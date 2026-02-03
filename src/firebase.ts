@@ -21,7 +21,10 @@ const roadmapRef = ref(database, 'roadmap');
 export function subscribeToRoadmap(callback: (data: RoadmapData) => void): () => void {
   const unsubscribe = onValue(roadmapRef, (snapshot) => {
     const data = snapshot.val();
-    callback(data || { projects: [] });
+    callback({
+      projects: data?.projects || [],
+      teamMembers: data?.teamMembers || []
+    });
   });
   return unsubscribe;
 }
@@ -32,7 +35,11 @@ export async function saveRoadmap(data: RoadmapData): Promise<void> {
 
 export async function getRoadmap(): Promise<RoadmapData> {
   const snapshot = await get(roadmapRef);
-  return snapshot.val() || { projects: [] };
+  const data = snapshot.val();
+  return {
+    projects: data?.projects || [],
+    teamMembers: data?.teamMembers || []
+  };
 }
 
 export { database };
