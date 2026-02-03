@@ -4,24 +4,42 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    // Prevent connection resets during development
+    hmr: {
+      overlay: true
+    }
+  },
   build: {
-    // Split chunks for better caching
+    // Split chunks for better caching and faster loads
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Separate Firebase into its own chunk (lazy loaded)
-          firebase: ['firebase/app', 'firebase/database'],
-          // Separate PDF export libs into their own chunk (lazy loaded)
-          'pdf-export': ['html2canvas', 'jspdf'],
-          // Separate DnD kit into its own chunk
-          dnd: ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
-          // Separate date-fns
-          'date-fns': ['date-fns']
+        manualChunks: (id) => {
+          // Separate large dependencies for better caching
+          if (id.includes('node_modules')) {
+            if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
+              return 'vendor-react'
+            }
+            if (id.includes('firebase')) {
+              return 'firebase'
+            }
+            if (id.includes('html2canvas') || id.includes('jspdf')) {
+              return 'pdf-export'
+            }
+            if (id.includes('@dnd-kit')) {
+              return 'dnd'
+            }
+            if (id.includes('date-fns')) {
+              return 'date-fns'
+            }
+          }
         }
       }
     },
     // Target modern browsers for smaller bundle
     target: 'es2020',
+    // Minify for smaller size
+    minify: 'esbuild',
     // Reduce chunk size warnings threshold
     chunkSizeWarningLimit: 500
   }

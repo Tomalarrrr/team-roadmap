@@ -318,6 +318,45 @@ export function Timeline({
   // Track which dependency is hovered for isolation effect
   const [hoveredDepId, setHoveredDepId] = useState<string | null>(null);
 
+  // Track viewport bounds for culling off-screen elements
+  const [viewportBounds, setViewportBounds] = useState({ left: 0, right: 10000, top: 0, bottom: 10000 });
+
+  // Update viewport bounds on scroll and resize for virtual scrolling
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const updateViewport = () => {
+      const rect = container.getBoundingClientRect();
+      const scrollLeft = container.scrollLeft;
+      const scrollTop = container.scrollTop;
+
+      setViewportBounds({
+        left: scrollLeft - 100,
+        right: scrollLeft + rect.width + 100,
+        top: scrollTop - 100,
+        bottom: scrollTop + rect.height + 100
+      });
+    };
+
+    updateViewport();
+
+    let rafId: number | null = null;
+    const handleScroll = () => {
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(updateViewport);
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', updateViewport);
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', updateViewport);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, []);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     // Only start pan if clicking within the header area
     const target = e.target as HTMLElement;
@@ -389,27 +428,31 @@ export function Timeline({
     }
   }, []);
 
-  // Group projects by owner
-  const projectsByOwner = useMemo(() => {
+  // Group projects by owner AND calculate stacks in single pass (batched operations)
+  const { projectsByOwner, projectStacksByOwner } = useMemo(() => {
     const grouped: Record<string, Project[]> = {};
-    teamMembers.forEach(m => { grouped[m.name] = []; });
+    const stacksByOwner: Record<string, Map<string, number>> = {};
+
+    // Initialize for all team members
+    teamMembers.forEach(m => {
+      grouped[m.name] = [];
+    });
+
+    // Group projects by owner
     projects.forEach(p => {
       if (grouped[p.owner]) {
         grouped[p.owner].push(p);
       }
     });
-    return grouped;
-  }, [projects, teamMembers]);
 
-  // Calculate project stacks for each owner (flight path algorithm)
-  const projectStacksByOwner = useMemo(() => {
-    const stacksByOwner: Record<string, Map<string, number>> = {};
+    // Calculate stacks for each owner
     teamMembers.forEach(m => {
-      const ownerProjects = projectsByOwner[m.name] || [];
+      const ownerProjects = grouped[m.name] || [];
       stacksByOwner[m.name] = calculateProjectStacks(ownerProjects);
     });
-    return stacksByOwner;
-  }, [teamMembers, projectsByOwner]);
+
+    return { projectsByOwner: grouped, projectStacksByOwner: stacksByOwner };
+  }, [projects, teamMembers]);
 
   // Create O(1) project lookup map (avoids O(n) .find() in dependency rendering)
   const projectsById = useMemo(() => {
@@ -462,6 +505,21 @@ export function Timeline({
     });
     return map;
   }, [displayedTeamMembers]);
+
+  // Virtual scrolling: calculate which lanes are visible (viewport frustum culling)
+  const visibleLaneIndices = useMemo(() => {
+    const indices: number[] = [];
+    displayedTeamMembers.forEach((_, idx) => {
+      const laneTop = lanePositions[idx];
+      const laneBottom = laneTop + laneHeights[idx];
+
+      // Check if lane intersects with viewport (with buffer for smooth scrolling)
+      if (laneBottom >= viewportBounds.top && laneTop <= viewportBounds.bottom) {
+        indices.push(idx);
+      }
+    });
+    return indices;
+  }, [displayedTeamMembers, lanePositions, laneHeights, viewportBounds]);
 
   // Store lane positions in ref for dependency calculation
   const lanePositionsRef = useRef(lanePositions);
@@ -596,8 +654,9 @@ export function Timeline({
                 })}
               </svg>
 
-              {/* Project lanes */}
-              {displayedTeamMembers.map((member, idx) => {
+              {/* Project lanes (virtualized - only render visible lanes) */}
+              {visibleLaneIndices.map((idx) => {
+                const member = displayedTeamMembers[idx];
                 const stacks = projectStacksByOwner[member.name];
                 return (
                   <DroppableLane

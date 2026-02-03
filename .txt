@@ -1,0 +1,1982 @@
+# FAANG L7+ STAFF ENGINEER: TEAM ROADMAP - COMPLETE SYSTEM OVERHAUL
+
+**MISSION**: Transform team-roadmap from MVP-quality single-user app to production-grade, multi-user collaborative timeline platform. Fix all critical bugs, optimize performance, enhance UX, and establish comprehensive testing infrastructure.
+
+**SEVERITY LEVEL**: P0 - Production Blockers Exist
+**ESTIMATED SCOPE**: 400-600 engineering hours
+**REQUIRED PERMISSIONS**: Full write access to all files, Firebase configuration, git commits, package.json modifications
+**SUCCESS CRITERIA**: All tests passing, zero TypeScript errors, <2s TTI, 99.5%+ Firebase save rate, production-ready authentication
+
+---
+
+## EXECUTION PROTOCOL
+
+**WORKING STYLE**:
+1. **Verify Before Acting**: Read all relevant files completely before making changes
+2. **Atomic Commits**: Each logical change gets its own git commit with detailed message
+3. **Test-Driven**: Write tests BEFORE fixing bugs where possible
+4. **Document Decisions**: Add inline comments explaining non-obvious architectural choices
+5. **Measure Impact**: Benchmark performance before/after optimizations
+6. **Zero Regressions**: Run full test suite after each phase
+7. **Progressive Verification**: Test each fix individually before proceeding
+8. **No Shortcuts**: Complete each item fully - no TODOs, no placeholders, no "good enough"
+
+**VERIFICATION CHECKPOINTS**:
+- After each bug fix: Write regression test, verify fix works, commit
+- After each optimization: Benchmark improvement, document metrics, commit
+- After each phase: Full build + test suite + manual smoke test
+- Final: Complete E2E test pass, production build, deployment verification
+
+---
+
+## PHASE 0: IMMEDIATE BUILD FIXES (BLOCKER)
+
+### Current Build Failure
+**Location**: [Timeline.tsx:611](src/components/Timeline.tsx#L611), [Timeline.tsx:616](src/components/Timeline.tsx#L616)
+**Error**: `Type 'void' is not assignable to type 'Promise<void>'`
+**Root Cause**: Callback functions need to return Promises
+
+**FIX**:
+```typescript
+// Lines 611, 616 - ensure callbacks are async or return Promise.resolve()
+onUpdate={async (updates) => { /* ... */ }}
+// OR
+onUpdate={(updates) => { /* ... */; return Promise.resolve(); }}
+```
+
+**VERIFY**:
+- `npm run build` succeeds
+- TypeScript compilation has zero errors
+- Git commit: "Fix Timeline callback type errors for production build"
+
+---
+
+## PHASE 1: CRITICAL SECURITY & DATA INTEGRITY (P0 - WEEK 1)
+
+### 🔴 CRITICAL-1: Authentication Vulnerability (BLOCKER)
+
+**Current State**: [App.tsx:29-36](src/App.tsx#L29)
+```typescript
+const getUserId = () => {
+  let userId = sessionStorage.getItem('roadmap-user-id');
+  if (!userId) {
+    userId = `user-${Date.now()}-${Math.random()}...`;
+  }
+```
+
+**Risk**: No authentication, users can impersonate anyone, data corruption guaranteed in multi-user scenario
+
+**IMPLEMENTATION**:
+
+1. **Add Firebase Authentication**:
+   ```bash
+   npm install firebase/auth
+   ```
+
+2. **Create auth hook** (`src/hooks/useAuth.ts`):
+   ```typescript
+   import { GoogleAuthProvider, signInWithPopup, onAuthStateChanged } from 'firebase/auth';
+
+   export function useAuth() {
+     const [user, setUser] = useState<User | null>(null);
+     const [loading, setLoading] = useState(true);
+
+     useEffect(() => {
+       return onAuthStateChanged(auth, (user) => {
+         setUser(user);
+         setLoading(false);
+       });
+     }, []);
+
+     const signIn = async () => {
+       const provider = new GoogleAuthProvider();
+       return signInWithPopup(auth, provider);
+     };
+
+     return { user, loading, signIn, signOut: () => auth.signOut() };
+   }
+   ```
+
+3. **Update App.tsx**:
+   - Add auth gate: Show login UI if not authenticated
+   - Replace `getUserId()` with `user.uid` from Firebase Auth
+   - Add loading spinner during auth check
+
+4. **Update Firebase Rules** (`firestore.rules`):
+   ```javascript
+   rules_version = '2';
+   service cloud.firestore {
+     match /databases/{database}/documents {
+       match /roadmaps/{userId} {
+         allow read, write: if request.auth != null && request.auth.uid == userId;
+       }
+     }
+   }
+   ```
+
+**VERIFY**:
+- Cannot access app without authentication
+- Each user sees only their own data
+- Attempting to access another user's data returns permission denied
+- Session persists across page refreshes
+- **Git commit**: "feat: implement Firebase Authentication with Google sign-in"
+
+---
+
+### 🔴 CRITICAL-2: Firebase Configuration Fallback Failure
+
+**Current State**: [firebase.ts:6-14](src/config/firebase.ts#L6)
+```typescript
+apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "YOUR_API_KEY", // Silent failure
+```
+
+**IMPLEMENTATION**:
+
+1. **Add validation** in `firebase.ts`:
+   ```typescript
+   const requiredEnvVars = [
+     'VITE_FIREBASE_API_KEY',
+     'VITE_FIREBASE_AUTH_DOMAIN',
+     'VITE_FIREBASE_PROJECT_ID',
+     'VITE_FIREBASE_STORAGE_BUCKET',
+     'VITE_FIREBASE_MESSAGING_SENDER_ID',
+     'VITE_FIREBASE_APP_ID'
+   ];
+
+   const missingVars = requiredEnvVars.filter(key => !import.meta.env[key]);
+   if (missingVars.length > 0) {
+     throw new Error(
+       `Missing required Firebase environment variables: ${missingVars.join(', ')}\n` +
+       `Please check your .env file.`
+     );
+   }
+   ```
+
+2. **Create `.env.example`**:
+   ```
+   VITE_FIREBASE_API_KEY=your_api_key_here
+   VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
+   VITE_FIREBASE_PROJECT_ID=your_project_id
+   VITE_FIREBASE_STORAGE_BUCKET=your_project.appspot.com
+   VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
+   VITE_FIREBASE_APP_ID=1:123456789:web:abcdef
+   ```
+
+3. **Update README** with setup instructions
+
+**VERIFY**:
+- Starting app without .env throws clear error
+- Error message lists all missing variables
+- **Git commit**: "fix: validate Firebase environment variables on startup"
+
+---
+
+### 🔴 CRITICAL-3: XSS Vulnerability in Error Display
+
+**Current State**: [App.tsx:615](src/App.tsx#L615)
+```typescript
+<span>Failed to save: {saveError}</span> // Unescaped error HTML
+```
+
+**IMPLEMENTATION**:
+
+1. **Create sanitizer utility** (`src/utils/sanitize.ts`):
+   ```typescript
+   export function sanitizeError(error: unknown): string {
+     const message = error instanceof Error ? error.message : String(error);
+     // Remove all HTML tags
+     return message.replace(/<[^>]*>/g, '');
+   }
+   ```
+
+2. **Update all error displays**:
+   ```typescript
+   <span>Failed to save: {sanitizeError(saveError)}</span>
+   ```
+
+3. **Audit all user-controlled content rendering**:
+   - Project titles
+   - Milestone names
+   - Descriptions
+   - Add sanitization where needed
+
+**VERIFY**:
+- Inject `<script>alert('XSS')</script>` into error message - should display as text
+- Check all forms: titles, descriptions should escape HTML
+- **Git commit**: "security: sanitize all user-generated content to prevent XSS"
+
+---
+
+### 🔴 CRITICAL-4: Firebase Concurrent Edit Data Loss
+
+**Current State**: [firebase.ts:62](src/config/firebase.ts#L62) - `set()` replaces entire database
+
+**IMPLEMENTATION**:
+
+1. **Replace `set()` with `update()`** in `useRoadmap.ts`:
+   ```typescript
+   // OLD: set(roadmapRef, data) - overwrites everything
+
+   // NEW: Field-level updates
+   const saveProject = async (projectId: string, projectData: Project) => {
+     await update(roadmapRef, {
+       [`projects/${projectId}`]: projectData
+     });
+   };
+   ```
+
+2. **Implement transaction-based saves** for critical operations:
+   ```typescript
+   import { runTransaction } from 'firebase/database';
+
+   const updateProject = async (projectId: string, updates: Partial<Project>) => {
+     await runTransaction(ref(db, `roadmaps/${userId}/projects/${projectId}`), (current) => {
+       if (!current) return null;
+       return { ...current, ...updates, updatedAt: Date.now() };
+     });
+   };
+   ```
+
+3. **Add optimistic update conflict detection**:
+   ```typescript
+   const [conflicts, setConflicts] = useState<string[]>([]);
+
+   // In Firebase listener
+   onValue(roadmapRef, (snapshot) => {
+     if (isLocalUpdateRef.current) {
+       isLocalUpdateRef.current = false;
+       return;
+     }
+
+     const serverData = snapshot.val();
+     const localData = roadmapRef.current;
+
+     // Detect conflicts
+     const conflictingProjects = detectConflicts(localData, serverData);
+     if (conflictingProjects.length > 0) {
+       setConflicts(conflictingProjects);
+       // Show conflict resolution UI
+     }
+   });
+   ```
+
+**VERIFY**:
+- Simulate concurrent edits: Two browser windows, edit different projects
+- Verify both changes persist (no data loss)
+- Test same-project concurrent edit triggers conflict detection
+- **Git commit**: "fix: prevent data loss from concurrent Firebase edits using field-level updates"
+
+---
+
+### 🔴 CRITICAL-5: Circular Dependency Prevention
+
+**Current State**: No validation in dependency creation
+
+**IMPLEMENTATION**:
+
+1. **Create validation utility** (`src/utils/dependencyValidation.ts`):
+   ```typescript
+   export function detectCircularDependency(
+     fromId: string,
+     toId: string,
+     dependencies: Dependency[]
+   ): boolean {
+     const graph = buildDependencyGraph(dependencies);
+
+     // DFS to detect cycle
+     function hasCycle(current: string, visited: Set<string>, path: Set<string>): boolean {
+       if (path.has(current)) return true;
+       if (visited.has(current)) return false;
+
+       visited.add(current);
+       path.add(current);
+
+       const neighbors = graph.get(current) || [];
+       for (const neighbor of neighbors) {
+         if (hasCycle(neighbor, visited, path)) return true;
+       }
+
+       path.delete(current);
+       return false;
+     }
+
+     // Add proposed edge and check
+     graph.set(fromId, [...(graph.get(fromId) || []), toId]);
+     return hasCycle(fromId, new Set(), new Set());
+   }
+   ```
+
+2. **Update `addDependency` function**:
+   ```typescript
+   const addDependency = (fromId: string, toId: string) => {
+     if (detectCircularDependency(fromId, toId, roadmap.dependencies)) {
+       setError('Cannot create dependency: would create a circular reference');
+       return;
+     }
+
+     // Proceed with adding dependency
+   };
+   ```
+
+3. **Add visual feedback** - show error toast with cycle path
+
+**VERIFY**:
+- Create A→B→C, attempt C→A - should show error
+- Error message should describe the cycle: "A → B → C → A"
+- **Git commit**: "fix: prevent circular dependency creation with topological validation"
+
+---
+
+## PHASE 2: PERFORMANCE OPTIMIZATIONS (P0 - WEEK 2)
+
+### ⚡ PERF-1: Milestone Stacking Algorithm O(n²) → O(n log n)
+
+**Current State**: [ProjectBar.tsx:18-59](src/components/ProjectBar.tsx#L18)
+
+**IMPLEMENTATION**:
+
+1. **Replace nested loop algorithm**:
+   ```typescript
+   function optimizedMilestoneStacking(milestones: Milestone[]): Map<string, number> {
+     // Sort by start date
+     const sorted = [...milestones].sort((a, b) =>
+       new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+     );
+
+     const stacks: { endTime: number; milestones: string[] }[] = [];
+     const stackAssignments = new Map<string, number>();
+
+     for (const milestone of sorted) {
+       const startTime = new Date(milestone.startDate).getTime();
+       const endTime = new Date(milestone.endDate).getTime();
+
+       // Find first stack where this milestone fits
+       const stackIndex = stacks.findIndex(stack => stack.endTime <= startTime);
+
+       if (stackIndex !== -1) {
+         // Use existing stack
+         stacks[stackIndex].endTime = endTime;
+         stacks[stackIndex].milestones.push(milestone.id);
+         stackAssignments.set(milestone.id, stackIndex);
+       } else {
+         // Create new stack
+         stacks.push({ endTime, milestones: [milestone.id] });
+         stackAssignments.set(milestone.id, stacks.length - 1);
+       }
+     }
+
+     return stackAssignments;
+   }
+   ```
+
+2. **Benchmark before/after**:
+   ```typescript
+   // Add performance measurement
+   console.time('milestone-stacking');
+   const stacks = optimizedMilestoneStacking(milestones);
+   console.timeEnd('milestone-stacking');
+   ```
+
+**VERIFY**:
+- Create test with 50 overlapping milestones
+- Measure time: should be <10ms (vs 100-200ms with O(n²))
+- Visual check: stacking layout identical to before
+- **Git commit**: "perf: optimize milestone stacking from O(n²) to O(n log n)"
+
+---
+
+### ⚡ PERF-2: React.memo for Timeline Components
+
+**IMPLEMENTATION**:
+
+1. **Memoize DraggableProjectBar**:
+   ```typescript
+   import { memo } from 'react';
+
+   export const DraggableProjectBar = memo(
+     function DraggableProjectBar({ project, onUpdate, ... }: Props) {
+       // Component logic
+     },
+     (prevProps, nextProps) => {
+       // Custom comparison - only re-render if these change
+       return (
+         prevProps.project.id === nextProps.project.id &&
+         prevProps.project.startDate === nextProps.project.startDate &&
+         prevProps.project.endDate === nextProps.project.endDate &&
+         prevProps.project.title === nextProps.project.title &&
+         prevProps.project.color === nextProps.project.color &&
+         prevProps.viewportStartDate === nextProps.viewportStartDate &&
+         prevProps.viewportEndDate === nextProps.viewportEndDate
+       );
+     }
+   );
+   ```
+
+2. **Memoize MilestoneLine**:
+   ```typescript
+   export const MilestoneLine = memo(
+     function MilestoneLine({ milestone, projectId, ... }: Props) {
+       // Component logic
+     },
+     (prevProps, nextProps) => {
+       return (
+         prevProps.milestone.id === nextProps.milestone.id &&
+         prevProps.milestone.startDate === nextProps.milestone.startDate &&
+         prevProps.milestone.endDate === nextProps.milestone.endDate &&
+         prevProps.milestone.title === nextProps.milestone.title
+       );
+     }
+   );
+   ```
+
+3. **Measure re-render count**:
+   ```typescript
+   // Add React DevTools Profiler
+   import { Profiler } from 'react';
+
+   <Profiler id="Timeline" onRender={(id, phase, actualDuration) => {
+     console.log(`${id} ${phase} took ${actualDuration}ms`);
+   }}>
+     <Timeline />
+   </Profiler>
+   ```
+
+**VERIFY**:
+- Apply filter change: measure re-renders before/after
+- Target: 60-80% reduction in component renders
+- **Git commit**: "perf: memoize Timeline components to reduce re-renders"
+
+---
+
+### ⚡ PERF-3: Filter Computation Caching
+
+**Current State**: [App.tsx:169-176](src/App.tsx#L169) - `.toLowerCase()` called repeatedly
+
+**IMPLEMENTATION**:
+
+1. **Pre-compute lowercased strings**:
+   ```typescript
+   const filteredProjects = useMemo(() => {
+     if (!filterText.trim()) return roadmap.projects;
+
+     const lowerFilter = filterText.toLowerCase();
+
+     return roadmap.projects.filter(project => {
+       const lowerTitle = project.title.toLowerCase();
+       const lowerStatus = (project.status || '').toLowerCase();
+
+       return lowerTitle.includes(lowerFilter) || lowerStatus.includes(lowerFilter);
+     });
+   }, [roadmap.projects, filterText]);
+   ```
+
+2. **Cache project search indices**:
+   ```typescript
+   const searchIndex = useMemo(() => {
+     return new Map(
+       roadmap.projects.map(project => [
+         project.id,
+         {
+           titleLower: project.title.toLowerCase(),
+           statusLower: (project.status || '').toLowerCase(),
+           descriptionLower: (project.description || '').toLowerCase()
+         }
+       ])
+     );
+   }, [roadmap.projects]);
+
+   const filteredProjects = useMemo(() => {
+     if (!filterText.trim()) return roadmap.projects;
+     const lowerFilter = filterText.toLowerCase();
+
+     return roadmap.projects.filter(project => {
+       const index = searchIndex.get(project.id)!;
+       return (
+         index.titleLower.includes(lowerFilter) ||
+         index.statusLower.includes(lowerFilter) ||
+         index.descriptionLower.includes(lowerFilter)
+       );
+     });
+   }, [roadmap.projects, searchIndex, filterText]);
+   ```
+
+**VERIFY**:
+- Type in filter box with 100 projects
+- Measure keystroke → render time: target <50ms
+- **Git commit**: "perf: cache lowercased strings for faster filtering"
+
+---
+
+### ⚡ PERF-4: Memoize SVG Dependency Paths
+
+**Current State**: [Timeline.tsx:561-590](src/components/Timeline.tsx#L561) - recalculates every render
+
+**IMPLEMENTATION**:
+
+```typescript
+const dependencyPaths = useMemo(() => {
+  return roadmap.dependencies.map(dep => {
+    const fromProject = roadmap.projects.find(p => p.id === dep.fromId);
+    const toProject = roadmap.projects.find(p => p.id === dep.toId);
+
+    if (!fromProject || !toProject) return null;
+
+    const fromPos = calculatePosition(fromProject);
+    const toPos = calculatePosition(toProject);
+
+    return {
+      id: `${dep.fromId}-${dep.toId}`,
+      path: generateSVGPath(fromPos, toPos),
+      fromProject,
+      toProject
+    };
+  }).filter(Boolean);
+}, [
+  roadmap.dependencies,
+  roadmap.projects,
+  viewportStartDate,
+  viewportEndDate,
+  projectPositions
+]);
+```
+
+**VERIFY**:
+- Open timeline with 20+ dependencies
+- Pan/zoom: paths should update smoothly (60fps)
+- **Git commit**: "perf: memoize SVG dependency path calculations"
+
+---
+
+## PHASE 3: UX ENHANCEMENTS (P1 - WEEK 3)
+
+### 🎨 UX-1: Loading States & Skeletons
+
+**IMPLEMENTATION**:
+
+1. **Create skeleton component** (`src/components/Skeleton.tsx`):
+   ```typescript
+   export function ProjectBarSkeleton() {
+     return (
+       <div className="animate-pulse">
+         <div className="h-8 bg-gray-300 rounded mb-2"></div>
+         <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+       </div>
+     );
+   }
+
+   export function TimelineSkeleton() {
+     return (
+       <div className="space-y-4">
+         {Array.from({ length: 5 }).map((_, i) => (
+           <ProjectBarSkeleton key={i} />
+         ))}
+       </div>
+     );
+   }
+   ```
+
+2. **Update App.tsx**:
+   ```typescript
+   if (loading) {
+     return <TimelineSkeleton />;
+   }
+
+   if (saveStatus === 'saving') {
+     return <Spinner message="Saving changes..." />;
+   }
+   ```
+
+**VERIFY**:
+- Initial load shows skeleton for <500ms
+- Save operations show spinner if >500ms
+- **Git commit**: "feat: add loading skeletons and save status indicators"
+
+---
+
+### 🎨 UX-2: Enhanced Drag Preview
+
+**IMPLEMENTATION**:
+
+1. **Add date tooltip to drag preview**:
+   ```typescript
+   const [dragTooltip, setDragTooltip] = useState<{
+     x: number;
+     y: number;
+     text: string;
+   } | null>(null);
+
+   const handleDrag = (e: DragEvent, preview: DateRange) => {
+     setDragTooltip({
+       x: e.clientX,
+       y: e.clientY,
+       text: `${formatDate(preview.start)} → ${formatDate(preview.end)}`
+     });
+   };
+
+   // Render tooltip
+   {dragTooltip && (
+     <div
+       className="fixed bg-black text-white px-2 py-1 rounded text-sm pointer-events-none"
+       style={{ left: dragTooltip.x + 10, top: dragTooltip.y + 10 }}
+     >
+       {dragTooltip.text}
+     </div>
+   )}
+   ```
+
+2. **Highlight valid drop zones**:
+   ```typescript
+   <div
+     className={cn(
+       "timeline-row",
+       isDragTarget && "bg-blue-50 border-2 border-blue-300"
+     )}
+   />
+   ```
+
+3. **Add snap-to-grid visual feedback**:
+   - Show week boundaries when dragging
+   - Highlight snap point before drop
+
+**VERIFY**:
+- Drag project: tooltip shows date range
+- Hover over timeline: valid areas highlight
+- **Git commit**: "feat: enhance drag UX with tooltips and drop zone highlights"
+
+---
+
+### 🎨 UX-3: Undo/Redo Visual Feedback
+
+**IMPLEMENTATION**:
+
+1. **Install toast library**:
+   ```bash
+   npm install sonner
+   ```
+
+2. **Add toast notifications**:
+   ```typescript
+   import { toast } from 'sonner';
+
+   const undo = () => {
+     const action = undoManager.undo();
+     if (action) {
+       toast.success('Action undone', {
+         action: {
+           label: 'Redo',
+           onClick: () => redo()
+         }
+       });
+     }
+   };
+   ```
+
+3. **Show undo stack size in toolbar**:
+   ```typescript
+   <button onClick={undo} disabled={!canUndo}>
+     Undo {undoStack.length > 0 && `(${undoStack.length})`}
+   </button>
+   ```
+
+4. **Animate undo changes**:
+   ```typescript
+   const [highlightedProjectId, setHighlightedProjectId] = useState<string | null>(null);
+
+   const undo = () => {
+     const action = undoManager.undo();
+     if (action?.projectId) {
+       setHighlightedProjectId(action.projectId);
+       setTimeout(() => setHighlightedProjectId(null), 1000);
+     }
+   };
+
+   // In ProjectBar
+   <div className={cn(
+     "project-bar",
+     highlightedProjectId === project.id && "animate-highlight"
+   )} />
+   ```
+
+**VERIFY**:
+- Undo shows toast with redo button
+- Toolbar shows action count
+- Undone item flashes briefly
+- **Git commit**: "feat: add visual feedback for undo/redo operations"
+
+---
+
+### 🎨 UX-4: Dependency Creation UX
+
+**IMPLEMENTATION**:
+
+1. **Add context menu option**:
+   ```typescript
+   const ProjectContextMenu = ({ projectId }) => (
+     <ContextMenu>
+       <ContextMenuItem onClick={() => setDependencyMode({ from: projectId })}>
+         Create Dependency From Here
+       </ContextMenuItem>
+       <ContextMenuItem onClick={() => setDependencyMode({ to: projectId })}>
+         Create Dependency To Here
+       </ContextMenuItem>
+     </ContextMenu>
+   );
+   ```
+
+2. **Show temporary preview line**:
+   ```typescript
+   const [dependencyPreview, setDependencyPreview] = useState<{
+     fromId: string;
+     toId: string | null;
+     cursorPos: Point;
+   } | null>(null);
+
+   // Render dotted line from source to cursor
+   {dependencyPreview && (
+     <svg className="absolute inset-0 pointer-events-none">
+       <path
+         d={generatePreviewPath(dependencyPreview.fromId, dependencyPreview.cursorPos)}
+         stroke="blue"
+         strokeWidth="2"
+         strokeDasharray="5,5"
+         fill="none"
+       />
+     </svg>
+   )}
+   ```
+
+3. **Add confirmation dialog**:
+   ```typescript
+   const confirmDependency = (fromId: string, toId: string) => {
+     const from = projects.find(p => p.id === fromId);
+     const to = projects.find(p => p.id === toId);
+
+     if (window.confirm(`Create dependency: "${from.title}" → "${to.title}"?`)) {
+       addDependency(fromId, toId);
+     }
+   };
+   ```
+
+**VERIFY**:
+- Right-click project: see "Create Dependency" options
+- Selecting source shows dotted line following cursor
+- Clicking target shows confirmation dialog
+- **Git commit**: "feat: improve dependency creation with context menu and preview"
+
+---
+
+## PHASE 4: ERROR HANDLING & RELIABILITY (P1 - WEEK 4)
+
+### 🛡️ ERROR-1: Firebase Error Recovery
+
+**IMPLEMENTATION**:
+
+1. **Monitor connection state** (`src/hooks/useFirebaseConnection.ts`):
+   ```typescript
+   import { ref, onValue } from 'firebase/database';
+
+   export function useFirebaseConnection() {
+     const [state, setState] = useState<'online' | 'offline' | 'error'>('online');
+
+     useEffect(() => {
+       const connectedRef = ref(db, '.info/connected');
+
+       return onValue(connectedRef, (snapshot) => {
+         setState(snapshot.val() ? 'online' : 'offline');
+       });
+     }, []);
+
+     return state;
+   }
+   ```
+
+2. **Add offline banner**:
+   ```typescript
+   const connectionState = useFirebaseConnection();
+
+   {connectionState === 'offline' && (
+     <div className="fixed top-0 left-0 right-0 bg-yellow-500 text-white p-2 text-center z-50">
+       You are offline. Changes will sync when connection is restored.
+     </div>
+   )}
+   ```
+
+3. **Implement save queue**:
+   ```typescript
+   const [saveQueue, setSaveQueue] = useState<QueuedOperation[]>([]);
+
+   const queueSave = (operation: Operation) => {
+     if (connectionState === 'offline') {
+       setSaveQueue(prev => [...prev, operation]);
+       toast.info('Change queued - will save when online');
+     } else {
+       executeSave(operation);
+     }
+   };
+
+   useEffect(() => {
+     if (connectionState === 'online' && saveQueue.length > 0) {
+       processSaveQueue();
+     }
+   }, [connectionState]);
+   ```
+
+**VERIFY**:
+- Disconnect network: see offline banner
+- Make changes: see "queued" messages
+- Reconnect: changes auto-save
+- **Git commit**: "feat: add offline detection and save queue"
+
+---
+
+### 🛡️ ERROR-2: Validation Layer
+
+**IMPLEMENTATION**:
+
+1. **Create validation utilities** (`src/utils/validation.ts`):
+   ```typescript
+   export function validateProject(project: Project): ValidationResult {
+     const errors: string[] = [];
+
+     if (!project.title?.trim()) {
+       errors.push('Project title is required');
+     }
+
+     if (new Date(project.endDate) < new Date(project.startDate)) {
+       errors.push('End date must be after start date');
+     }
+
+     if (project.milestones) {
+       for (const milestone of project.milestones) {
+         if (new Date(milestone.startDate) < new Date(project.startDate)) {
+           errors.push(`Milestone "${milestone.title}" starts before project`);
+         }
+         if (new Date(milestone.endDate) > new Date(project.endDate)) {
+           errors.push(`Milestone "${milestone.title}" ends after project`);
+         }
+       }
+     }
+
+     return {
+       valid: errors.length === 0,
+       errors
+     };
+   }
+
+   export function validateDependency(
+     fromId: string,
+     toId: string,
+     dependencies: Dependency[]
+   ): ValidationResult {
+     if (fromId === toId) {
+       return { valid: false, errors: ['Cannot depend on self'] };
+     }
+
+     if (detectCircularDependency(fromId, toId, dependencies)) {
+       return { valid: false, errors: ['Would create circular dependency'] };
+     }
+
+     const exists = dependencies.some(d => d.fromId === fromId && d.toId === toId);
+     if (exists) {
+       return { valid: false, errors: ['Dependency already exists'] };
+     }
+
+     return { valid: true, errors: [] };
+   }
+   ```
+
+2. **Add pre-save validation**:
+   ```typescript
+   const saveProject = async (project: Project) => {
+     const validation = validateProject(project);
+
+     if (!validation.valid) {
+       setError(validation.errors.join('; '));
+       return;
+     }
+
+     try {
+       await firebaseSave(project);
+       toast.success('Project saved');
+     } catch (error) {
+       setError(`Save failed: ${error.message}`);
+     }
+   };
+   ```
+
+**VERIFY**:
+- Try to save project with end date before start date: see error
+- Try to create circular dependency: see specific error message
+- Try to create milestone outside project bounds: see error
+- **Git commit**: "feat: add comprehensive validation layer"
+
+---
+
+### 🛡️ ERROR-3: Optimistic Update Rollback UX
+
+**IMPLEMENTATION**:
+
+1. **Track optimistic updates**:
+   ```typescript
+   const [optimisticUpdates, setOptimisticUpdates] = useState<Map<string, any>>(new Map());
+
+   const optimisticUpdate = async (id: string, update: any, saveFn: () => Promise<void>) => {
+     // Apply immediately
+     setOptimisticUpdates(prev => new Map(prev).set(id, update));
+
+     try {
+       await saveFn();
+       setOptimisticUpdates(prev => {
+         const next = new Map(prev);
+         next.delete(id);
+         return next;
+       });
+     } catch (error) {
+       // Rollback
+       setOptimisticUpdates(prev => {
+         const next = new Map(prev);
+         next.delete(id);
+         return next;
+       });
+
+       toast.error('Save failed - changes reverted', {
+         action: {
+           label: 'Retry',
+           onClick: () => optimisticUpdate(id, update, saveFn)
+         }
+       });
+     }
+   };
+   ```
+
+2. **Show dirty state indicator**:
+   ```typescript
+   {optimisticUpdates.size > 0 && (
+     <div className="fixed bottom-4 right-4 bg-blue-500 text-white px-3 py-2 rounded shadow">
+       {optimisticUpdates.size} unsaved {optimisticUpdates.size === 1 ? 'change' : 'changes'}
+     </div>
+   )}
+   ```
+
+**VERIFY**:
+- Simulate Firebase error: see rollback toast with retry button
+- Make change: see unsaved indicator
+- Wait for save: indicator disappears
+- **Git commit**: "feat: add visual feedback for optimistic update failures"
+
+---
+
+## PHASE 5: TESTING INFRASTRUCTURE (P1 - WEEKS 5-6)
+
+### 🧪 TEST-1: Setup Testing Framework
+
+**IMPLEMENTATION**:
+
+1. **Install testing dependencies**:
+   ```bash
+   npm install -D vitest @testing-library/react @testing-library/jest-dom @testing-library/user-event jsdom
+   npm install -D @testing-library/react-hooks
+   ```
+
+2. **Create test config** (`vitest.config.ts`):
+   ```typescript
+   import { defineConfig } from 'vitest/config';
+   import react from '@vitejs/plugin-react';
+
+   export default defineConfig({
+     plugins: [react()],
+     test: {
+       globals: true,
+       environment: 'jsdom',
+       setupFiles: './src/test/setup.ts',
+       coverage: {
+         provider: 'v8',
+         reporter: ['text', 'json', 'html'],
+         exclude: ['node_modules/', 'src/test/']
+       }
+     }
+   });
+   ```
+
+3. **Create test setup** (`src/test/setup.ts`):
+   ```typescript
+   import '@testing-library/jest-dom';
+   import { cleanup } from '@testing-library/react';
+   import { afterEach } from 'vitest';
+
+   afterEach(() => {
+     cleanup();
+   });
+   ```
+
+4. **Add test scripts to package.json**:
+   ```json
+   {
+     "scripts": {
+       "test": "vitest",
+       "test:ui": "vitest --ui",
+       "test:coverage": "vitest --coverage"
+     }
+   }
+   ```
+
+**VERIFY**:
+- `npm test` runs successfully
+- Coverage report generates
+- **Git commit**: "chore: setup Vitest testing framework"
+
+---
+
+### 🧪 TEST-2: Hook Tests
+
+**IMPLEMENTATION**:
+
+1. **Test useRoadmap hook** (`src/hooks/__tests__/useRoadmap.test.ts`):
+   ```typescript
+   import { renderHook, waitFor } from '@testing-library/react';
+   import { describe, it, expect, vi, beforeEach } from 'vitest';
+   import { useRoadmap } from '../useRoadmap';
+
+   // Mock Firebase
+   vi.mock('firebase/database', () => ({
+     ref: vi.fn(),
+     onValue: vi.fn(),
+     set: vi.fn(),
+     update: vi.fn()
+   }));
+
+   describe('useRoadmap', () => {
+     beforeEach(() => {
+       vi.clearAllMocks();
+     });
+
+     it('loads initial data from Firebase', async () => {
+       const { result } = renderHook(() => useRoadmap('user-123'));
+
+       await waitFor(() => {
+         expect(result.current.loading).toBe(false);
+       });
+
+       expect(result.current.roadmap).toBeDefined();
+     });
+
+     it('handles optimistic updates', async () => {
+       const { result } = renderHook(() => useRoadmap('user-123'));
+
+       const newProject = { id: 'p1', title: 'Test', startDate: '2025-01-01', endDate: '2025-02-01' };
+
+       await act(() => {
+         result.current.addProject(newProject);
+       });
+
+       // Should immediately appear
+       expect(result.current.roadmap.projects).toContainEqual(newProject);
+     });
+
+     it('rolls back on Firebase failure', async () => {
+       const { result } = renderHook(() => useRoadmap('user-123'));
+
+       // Mock Firebase to fail
+       vi.mocked(update).mockRejectedValueOnce(new Error('Network error'));
+
+       const initialProjects = result.current.roadmap.projects;
+
+       await act(async () => {
+         try {
+           await result.current.addProject({ id: 'p1', title: 'Test' });
+         } catch {}
+       });
+
+       // Should rollback
+       expect(result.current.roadmap.projects).toEqual(initialProjects);
+     });
+
+     it('prevents concurrent save conflicts', async () => {
+       // Test concurrent edit detection
+     });
+   });
+   ```
+
+2. **Test useUndoManager hook** (`src/hooks/__tests__/useUndoManager.test.ts`):
+   ```typescript
+   describe('useUndoManager', () => {
+     it('supports undo/redo operations', () => {
+       const { result } = renderHook(() => useUndoManager());
+
+       const action1 = { type: 'UPDATE', data: { id: '1' }, inverse: { type: 'UPDATE', data: { id: '0' } } };
+
+       act(() => {
+         result.current.record(action1);
+       });
+
+       expect(result.current.canUndo).toBe(true);
+
+       act(() => {
+         const undone = result.current.undo();
+         expect(undone).toEqual(action1.inverse);
+       });
+
+       expect(result.current.canRedo).toBe(true);
+     });
+
+     it('limits undo stack size', () => {
+       const { result } = renderHook(() => useUndoManager({ limit: 5 }));
+
+       for (let i = 0; i < 10; i++) {
+         act(() => {
+           result.current.record({ type: 'ACTION', data: i });
+         });
+       }
+
+       expect(result.current.undoStack.length).toBe(5);
+     });
+
+     it('clears redo stack on new action', () => {
+       const { result } = renderHook(() => useUndoManager());
+
+       act(() => {
+         result.current.record({ type: 'A' });
+         result.current.record({ type: 'B' });
+         result.current.undo();
+       });
+
+       expect(result.current.canRedo).toBe(true);
+
+       act(() => {
+         result.current.record({ type: 'C' });
+       });
+
+       expect(result.current.canRedo).toBe(false);
+     });
+   });
+   ```
+
+**VERIFY**:
+- `npm test` passes all hook tests
+- Coverage >80% for hooks
+- **Git commit**: "test: add comprehensive hook tests"
+
+---
+
+### 🧪 TEST-3: Component Tests
+
+**IMPLEMENTATION**:
+
+1. **Test Timeline component** (`src/components/__tests__/Timeline.test.tsx`):
+   ```typescript
+   import { render, screen, fireEvent } from '@testing-library/react';
+   import { Timeline } from '../Timeline';
+
+   describe('Timeline', () => {
+     it('renders projects in correct positions', () => {
+       const projects = [
+         { id: 'p1', title: 'Project A', startDate: '2025-01-01', endDate: '2025-02-01' }
+       ];
+
+       render(<Timeline projects={projects} />);
+
+       expect(screen.getByText('Project A')).toBeInTheDocument();
+     });
+
+     it('handles drag operations', async () => {
+       const onUpdate = vi.fn();
+       const project = { id: 'p1', title: 'Test', startDate: '2025-01-01', endDate: '2025-02-01' };
+
+       render(<Timeline projects={[project]} onUpdate={onUpdate} />);
+
+       const projectBar = screen.getByText('Test');
+
+       fireEvent.dragStart(projectBar);
+       fireEvent.dragEnd(projectBar);
+
+       await waitFor(() => {
+         expect(onUpdate).toHaveBeenCalled();
+       });
+     });
+
+     it('renders dependencies correctly', () => {
+       const projects = [
+         { id: 'p1', title: 'A', startDate: '2025-01-01', endDate: '2025-02-01' },
+         { id: 'p2', title: 'B', startDate: '2025-02-15', endDate: '2025-03-01' }
+       ];
+       const dependencies = [{ fromId: 'p1', toId: 'p2' }];
+
+       const { container } = render(
+         <Timeline projects={projects} dependencies={dependencies} />
+       );
+
+       const svg = container.querySelector('svg');
+       expect(svg).toBeInTheDocument();
+     });
+   });
+   ```
+
+2. **Test ProjectBar component**:
+   ```typescript
+   describe('ProjectBar', () => {
+     it('displays milestones in correct stacks', () => {
+       const milestones = [
+         { id: 'm1', title: 'M1', startDate: '2025-01-01', endDate: '2025-01-15' },
+         { id: 'm2', title: 'M2', startDate: '2025-01-10', endDate: '2025-01-20' }
+       ];
+
+       render(<ProjectBar project={{ milestones }} />);
+
+       // Check stacking algorithm worked
+       const m1 = screen.getByText('M1');
+       const m2 = screen.getByText('M2');
+
+       expect(m1).toBeInTheDocument();
+       expect(m2).toBeInTheDocument();
+     });
+   });
+   ```
+
+**VERIFY**:
+- `npm test` passes all component tests
+- Coverage >70% for components
+- **Git commit**: "test: add Timeline and ProjectBar component tests"
+
+---
+
+### 🧪 TEST-4: Integration Tests
+
+**IMPLEMENTATION**:
+
+1. **Test complete user flows** (`src/test/integration/project-workflow.test.tsx`):
+   ```typescript
+   import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+   import userEvent from '@testing-library/user-event';
+   import App from '../../App';
+
+   describe('Project Workflow Integration', () => {
+     it('complete project lifecycle: create → edit → delete', async () => {
+       const user = userEvent.setup();
+       render(<App />);
+
+       // Create project
+       const addButton = screen.getByRole('button', { name: /add project/i });
+       await user.click(addButton);
+
+       await user.type(screen.getByLabelText(/title/i), 'New Project');
+       await user.type(screen.getByLabelText(/start date/i), '2025-01-01');
+       await user.type(screen.getByLabelText(/end date/i), '2025-02-01');
+
+       await user.click(screen.getByRole('button', { name: /save/i }));
+
+       await waitFor(() => {
+         expect(screen.getByText('New Project')).toBeInTheDocument();
+       });
+
+       // Edit project
+       await user.click(screen.getByText('New Project'));
+       await user.clear(screen.getByLabelText(/title/i));
+       await user.type(screen.getByLabelText(/title/i), 'Updated Project');
+       await user.click(screen.getByRole('button', { name: /save/i }));
+
+       await waitFor(() => {
+         expect(screen.getByText('Updated Project')).toBeInTheDocument();
+       });
+
+       // Delete project
+       await user.click(screen.getByRole('button', { name: /delete/i }));
+       await user.click(screen.getByRole('button', { name: /confirm/i }));
+
+       await waitFor(() => {
+         expect(screen.queryByText('Updated Project')).not.toBeInTheDocument();
+       });
+     });
+
+     it('dependency creation flow', async () => {
+       // Test creating dependency between two projects
+     });
+
+     it('undo/redo flow', async () => {
+       // Test complete undo/redo cycle
+     });
+
+     it('copy/paste flow', async () => {
+       // Test clipboard functionality
+     });
+   });
+   ```
+
+**VERIFY**:
+- All integration tests pass
+- Tests run in <30 seconds
+- **Git commit**: "test: add integration tests for core workflows"
+
+---
+
+## PHASE 6: ADVANCED FEATURES (P2 - WEEKS 7-8)
+
+### 🚀 FEATURE-1: Real-time Presence
+
+**IMPLEMENTATION**:
+
+1. **Track active users** (`src/hooks/usePresence.ts`):
+   ```typescript
+   import { ref, onValue, set, onDisconnect } from 'firebase/database';
+
+   export function usePresence(userId: string) {
+     const [activeUsers, setActiveUsers] = useState<User[]>([]);
+
+     useEffect(() => {
+       const presenceRef = ref(db, `presence/${userId}`);
+       const allPresenceRef = ref(db, 'presence');
+
+       // Set user as online
+       set(presenceRef, {
+         userId,
+         online: true,
+         lastSeen: Date.now()
+       });
+
+       // Remove on disconnect
+       onDisconnect(presenceRef).remove();
+
+       // Listen to all users
+       return onValue(allPresenceRef, (snapshot) => {
+         const users = [];
+         snapshot.forEach((child) => {
+           if (child.val().online) {
+             users.push(child.val());
+           }
+         });
+         setActiveUsers(users);
+       });
+     }, [userId]);
+
+     return activeUsers;
+   }
+   ```
+
+2. **Show user cursors on timeline**:
+   ```typescript
+   const [cursorPositions, setCursorPositions] = useState<Map<string, Point>>(new Map());
+
+   const handleMouseMove = throttle((e: MouseEvent) => {
+     const timelinePos = {
+       x: e.clientX,
+       y: e.clientY
+     };
+
+     // Broadcast position
+     set(ref(db, `presence/${userId}/cursor`), timelinePos);
+   }, 100);
+
+   // Render other users' cursors
+   {activeUsers.map(user => (
+     <div
+       key={user.userId}
+       className="absolute pointer-events-none"
+       style={{ left: user.cursor?.x, top: user.cursor?.y }}
+     >
+       <div className="bg-blue-500 text-white px-2 py-1 rounded text-xs">
+         {user.name}
+       </div>
+     </div>
+   ))}
+   ```
+
+**VERIFY**:
+- Open two browser windows: see other user's cursor
+- Close window: cursor disappears within 5 seconds
+- **Git commit**: "feat: add real-time presence and cursor tracking"
+
+---
+
+### 🚀 FEATURE-2: Conflict Resolution UI
+
+**IMPLEMENTATION**:
+
+1. **Detect concurrent edits**:
+   ```typescript
+   const detectConflict = (local: Project, remote: Project): boolean => {
+     return (
+       local.updatedAt !== remote.updatedAt &&
+       local.id === remote.id &&
+       JSON.stringify(local) !== JSON.stringify(remote)
+     );
+   };
+   ```
+
+2. **Show conflict dialog**:
+   ```typescript
+   const ConflictDialog = ({ local, remote, onResolve }) => (
+     <Dialog open>
+       <DialogTitle>Conflict Detected</DialogTitle>
+       <DialogContent>
+         <p>Another user edited "{local.title}" while you were working.</p>
+
+         <div className="grid grid-cols-2 gap-4">
+           <div>
+             <h3>Your Version</h3>
+             <ProjectDiff project={local} />
+           </div>
+           <div>
+             <h3>Their Version</h3>
+             <ProjectDiff project={remote} />
+           </div>
+         </div>
+       </DialogContent>
+       <DialogActions>
+         <Button onClick={() => onResolve('local')}>Keep Mine</Button>
+         <Button onClick={() => onResolve('remote')}>Keep Theirs</Button>
+         <Button onClick={() => onResolve('manual')}>Merge Manually</Button>
+       </DialogActions>
+     </Dialog>
+   );
+   ```
+
+**VERIFY**:
+- Simulate concurrent edit: see conflict dialog
+- Choose "Keep Mine": local version saves
+- Choose "Keep Theirs": remote version saves
+- **Git commit**: "feat: add conflict resolution UI for concurrent edits"
+
+---
+
+### 🚀 FEATURE-3: Keyboard Navigation
+
+**IMPLEMENTATION**:
+
+1. **Add keyboard drag-drop**:
+   ```typescript
+   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+   const [keyboardDragMode, setKeyboardDragMode] = useState(false);
+
+   useEffect(() => {
+     const handleKeyDown = (e: KeyboardEvent) => {
+       if (!selectedProjectId) return;
+
+       if (e.key === ' ' && !keyboardDragMode) {
+         setKeyboardDragMode(true);
+         announceToScreenReader('Picked up project, use arrow keys to move');
+         return;
+       }
+
+       if (keyboardDragMode) {
+         if (e.key === 'Enter') {
+           commitKeyboardDrag();
+           announceToScreenReader('Project dropped');
+           return;
+         }
+
+         if (e.key === 'Escape') {
+           cancelKeyboardDrag();
+           announceToScreenReader('Drag cancelled');
+           return;
+         }
+
+         // Arrow keys to move
+         if (e.key === 'ArrowRight') {
+           moveProject(selectedProjectId, { days: 1 });
+         } else if (e.key === 'ArrowLeft') {
+           moveProject(selectedProjectId, { days: -1 });
+         }
+       }
+     };
+
+     window.addEventListener('keydown', handleKeyDown);
+     return () => window.removeEventListener('keydown', handleKeyDown);
+   }, [selectedProjectId, keyboardDragMode]);
+   ```
+
+2. **Add ARIA live region**:
+   ```typescript
+   const [announcement, setAnnouncement] = useState('');
+
+   <div role="status" aria-live="polite" className="sr-only">
+     {announcement}
+   </div>
+   ```
+
+**VERIFY**:
+- Tab to project, press Space: enters drag mode
+- Arrow keys: moves project
+- Enter: commits move
+- Escape: cancels
+- Screen reader announces all actions
+- **Git commit**: "feat: add keyboard navigation for drag-and-drop"
+
+---
+
+### 🚀 FEATURE-4: Smart Export
+
+**IMPLEMENTATION**:
+
+1. **Install export libraries**:
+   ```bash
+   npm install jspdf html2canvas xlsx ical-generator
+   ```
+
+2. **Create export utilities** (`src/utils/export.ts`):
+   ```typescript
+   import jsPDF from 'jspdf';
+   import html2canvas from 'html2canvas';
+   import * as XLSX from 'xlsx';
+   import ical from 'ical-generator';
+
+   export async function exportToPDF(roadmap: Roadmap) {
+     const timeline = document.getElementById('timeline');
+     const canvas = await html2canvas(timeline);
+
+     const pdf = new jsPDF('landscape');
+     const imgData = canvas.toDataURL('image/png');
+     pdf.addImage(imgData, 'PNG', 10, 10, 280, 190);
+     pdf.save('roadmap.pdf');
+   }
+
+   export function exportToExcel(roadmap: Roadmap) {
+     const data = roadmap.projects.map(project => ({
+       Title: project.title,
+       'Start Date': project.startDate,
+       'End Date': project.endDate,
+       Status: project.status,
+       Description: project.description
+     }));
+
+     const ws = XLSX.utils.json_to_sheet(data);
+     const wb = XLSX.utils.book_new();
+     XLSX.utils.book_append_sheet(wb, ws, 'Projects');
+     XLSX.writeFile(wb, 'roadmap.xlsx');
+   }
+
+   export function exportToICal(roadmap: Roadmap) {
+     const calendar = ical({ name: 'Project Roadmap' });
+
+     roadmap.projects.forEach(project => {
+       calendar.createEvent({
+         start: new Date(project.startDate),
+         end: new Date(project.endDate),
+         summary: project.title,
+         description: project.description
+       });
+     });
+
+     const icalString = calendar.toString();
+     const blob = new Blob([icalString], { type: 'text/calendar' });
+     const url = URL.createObjectURL(blob);
+
+     const a = document.createElement('a');
+     a.href = url;
+     a.download = 'roadmap.ics';
+     a.click();
+   }
+   ```
+
+3. **Add export menu**:
+   ```typescript
+   <DropdownMenu>
+     <DropdownMenuTrigger>Export</DropdownMenuTrigger>
+     <DropdownMenuContent>
+       <DropdownMenuItem onClick={() => exportToPDF(roadmap)}>
+         Export as PDF
+       </DropdownMenuItem>
+       <DropdownMenuItem onClick={() => exportToExcel(roadmap)}>
+         Export as Excel
+       </DropdownMenuItem>
+       <DropdownMenuItem onClick={() => exportToICal(roadmap)}>
+         Export to Calendar (iCal)
+       </DropdownMenuItem>
+     </DropdownMenuContent>
+   </DropdownMenu>
+   ```
+
+**VERIFY**:
+- Export PDF: produces high-quality timeline image
+- Export Excel: all project data in spreadsheet
+- Export iCal: opens in calendar app correctly
+- **Git commit**: "feat: add PDF, Excel, and iCal export functionality"
+
+---
+
+## PHASE 7: POLISH & OPTIMIZATION (P2 - WEEK 9)
+
+### ✨ POLISH-1: High Contrast Mode
+
+**IMPLEMENTATION**:
+
+```typescript
+const [highContrast, setHighContrast] = useState(false);
+
+useEffect(() => {
+  const mediaQuery = window.matchMedia('(prefers-contrast: high)');
+  setHighContrast(mediaQuery.matches);
+
+  const handler = (e) => setHighContrast(e.matches);
+  mediaQuery.addEventListener('change', handler);
+  return () => mediaQuery.removeEventListener('change', handler);
+}, []);
+
+// Apply high contrast styles
+<div className={cn(
+  "timeline",
+  highContrast && "high-contrast"
+)}>
+
+// In CSS
+.high-contrast {
+  .project-bar {
+    border-width: 3px;
+    font-weight: 600;
+  }
+
+  .dependency-line {
+    stroke-width: 3px;
+  }
+}
+```
+
+**VERIFY**:
+- Enable high contrast in OS settings
+- App automatically adjusts
+- All elements remain readable
+- **Git commit**: "feat: add high contrast mode support"
+
+---
+
+### ✨ POLISH-2: Smart Zoom Controls
+
+**IMPLEMENTATION**:
+
+```typescript
+const zoomToFitProject = (projectId: string) => {
+  const project = roadmap.projects.find(p => p.id === projectId);
+  if (!project) return;
+
+  const padding = 7 * 24 * 60 * 60 * 1000; // 7 days padding
+  const start = new Date(project.startDate).getTime() - padding;
+  const end = new Date(project.endDate).getTime() + padding;
+
+  setViewport({ start, end });
+};
+
+const zoomToQuarter = () => {
+  const now = Date.now();
+  const quarterStart = getQuarterStart(now);
+  const quarterEnd = getQuarterEnd(now);
+
+  setViewport({ start: quarterStart, end: quarterEnd });
+};
+
+// Add toolbar buttons
+<Button onClick={() => zoomToFitProject(selectedProjectId)}>
+  Zoom to Project
+</Button>
+<Button onClick={zoomToQuarter}>
+  Current Quarter
+</Button>
+```
+
+**VERIFY**:
+- Click "Zoom to Project": centers and fits project
+- Click "Current Quarter": shows 3-month view
+- **Git commit**: "feat: add smart zoom controls"
+
+---
+
+### ✨ POLISH-3: Bulk Operations
+
+**IMPLEMENTATION**:
+
+```typescript
+const [selectedProjects, setSelectedProjects] = useState<Set<string>>(new Set());
+
+const handleProjectClick = (projectId: string, e: React.MouseEvent) => {
+  if (e.shiftKey) {
+    setSelectedProjects(prev => {
+      const next = new Set(prev);
+      if (next.has(projectId)) {
+        next.delete(projectId);
+      } else {
+        next.add(projectId);
+      }
+      return next;
+    });
+  }
+};
+
+const bulkUpdateStatus = (status: string) => {
+  selectedProjects.forEach(projectId => {
+    updateProject(projectId, { status });
+  });
+  setSelectedProjects(new Set());
+  toast.success(`Updated ${selectedProjects.size} projects`);
+};
+
+// Add bulk action toolbar
+{selectedProjects.size > 0 && (
+  <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white shadow-lg p-4 rounded">
+    <span>{selectedProjects.size} selected</span>
+    <Button onClick={() => bulkUpdateStatus('Complete')}>
+      Mark as Complete
+    </Button>
+    <Button onClick={() => bulkDelete(selectedProjects)}>
+      Delete Selected
+    </Button>
+  </div>
+)}
+```
+
+**VERIFY**:
+- Shift+click selects multiple projects
+- Bulk actions affect all selected
+- **Git commit**: "feat: add multi-select and bulk operations"
+
+---
+
+## PHASE 8: FINAL VERIFICATION & DEPLOYMENT
+
+### 📊 METRICS-1: Performance Audit
+
+**IMPLEMENTATION**:
+
+1. **Install Lighthouse CI**:
+   ```bash
+   npm install -g @lhci/cli
+   ```
+
+2. **Create Lighthouse config** (`lighthouserc.js`):
+   ```javascript
+   module.exports = {
+     ci: {
+       collect: {
+         url: ['http://localhost:4173'],
+         numberOfRuns: 3
+       },
+       assert: {
+         preset: 'lighthouse:recommended',
+         assertions: {
+           'categories:performance': ['error', { minScore: 0.9 }],
+           'categories:accessibility': ['error', { minScore: 0.95 }],
+           'first-contentful-paint': ['error', { maxNumericValue: 2000 }],
+           'largest-contentful-paint': ['error', { maxNumericValue: 2500 }],
+           'total-blocking-time': ['error', { maxNumericValue: 200 }]
+         }
+       }
+     }
+   };
+   ```
+
+3. **Add performance monitoring**:
+   ```typescript
+   // In App.tsx
+   useEffect(() => {
+     const observer = new PerformanceObserver((list) => {
+       list.getEntries().forEach((entry) => {
+         console.log(`${entry.name}: ${entry.duration}ms`);
+       });
+     });
+
+     observer.observe({ entryTypes: ['measure'] });
+
+     return () => observer.disconnect();
+   }, []);
+
+   // Measure critical operations
+   performance.mark('render-start');
+   // ... render logic
+   performance.mark('render-end');
+   performance.measure('render-duration', 'render-start', 'render-end');
+   ```
+
+**VERIFY**:
+- Run `lhci autorun`
+- Performance score >90
+- Accessibility score >95
+- All metrics within targets
+- **Git commit**: "chore: add Lighthouse CI and performance monitoring"
+
+---
+
+### 📊 METRICS-2: Error Tracking
+
+**IMPLEMENTATION**:
+
+1. **Install Sentry** (or similar):
+   ```bash
+   npm install @sentry/react
+   ```
+
+2. **Initialize**:
+   ```typescript
+   import * as Sentry from '@sentry/react';
+
+   if (import.meta.env.PROD) {
+     Sentry.init({
+       dsn: import.meta.env.VITE_SENTRY_DSN,
+       integrations: [
+         new Sentry.BrowserTracing(),
+         new Sentry.Replay()
+       ],
+       tracesSampleRate: 1.0,
+       replaysSessionSampleRate: 0.1,
+       replaysOnErrorSampleRate: 1.0
+     });
+   }
+   ```
+
+3. **Add error boundaries**:
+   ```typescript
+   <Sentry.ErrorBoundary fallback={<ErrorFallback />}>
+     <App />
+   </Sentry.ErrorBoundary>
+   ```
+
+**VERIFY**:
+- Trigger test error: appears in Sentry dashboard
+- Session replay captures user actions
+- **Git commit**: "feat: add Sentry error tracking and session replay"
+
+---
+
+### 🚀 DEPLOY-1: Production Build
+
+**STEPS**:
+
+1. **Final build verification**:
+   ```bash
+   npm run build
+   npm run preview
+   ```
+
+2. **Run full test suite**:
+   ```bash
+   npm test
+   npm run test:coverage
+   ```
+
+3. **Check bundle size**:
+   ```bash
+   npm run build -- --mode production
+   # Verify JS bundle <500KB, total <1MB
+   ```
+
+4. **Environment variable checklist**:
+   - [ ] `VITE_FIREBASE_API_KEY` set
+   - [ ] `VITE_FIREBASE_AUTH_DOMAIN` set
+   - [ ] `VITE_FIREBASE_PROJECT_ID` set
+   - [ ] `VITE_FIREBASE_STORAGE_BUCKET` set
+   - [ ] `VITE_FIREBASE_MESSAGING_SENDER_ID` set
+   - [ ] `VITE_FIREBASE_APP_ID` set
+   - [ ] `VITE_SENTRY_DSN` set (if using Sentry)
+
+5. **Deploy to Vercel**:
+   ```bash
+   vercel --prod
+   ```
+
+6. **Post-deployment verification**:
+   - [ ] Can authenticate with Google
+   - [ ] Can create/edit/delete projects
+   - [ ] Can create dependencies
+   - [ ] Can undo/redo
+   - [ ] Offline mode works
+   - [ ] Multi-user collaboration works
+   - [ ] No console errors
+   - [ ] Lighthouse score >90
+
+**VERIFY**:
+- Production URL loads successfully
+- All features work in production
+- **Git commit**: "chore: production deployment v1.0"
+
+---
+
+## FINAL DELIVERABLES
+
+### Documentation
+
+1. **README.md** - Complete setup and usage instructions
+2. **ARCHITECTURE.md** - System design and key decisions
+3. **TESTING.md** - Testing strategy and how to run tests
+4. **DEPLOYMENT.md** - Deployment guide and environment setup
+5. **CHANGELOG.md** - All changes made during this overhaul
+
+### Code Quality Metrics
+
+- **Test Coverage**: >80% overall
+- **TypeScript**: Zero errors, zero `any` types
+- **Performance**:
+  - Time to Interactive <2s
+  - Largest Contentful Paint <2.5s
+  - Total Blocking Time <200ms
+- **Accessibility**: WCAG 2.1 AA compliant
+- **Bundle Size**: <500KB JS (gzipped)
+
+### Git History
+
+- ~60-80 atomic commits
+- Clear, descriptive commit messages
+- All commits buildable and testable
+- Proper semantic versioning tags
+
+---
+
+## SUCCESS CRITERIA CHECKLIST
+
+### Critical (Must Complete)
+
+- [ ] Build succeeds with zero TypeScript errors
+- [ ] Firebase Authentication implemented and working
+- [ ] All XSS vulnerabilities patched
+- [ ] Concurrent edit data loss prevented
+- [ ] Circular dependency detection working
+- [ ] Performance: Milestone stacking optimized to O(n log n)
+- [ ] Components memoized, re-renders reduced by 60%+
+- [ ] All critical bugs fixed (items marked 🔴)
+- [ ] Test coverage >80%
+- [ ] Production deployment successful
+
+### High Priority (Should Complete)
+
+- [ ] All high severity bugs fixed (items marked 🟡)
+- [ ] Loading states and error handling implemented
+- [ ] Undo/redo visual feedback working
+- [ ] Offline mode with save queue
+- [ ] Comprehensive validation layer
+- [ ] Integration tests passing
+- [ ] Lighthouse performance score >90
+
+### Nice to Have (May Complete if Time Allows)
+
+- [ ] Real-time presence indicators
+- [ ] Conflict resolution UI
+- [ ] Keyboard navigation
+- [ ] Smart zoom controls
+- [ ] Bulk operations
+- [ ] Export to PDF/Excel/iCal
+- [ ] High contrast mode
+
+---
+
+## ESTIMATED TIMELINE
+
+- **Week 1**: Phase 0-1 (Build fixes + Critical security)
+- **Week 2**: Phase 2 (Performance optimizations)
+- **Week 3**: Phase 3 (UX enhancements)
+- **Week 4**: Phase 4 (Error handling)
+- **Week 5-6**: Phase 5 (Testing infrastructure)
+- **Week 7-8**: Phase 6 (Advanced features)
+- **Week 9**: Phase 7-8 (Polish + Deploy)
+
+**Total: 9 weeks of dedicated L7+ engineering work**
+
+---
+
+## EXECUTION NOTES
+
+**Start with**: Fix the build errors (Phase 0) immediately
+**Verify frequently**: After each major change, run build + tests
+**Commit atomically**: One logical change per commit
+**Document decisions**: Add comments explaining non-obvious choices
+**Measure impact**: Benchmark before/after all performance work
+**No shortcuts**: Complete each item fully before moving on
+
+**When complete**: This codebase should be production-ready for multi-user collaboration with enterprise-grade reliability, performance, and UX.
+
+---
+
+END OF PROMPT
