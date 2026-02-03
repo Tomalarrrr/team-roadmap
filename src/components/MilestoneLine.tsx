@@ -69,6 +69,10 @@ export function MilestoneLine({
     };
   }, []);
 
+  // Store callback in ref to avoid effect re-running when it changes
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
+
   // Use preview dates during drag for smooth visual feedback
   const displayStartDate = previewDates?.start ?? milestone.startDate;
   const displayEndDate = previewDates?.end ?? milestone.endDate;
@@ -150,20 +154,26 @@ export function MilestoneLine({
       setPreviewDates(preview);
     };
 
-    const handleMouseUp = () => {
+    const handleMouseUp = async () => {
       // Commit the final position to Firebase only on release
       const finalPreview = latestPreviewRef.current;
       if (finalPreview && isMountedRef.current) {
         const hasChanged = finalPreview.start !== originalDates.start || finalPreview.end !== originalDates.end;
         if (hasChanged) {
-          onUpdate({
-            startDate: finalPreview.start,
-            endDate: finalPreview.end
-          });
+          // Wait for update to complete before clearing preview
+          // This prevents the visual snap-back
+          try {
+            await onUpdateRef.current({
+              startDate: finalPreview.start,
+              endDate: finalPreview.end
+            });
+          } catch {
+            // If save fails, data will be rolled back by useRoadmap
+          }
         }
       }
 
-      // Clear preview state
+      // Clear preview state after update completes
       latestPreviewRef.current = null;
       if (isMountedRef.current) {
         setPreviewDates(null);
@@ -179,7 +189,7 @@ export function MilestoneLine({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragMode, dragStartX, originalDates, dayWidth, onUpdate]);
+  }, [dragMode, dragStartX, originalDates, dayWidth]);
 
   // Close menu when clicking outside or right-clicking elsewhere
   // Use ref for handler to ensure we always remove the exact same function

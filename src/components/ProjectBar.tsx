@@ -131,6 +131,13 @@ export function ProjectBar({
     };
   }, []);
 
+  // Store callbacks in refs to avoid effect re-running when they change
+  // (they're often inline functions that change every render)
+  const onUpdateRef = useRef(onUpdate);
+  const onEdgeDragRef = useRef(onEdgeDrag);
+  onUpdateRef.current = onUpdate;
+  onEdgeDragRef.current = onEdgeDrag;
+
   // Calculate effective dates including milestone extensions
   // Use preview dates during drag for smooth visual feedback
   const effectiveDates = useMemo(() => {
@@ -179,8 +186,8 @@ export function ProjectBar({
     const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
 
     const handleMouseMove = (e: MouseEvent) => {
-      // Notify edge scroll system
-      onEdgeDrag?.(e.clientX, true);
+      // Notify edge scroll system (use ref to avoid stale closure)
+      onEdgeDragRef.current?.(e.clientX, true);
 
       const deltaX = e.clientX - dragStartX;
 
@@ -222,22 +229,28 @@ export function ProjectBar({
       setPreviewDates(preview);
     };
 
-    const handleMouseUp = () => {
-      onEdgeDrag?.(0, false); // Stop edge scrolling
+    const handleMouseUp = async () => {
+      onEdgeDragRef.current?.(0, false); // Stop edge scrolling
 
       // Commit the final position to Firebase only on release
       const finalPreview = latestPreviewRef.current;
       if (finalPreview) {
         const hasChanged = finalPreview.start !== originalDates.start || finalPreview.end !== originalDates.end;
         if (hasChanged) {
-          onUpdate({
-            startDate: finalPreview.start,
-            endDate: finalPreview.end
-          });
+          // Wait for update to complete before clearing preview
+          // This prevents the visual snap-back
+          try {
+            await onUpdateRef.current({
+              startDate: finalPreview.start,
+              endDate: finalPreview.end
+            });
+          } catch {
+            // If save fails, data will be rolled back by useRoadmap
+          }
         }
       }
 
-      // Clear preview state
+      // Clear preview state after update completes
       latestPreviewRef.current = null;
       setPreviewDates(null);
       setDragMode(null);
@@ -250,7 +263,7 @@ export function ProjectBar({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragMode, dragStartX, originalDates, dayWidth, onUpdate, onEdgeDrag]);
+  }, [dragMode, dragStartX, originalDates, dayWidth]);
 
   // Close menu when clicking outside or right-clicking elsewhere
   useEffect(() => {
