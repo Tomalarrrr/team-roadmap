@@ -105,6 +105,8 @@ export function ProjectBar({
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStartX, setDragStartX] = useState(0);
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
+  // Preview dates for smooth visual feedback during drag (separate from actual data)
+  const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [showTooltip, setShowTooltip] = useState(false);
@@ -130,9 +132,12 @@ export function ProjectBar({
   }, []);
 
   // Calculate effective dates including milestone extensions
+  // Use preview dates during drag for smooth visual feedback
   const effectiveDates = useMemo(() => {
-    let effectiveStart = project.startDate;
-    let effectiveEnd = project.endDate;
+    const baseStart = previewDates?.start ?? project.startDate;
+    const baseEnd = previewDates?.end ?? project.endDate;
+    let effectiveStart = baseStart;
+    let effectiveEnd = baseEnd;
 
     (project.milestones || []).forEach(milestone => {
       if (milestone.startDate < effectiveStart) {
@@ -144,7 +149,7 @@ export function ProjectBar({
     });
 
     return { start: effectiveStart, end: effectiveEnd };
-  }, [project.startDate, project.endDate, project.milestones]);
+  }, [project.startDate, project.endDate, project.milestones, previewDates]);
 
   const { left, width } = getBarDimensions(
     effectiveDates.start,
@@ -165,6 +170,9 @@ export function ProjectBar({
     setOriginalDates({ start: project.startDate, end: project.endDate });
   }, [project.startDate, project.endDate]);
 
+  // Track the latest preview for committing on mouseUp
+  const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
+
   useEffect(() => {
     if (!dragMode) return;
 
@@ -181,37 +189,57 @@ export function ProjectBar({
 
       const deltaDays = Math.round(deltaX / dayWidth);
 
-      if (deltaDays === 0) return;
-
       const originalStart = parseISO(originalDates.start);
       const originalEnd = parseISO(originalDates.end);
 
+      let newStart = originalDates.start;
+      let newEnd = originalDates.end;
+
       if (dragMode === 'move') {
-        const newStart = new Date(originalStart);
-        const newEnd = new Date(originalEnd);
-        newStart.setDate(newStart.getDate() + deltaDays);
-        newEnd.setDate(newEnd.getDate() + deltaDays);
-        onUpdate({
-          startDate: toISODateString(newStart),
-          endDate: toISODateString(newEnd)
-        });
+        const start = new Date(originalStart);
+        const end = new Date(originalEnd);
+        start.setDate(start.getDate() + deltaDays);
+        end.setDate(end.getDate() + deltaDays);
+        newStart = toISODateString(start);
+        newEnd = toISODateString(end);
       } else if (dragMode === 'resize-start') {
-        const newStart = new Date(originalStart);
-        newStart.setDate(newStart.getDate() + deltaDays);
-        if (newStart < originalEnd) {
-          onUpdate({ startDate: toISODateString(newStart) });
+        const start = new Date(originalStart);
+        start.setDate(start.getDate() + deltaDays);
+        if (start < originalEnd) {
+          newStart = toISODateString(start);
         }
       } else if (dragMode === 'resize-end') {
-        const newEnd = new Date(originalEnd);
-        newEnd.setDate(newEnd.getDate() + deltaDays);
-        if (newEnd > originalStart) {
-          onUpdate({ endDate: toISODateString(newEnd) });
+        const end = new Date(originalEnd);
+        end.setDate(end.getDate() + deltaDays);
+        if (end > originalStart) {
+          newEnd = toISODateString(end);
         }
       }
+
+      // Update preview for smooth visual feedback (no Firebase call)
+      const preview = { start: newStart, end: newEnd };
+      latestPreviewRef.current = preview;
+      setPreviewDates(preview);
     };
 
     const handleMouseUp = () => {
       onEdgeDrag?.(0, false); // Stop edge scrolling
+
+      // Commit the final position to Firebase only on release
+      const finalPreview = latestPreviewRef.current;
+      if (finalPreview) {
+        const hasChanged = finalPreview.start !== originalDates.start || finalPreview.end !== originalDates.end;
+        if (hasChanged) {
+          onUpdate({
+            startDate: finalPreview.start,
+            endDate: finalPreview.end
+          });
+        }
+      }
+
+      // Clear preview state
+      latestPreviewRef.current = null;
+      setPreviewDates(null);
       setDragMode(null);
     };
 
