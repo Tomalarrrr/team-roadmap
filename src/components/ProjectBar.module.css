@@ -18,10 +18,18 @@
 
 .projectBar.dragging {
   cursor: grabbing;
-  transform: translateY(-2px) rotate(1deg);
+  /* transform removed - let DnD kit handle it to prevent conflicts */
   box-shadow: var(--shadow-lg);
-  z-index: 10;
-  opacity: 0.95;
+  z-index: 100;  /* Increased from 10 to be above everything */
+  opacity: 0.8;  /* Match DnD kit inline opacity */
+  /* Disable ALL transitions during drag to prevent flickering */
+  transition: none !important;
+}
+
+/* Disable hover transforms during drag to prevent conflicts */
+.projectBar.dragging:hover {
+  transform: none !important;
+  filter: none !important;
 }
 
 .projectBar.selected {

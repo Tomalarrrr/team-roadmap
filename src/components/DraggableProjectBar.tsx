@@ -47,8 +47,8 @@ function DraggableProjectBarComponent({
 
   const style = {
     transform: CSS.Translate.toString(transform),
-    opacity: isDragging ? 0.8 : 1,
-    zIndex: isDragging ? 1000 : undefined
+    opacity: isDragging ? 0.8 : 1
+    // z-index handled by CSS to prevent stacking context conflicts
   } as React.CSSProperties;
 
   return (

@@ -22,10 +22,18 @@
 
 .milestoneLine.dragging {
   cursor: grabbing;
-  transform: scale(1.03) rotate(1deg);
+  /* transform removed - prevent conflicts during drag */
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 20;
-  opacity: 0.95;
+  z-index: 100;  /* Increased from 20 to be consistent */
+  opacity: 0.9;
+  /* Disable ALL transitions during drag to prevent flickering */
+  transition: none !important;
+}
+
+/* Disable hover transforms during drag to prevent conflicts */
+.milestoneLine.dragging:hover {
+  transform: none !important;
+  filter: none !important;
 }
 
 /* Dependency creation states */
