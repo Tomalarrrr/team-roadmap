@@ -87,12 +87,12 @@ interface TimelineProps {
   selectedProjectId?: string | null;
   filteredOwners?: string[]; // When set, only show swimlanes for these owners
   onAddProject: (ownerName: string) => void;
-  onUpdateProject: (projectId: string, updates: Partial<Project>) => void;
+  onUpdateProject: (projectId: string, updates: Partial<Project>) => Promise<void>;
   onDeleteProject: (projectId: string) => void;
   onAddMilestone: (projectId: string) => void;
   onEditProject: (project: Project) => void;
   onEditMilestone: (projectId: string, milestoneId: string) => void;
-  onUpdateMilestone: (projectId: string, milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
+  onUpdateMilestone: (projectId: string, milestoneId: string, updates: Partial<import('../types').Milestone>) => Promise<void>;
   onDeleteMilestone: (projectId: string, milestoneId: string) => void;
   onAddTeamMember: () => void;
   onEditTeamMember: (member: TeamMember) => void;
