@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { UndoAction, ActionType } from '../types';
 
 interface UndoManagerOptions {
@@ -14,6 +14,33 @@ interface UndoState {
 export function useUndoManager({ userId, maxHistory = 50 }: UndoManagerOptions) {
   const [state, setState] = useState<UndoState>({ past: [], future: [] });
   const isUndoingRef = useRef(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = useRef(true);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  // Safe timeout setter that respects mount state
+  const safeResetUndoingFlag = useCallback(() => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = setTimeout(() => {
+      if (isMountedRef.current) {
+        isUndoingRef.current = false;
+      }
+      timeoutRef.current = null;
+    }, 0);
+  }, []);
 
   // Generate unique action ID
   const generateId = () => `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
@@ -79,9 +106,9 @@ export function useUndoManager({ userId, maxHistory = 50 }: UndoManagerOptions) 
     }));
 
     // Return the inverse data to apply
-    setTimeout(() => { isUndoingRef.current = false; }, 0);
+    safeResetUndoingFlag();
     return action;
-  }, [getLastUserAction]);
+  }, [getLastUserAction, safeResetUndoingFlag]);
 
   // Redo last undone action by this user
   const redo = useCallback(() => {
@@ -96,9 +123,9 @@ export function useUndoManager({ userId, maxHistory = 50 }: UndoManagerOptions) 
       future: [...prev.future.slice(0, index), ...prev.future.slice(index + 1)]
     }));
 
-    setTimeout(() => { isUndoingRef.current = false; }, 0);
+    safeResetUndoingFlag();
     return action;
-  }, [getFirstUserRedoAction]);
+  }, [getFirstUserRedoAction, safeResetUndoingFlag]);
 
   // Clear history
   const clearHistory = useCallback(() => {

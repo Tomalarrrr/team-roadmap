@@ -82,3 +82,31 @@ export interface ClipboardData {
   data: Project | Milestone;
   copiedAt: number;
 }
+
+// Type guards for runtime validation
+export function isProject(value: unknown): value is Project {
+  if (!value || typeof value !== 'object') return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.id === 'string' &&
+    typeof obj.title === 'string' &&
+    typeof obj.owner === 'string' &&
+    typeof obj.startDate === 'string' &&
+    typeof obj.endDate === 'string' &&
+    typeof obj.statusColor === 'string' &&
+    Array.isArray(obj.milestones)
+  );
+}
+
+export function isMilestone(value: unknown): value is Milestone {
+  if (!value || typeof value !== 'object') return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.id === 'string' &&
+    typeof obj.title === 'string' &&
+    typeof obj.startDate === 'string' &&
+    typeof obj.endDate === 'string' &&
+    typeof obj.statusColor === 'string' &&
+    Array.isArray(obj.tags)
+  );
+}

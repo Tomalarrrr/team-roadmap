@@ -10,6 +10,7 @@ import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
 import { TeamMemberForm } from './components/TeamMemberForm';
 import type { Project, Milestone, TeamMember } from './types';
+import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates } from './utils/dateUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -204,25 +205,39 @@ function App() {
     const action = undo();
     if (!action) return;
 
-    // Apply the inverse action
-    const inverse = action.inverse as { action: string; data: unknown };
+    // Validate inverse structure
+    const inverse = action.inverse;
+    if (!inverse || typeof inverse !== 'object') {
+      console.warn('Invalid undo action: inverse data missing or malformed');
+      return;
+    }
+    const inverseObj = inverse as { action?: string; data?: unknown };
+    if (typeof inverseObj.action !== 'string' || inverseObj.data === undefined) {
+      console.warn('Invalid undo action: missing action or data property');
+      return;
+    }
+
+    // Apply the inverse action with type validation
     switch (action.type) {
       case 'CREATE_PROJECT':
-        if (inverse.action === 'delete') {
-          const proj = inverse.data as Project;
-          deleteProject(proj.id);
+        if (inverseObj.action === 'delete' && isProject(inverseObj.data)) {
+          deleteProject(inverseObj.data.id);
+        } else if (inverseObj.action === 'delete') {
+          console.warn('Undo CREATE_PROJECT failed: data is not a valid Project');
         }
         break;
       case 'DELETE_PROJECT':
-        if (inverse.action === 'restore') {
-          const proj = inverse.data as Project;
-          addProject(proj);
+        if (inverseObj.action === 'restore' && isProject(inverseObj.data)) {
+          addProject(inverseObj.data);
+        } else if (inverseObj.action === 'restore') {
+          console.warn('Undo DELETE_PROJECT failed: data is not a valid Project');
         }
         break;
       case 'UPDATE_PROJECT':
-        if (inverse.action === 'update') {
-          const proj = inverse.data as Project;
-          updateProject(proj.id, proj);
+        if (inverseObj.action === 'update' && isProject(inverseObj.data)) {
+          updateProject(inverseObj.data.id, inverseObj.data);
+        } else if (inverseObj.action === 'update') {
+          console.warn('Undo UPDATE_PROJECT failed: data is not a valid Project');
         }
         break;
       // Add more cases as needed
@@ -234,21 +249,30 @@ function App() {
     const action = redo();
     if (!action) return;
 
-    // Apply the original action
+    // Apply the original action with type validation
     switch (action.type) {
       case 'CREATE_PROJECT': {
-        const proj = action.data as Project;
-        addProject(proj);
+        if (isProject(action.data)) {
+          addProject(action.data);
+        } else {
+          console.warn('Redo CREATE_PROJECT failed: data is not a valid Project');
+        }
         break;
       }
       case 'DELETE_PROJECT': {
-        const proj = action.data as Project;
-        deleteProject(proj.id);
+        if (isProject(action.data)) {
+          deleteProject(action.data.id);
+        } else {
+          console.warn('Redo DELETE_PROJECT failed: data is not a valid Project');
+        }
         break;
       }
       case 'UPDATE_PROJECT': {
-        const proj = action.data as Project;
-        updateProject(proj.id, proj);
+        if (isProject(action.data)) {
+          updateProject(action.data.id, action.data);
+        } else {
+          console.warn('Redo UPDATE_PROJECT failed: data is not a valid Project');
+        }
         break;
       }
     }

@@ -58,6 +58,15 @@ export function MilestoneLine({
   // Click-to-edit tracking (distinguish from drag)
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const { left: milestoneLeft, width: milestoneWidth } = getBarDimensions(
     milestone.startDate,
     milestone.endDate,
@@ -129,12 +138,15 @@ export function MilestoneLine({
     };
 
     const handleMouseUp = () => {
-      setDragMode(null);
+      if (isMountedRef.current) {
+        setDragMode(null);
+      }
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
 
+    // Cleanup on unmount or when dragMode changes - ensures listeners are always removed
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
@@ -142,9 +154,17 @@ export function MilestoneLine({
   }, [dragMode, dragStartX, originalDates, dayWidth, onUpdate]);
 
   // Close menu when clicking outside or right-clicking elsewhere
+  // Use ref for handler to ensure we always remove the exact same function
+  const closeMenuRef = useRef<() => void>(() => {});
+  closeMenuRef.current = () => {
+    if (isMountedRef.current) {
+      setShowMenu(false);
+    }
+  };
+
   useEffect(() => {
     if (!showMenu) return;
-    const handleClose = () => setShowMenu(false);
+    const handleClose = () => closeMenuRef.current();
     document.addEventListener('click', handleClose);
     document.addEventListener('contextmenu', handleClose);
     return () => {

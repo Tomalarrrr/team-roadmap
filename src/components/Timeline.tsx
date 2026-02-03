@@ -143,6 +143,10 @@ export function Timeline({
   const scrollRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
+  const hasInitialScrolledRef = useRef(false);
+  const edgeScrollFrameRef = useRef<number | null>(null);
+  const lastMouseXRef = useRef<number>(0);
+  const prevDayWidthRef = useRef<number | null>(null);
   const dayWidth = ZOOM_DAY_WIDTHS[zoomLevel];
 
   // DnD sensors with activation constraint for responsive feel
@@ -234,23 +238,45 @@ export function Timeline({
 
   const todayPosition = getTodayPosition(timelineStart, dayWidth);
 
-  // Scroll to selected project or today
+  // Effect A: One-time initial scroll - position "today" at 1/3 from left
   useEffect(() => {
-    if (scrollRef.current) {
-      if (selectedProjectId) {
-        // Find and scroll to the selected project
-        const project = projects.find(p => p.id === selectedProjectId);
-        if (project) {
-          const { left } = getBarDimensions(project.startDate, project.endDate, timelineStart, dayWidth);
-          scrollRef.current.scrollLeft = Math.max(0, left - 200);
-        }
-      } else {
-        // Scroll to show today with some padding on the left
-        const todayPos = todayPosition - 200; // 200px padding from left
-        scrollRef.current.scrollLeft = Math.max(0, todayPos);
-      }
+    if (scrollRef.current && !hasInitialScrolledRef.current) {
+      const viewportWidth = scrollRef.current.clientWidth;
+      const oneThirdOffset = viewportWidth / 3;
+      scrollRef.current.scrollLeft = Math.max(0, todayPosition - oneThirdOffset);
+      hasInitialScrolledRef.current = true;
+      prevDayWidthRef.current = dayWidth;
     }
-  }, [zoomLevel, todayPosition, selectedProjectId, projects, timelineStart, dayWidth]);
+  }, [todayPosition, dayWidth]);
+
+  // Effect B: Scroll to selected project only (from search)
+  useEffect(() => {
+    if (!scrollRef.current || !selectedProjectId) return;
+    const project = projects.find(p => p.id === selectedProjectId);
+    if (project) {
+      const { left } = getBarDimensions(project.startDate, project.endDate, timelineStart, dayWidth);
+      const viewportWidth = scrollRef.current.clientWidth;
+      scrollRef.current.scrollLeft = Math.max(0, left - viewportWidth / 3);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProjectId, timelineStart, dayWidth]);
+
+  // Effect C: Maintain scroll position when zoom level changes
+  useEffect(() => {
+    if (!scrollRef.current || !hasInitialScrolledRef.current) return;
+    if (prevDayWidthRef.current === null || prevDayWidthRef.current === dayWidth) return;
+
+    // Calculate what date was at the 1/3 point before zoom
+    const viewportWidth = scrollRef.current.clientWidth;
+    const prevScrollLeft = scrollRef.current.scrollLeft;
+    const prevCenterDate = (prevScrollLeft + viewportWidth / 3) / prevDayWidthRef.current;
+
+    // Scroll to put that same date at 1/3 with new dayWidth
+    const newScrollLeft = prevCenterDate * dayWidth - viewportWidth / 3;
+    scrollRef.current.scrollLeft = Math.max(0, newScrollLeft);
+
+    prevDayWidthRef.current = dayWidth;
+  }, [dayWidth]);
 
   // Keyboard navigation for timeline panning
   const KEYBOARD_SCROLL_AMOUNT = 100;
@@ -319,6 +345,49 @@ export function Timeline({
 
   const handleMouseLeave = useCallback(() => {
     setIsPanning(false);
+  }, []);
+
+  // Edge scroll during project drag/resize
+  const handleEdgeDrag = useCallback((mouseX: number, isDragging: boolean) => {
+    lastMouseXRef.current = mouseX;
+
+    if (!isDragging) {
+      if (edgeScrollFrameRef.current) {
+        cancelAnimationFrame(edgeScrollFrameRef.current);
+        edgeScrollFrameRef.current = null;
+      }
+      return;
+    }
+
+    const EDGE_THRESHOLD = 80;
+    const BASE_SCROLL_SPEED = 10;
+
+    const scrollStep = () => {
+      const container = scrollRef.current;
+      if (!container) return;
+
+      const rect = container.getBoundingClientRect();
+      const mx = lastMouseXRef.current;
+      const distFromLeft = mx - rect.left;
+      const distFromRight = rect.right - mx;
+
+      let scrollDelta = 0;
+      if (distFromLeft < EDGE_THRESHOLD && distFromLeft > 0) {
+        scrollDelta = -BASE_SCROLL_SPEED * (1 - distFromLeft / EDGE_THRESHOLD);
+      } else if (distFromRight < EDGE_THRESHOLD && distFromRight > 0) {
+        scrollDelta = BASE_SCROLL_SPEED * (1 - distFromRight / EDGE_THRESHOLD);
+      }
+
+      if (scrollDelta !== 0) {
+        container.scrollLeft += scrollDelta;
+      }
+
+      edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
+    };
+
+    if (!edgeScrollFrameRef.current) {
+      edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
+    }
   }, []);
 
   // Group projects by owner
@@ -548,6 +617,7 @@ export function Timeline({
                         onUpdateMilestone={(mid, updates) => onUpdateMilestone(project.id, mid, updates)}
                         onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
                         onCopy={onCopyProject ? () => onCopyProject(project) : undefined}
+                        onEdgeDrag={handleEdgeDrag}
                       />
                     ))}
                   </DroppableLane>

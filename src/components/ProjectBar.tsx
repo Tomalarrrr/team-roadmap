@@ -74,6 +74,7 @@ interface ProjectBarProps {
   onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
   onDeleteMilestone: (milestoneId: string) => void;
   onCopy?: () => void;
+  onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
 }
 
 const BASE_PROJECT_HEIGHT = 52;
@@ -97,7 +98,8 @@ export function ProjectBar({
   onEditMilestone,
   onUpdateMilestone,
   onDeleteMilestone,
-  onCopy
+  onCopy,
+  onEdgeDrag
 }: ProjectBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -160,6 +162,9 @@ export function ProjectBar({
     const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
 
     const handleMouseMove = (e: MouseEvent) => {
+      // Notify edge scroll system
+      onEdgeDrag?.(e.clientX, true);
+
       const deltaX = e.clientX - dragStartX;
 
       // Don't start moving until we've exceeded the drag threshold
@@ -197,6 +202,7 @@ export function ProjectBar({
     };
 
     const handleMouseUp = () => {
+      onEdgeDrag?.(0, false); // Stop edge scrolling
       setDragMode(null);
     };
 
@@ -207,7 +213,7 @@ export function ProjectBar({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragMode, dragStartX, originalDates, dayWidth, onUpdate]);
+  }, [dragMode, dragStartX, originalDates, dayWidth, onUpdate, onEdgeDrag]);
 
   // Close menu when clicking outside or right-clicking elsewhere
   useEffect(() => {
