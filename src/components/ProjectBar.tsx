@@ -186,6 +186,7 @@ export function ProjectBar({
 
   // Track the latest preview for committing on mouseUp
   const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
+  const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!dragMode) return;
@@ -196,44 +197,53 @@ export function ProjectBar({
       // Notify edge scroll system (use ref to avoid stale closure)
       onEdgeDragRef.current?.(e.clientX, true);
 
-      const deltaX = e.clientX - dragStartX;
-
-      // Don't start moving until we've exceeded the drag threshold
-      if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
-
-      const deltaDays = Math.round(deltaX / dayWidth);
-
-      const originalStart = parseISO(originalDates.start);
-      const originalEnd = parseISO(originalDates.end);
-
-      let newStart = originalDates.start;
-      let newEnd = originalDates.end;
-
-      if (dragMode === 'move') {
-        const start = new Date(originalStart);
-        const end = new Date(originalEnd);
-        start.setDate(start.getDate() + deltaDays);
-        end.setDate(end.getDate() + deltaDays);
-        newStart = toISODateString(start);
-        newEnd = toISODateString(end);
-      } else if (dragMode === 'resize-start') {
-        const start = new Date(originalStart);
-        start.setDate(start.getDate() + deltaDays);
-        if (start < originalEnd) {
-          newStart = toISODateString(start);
-        }
-      } else if (dragMode === 'resize-end') {
-        const end = new Date(originalEnd);
-        end.setDate(end.getDate() + deltaDays);
-        if (end > originalStart) {
-          newEnd = toISODateString(end);
-        }
+      // Cancel any pending animation frame to avoid stacking up updates
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
       }
 
-      // Update preview for smooth visual feedback (no Firebase call)
-      const preview = { start: newStart, end: newEnd };
-      latestPreviewRef.current = preview;
-      setPreviewDates(preview);
+      // Use requestAnimationFrame to throttle updates to screen refresh rate
+      // This prevents excessive re-renders and improves performance dramatically
+      rafIdRef.current = requestAnimationFrame(() => {
+        const deltaX = e.clientX - dragStartX;
+
+        // Don't start moving until we've exceeded the drag threshold
+        if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
+
+        const deltaDays = Math.round(deltaX / dayWidth);
+
+        const originalStart = parseISO(originalDates.start);
+        const originalEnd = parseISO(originalDates.end);
+
+        let newStart = originalDates.start;
+        let newEnd = originalDates.end;
+
+        if (dragMode === 'move') {
+          const start = new Date(originalStart);
+          const end = new Date(originalEnd);
+          start.setDate(start.getDate() + deltaDays);
+          end.setDate(end.getDate() + deltaDays);
+          newStart = toISODateString(start);
+          newEnd = toISODateString(end);
+        } else if (dragMode === 'resize-start') {
+          const start = new Date(originalStart);
+          start.setDate(start.getDate() + deltaDays);
+          if (start < originalEnd) {
+            newStart = toISODateString(start);
+          }
+        } else if (dragMode === 'resize-end') {
+          const end = new Date(originalEnd);
+          end.setDate(end.getDate() + deltaDays);
+          if (end > originalStart) {
+            newEnd = toISODateString(end);
+          }
+        }
+
+        // Update preview for smooth visual feedback (no Firebase call)
+        const preview = { start: newStart, end: newEnd };
+        latestPreviewRef.current = preview;
+        setPreviewDates(preview);
+      });
     };
 
     const handleMouseUp = async () => {
@@ -271,6 +281,11 @@ export function ProjectBar({
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      // Cancel any pending animation frame on cleanup
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
     };
   }, [dragMode, dragStartX, originalDates, dayWidth]);
 
