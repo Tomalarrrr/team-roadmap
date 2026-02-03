@@ -25,18 +25,17 @@ interface MilestoneFormProps {
 }
 
 const DEFAULT_COLORS = [
-  '#1e3a5f', // Navy Blue
-  '#7c3aed', // Purple
-  '#991b1b', // Deep Red
-  '#d97706', // Amber
-  '#059669', // Green
-  '#6b7280', // Grey
+  '#6B8CAE', // Soft Blue
+  '#9F8FBF', // Soft Purple
+  '#C98B8B', // Soft Rose
+  '#D4A574', // Soft Amber
+  '#7BAF8E', // Soft Green
+  '#9CA3AF', // Soft Grey
 ];
 
 export function MilestoneForm({
   initialValues,
   projectStartDate,
-  projectEndDate,
   onSubmit,
   onCancel,
   isEditing = false
@@ -94,8 +93,6 @@ export function MilestoneForm({
             type="date"
             value={startDate}
             onChange={(e) => setStartDate(e.target.value)}
-            min={projectStartDate}
-            max={projectEndDate}
             className={styles.input}
             required
           />
@@ -107,8 +104,6 @@ export function MilestoneForm({
             type="date"
             value={endDate}
             onChange={(e) => setEndDate(e.target.value)}
-            min={projectStartDate}
-            max={projectEndDate}
             className={styles.input}
             required
           />

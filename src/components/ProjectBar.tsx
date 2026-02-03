@@ -92,9 +92,26 @@ export function ProjectBar({
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
   const [showMenu, setShowMenu] = useState(false);
 
+  // Calculate effective dates including milestone extensions
+  const effectiveDates = useMemo(() => {
+    let effectiveStart = project.startDate;
+    let effectiveEnd = project.endDate;
+
+    (project.milestones || []).forEach(milestone => {
+      if (milestone.startDate < effectiveStart) {
+        effectiveStart = milestone.startDate;
+      }
+      if (milestone.endDate > effectiveEnd) {
+        effectiveEnd = milestone.endDate;
+      }
+    });
+
+    return { start: effectiveStart, end: effectiveEnd };
+  }, [project.startDate, project.endDate, project.milestones]);
+
   const { left, width } = getBarDimensions(
-    project.startDate,
-    project.endDate,
+    effectiveDates.start,
+    effectiveDates.end,
     timelineStart,
     dayWidth
   );

@@ -16,7 +16,7 @@ interface MilestoneLineProps {
   onDelete: () => void;
 }
 
-const AUTO_BLUE = '#1e3a5f'; // Navy Blue for past milestones
+const AUTO_BLUE = '#6B8CAE'; // Soft Blue for past milestones
 
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 

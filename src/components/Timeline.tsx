@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useCallback } from 'react';
+import { useRef, useEffect, useMemo, useCallback, useState } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -21,7 +21,6 @@ import { DroppableLane } from './DroppableLane';
 import {
   getFYStart,
   getFYEnd,
-  getFYFromDate,
   getVisibleFYs,
   getTodayPosition
 } from '../utils/dateUtils';
@@ -170,31 +169,12 @@ export function Timeline({
   }, [onUpdateProject]);
 
   const { timelineStart, timelineEnd, visibleFYs } = useMemo(() => {
-    const currentFY = getFYFromDate(new Date());
-    if (zoomLevel === 'month') {
-      // Start 2 months ago, extend to end of 2030
-      const today = new Date();
-      const start = startOfMonth(addMonths(today, -2));
-      const end = new Date(2030, 11, 31); // December 31, 2030
-      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 8) };
-    } else if (zoomLevel === 'day') {
-      const today = new Date();
-      const start = startOfMonth(addMonths(today, -2));
-      const end = addMonths(start, 6);
-      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 2) };
-    } else if (zoomLevel === 'week') {
-      const today = new Date();
-      const start = startOfMonth(addMonths(today, -2));
-      const end = addMonths(start, 18);
-      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 3) };
-    } else {
-      // Year view: show from current FY to FY2030
-      const startFY = currentFY;
-      const endFY = 2030;
-      const fys = getVisibleFYs(startFY, endFY - startFY + 1);
-      return { timelineStart: getFYStart(fys[0]), timelineEnd: getFYEnd(fys[fys.length - 1]), visibleFYs: fys };
-    }
-  }, [zoomLevel]);
+    // All views now show January 2025 to December 2030
+    const start = new Date(2025, 0, 1); // January 1, 2025
+    const end = new Date(2030, 11, 31); // December 31, 2030
+    const fys = getVisibleFYs(2025, 6); // FY2025 to FY2030
+    return { timelineStart: start, timelineEnd: end, visibleFYs: fys };
+  }, []);
 
   const totalDays = dateFnsDiff(timelineEnd, timelineStart);
   const totalWidth = totalDays * dayWidth;
@@ -227,10 +207,11 @@ export function Timeline({
 
   useEffect(() => {
     if (scrollRef.current) {
-      // Start at position 0 (current month on left)
-      scrollRef.current.scrollLeft = 0;
+      // Scroll to show today with some padding on the left
+      const todayPos = todayPosition - 200; // 200px padding from left
+      scrollRef.current.scrollLeft = Math.max(0, todayPos);
     }
-  }, [zoomLevel]);
+  }, [zoomLevel, todayPosition]);
 
   const handleWheel = (e: React.WheelEvent) => {
     if (scrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -238,6 +219,38 @@ export function Timeline({
       scrollRef.current.scrollLeft += e.deltaY;
     }
   };
+
+  // Click-drag panning state
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, scrollLeft: 0 });
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Only start pan if clicking on empty area (not on projects/milestones)
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-draggable]') || target.closest('button')) return;
+
+    if (scrollRef.current) {
+      setIsPanning(true);
+      setPanStart({
+        x: e.clientX,
+        scrollLeft: scrollRef.current.scrollLeft
+      });
+    }
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning || !scrollRef.current) return;
+    const dx = e.clientX - panStart.x;
+    scrollRef.current.scrollLeft = panStart.scrollLeft - dx;
+  }, [isPanning, panStart]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsPanning(false);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setIsPanning(false);
+  }, []);
 
   // Group projects by owner
   const projectsByOwner = useMemo(() => {
@@ -319,7 +332,15 @@ export function Timeline({
 
       {/* Scrollable timeline */}
       <div className={styles.timelineWrapper}>
-        <div ref={scrollRef} className={styles.scrollContainer} onWheel={handleWheel}>
+        <div
+          ref={scrollRef}
+          className={`${styles.scrollContainer} ${isPanning ? styles.panning : ''}`}
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseLeave}
+        >
           {/* Header */}
           <div className={styles.header} style={{ width: totalWidth }}>
             {zoomLevel === 'year' ? (

@@ -113,24 +113,24 @@
 
 .addProjectBtn {
   align-self: flex-start;
-  padding: 6px 12px;
+  padding: 4px 10px;
   display: flex;
   align-items: center;
   gap: 4px;
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  border-radius: var(--radius-md);
-  font-size: 0.75rem;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
   font-weight: 500;
   transition: all 0.15s;
-  border: 1px dashed var(--border-medium);
+  border: none;
+  opacity: 0.6;
 }
 
 .addProjectBtn:hover {
-  background: var(--accent-blue);
-  color: white;
-  border-color: var(--accent-blue);
-  border-style: solid;
+  background: rgba(107, 140, 174, 0.15);
+  color: var(--text-primary);
+  opacity: 1;
 }
 
 .addMemberBtn {
@@ -163,6 +163,12 @@
   height: 100%;
   overflow-x: auto;
   overflow-y: auto;
+  cursor: grab;
+}
+
+.scrollContainer.panning {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .header {
