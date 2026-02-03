@@ -45,7 +45,7 @@ export function useUndoManager({ userId, maxHistory = 50 }: UndoManagerOptions) 
   // Generate unique action ID
   const generateId = () => `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
-  // Record an action
+  // Record an action (uses type assertion for flexibility with discriminated unions)
   const recordAction = useCallback((
     type: ActionType,
     data: unknown,
@@ -53,14 +53,14 @@ export function useUndoManager({ userId, maxHistory = 50 }: UndoManagerOptions) 
   ) => {
     if (isUndoingRef.current) return; // Don't record during undo/redo
 
-    const action: UndoAction = {
+    const action = {
       id: generateId(),
       type,
       userId,
       timestamp: Date.now(),
       data,
       inverse
-    };
+    } as UndoAction;
 
     setState(prev => ({
       past: [...prev.past.slice(-maxHistory + 1), action],

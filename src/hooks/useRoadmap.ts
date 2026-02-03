@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { subscribeToRoadmap, saveRoadmap } from '../firebase';
+import { subscribeToRoadmap, saveRoadmap, subscribeToConnectionState } from '../firebase';
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { withRetry } from '../utils/retry';
@@ -61,6 +61,7 @@ export function useRoadmap() {
   const [data, setData] = useState<RoadmapData>(DEFAULT_DATA);
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(true);
 
   // Ref to always access current data (fixes stale closure bug during rapid updates)
   const dataRef = useRef<RoadmapData>(data);
@@ -72,6 +73,7 @@ export function useRoadmap() {
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
+    let unsubscribeConnection: (() => void) | null = null;
     let mounted = true;
 
     // Initialize Firebase asynchronously (deferred loading)
@@ -102,9 +104,25 @@ export function useRoadmap() {
       }
     });
 
+    // Monitor connection state
+    subscribeToConnectionState((connected) => {
+      if (!mounted) return;
+      setIsOnline(connected);
+      if (!connected) {
+        console.warn('Firebase connection lost. Changes will be saved when reconnected.');
+      }
+    }).then((unsub) => {
+      if (mounted) {
+        unsubscribeConnection = unsub;
+      } else {
+        unsub();
+      }
+    });
+
     return () => {
       mounted = false;
       unsubscribe?.();
+      unsubscribeConnection?.();
     };
   }, []);
 
@@ -306,6 +324,7 @@ export function useRoadmap() {
     data,
     loading,
     saveError,
+    isOnline,
     clearError,
     addTeamMember,
     updateTeamMember,

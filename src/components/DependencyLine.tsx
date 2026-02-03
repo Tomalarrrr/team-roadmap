@@ -3,6 +3,45 @@ import type { Project, Milestone } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
 import styles from './DependencyLine.module.css';
 
+// Helper to calculate milestone stack index (memoized externally)
+// Cache milestone stack calculations to avoid recomputation
+const milestoneStackCache = new WeakMap<Milestone[], Map<string, number>>();
+
+function getMilestoneStacks(milestones: Milestone[]): Map<string, number> {
+  const cached = milestoneStackCache.get(milestones);
+  if (cached) return cached;
+
+  const stacks = new Map<string, number>();
+  const sorted = [...milestones].sort((a, b) =>
+    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+  );
+
+  // Use interval scheduling algorithm (same as ProjectBar optimization)
+  const stackEndTimes: number[] = [];
+
+  sorted.forEach((milestone) => {
+    const startTime = new Date(milestone.startDate).getTime();
+    const endTime = new Date(milestone.endDate).getTime();
+
+    let assignedStack = -1;
+    for (let i = 0; i < stackEndTimes.length; i++) {
+      if (stackEndTimes[i] < startTime) {
+        assignedStack = i;
+        stackEndTimes[i] = endTime;
+        break;
+      }
+    }
+    if (assignedStack === -1) {
+      assignedStack = stackEndTimes.length;
+      stackEndTimes.push(endTime);
+    }
+    stacks.set(milestone.id, assignedStack);
+  });
+
+  milestoneStackCache.set(milestones, stacks);
+  return stacks;
+}
+
 interface DependencyLineProps {
   fromProject: Project;
   toProject: Project;
@@ -44,29 +83,16 @@ export function DependencyLine({
   const [showConfirm, setShowConfirm] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
-  // Helper to calculate milestone stack index
-  const getMilestoneStackIndex = (milestones: Milestone[], milestoneId: string): number => {
-    // Simple approach: find the milestone and calculate its stack based on overlaps
-    const milestone = milestones.find(m => m.id === milestoneId);
-    if (!milestone) return 0;
+  // Memoize milestone stacks to avoid recalculation
+  const fromMilestoneStacks = useMemo(
+    () => getMilestoneStacks(fromProject.milestones || []),
+    [fromProject.milestones]
+  );
 
-    const sorted = [...milestones].sort((a, b) =>
-      new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-    );
-
-    let stackIndex = 0;
-    for (const m of sorted) {
-      if (m.id === milestoneId) break;
-      const mInterval = { start: new Date(m.startDate), end: new Date(m.endDate) };
-      const targetInterval = { start: new Date(milestone.startDate), end: new Date(milestone.endDate) };
-
-      // Check overlap
-      if (mInterval.start <= targetInterval.end && mInterval.end >= targetInterval.start) {
-        stackIndex++;
-      }
-    }
-    return stackIndex;
-  };
+  const toMilestoneStacks = useMemo(
+    () => getMilestoneStacks(toProject.milestones || []),
+    [toProject.milestones]
+  );
 
   const line = useMemo(() => {
     // Get milestone objects if specified
@@ -101,7 +127,7 @@ export function DependencyLine({
 
     if (fromMilestone) {
       // Milestone position: within project bar, below content
-      const milestoneStackIdx = getMilestoneStackIndex(fromProject.milestones || [], fromMilestoneId!);
+      const milestoneStackIdx = fromMilestoneStacks.get(fromMilestoneId!) ?? 0;
       const projectTop = fromLaneOffset + BAR_VERTICAL_OFFSET + fromStack * PROJECT_HEIGHT;
       fromY = projectTop + PROJECT_CONTENT_HEIGHT + 6 + milestoneStackIdx * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2;
     } else {
@@ -109,7 +135,7 @@ export function DependencyLine({
     }
 
     if (toMilestone) {
-      const milestoneStackIdx = getMilestoneStackIndex(toProject.milestones || [], toMilestoneId!);
+      const milestoneStackIdx = toMilestoneStacks.get(toMilestoneId!) ?? 0;
       const projectTop = toLaneOffset + BAR_VERTICAL_OFFSET + toStack * PROJECT_HEIGHT;
       toY = projectTop + PROJECT_CONTENT_HEIGHT + 6 + milestoneStackIdx * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2;
     } else {
@@ -138,7 +164,26 @@ export function DependencyLine({
       midX,
       midY: (adjustedFromY + adjustedToY) / 2
     };
-  }, [fromProject, toProject, fromMilestoneId, toMilestoneId, timelineStart, dayWidth, projectStacks, lanePositions, ownerToLaneIndex, lineIndex]);
+  }, [
+    fromProject.id,
+    fromProject.owner,
+    fromProject.startDate,
+    fromProject.endDate,
+    toProject.id,
+    toProject.owner,
+    toProject.startDate,
+    toProject.endDate,
+    fromMilestoneId,
+    toMilestoneId,
+    timelineStart,
+    dayWidth,
+    projectStacks,
+    lanePositions,
+    ownerToLaneIndex,
+    lineIndex,
+    fromMilestoneStacks,
+    toMilestoneStacks
+  ]);
 
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();

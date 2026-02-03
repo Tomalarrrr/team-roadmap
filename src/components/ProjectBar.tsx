@@ -9,7 +9,7 @@ import {
   formatShortDate,
   isDatePast
 } from '../utils/dateUtils';
-import { parseISO, areIntervalsOverlapping } from 'date-fns';
+import { parseISO } from 'date-fns';
 import styles from './ProjectBar.module.css';
 
 const AUTO_BLUE = '#0070c0'; // Blue for completed/past projects

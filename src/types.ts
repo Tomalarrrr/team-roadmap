@@ -46,7 +46,7 @@ export interface DependencyTarget {
   milestoneId?: string;
 }
 
-// Undo system types
+// Undo system types (discriminated unions for type safety)
 export type ActionType =
   | 'CREATE_PROJECT'
   | 'UPDATE_PROJECT'
@@ -61,14 +61,75 @@ export type ActionType =
   | 'ADD_DEPENDENCY'
   | 'REMOVE_DEPENDENCY';
 
-export interface UndoAction {
+// Base undo action interface
+interface BaseUndoAction {
   id: string;
-  type: ActionType;
   userId: string;
   timestamp: number;
-  data: unknown;
-  inverse: unknown; // Data needed to reverse the action
 }
+
+// Discriminated union for type-safe undo actions
+export type UndoAction =
+  | (BaseUndoAction & {
+      type: 'CREATE_PROJECT';
+      data: Project;
+      inverse: { action: 'delete'; data: Project };
+    })
+  | (BaseUndoAction & {
+      type: 'UPDATE_PROJECT';
+      data: Project;
+      inverse: { action: 'update'; data: Project };
+    })
+  | (BaseUndoAction & {
+      type: 'DELETE_PROJECT';
+      data: Project;
+      inverse: { action: 'restore'; data: Project };
+    })
+  | (BaseUndoAction & {
+      type: 'CREATE_MILESTONE';
+      data: Milestone;
+      inverse: { action: 'delete'; data: Milestone };
+    })
+  | (BaseUndoAction & {
+      type: 'UPDATE_MILESTONE';
+      data: Milestone;
+      inverse: { action: 'update'; data: Milestone };
+    })
+  | (BaseUndoAction & {
+      type: 'DELETE_MILESTONE';
+      data: Milestone;
+      inverse: { action: 'restore'; data: Milestone };
+    })
+  | (BaseUndoAction & {
+      type: 'CREATE_MEMBER';
+      data: TeamMember;
+      inverse: { action: 'delete'; data: TeamMember };
+    })
+  | (BaseUndoAction & {
+      type: 'UPDATE_MEMBER';
+      data: TeamMember;
+      inverse: { action: 'update'; data: TeamMember };
+    })
+  | (BaseUndoAction & {
+      type: 'DELETE_MEMBER';
+      data: TeamMember;
+      inverse: { action: 'restore'; data: TeamMember };
+    })
+  | (BaseUndoAction & {
+      type: 'REORDER_MEMBERS';
+      data: TeamMember[];
+      inverse: { action: 'reorder'; data: TeamMember[] };
+    })
+  | (BaseUndoAction & {
+      type: 'ADD_DEPENDENCY';
+      data: Dependency;
+      inverse: { action: 'delete'; data: Dependency };
+    })
+  | (BaseUndoAction & {
+      type: 'REMOVE_DEPENDENCY';
+      data: Dependency;
+      inverse: { action: 'restore'; data: Dependency };
+    });
 
 export interface RoadmapData {
   projects: Project[];

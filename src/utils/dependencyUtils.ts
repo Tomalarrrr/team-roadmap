@@ -14,9 +14,7 @@ import type { Dependency } from '../types';
 export function wouldCreateCycle(
   dependencies: Dependency[],
   fromId: string,
-  toId: string,
-  fromProjectId?: string,
-  toProjectId?: string
+  toId: string
 ): boolean {
   // Self-dependency check
   if (fromId === toId) return true;
@@ -118,7 +116,7 @@ export function validateDependency(
   const fromId = fromMilestoneId || fromProjectId;
   const toId = toMilestoneId || toProjectId;
 
-  if (wouldCreateCycle(dependencies, fromId, toId, fromProjectId, toProjectId)) {
+  if (wouldCreateCycle(dependencies, fromId, toId)) {
     return { valid: false, error: 'This would create a circular dependency' };
   }
 

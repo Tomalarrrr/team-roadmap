@@ -2,13 +2,16 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import { createPortal } from 'react-dom';
 import styles from './Toast.module.css';
 
+export type ToastType = 'success' | 'error' | 'warning' | 'info';
+
 interface ToastMessage {
   id: string;
   message: string;
+  type: ToastType;
 }
 
 interface ToastContextType {
-  showToast: (message: string) => void;
+  showToast: (message: string, type?: ToastType) => void;
 }
 
 const ToastContext = createContext<ToastContextType | null>(null);
@@ -28,9 +31,9 @@ interface ToastProviderProps {
 export function ToastProvider({ children }: ToastProviderProps) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  const showToast = useCallback((message: string) => {
+  const showToast = useCallback((message: string, type: ToastType = 'info') => {
     const id = `toast-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-    setToasts(prev => [...prev, { id, message }]);
+    setToasts(prev => [...prev, { id, message, type }]);
   }, []);
 
   const removeToast = useCallback((id: string) => {
@@ -61,12 +64,14 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
   const [isExiting, setIsExiting] = useState(false);
 
   useEffect(() => {
+    // Errors stay longer (4s), others 2.5s
+    const duration = toast.type === 'error' ? 4000 : 2500;
     const timer = setTimeout(() => {
       setIsExiting(true);
-    }, 2000);
+    }, duration);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [toast.type]);
 
   useEffect(() => {
     if (isExiting) {
@@ -77,12 +82,20 @@ function ToastItem({ toast, onRemove }: ToastItemProps) {
     }
   }, [isExiting, onRemove, toast.id]);
 
+  const icon = {
+    success: '✓',
+    error: '✕',
+    warning: '⚠',
+    info: 'ℹ'
+  }[toast.type];
+
   return (
     <div
-      className={`${styles.toast} ${isExiting ? styles.exiting : ''}`}
-      role="status"
+      className={`${styles.toast} ${styles[toast.type]} ${isExiting ? styles.exiting : ''}`}
+      role={toast.type === 'error' ? 'alert' : 'status'}
     >
-      {toast.message}
+      <span className={styles.icon}>{icon}</span>
+      <span className={styles.message}>{toast.message}</span>
     </div>
   );
 }

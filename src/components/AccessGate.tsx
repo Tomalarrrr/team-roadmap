@@ -1,14 +1,22 @@
-import { useState, useEffect } from 'react';
-import styles from './AccessGate.module.css';
+// Imports needed when PIN authentication is enabled
+// import { useState, useEffect } from 'react';
+// import styles from './AccessGate.module.css';
 
 interface AccessGateProps {
   children: React.ReactNode;
 }
 
-const TEAM_PIN = import.meta.env.VITE_TEAM_PIN || 'TEAM2024';
-const STORAGE_KEY = 'roadmap-team-access';
+// PIN configuration - disabled for now
+// const TEAM_PIN = import.meta.env.VITE_TEAM_PIN || 'TEAM2024';
+// const STORAGE_KEY = 'roadmap-team-access';
 
 export function AccessGate({ children }: AccessGateProps) {
+  // PIN authentication disabled for now
+  // To re-enable: uncomment the imports/constants above and the code below, then remove the direct return
+
+  return <>{children}</>;
+
+  /* PIN AUTHENTICATION - CURRENTLY DISABLED
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -83,4 +91,5 @@ export function AccessGate({ children }: AccessGateProps) {
   }
 
   return <>{children}</>;
+  */
 }

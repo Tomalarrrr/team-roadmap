@@ -88,6 +88,21 @@ export async function subscribeToRoadmap(callback: (data: RoadmapData) => void):
   return unsubscribe;
 }
 
+export async function subscribeToConnectionState(callback: (connected: boolean) => void): Promise<Unsubscribe> {
+  await ensureInitialized();
+  const { onValue, ref } = await import('firebase/database');
+
+  // Firebase's special .info/connected location tracks connection state
+  const connectedRef = ref(database!, '.info/connected');
+
+  const unsubscribe = onValue(connectedRef, (snapshot) => {
+    const connected = snapshot.val() === true;
+    callback(connected);
+  });
+
+  return unsubscribe;
+}
+
 export async function saveRoadmap(data: RoadmapData): Promise<void> {
   await ensureInitialized();
   const { set } = await import('firebase/database');

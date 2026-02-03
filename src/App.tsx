@@ -46,6 +46,7 @@ function App() {
     data,
     loading,
     saveError,
+    isOnline,
     clearError,
     addTeamMember,
     updateTeamMember,
@@ -72,6 +73,14 @@ function App() {
   });
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Show save errors as toasts
+  useEffect(() => {
+    if (saveError) {
+      showToast(sanitizeError(saveError), 'error');
+      clearError();
+    }
+  }, [saveError, showToast, clearError]);
 
   // Undo manager
   const userId = useMemo(() => getUserId(), []);
@@ -336,20 +345,25 @@ function App() {
   // Project handlers with undo support
   const handleAddProject = useCallback(
     async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Omit<Milestone, 'id'>[] }) => {
-      const { milestones: newMilestones, ...projectData } = values;
-      const newProject = await addProject(projectData);
-      if (newProject && newMilestones && newMilestones.length > 0) {
-        // Add milestones to the newly created project
-        for (const milestone of newMilestones) {
-          await addMilestone(newProject.id, milestone);
+      try {
+        const { milestones: newMilestones, ...projectData } = values;
+        const newProject = await addProject(projectData);
+        if (newProject && newMilestones && newMilestones.length > 0) {
+          // Add milestones to the newly created project
+          for (const milestone of newMilestones) {
+            await addMilestone(newProject.id, milestone);
+          }
         }
+        if (newProject) {
+          recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
+        }
+        showToast('Project created successfully', 'success');
+        closeModal();
+      } catch (error) {
+        showToast(`Failed to create project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
       }
-      if (newProject) {
-        recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
-      }
-      closeModal();
     },
-    [addProject, addMilestone, closeModal, recordAction]
+    [addProject, addMilestone, closeModal, recordAction, showToast]
   );
 
   const handleEditProject = useCallback(
@@ -395,13 +409,18 @@ function App() {
 
   const handleDeleteProject = useCallback(
     async (projectId: string) => {
-      const project = data.projects.find(p => p.id === projectId);
-      if (project) {
-        recordAction('DELETE_PROJECT', project, createInverse('DELETE_PROJECT', project, null));
-        await deleteProject(projectId);
+      try {
+        const project = data.projects.find(p => p.id === projectId);
+        if (project) {
+          recordAction('DELETE_PROJECT', project, createInverse('DELETE_PROJECT', project, null));
+          await deleteProject(projectId);
+          showToast('Project deleted', 'success');
+        }
+      } catch (error) {
+        showToast(`Failed to delete project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
       }
     },
-    [data.projects, deleteProject, recordAction]
+    [data.projects, deleteProject, recordAction, showToast]
   );
 
   // Milestone handlers
@@ -432,12 +451,23 @@ function App() {
     fromMilestoneId?: string,
     toMilestoneId?: string
   ) => {
-    await addDependency(fromProjectId, toProjectId, fromMilestoneId, toMilestoneId);
-  }, [addDependency]);
+    try {
+      await addDependency(fromProjectId, toProjectId, fromMilestoneId, toMilestoneId);
+      showToast('Dependency created', 'success');
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      showToast(errorMsg, 'error');
+    }
+  }, [addDependency, showToast]);
 
   const handleRemoveDependency = useCallback(async (depId: string) => {
-    await removeDependency(depId);
-  }, [removeDependency]);
+    try {
+      await removeDependency(depId);
+      showToast('Dependency removed', 'success');
+    } catch (error) {
+      showToast(`Failed to remove dependency: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  }, [removeDependency, showToast]);
 
   const openAddMilestone = useCallback(
     (projectId: string) => {
@@ -614,11 +644,10 @@ function App() {
         )}
       </Modal>
 
-      {/* Save Error Toast */}
-      {saveError && (
-        <div className={styles.errorToast}>
-          <span>Failed to save: {sanitizeError(saveError)}</span>
-          <button onClick={clearError} className={styles.toastClose}>×</button>
+      {/* Offline Indicator */}
+      {!isOnline && (
+        <div className={styles.offlineToast}>
+          <span>📡 Offline - Changes will be saved when reconnected</span>
         </div>
       )}
     </div>
