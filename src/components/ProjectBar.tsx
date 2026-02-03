@@ -91,6 +91,7 @@ export function ProjectBar({
   const [dragStartX, setDragStartX] = useState(0);
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
   const [showMenu, setShowMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
 
   // Calculate effective dates including milestone extensions
   const effectiveDates = useMemo(() => {
@@ -173,12 +174,16 @@ export function ProjectBar({
     };
   }, [dragMode, dragStartX, originalDates, dayWidth, onUpdate]);
 
-  // Close menu when clicking outside
+  // Close menu when clicking outside or right-clicking elsewhere
   useEffect(() => {
     if (!showMenu) return;
-    const handleClick = () => setShowMenu(false);
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
+    const handleClose = () => setShowMenu(false);
+    document.addEventListener('click', handleClose);
+    document.addEventListener('contextmenu', handleClose);
+    return () => {
+      document.removeEventListener('click', handleClose);
+      document.removeEventListener('contextmenu', handleClose);
+    };
   }, [showMenu]);
 
   // Calculate milestone stacking
@@ -213,6 +218,8 @@ export function ProjectBar({
       }}
       onContextMenu={(e) => {
         e.preventDefault();
+        e.stopPropagation();
+        setMenuPosition({ x: e.clientX, y: e.clientY });
         setShowMenu(true);
       }}
     >
@@ -266,7 +273,11 @@ export function ProjectBar({
 
       {/* Context menu */}
       {showMenu && (
-        <div className={styles.contextMenu} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={styles.contextMenu}
+          style={{ left: menuPosition.x, top: menuPosition.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button onClick={onEdit}>Edit Project</button>
           <button onClick={onAddMilestone}>Add Milestone</button>
           <button className={styles.deleteBtn} onClick={onDelete}>Delete</button>

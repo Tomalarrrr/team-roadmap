@@ -37,6 +37,7 @@ export function MilestoneLine({
   const milestoneRef = useRef<HTMLDivElement>(null);
   const [showTooltip, setShowTooltip] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStartX, setDragStartX] = useState(0);
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
@@ -120,12 +121,16 @@ export function MilestoneLine({
     };
   }, [dragMode, dragStartX, originalDates, dayWidth, onUpdate]);
 
-  // Close menu when clicking outside
+  // Close menu when clicking outside or right-clicking elsewhere
   useEffect(() => {
     if (!showMenu) return;
-    const handleClick = () => setShowMenu(false);
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
+    const handleClose = () => setShowMenu(false);
+    document.addEventListener('click', handleClose);
+    document.addEventListener('contextmenu', handleClose);
+    return () => {
+      document.removeEventListener('click', handleClose);
+      document.removeEventListener('contextmenu', handleClose);
+    };
   }, [showMenu]);
 
   if (displayWidth <= 0 || displayLeft >= projectWidth) {
@@ -151,6 +156,7 @@ export function MilestoneLine({
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
+        setMenuPosition({ x: e.clientX, y: e.clientY });
         setShowMenu(true);
       }}
     >
@@ -194,7 +200,11 @@ export function MilestoneLine({
 
       {/* Context menu */}
       {showMenu && (
-        <div className={styles.contextMenu} onClick={(e) => e.stopPropagation()}>
+        <div
+          className={styles.contextMenu}
+          style={{ left: menuPosition.x, top: menuPosition.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <button onClick={onEdit}>Edit Milestone</button>
           <button className={styles.deleteBtn} onClick={onDelete}>Delete</button>
         </div>

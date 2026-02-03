@@ -94,18 +94,15 @@
 }
 
 .contextMenu {
-  position: absolute;
-  top: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-top: 4px;
-  background: var(--bg-secondary);
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-primary);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-light);
   overflow: hidden;
-  z-index: 100;
   animation: scaleIn 0.1s ease;
+  min-width: 140px;
 }
 
 @keyframes scaleIn {
