@@ -138,6 +138,17 @@ export function ProjectBar({
   onUpdateRef.current = onUpdate;
   onEdgeDragRef.current = onEdgeDrag;
 
+  // Clear preview when actual data matches what we saved
+  // This is more robust than timing-based clearing because React's batching
+  // means the parent might not have re-rendered yet when mouseUp handler completes
+  useEffect(() => {
+    if (previewDates &&
+        project.startDate === previewDates.start &&
+        project.endDate === previewDates.end) {
+      setPreviewDates(null);
+    }
+  }, [project.startDate, project.endDate, previewDates]);
+
   // Calculate effective dates including milestone extensions
   // Use preview dates during drag for smooth visual feedback
   const effectiveDates = useMemo(() => {
@@ -237,22 +248,24 @@ export function ProjectBar({
       if (finalPreview) {
         const hasChanged = finalPreview.start !== originalDates.start || finalPreview.end !== originalDates.end;
         if (hasChanged) {
-          // Wait for update to complete before clearing preview
-          // This prevents the visual snap-back
-          try {
-            await onUpdateRef.current({
-              startDate: finalPreview.start,
-              endDate: finalPreview.end
-            });
-          } catch {
-            // If save fails, data will be rolled back by useRoadmap
-          }
+          // Fire the update - don't await, let the effect clear preview when props match
+          onUpdateRef.current({
+            startDate: finalPreview.start,
+            endDate: finalPreview.end
+          }).catch(() => {
+            // If save fails, clear preview (rollback will restore old position)
+            setPreviewDates(null);
+          });
+        } else {
+          // No change, clear preview immediately
+          setPreviewDates(null);
         }
+      } else {
+        // No preview, clear anyway
+        setPreviewDates(null);
       }
 
-      // Clear preview state after update completes
       latestPreviewRef.current = null;
-      setPreviewDates(null);
       setDragMode(null);
     };
 

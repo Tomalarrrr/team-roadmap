@@ -73,6 +73,16 @@ export function MilestoneLine({
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
 
+  // Clear preview when actual data matches what we saved
+  // This is more robust than timing-based clearing
+  useEffect(() => {
+    if (previewDates &&
+        milestone.startDate === previewDates.start &&
+        milestone.endDate === previewDates.end) {
+      setPreviewDates(null);
+    }
+  }, [milestone.startDate, milestone.endDate, previewDates]);
+
   // Use preview dates during drag for smooth visual feedback
   const displayStartDate = previewDates?.start ?? milestone.startDate;
   const displayEndDate = previewDates?.end ?? milestone.endDate;
@@ -154,29 +164,35 @@ export function MilestoneLine({
       setPreviewDates(preview);
     };
 
-    const handleMouseUp = async () => {
+    const handleMouseUp = () => {
       // Commit the final position to Firebase only on release
       const finalPreview = latestPreviewRef.current;
       if (finalPreview && isMountedRef.current) {
         const hasChanged = finalPreview.start !== originalDates.start || finalPreview.end !== originalDates.end;
         if (hasChanged) {
-          // Wait for update to complete before clearing preview
-          // This prevents the visual snap-back
-          try {
-            await onUpdateRef.current({
-              startDate: finalPreview.start,
-              endDate: finalPreview.end
-            });
-          } catch {
-            // If save fails, data will be rolled back by useRoadmap
-          }
+          // Fire the update - let the effect clear preview when props match
+          onUpdateRef.current({
+            startDate: finalPreview.start,
+            endDate: finalPreview.end
+          }).catch(() => {
+            // If save fails, clear preview (rollback will restore old position)
+            if (isMountedRef.current) {
+              setPreviewDates(null);
+            }
+          });
+        } else {
+          // No change, clear preview immediately
+          setPreviewDates(null);
+        }
+      } else {
+        // No preview, clear anyway
+        if (isMountedRef.current) {
+          setPreviewDates(null);
         }
       }
 
-      // Clear preview state after update completes
       latestPreviewRef.current = null;
       if (isMountedRef.current) {
-        setPreviewDates(null);
         setDragMode(null);
       }
     };
