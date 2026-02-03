@@ -59,6 +59,15 @@
   color: var(--text-primary);
 }
 
+.iconBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+}
+
+.iconBtn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
 .iconBtn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
@@ -89,6 +98,15 @@
 .pasteBtn:hover {
   background: var(--accent-blue);
   color: white;
+}
+
+.pasteBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue-dark, #1d4ed8);
+}
+
+.pasteBtn:active {
+  transform: scale(0.98);
 }
 
 .divider {

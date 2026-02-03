@@ -359,6 +359,7 @@ export function ProjectBar({
           {isPast && !project.manualColorOverride && (
             <div className={styles.pastBadge}>Past project</div>
           )}
+          <div className={styles.tooltipHint}>Click to edit • Drag to move</div>
         </div>
       )}
     </div>

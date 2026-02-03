@@ -87,10 +87,19 @@
   background: rgba(0, 0, 0, 0.04);
 }
 
+.zoomBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+}
+
 .zoomBtn.active {
   background: var(--bg-secondary);
   color: var(--text-primary);
   box-shadow: var(--shadow-sm);
+}
+
+.zoomBtn.active:focus-visible {
+  box-shadow: var(--shadow-sm), 0 0 0 2px var(--accent-blue);
 }
 
 .right {

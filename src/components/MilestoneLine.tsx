@@ -235,6 +235,7 @@ export function MilestoneLine({
           {isPast && !milestone.manualColorOverride && (
             <div className={styles.pastBadge}>Past milestone</div>
           )}
+          <div className={styles.tooltipHint}>Click to edit • Drag to move</div>
         </div>
       )}
 

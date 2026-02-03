@@ -36,6 +36,11 @@
   background: var(--accent-blue-light);
 }
 
+.newRowBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+}
+
 .label {
   font-size: 0.85rem;
   font-weight: 500;
@@ -133,9 +138,18 @@
   transform: scale(1.1);
 }
 
+.colorSwatch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+}
+
 .colorSwatch.selected {
   border-color: var(--text-primary);
   box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--text-muted);
+}
+
+.colorSwatch.selected:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--accent-blue);
 }
 
 .customColorWrapper {
@@ -208,6 +222,11 @@
   border-color: #ef4444;
 }
 
+.deleteBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #ef4444;
+}
+
 .cancelBtn {
   padding: 10px 20px;
   border-radius: var(--radius-md);
@@ -220,6 +239,11 @@
 
 .cancelBtn:hover {
   background: var(--border-light);
+}
+
+.cancelBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--text-muted);
 }
 
 .submitBtn {
@@ -239,4 +263,9 @@
 
 .submitBtn:active {
   transform: translateY(0);
+}
+
+.submitBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-blue-light);
 }

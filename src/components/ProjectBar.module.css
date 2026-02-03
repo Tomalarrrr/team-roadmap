@@ -2,8 +2,8 @@
   position: absolute;
   min-height: 52px;
   border-radius: var(--radius-full);
-  cursor: grab;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
   box-shadow: var(--shadow-sm);
   z-index: 2;
   min-width: 80px;
@@ -12,6 +12,7 @@
 .projectBar:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-md);
+  filter: brightness(1.05);
   z-index: 4;
 }
 
@@ -58,6 +59,11 @@
   flex-direction: column;
   justify-content: flex-start;
   overflow: hidden;
+  cursor: pointer;
+}
+
+.dragArea:active {
+  cursor: grabbing;
 }
 
 .projectContent {
@@ -201,4 +207,13 @@
   font-size: 0.65rem;
   color: var(--accent-blue);
   font-weight: 500;
+}
+
+.tooltipHint {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-style: italic;
 }

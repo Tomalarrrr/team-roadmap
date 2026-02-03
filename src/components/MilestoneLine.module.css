@@ -3,8 +3,8 @@
   top: 0;
   height: 20px;
   border-radius: var(--radius-full);
-  cursor: grab;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.8);
   display: flex;
@@ -16,6 +16,7 @@
 .milestoneLine:hover {
   transform: scale(1.02);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  filter: brightness(1.08);
   z-index: 10;
 }
 
@@ -58,7 +59,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: grab;
+  cursor: pointer;
 }
 
 .dragArea:active {
@@ -193,4 +194,13 @@
 
 .contextMenu .deleteBtn:hover {
   background: #fef2f2;
+}
+
+.tooltipHint {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  font-style: italic;
 }
