@@ -22,14 +22,12 @@ interface ProjectFormProps {
 }
 
 const DEFAULT_COLORS = [
-  '#6366f1', // Indigo
-  '#8b5cf6', // Purple
-  '#ec4899', // Pink
-  '#f59e0b', // Amber
-  '#10b981', // Emerald
-  '#06b6d4', // Cyan
-  '#3b82f6', // Blue
-  '#ef4444', // Red
+  '#1e3a5f', // Navy Blue
+  '#7c3aed', // Purple
+  '#991b1b', // Deep Red
+  '#d97706', // Amber
+  '#059669', // Green
+  '#6b7280', // Grey
 ];
 
 export function ProjectForm({

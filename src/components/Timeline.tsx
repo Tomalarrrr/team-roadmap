@@ -1,6 +1,21 @@
 import { useRef, useEffect, useMemo } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy
+} from '@dnd-kit/sortable';
 import type { Project, TeamMember } from '../types';
 import { ProjectBar } from './ProjectBar';
+import { SortableMemberLane } from './SortableMemberLane';
 import {
   getFYStart,
   getFYEnd,
@@ -26,6 +41,7 @@ interface TimelineProps {
   onDeleteMilestone: (projectId: string, milestoneId: string) => void;
   onAddTeamMember: () => void;
   onEditTeamMember: (member: TeamMember) => void;
+  onReorderTeamMembers: (fromIndex: number, toIndex: number) => void;
 }
 
 const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
@@ -35,7 +51,9 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
   year: 0.8
 };
 
-const LANE_HEIGHT = 100;
+const PROJECT_HEIGHT = 60;
+const LANE_PADDING = 16;
+const MIN_LANE_HEIGHT = 80;
 
 export function Timeline({
   projects,
@@ -49,30 +67,55 @@ export function Timeline({
   onEditMilestone,
   onDeleteMilestone,
   onAddTeamMember,
-  onEditTeamMember
+  onEditTeamMember,
+  onReorderTeamMembers
 }: TimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const dayWidth = ZOOM_DAY_WIDTHS[zoomLevel];
 
+  // DnD sensors with activation constraint for responsive feel
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8 // Require 8px movement before drag starts
+      }
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates
+    })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      const oldIndex = teamMembers.findIndex(m => m.id === active.id);
+      const newIndex = teamMembers.findIndex(m => m.id === over.id);
+      if (oldIndex !== -1 && newIndex !== -1) {
+        onReorderTeamMembers(oldIndex, newIndex);
+      }
+    }
+  };
+
   const { timelineStart, timelineEnd, visibleFYs } = useMemo(() => {
     const currentFY = getFYFromDate(new Date());
     if (zoomLevel === 'month') {
+      // Start from current month, show 18 months forward
       const today = new Date();
-      const start = startOfMonth(addMonths(today, -6));
-      const end = addMonths(startOfMonth(today), 7);
-      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 2) };
+      const start = startOfMonth(today);
+      const end = addMonths(start, 18);
+      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 3) };
     } else if (zoomLevel === 'day') {
       const today = new Date();
-      const start = startOfMonth(addMonths(today, -1));
-      const end = addMonths(startOfMonth(today), 2);
+      const start = startOfMonth(today);
+      const end = addMonths(start, 3);
       return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 1) };
     } else if (zoomLevel === 'week') {
       const today = new Date();
-      const start = startOfMonth(addMonths(today, -2));
-      const end = addMonths(startOfMonth(today), 4);
+      const start = startOfMonth(today);
+      const end = addMonths(start, 6);
       return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 2) };
     } else {
-      const fys = getVisibleFYs(currentFY - 2, 5);
+      const fys = getVisibleFYs(currentFY, 3);
       return { timelineStart: getFYStart(fys[0]), timelineEnd: getFYEnd(fys[fys.length - 1]), visibleFYs: fys };
     }
   }, [zoomLevel]);
@@ -108,10 +151,10 @@ export function Timeline({
 
   useEffect(() => {
     if (scrollRef.current) {
-      const containerWidth = scrollRef.current.clientWidth;
-      scrollRef.current.scrollLeft = Math.max(0, todayPosition - containerWidth / 3);
+      // Start at position 0 (current month on left)
+      scrollRef.current.scrollLeft = 0;
     }
-  }, [todayPosition, zoomLevel]);
+  }, [zoomLevel]);
 
   const handleWheel = (e: React.WheelEvent) => {
     if (scrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -132,26 +175,55 @@ export function Timeline({
     return grouped;
   }, [projects, teamMembers]);
 
+  // Calculate lane heights based on project count
+  const laneHeights = useMemo(() => {
+    return teamMembers.map(member => {
+      const projectCount = projectsByOwner[member.name]?.length || 0;
+      const height = Math.max(MIN_LANE_HEIGHT, projectCount * PROJECT_HEIGHT + LANE_PADDING * 2);
+      return height;
+    });
+  }, [teamMembers, projectsByOwner]);
+
+  // Calculate cumulative lane positions
+  const lanePositions = useMemo(() => {
+    const positions: number[] = [];
+    let cumulative = 0;
+    laneHeights.forEach(height => {
+      positions.push(cumulative);
+      cumulative += height;
+    });
+    return positions;
+  }, [laneHeights]);
+
+  const totalLanesHeight = lanePositions.length > 0
+    ? lanePositions[lanePositions.length - 1] + laneHeights[laneHeights.length - 1]
+    : 0;
+
   return (
     <div className={styles.container}>
       {/* Fixed left sidebar with team members */}
       <div className={styles.sidebar}>
         <div className={styles.sidebarHeader}>Team</div>
-        {teamMembers.map((member) => (
-          <div key={member.id} className={styles.memberLane}>
-            <div className={styles.memberInfo} onClick={() => onEditTeamMember(member)}>
-              <span className={styles.memberName}>{member.name}</span>
-              <span className={styles.memberTitle}>{member.jobTitle}</span>
-            </div>
-            <button
-              className={styles.addProjectBtn}
-              onClick={() => onAddProject(member.name)}
-              title="Add project"
-            >
-              +
-            </button>
-          </div>
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={teamMembers.map(m => m.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {teamMembers.map((member, idx) => (
+              <SortableMemberLane
+                key={member.id}
+                member={member}
+                height={laneHeights[idx]}
+                onEdit={() => onEditTeamMember(member)}
+                onAddProject={() => onAddProject(member.name)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
         <button className={styles.addMemberBtn} onClick={onAddTeamMember}>
           + Add Team Member
         </button>
@@ -178,7 +250,7 @@ export function Timeline({
           </div>
 
           {/* Lanes */}
-          <div className={styles.lanes} style={{ width: totalWidth }}>
+          <div className={styles.lanes} style={{ width: totalWidth, minHeight: totalLanesHeight }}>
             {/* Grid lines */}
             {zoomLevel === 'year' && fySegments.map(({ fy, left, width }) => (
               <div key={`q-${fy}`}>
@@ -203,14 +275,15 @@ export function Timeline({
               <div
                 key={member.id}
                 className={styles.lane}
-                style={{ top: idx * LANE_HEIGHT, height: LANE_HEIGHT }}
+                style={{ top: lanePositions[idx], height: laneHeights[idx] }}
               >
-                {projectsByOwner[member.name]?.map((project) => (
+                {projectsByOwner[member.name]?.map((project, projectIdx) => (
                   <ProjectBar
                     key={project.id}
                     project={project}
                     timelineStart={timelineStart}
                     dayWidth={dayWidth}
+                    stackIndex={projectIdx}
                     onUpdate={(updates) => onUpdateProject(project.id, updates)}
                     onDelete={() => onDeleteProject(project.id)}
                     onAddMilestone={() => onAddMilestone(project.id)}

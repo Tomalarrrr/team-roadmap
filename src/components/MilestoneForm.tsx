@@ -25,14 +25,12 @@ interface MilestoneFormProps {
 }
 
 const DEFAULT_COLORS = [
-  '#10b981', // Emerald
-  '#06b6d4', // Cyan
-  '#3b82f6', // Blue
-  '#8b5cf6', // Purple
-  '#f59e0b', // Amber
-  '#ef4444', // Red
-  '#ec4899', // Pink
-  '#6366f1', // Indigo
+  '#1e3a5f', // Navy Blue
+  '#7c3aed', // Purple
+  '#991b1b', // Deep Red
+  '#d97706', // Amber
+  '#059669', // Green
+  '#6b7280', // Grey
 ];
 
 export function MilestoneForm({

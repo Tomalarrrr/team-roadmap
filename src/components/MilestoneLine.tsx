@@ -13,7 +13,7 @@ interface MilestoneLineProps {
   onDelete: () => void;
 }
 
-const AUTO_BLUE = '#3b82f6';
+const AUTO_BLUE = '#1e3a5f'; // Navy Blue for past milestones
 
 export function MilestoneLine({
   milestone,
@@ -80,6 +80,9 @@ export function MilestoneLine({
         setShowMenu(true);
       }}
     >
+      {/* Title inside pill */}
+      <span className={styles.milestoneTitle}>{milestone.title}</span>
+
       {/* Tooltip */}
       {showTooltip && (
         <div className={styles.tooltip}>

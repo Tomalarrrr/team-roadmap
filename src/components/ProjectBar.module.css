@@ -1,13 +1,12 @@
 .projectBar {
   position: absolute;
-  top: 28px;
-  height: 48px;
+  height: 44px;
   border-radius: var(--radius-full);
   cursor: grab;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   box-shadow: var(--shadow-sm);
   z-index: 2;
-  min-width: 60px;
+  min-width: 80px;
 }
 
 .projectBar:hover {
@@ -75,10 +74,10 @@
 
 .milestonesContainer {
   position: absolute;
-  bottom: 4px;
-  left: 8px;
-  right: 8px;
-  height: 8px;
+  bottom: 5px;
+  left: 12px;
+  right: 12px;
+  height: 16px;
   pointer-events: auto;
 }
 

@@ -13,6 +13,7 @@ interface ProjectBarProps {
   project: Project;
   timelineStart: Date;
   dayWidth: number;
+  stackIndex?: number;
   onUpdate: (updates: Partial<Project>) => void;
   onDelete: () => void;
   onAddMilestone: () => void;
@@ -21,12 +22,15 @@ interface ProjectBarProps {
   onDeleteMilestone: (milestoneId: string) => void;
 }
 
+const PROJECT_HEIGHT = 60;
+
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
 export function ProjectBar({
   project,
   timelineStart,
   dayWidth,
+  stackIndex = 0,
   onUpdate,
   onDelete,
   onAddMilestone,
@@ -112,6 +116,8 @@ export function ProjectBar({
     return () => document.removeEventListener('click', handleClick);
   }, [showMenu]);
 
+  const topPosition = 8 + stackIndex * PROJECT_HEIGHT;
+
   return (
     <div
       ref={barRef}
@@ -119,7 +125,8 @@ export function ProjectBar({
       style={{
         left,
         width,
-        backgroundColor: project.statusColor || '#6366f1'
+        top: topPosition,
+        backgroundColor: project.statusColor || '#1e3a5f'
       }}
       onContextMenu={(e) => {
         e.preventDefault();

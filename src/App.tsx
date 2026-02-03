@@ -25,6 +25,7 @@ function App() {
     addTeamMember,
     updateTeamMember,
     deleteTeamMember,
+    reorderTeamMembers,
     addProject,
     updateProject,
     deleteProject,
@@ -156,6 +157,7 @@ function App() {
           onDeleteMilestone={deleteMilestone}
           onAddTeamMember={() => setModal({ type: 'add-member' })}
           onEditTeamMember={(member) => setModal({ type: 'edit-member', member })}
+          onReorderTeamMembers={reorderTeamMembers}
         />
       </main>
 

@@ -56,6 +56,13 @@ export function useRoadmap() {
     await saveRoadmap({ ...data, projects: newProjects, teamMembers: newMembers });
   }, [data]);
 
+  const reorderTeamMembers = useCallback(async (fromIndex: number, toIndex: number) => {
+    const newMembers = [...data.teamMembers];
+    const [moved] = newMembers.splice(fromIndex, 1);
+    newMembers.splice(toIndex, 0, moved);
+    await saveRoadmap({ ...data, teamMembers: newMembers });
+  }, [data]);
+
   const addProject = useCallback(async (project: Omit<Project, 'id' | 'milestones'>) => {
     const newProject: Project = {
       ...project,
@@ -126,6 +133,7 @@ export function useRoadmap() {
     addTeamMember,
     updateTeamMember,
     deleteTeamMember,
+    reorderTeamMembers,
     addProject,
     updateProject,
     deleteProject,
