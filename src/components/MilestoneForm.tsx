@@ -46,7 +46,7 @@ export function MilestoneForm({
   const [title, setTitle] = useState(initialValues?.title || '');
   const [startDate, setStartDate] = useState(initialValues?.startDate || projectStartDate);
   const [endDate, setEndDate] = useState(initialValues?.endDate || projectStartDate);
-  const [tagsInput, setTagsInput] = useState(initialValues?.tags.join(', ') || '');
+  const [tagsInput, setTagsInput] = useState(initialValues?.tags?.join(', ') || '');
   const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_COLORS[0]);
   const [manualColorOverride, setManualColorOverride] = useState(
     initialValues?.manualColorOverride || false

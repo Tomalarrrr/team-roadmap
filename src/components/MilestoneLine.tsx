@@ -87,9 +87,9 @@ export function MilestoneLine({
           <div className={styles.tooltipDates}>
             {formatShortDate(milestone.startDate)} - {formatShortDate(milestone.endDate)}
           </div>
-          {milestone.tags.length > 0 && (
+          {(milestone.tags?.length ?? 0) > 0 && (
             <div className={styles.tooltipTags}>
-              {milestone.tags.map((tag, i) => (
+              {(milestone.tags || []).map((tag, i) => (
                 <span key={i} className={styles.tag}>{tag}</span>
               ))}
             </div>

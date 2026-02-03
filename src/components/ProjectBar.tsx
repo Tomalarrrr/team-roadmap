@@ -153,7 +153,7 @@ export function ProjectBar({
 
         {/* Milestones as lines within the project bar */}
         <div className={styles.milestonesContainer}>
-          {project.milestones.map((milestone) => (
+          {(project.milestones || []).map((milestone) => (
             <MilestoneLine
               key={milestone.id}
               milestone={milestone}

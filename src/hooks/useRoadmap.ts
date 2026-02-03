@@ -14,8 +14,16 @@ export function useRoadmap() {
 
   useEffect(() => {
     const unsubscribe = subscribeToRoadmap((newData) => {
+      // Normalize data to ensure all required arrays exist
+      const projects = (newData.projects || []).map(p => ({
+        ...p,
+        milestones: (p.milestones || []).map(m => ({
+          ...m,
+          tags: m.tags || []
+        }))
+      }));
       setData({
-        projects: newData.projects || [],
+        projects,
         teamMembers: newData.teamMembers || []
       });
       setLoading(false);
