@@ -1,0 +1,107 @@
+import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import type { DependencySource, DependencyTarget } from '../types';
+
+interface DependencyCreationState {
+  isCreating: boolean;
+  source: DependencySource | null;
+  cursorPosition: { x: number; y: number } | null;
+}
+
+interface DependencyCreationContextValue {
+  state: DependencyCreationState;
+  startCreation: (source: DependencySource) => void;
+  updateCursorPosition: (position: { x: number; y: number }) => void;
+  completeCreation: (target: DependencyTarget) => void;
+  cancelCreation: () => void;
+}
+
+const DependencyCreationContext = createContext<DependencyCreationContextValue | null>(null);
+
+interface DependencyCreationProviderProps {
+  children: ReactNode;
+  onAddDependency?: (
+    fromProjectId: string,
+    toProjectId: string,
+    fromMilestoneId?: string,
+    toMilestoneId?: string
+  ) => void;
+}
+
+export function DependencyCreationProvider({
+  children,
+  onAddDependency
+}: DependencyCreationProviderProps) {
+  const [state, setState] = useState<DependencyCreationState>({
+    isCreating: false,
+    source: null,
+    cursorPosition: null
+  });
+
+  const startCreation = useCallback((source: DependencySource) => {
+    setState({
+      isCreating: true,
+      source,
+      cursorPosition: source.position
+    });
+  }, []);
+
+  const updateCursorPosition = useCallback((position: { x: number; y: number }) => {
+    setState(prev => ({
+      ...prev,
+      cursorPosition: position
+    }));
+  }, []);
+
+  const completeCreation = useCallback((target: DependencyTarget) => {
+    if (state.source && onAddDependency) {
+      // Prevent self-dependency
+      const isSameSource =
+        state.source.projectId === target.projectId &&
+        state.source.milestoneId === target.milestoneId;
+
+      if (!isSameSource) {
+        onAddDependency(
+          state.source.projectId,
+          target.projectId,
+          state.source.milestoneId,
+          target.milestoneId
+        );
+      }
+    }
+    setState({
+      isCreating: false,
+      source: null,
+      cursorPosition: null
+    });
+  }, [state.source, onAddDependency]);
+
+  const cancelCreation = useCallback(() => {
+    setState({
+      isCreating: false,
+      source: null,
+      cursorPosition: null
+    });
+  }, []);
+
+  return (
+    <DependencyCreationContext.Provider
+      value={{
+        state,
+        startCreation,
+        updateCursorPosition,
+        completeCreation,
+        cancelCreation
+      }}
+    >
+      {children}
+    </DependencyCreationContext.Provider>
+  );
+}
+
+export function useDependencyCreation() {
+  const context = useContext(DependencyCreationContext);
+  if (!context) {
+    throw new Error('useDependencyCreation must be used within DependencyCreationProvider');
+  }
+  return context;
+}

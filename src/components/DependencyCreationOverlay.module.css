@@ -1,0 +1,43 @@
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 100;
+  overflow: visible;
+}
+
+.previewLine {
+  opacity: 0.8;
+  animation: dashMove 0.5s linear infinite;
+}
+
+@keyframes dashMove {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -10;
+  }
+}
+
+.arrowHead {
+  opacity: 0.9;
+}
+
+.sourceDot {
+  opacity: 1;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform-origin: center;
+    r: 4px;
+  }
+  50% {
+    r: 6px;
+  }
+}

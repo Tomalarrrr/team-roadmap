@@ -216,7 +216,7 @@
   height: 100%;
   overflow-x: auto;
   overflow-y: auto;
-  cursor: grab;
+  cursor: default;
 }
 
 .scrollContainer.panning {
@@ -231,6 +231,11 @@
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-light);
   z-index: 10;
+  cursor: grab;
+}
+
+.header:active {
+  cursor: grabbing;
 }
 
 .fyHeader {

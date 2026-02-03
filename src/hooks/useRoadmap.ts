@@ -213,11 +213,19 @@ export function useRoadmap() {
     analytics.milestoneDeleted(milestoneId);
   }, [data, optimisticSave]);
 
-  const addDependency = useCallback(async (fromProjectId: string, toProjectId: string, type: Dependency['type'] = 'finish-to-start') => {
+  const addDependency = useCallback(async (
+    fromProjectId: string,
+    toProjectId: string,
+    fromMilestoneId?: string,
+    toMilestoneId?: string,
+    type: Dependency['type'] = 'finish-to-start'
+  ) => {
     const newDependency: Dependency = {
       id: uuidv4(),
       fromProjectId,
       toProjectId,
+      fromMilestoneId,
+      toMilestoneId,
       type
     };
     const newDependencies = [...(data.dependencies || []), newDependency];

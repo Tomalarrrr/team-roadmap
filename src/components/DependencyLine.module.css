@@ -30,6 +30,27 @@
   r: 6px;
 }
 
+/* Hover isolation - dim other lines when one is hovered */
+.dependencyLine.dimmed .mainPath {
+  opacity: 0.2;
+}
+
+.dependencyLine.dimmed .arrowHead {
+  opacity: 0.2;
+}
+
+/* Hovered state - make line more prominent */
+.dependencyLine.hovered .mainPath {
+  opacity: 0.9;
+  stroke: var(--accent-blue);
+  stroke-width: 2;
+}
+
+.dependencyLine.hovered .arrowHead {
+  opacity: 0.9;
+  fill: var(--accent-blue);
+}
+
 /* Confirmation dialog */
 .confirmDialog {
   background: var(--bg-primary);

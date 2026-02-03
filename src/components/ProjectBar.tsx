@@ -1,6 +1,8 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import type { Project, Milestone } from '../types';
 import { MilestoneLine } from './MilestoneLine';
+import { DependencyArrow } from './DependencyArrow';
+import { useDependencyCreation } from '../contexts/DependencyCreationContext';
 import {
   getBarDimensions,
   toISODateString,
@@ -105,9 +107,16 @@ export function ProjectBar({
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [showTooltip, setShowTooltip] = useState(false);
   const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0, below: false });
+  const [showDependencyArrow, setShowDependencyArrow] = useState(false);
+
+  // Dependency creation context
+  const { state: depState, startCreation, completeCreation } = useDependencyCreation();
+  const isCreatingDependency = depState.isCreating;
+  const isSource = depState.source?.projectId === project.id && !depState.source?.milestoneId;
 
   // Click-to-edit tracking (distinguish from drag)
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Calculate effective dates including milestone extensions
   const effectiveDates = useMemo(() => {
@@ -229,7 +238,7 @@ export function ProjectBar({
   const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
   const projectBarHeight = Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
 
-  const topPosition = 8 + stackIndex * 68; // Matches PROJECT_HEIGHT in Timeline
+  const topPosition = 12 + stackIndex * 68; // Matches LANE_PADDING and PROJECT_HEIGHT in Timeline
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -245,10 +254,44 @@ export function ProjectBar({
     }
   }, [onEdit, onDelete, onCopy]);
 
+  // Handle starting a dependency from this project
+  const handleStartDependency = useCallback(() => {
+    startCreation({
+      projectId: project.id,
+      position: {
+        x: left + width,
+        y: topPosition + projectBarHeight / 2
+      }
+    });
+  }, [project.id, left, width, topPosition, projectBarHeight, startCreation]);
+
+  // Handle click when in dependency creation mode (this project becomes the target)
+  const handleDependencyTarget = useCallback(() => {
+    if (isCreatingDependency && !isSource) {
+      completeCreation({ projectId: project.id });
+    }
+  }, [isCreatingDependency, isSource, project.id, completeCreation]);
+
+  // Track mouse proximity to end of bar for showing dependency arrow
+  const handleMouseMoveForArrow = useCallback((e: React.MouseEvent) => {
+    if (!barRef.current || isCreatingDependency) {
+      setShowDependencyArrow(false);
+      return;
+    }
+    const rect = barRef.current.getBoundingClientRect();
+    const distanceFromEnd = rect.right - e.clientX;
+    // Show arrow when within 40px of the right edge
+    setShowDependencyArrow(distanceFromEnd <= 40 && distanceFromEnd >= 0);
+  }, [isCreatingDependency]);
+
+  // Determine class names based on state
+  const isTargetable = isCreatingDependency && !isSource;
+
   return (
     <div
       ref={barRef}
-      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''}`}
+      data-dependency-target
+      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''}`}
       style={{
         left,
         width,
@@ -260,6 +303,7 @@ export function ProjectBar({
       tabIndex={0}
       aria-label={`Project: ${project.title}, ${formatShortDate(project.startDate)} to ${formatShortDate(project.endDate)}${isPast ? ', Complete' : ''}`}
       onKeyDown={handleKeyDown}
+      onClick={isTargetable ? handleDependencyTarget : undefined}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -272,20 +316,42 @@ export function ProjectBar({
         setShowMenu(true);
       }}
       onMouseEnter={() => {
-        if (!dragMode && !externalDragging && barRef.current) {
-          const rect = barRef.current.getBoundingClientRect();
-          const tooltipHeight = 150; // Estimated tooltip height
-          // Check if there's room above, if not show below
-          const showBelow = rect.top < tooltipHeight + 20;
-          setTooltipPosition({
-            x: rect.left + rect.width / 2,
-            y: showBelow ? rect.bottom : rect.top,
-            below: showBelow
-          });
-          setShowTooltip(true);
+        if (!dragMode && !externalDragging) {
+          tooltipTimeoutRef.current = setTimeout(() => {
+            setShowTooltip(true);
+          }, 800);
         }
       }}
-      onMouseLeave={() => setShowTooltip(false)}
+      onMouseMove={(e) => {
+        // Track proximity to end for showing dependency arrow
+        handleMouseMoveForArrow(e);
+
+        if (!dragMode && !externalDragging && showTooltip) {
+          const tooltipHeight = 150;
+          const tooltipWidth = 200;
+          const halfWidth = tooltipWidth / 2;
+          // Position near cursor, show below if too close to top
+          const showBelow = e.clientY < tooltipHeight + 20;
+          // Clamp horizontal position to stay within viewport
+          const clampedX = Math.min(
+            Math.max(halfWidth + 10, e.clientX),
+            window.innerWidth - halfWidth - 10
+          );
+          setTooltipPosition({
+            x: clampedX,
+            y: showBelow ? e.clientY + 15 : e.clientY - 15,
+            below: showBelow
+          });
+        }
+      }}
+      onMouseLeave={() => {
+        if (tooltipTimeoutRef.current) {
+          clearTimeout(tooltipTimeoutRef.current);
+          tooltipTimeoutRef.current = null;
+        }
+        setShowTooltip(false);
+        setShowDependencyArrow(false);
+      }}
     >
       {/* Resize handles */}
       <div
@@ -297,6 +363,13 @@ export function ProjectBar({
         className={styles.resizeHandle}
         style={{ right: 0 }}
         onMouseDown={(e) => handleMouseDown(e, 'resize-end')}
+      />
+
+      {/* Dependency arrow button - appears on hover near end */}
+      <DependencyArrow
+        isVisible={showDependencyArrow}
+        isCreatingDependency={isCreatingDependency}
+        onStartDependency={handleStartDependency}
       />
 
       {/* Draggable area - single click opens edit */}
@@ -340,11 +413,13 @@ export function ProjectBar({
           <MilestoneLine
             key={milestone.id}
             milestone={milestone}
+            projectId={project.id}
             timelineStart={timelineStart}
             dayWidth={dayWidth}
             projectLeft={left}
             projectWidth={width}
             stackIndex={milestoneStacks.get(milestone.id) || 0}
+            laneTop={topPosition}
             onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
             onEdit={() => onEditMilestone(milestone.id)}
             onDelete={() => onDeleteMilestone(milestone.id)}

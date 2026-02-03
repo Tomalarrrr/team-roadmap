@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Milestone } from '../types';
+import { DependencyArrow } from './DependencyArrow';
+import { useDependencyCreation } from '../contexts/DependencyCreationContext';
 import { getBarDimensions, isMilestonePast, formatShortDate, toISODateString } from '../utils/dateUtils';
 import { parseISO } from 'date-fns';
 import styles from './MilestoneLine.module.css';
 
 interface MilestoneLineProps {
   milestone: Milestone;
+  projectId: string;
   timelineStart: Date;
   dayWidth: number;
   projectLeft: number;
   projectWidth: number;
   stackIndex?: number;
+  laneTop?: number; // Top position of the lane for dependency positioning
   onUpdate: (updates: Partial<Milestone>) => void;
   onEdit: () => void;
   onDelete: () => void;
@@ -25,11 +29,13 @@ const MILESTONE_GAP = 4;
 
 export function MilestoneLine({
   milestone,
+  projectId,
   timelineStart,
   dayWidth,
   projectLeft,
   projectWidth,
   stackIndex = 0,
+  laneTop = 0,
   onUpdate,
   onEdit,
   onDelete
@@ -42,6 +48,12 @@ export function MilestoneLine({
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStartX, setDragStartX] = useState(0);
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
+  const [showDependencyArrow, setShowDependencyArrow] = useState(false);
+
+  // Dependency creation context
+  const { state: depState, startCreation, completeCreation } = useDependencyCreation();
+  const isCreatingDependency = depState.isCreating;
+  const isSource = depState.source?.projectId === projectId && depState.source?.milestoneId === milestone.id;
 
   // Click-to-edit tracking (distinguish from drag)
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -154,6 +166,39 @@ export function MilestoneLine({
     }
   }, [onEdit, onDelete]);
 
+  // Handle starting a dependency from this milestone
+  const handleStartDependency = useCallback(() => {
+    const milestoneTop = laneTop + stackIndex * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2 + 52; // 52 = project content height
+    startCreation({
+      projectId,
+      milestoneId: milestone.id,
+      position: {
+        x: milestoneLeft + milestoneWidth,
+        y: milestoneTop
+      }
+    });
+  }, [projectId, milestone.id, milestoneLeft, milestoneWidth, laneTop, stackIndex, startCreation]);
+
+  // Handle click when in dependency creation mode
+  const handleDependencyTarget = useCallback(() => {
+    if (isCreatingDependency && !isSource) {
+      completeCreation({ projectId, milestoneId: milestone.id });
+    }
+  }, [isCreatingDependency, isSource, projectId, milestone.id, completeCreation]);
+
+  // Track mouse proximity to end for showing dependency arrow
+  const handleMouseMoveForArrow = useCallback((e: React.MouseEvent) => {
+    if (!milestoneRef.current || isCreatingDependency) {
+      setShowDependencyArrow(false);
+      return;
+    }
+    const rect = milestoneRef.current.getBoundingClientRect();
+    const distanceFromEnd = rect.right - e.clientX;
+    setShowDependencyArrow(distanceFromEnd <= 30 && distanceFromEnd >= 0);
+  }, [isCreatingDependency]);
+
+  const isTargetable = isCreatingDependency && !isSource;
+
   if (displayWidth <= 0 || displayLeft >= projectWidth) {
     return null; // Milestone outside project bounds
   }
@@ -161,7 +206,8 @@ export function MilestoneLine({
   return (
     <div
       ref={milestoneRef}
-      className={`${styles.milestoneLine} ${dragMode ? styles.dragging : ''}`}
+      data-dependency-target
+      className={`${styles.milestoneLine} ${dragMode ? styles.dragging : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''}`}
       style={{
         left: displayLeft,
         top: stackIndex * (MILESTONE_HEIGHT + MILESTONE_GAP),
@@ -172,6 +218,7 @@ export function MilestoneLine({
       tabIndex={0}
       aria-label={`Milestone: ${milestone.title}, ${formatShortDate(milestone.startDate)} to ${formatShortDate(milestone.endDate)}${isPast ? ', Complete' : ''}`}
       onKeyDown={handleKeyDown}
+      onClick={isTargetable ? handleDependencyTarget : undefined}
       onMouseEnter={() => {
         if (!dragMode && milestoneRef.current) {
           const rect = milestoneRef.current.getBoundingClientRect();
@@ -186,7 +233,11 @@ export function MilestoneLine({
           setShowTooltip(true);
         }
       }}
-      onMouseLeave={() => setShowTooltip(false)}
+      onMouseMove={handleMouseMoveForArrow}
+      onMouseLeave={() => {
+        setShowTooltip(false);
+        setShowDependencyArrow(false);
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -202,6 +253,13 @@ export function MilestoneLine({
       <div
         className={`${styles.resizeHandle} ${styles.resizeHandleRight}`}
         onMouseDown={(e) => handleMouseDown(e, 'resize-end')}
+      />
+
+      {/* Dependency arrow button */}
+      <DependencyArrow
+        isVisible={showDependencyArrow}
+        isCreatingDependency={isCreatingDependency}
+        onStartDependency={handleStartDependency}
       />
 
       {/* Drag area - single click opens edit */}

@@ -28,8 +28,22 @@ export interface TeamMember {
 export interface Dependency {
   id: string;
   fromProjectId: string;
+  fromMilestoneId?: string;  // If set, dependency starts from this milestone
   toProjectId: string;
+  toMilestoneId?: string;    // If set, dependency ends at this milestone
   type: 'finish-to-start' | 'start-to-start' | 'finish-to-finish';
+}
+
+// Types for dependency creation UI
+export interface DependencySource {
+  projectId: string;
+  milestoneId?: string;
+  position: { x: number; y: number };
+}
+
+export interface DependencyTarget {
+  projectId: string;
+  milestoneId?: string;
 }
 
 // Undo system types

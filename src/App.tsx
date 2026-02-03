@@ -306,26 +306,62 @@ function App() {
 
   // Project handlers with undo support
   const handleAddProject = useCallback(
-    async (values: Omit<Project, 'id' | 'milestones'>) => {
-      const newProject = await addProject(values);
+    async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Omit<Milestone, 'id'>[] }) => {
+      const { milestones: newMilestones, ...projectData } = values;
+      const newProject = await addProject(projectData);
+      if (newProject && newMilestones && newMilestones.length > 0) {
+        // Add milestones to the newly created project
+        for (const milestone of newMilestones) {
+          await addMilestone(newProject.id, milestone);
+        }
+      }
       if (newProject) {
         recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
       }
       closeModal();
     },
-    [addProject, closeModal, recordAction]
+    [addProject, addMilestone, closeModal, recordAction]
   );
 
   const handleEditProject = useCallback(
-    async (values: Omit<Project, 'id' | 'milestones'>) => {
+    async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Array<{ id?: string } & Omit<Milestone, 'id'>> }) => {
       if (modal?.type === 'edit-project') {
         const beforeState = modal.project;
-        await updateProject(modal.project.id, values);
+        const { milestones: updatedMilestones, ...projectData } = values;
+        await updateProject(modal.project.id, projectData);
+
+        // Handle milestone updates if provided
+        if (updatedMilestones) {
+          const existingMilestones = modal.project.milestones || [];
+          const existingIds = new Set(existingMilestones.map(m => m.id));
+          const updatedIds = new Set(updatedMilestones.filter(m => m.id).map(m => m.id));
+
+          // Delete removed milestones
+          for (const existing of existingMilestones) {
+            if (!updatedIds.has(existing.id)) {
+              await deleteMilestone(modal.project.id, existing.id);
+            }
+          }
+
+          // Update existing and add new milestones
+          for (const milestone of updatedMilestones) {
+            if (milestone.id && existingIds.has(milestone.id)) {
+              // Update existing
+              const { id, ...milestoneData } = milestone;
+              await updateMilestone(modal.project.id, id, milestoneData);
+            } else if (!milestone.id) {
+              // Add new
+              const { id: _id, ...milestoneData } = milestone;
+              await addMilestone(modal.project.id, milestoneData);
+            }
+          }
+        }
+
         recordAction('UPDATE_PROJECT', values, createInverse('UPDATE_PROJECT', beforeState, values));
         closeModal();
       }
     },
-    [modal, updateProject, closeModal, recordAction]
+    [modal, updateProject, updateMilestone, addMilestone, deleteMilestone, closeModal, recordAction]
   );
 
   const handleDeleteProject = useCallback(
@@ -361,8 +397,13 @@ function App() {
   );
 
   // Dependency handlers (persisted to Firebase)
-  const handleAddDependency = useCallback(async (fromId: string, toId: string) => {
-    await addDependency(fromId, toId);
+  const handleAddDependency = useCallback(async (
+    fromProjectId: string,
+    toProjectId: string,
+    fromMilestoneId?: string,
+    toMilestoneId?: string
+  ) => {
+    await addDependency(fromProjectId, toProjectId, fromMilestoneId, toMilestoneId);
   }, [addDependency]);
 
   const handleRemoveDependency = useCallback(async (depId: string) => {
@@ -495,8 +536,13 @@ function App() {
               endDate: modal.project.endDate,
               statusColor: modal.project.statusColor
             }}
+            initialMilestones={modal.project.milestones}
             onSubmit={handleEditProject}
             onCancel={closeModal}
+            onDelete={async () => {
+              await handleDeleteProject(modal.project.id);
+              closeModal();
+            }}
             isEditing
           />
         )}

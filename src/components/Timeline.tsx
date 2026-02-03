@@ -19,6 +19,8 @@ import { SortableMemberLane } from './SortableMemberLane';
 import { DraggableProjectBar } from './DraggableProjectBar';
 import { DroppableLane } from './DroppableLane';
 import { DependencyLine } from './DependencyLine';
+import { DependencyCreationOverlay } from './DependencyCreationOverlay';
+import { DependencyCreationProvider } from '../contexts/DependencyCreationContext';
 import {
   getFYStart,
   getFYEnd,
@@ -27,6 +29,7 @@ import {
   getBarDimensions
 } from '../utils/dateUtils';
 import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from 'date-fns';
+import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
 export type ZoomLevel = 'day' | 'week' | 'month' | 'year';
@@ -95,7 +98,12 @@ interface TimelineProps {
   onEditTeamMember: (member: TeamMember) => void;
   onReorderTeamMembers: (fromIndex: number, toIndex: number) => void;
   onCopyProject?: (project: Project) => void;
-  onAddDependency?: (fromId: string, toId: string) => void; // Future: for creating dependencies via UI
+  onAddDependency?: (
+    fromProjectId: string,
+    toProjectId: string,
+    fromMilestoneId?: string,
+    toMilestoneId?: string
+  ) => void;
   onRemoveDependency?: (depId: string) => void;
 }
 
@@ -108,7 +116,7 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
 
 const PROJECT_HEIGHT = 68; // Height including spacing between projects
 const LANE_PADDING = 12;
-const MIN_LANE_HEIGHT = 80;
+const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
 
 export function Timeline({
   projects,
@@ -129,10 +137,12 @@ export function Timeline({
   onEditTeamMember,
   onReorderTeamMembers,
   onCopyProject,
-  // onAddDependency reserved for future UI-based dependency creation
+  onAddDependency,
   onRemoveDependency
 }: TimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const lanesRef = useRef<HTMLDivElement>(null);
   const dayWidth = ZOOM_DAY_WIDTHS[zoomLevel];
 
   // DnD sensors with activation constraint for responsive feel
@@ -242,21 +252,42 @@ export function Timeline({
     }
   }, [zoomLevel, todayPosition, selectedProjectId, projects, timelineStart, dayWidth]);
 
-  const handleWheel = (e: React.WheelEvent) => {
+  // Keyboard navigation for timeline panning
+  const KEYBOARD_SCROLL_AMOUNT = 100;
+  useKeyboardNavigation({
+    onNavigate: useCallback((direction: 'up' | 'down' | 'left' | 'right') => {
+      if (!scrollRef.current) return;
+      if (direction === 'left') {
+        scrollRef.current.scrollLeft -= KEYBOARD_SCROLL_AMOUNT;
+      } else if (direction === 'right') {
+        scrollRef.current.scrollLeft += KEYBOARD_SCROLL_AMOUNT;
+      }
+    }, []),
+    enabled: true
+  });
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    // Only allow horizontal scrolling via wheel when mouse is over the header
+    const target = e.target as HTMLElement;
+    if (!headerRef.current?.contains(target)) return;
+
     if (scrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
       e.preventDefault();
       scrollRef.current.scrollLeft += e.deltaY;
     }
-  };
+  }, []);
 
   // Click-drag panning state
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, scrollLeft: 0 });
 
+  // Track which dependency is hovered for isolation effect
+  const [hoveredDepId, setHoveredDepId] = useState<string | null>(null);
+
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    // Only start pan if clicking on empty area (not on projects/milestones)
+    // Only start pan if clicking within the header area
     const target = e.target as HTMLElement;
-    if (target.closest('[data-draggable]') || target.closest('button')) return;
+    if (!headerRef.current?.contains(target)) return;
 
     if (scrollRef.current) {
       setIsPanning(true);
@@ -359,6 +390,7 @@ export function Timeline({
     : 0;
 
   return (
+    <DependencyCreationProvider onAddDependency={onAddDependency}>
     <div id="timeline-container" className={styles.container}>
       {/* Fixed left sidebar with team members */}
       <div className={styles.sidebar}>
@@ -408,7 +440,7 @@ export function Timeline({
           onMouseLeave={handleMouseLeave}
         >
           {/* Header */}
-          <div className={styles.header} style={{ width: totalWidth }}>
+          <div ref={headerRef} className={styles.header} style={{ width: totalWidth }}>
             {zoomLevel === 'year' ? (
               fySegments.map(({ fy, left, width }) => (
                 <div key={fy} className={styles.fyHeader} style={{ left, width }}>
@@ -430,7 +462,7 @@ export function Timeline({
             collisionDetection={pointerWithin}
             onDragEnd={handleProjectDragEnd}
           >
-            <div className={styles.lanes} style={{ width: totalWidth, minHeight: totalLanesHeight }}>
+            <div ref={lanesRef} className={styles.lanes} style={{ width: totalWidth, minHeight: totalLanesHeight }}>
               {/* Grid lines */}
               {zoomLevel === 'year' && fySegments.map(({ fy, left, width }) => (
                 <div key={`q-${fy}`}>
@@ -455,7 +487,7 @@ export function Timeline({
                 className={styles.dependenciesLayer}
                 style={{ width: totalWidth, height: totalLanesHeight }}
               >
-                {dependencies.map(dep => {
+                {dependencies.map((dep, index) => {
                   const fromProject = projects.find(p => p.id === dep.fromProjectId);
                   const toProject = projects.find(p => p.id === dep.toProjectId);
                   if (!fromProject || !toProject) return null;
@@ -465,11 +497,16 @@ export function Timeline({
                       key={dep.id}
                       fromProject={fromProject}
                       toProject={toProject}
+                      fromMilestoneId={dep.fromMilestoneId}
+                      toMilestoneId={dep.toMilestoneId}
                       timelineStart={timelineStart}
                       dayWidth={dayWidth}
                       projectStacks={globalProjectStacks}
                       lanePositions={lanePositions}
                       ownerToLaneIndex={ownerToLaneIndex}
+                      lineIndex={index}
+                      isAnyHovered={hoveredDepId !== null}
+                      onHoverChange={(hovered) => setHoveredDepId(hovered ? dep.id : null)}
                       onRemove={() => onRemoveDependency?.(dep.id)}
                     />
                   );
@@ -508,10 +545,17 @@ export function Timeline({
                   </DroppableLane>
                 );
               })}
+
+              {/* Dependency creation preview overlay */}
+              <DependencyCreationOverlay
+                containerRef={lanesRef}
+                scrollRef={scrollRef}
+              />
             </div>
           </DndContext>
         </div>
       </div>
     </div>
+    </DependencyCreationProvider>
   );
 }

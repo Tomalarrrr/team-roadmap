@@ -1,0 +1,40 @@
+.dependencyArrow {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.6);
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.dependencyArrow.visible {
+  opacity: 0.5;
+  pointer-events: auto;
+}
+
+.dependencyArrow:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.3);
+  color: white;
+  transform: translateY(-50%) scale(1.1);
+}
+
+.dependencyArrow:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
+.dependencyArrow svg {
+  flex-shrink: 0;
+}

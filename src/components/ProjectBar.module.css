@@ -35,6 +35,26 @@
   50% { box-shadow: 0 0 0 6px var(--accent-blue-light), var(--shadow-lg); }
 }
 
+/* Dependency creation states */
+.projectBar.targetable {
+  cursor: crosshair;
+}
+
+.projectBar.targetable:hover {
+  box-shadow: 0 0 0 2px var(--accent-blue), var(--shadow-md);
+  filter: brightness(1.1);
+}
+
+.projectBar.isSource {
+  box-shadow: 0 0 0 2px var(--accent-blue), var(--shadow-md);
+  animation: sourceGlow 1s ease-in-out infinite;
+}
+
+@keyframes sourceGlow {
+  0%, 100% { box-shadow: 0 0 0 2px var(--accent-blue), var(--shadow-md); }
+  50% { box-shadow: 0 0 0 4px var(--accent-blue-light), var(--shadow-md); }
+}
+
 .resizeHandle {
   position: absolute;
   top: 0;
