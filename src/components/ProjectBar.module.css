@@ -1,7 +1,7 @@
 .projectBar {
   position: absolute;
-  height: 44px;
-  border-radius: var(--radius-full);
+  min-height: 52px;
+  border-radius: 26px;
   cursor: grab;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   box-shadow: var(--shadow-sm);
@@ -52,10 +52,14 @@
 .projectContent {
   padding: 0 8px;
   pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .projectTitle {
-  display: block;
   font-size: 0.8rem;
   font-weight: 600;
   color: white;
@@ -63,21 +67,29 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+.projectSeparator {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.6);
+  flex-shrink: 0;
 }
 
 .projectDates {
-  display: block;
   font-size: 0.65rem;
   color: rgba(255, 255, 255, 0.85);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .milestonesContainer {
   position: absolute;
-  bottom: 5px;
+  bottom: 6px;
   left: 12px;
   right: 12px;
-  height: 16px;
+  min-height: 20px;
   pointer-events: auto;
 }
 

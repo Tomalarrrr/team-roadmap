@@ -13,6 +13,7 @@ interface DraggableProjectBarProps {
   onAddMilestone: () => void;
   onEdit: () => void;
   onEditMilestone: (milestoneId: string) => void;
+  onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
   onDeleteMilestone: (milestoneId: string) => void;
 }
 
@@ -26,6 +27,7 @@ export function DraggableProjectBar({
   onAddMilestone,
   onEdit,
   onEditMilestone,
+  onUpdateMilestone,
   onDeleteMilestone
 }: DraggableProjectBarProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -55,6 +57,7 @@ export function DraggableProjectBar({
         onAddMilestone={onAddMilestone}
         onEdit={onEdit}
         onEditMilestone={onEditMilestone}
+        onUpdateMilestone={onUpdateMilestone}
         onDeleteMilestone={onDeleteMilestone}
       />
     </div>

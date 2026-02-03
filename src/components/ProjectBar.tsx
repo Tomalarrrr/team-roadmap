@@ -1,13 +1,57 @@
-import { useRef, useState, useCallback, useEffect } from 'react';
-import type { Project } from '../types';
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import type { Project, Milestone } from '../types';
 import { MilestoneLine } from './MilestoneLine';
 import {
   getBarDimensions,
   toISODateString,
   formatShortDate
 } from '../utils/dateUtils';
-import { parseISO } from 'date-fns';
+import { parseISO, areIntervalsOverlapping } from 'date-fns';
 import styles from './ProjectBar.module.css';
+
+// Calculate stack indices for overlapping milestones
+function calculateMilestoneStacks(milestones: Milestone[]): Map<string, number> {
+  const stacks = new Map<string, number>();
+  if (!milestones || milestones.length === 0) return stacks;
+
+  // Sort milestones by start date
+  const sorted = [...milestones].sort((a, b) =>
+    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+  );
+
+  sorted.forEach((milestone) => {
+    let stackIndex = 0;
+    const milestoneInterval = {
+      start: new Date(milestone.startDate),
+      end: new Date(milestone.endDate)
+    };
+
+    // Find the lowest available stack index
+    while (true) {
+      let canUseStack = true;
+      for (const [otherId, otherStack] of stacks) {
+        if (otherStack !== stackIndex) continue;
+        const other = milestones.find(m => m.id === otherId);
+        if (!other) continue;
+
+        const otherInterval = {
+          start: new Date(other.startDate),
+          end: new Date(other.endDate)
+        };
+
+        if (areIntervalsOverlapping(milestoneInterval, otherInterval, { inclusive: true })) {
+          canUseStack = false;
+          break;
+        }
+      }
+      if (canUseStack) break;
+      stackIndex++;
+    }
+    stacks.set(milestone.id, stackIndex);
+  });
+
+  return stacks;
+}
 
 interface ProjectBarProps {
   project: Project;
@@ -19,10 +63,13 @@ interface ProjectBarProps {
   onAddMilestone: () => void;
   onEdit: () => void;
   onEditMilestone: (milestoneId: string) => void;
+  onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
   onDeleteMilestone: (milestoneId: string) => void;
 }
 
-const PROJECT_HEIGHT = 60;
+const BASE_PROJECT_HEIGHT = 52;
+const MILESTONE_ROW_HEIGHT = 24;
+const PROJECT_CONTENT_HEIGHT = 28;
 
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
@@ -36,6 +83,7 @@ export function ProjectBar({
   onAddMilestone,
   onEdit,
   onEditMilestone,
+  onUpdateMilestone,
   onDeleteMilestone
 }: ProjectBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
@@ -116,7 +164,24 @@ export function ProjectBar({
     return () => document.removeEventListener('click', handleClick);
   }, [showMenu]);
 
-  const topPosition = 8 + stackIndex * PROJECT_HEIGHT;
+  // Calculate milestone stacking
+  const milestoneStacks = useMemo(
+    () => calculateMilestoneStacks(project.milestones || []),
+    [project.milestones]
+  );
+
+  // Calculate max milestone stack for dynamic project bar height
+  const maxMilestoneStack = useMemo(() => {
+    if (milestoneStacks.size === 0) return 0;
+    return Math.max(...milestoneStacks.values());
+  }, [milestoneStacks]);
+
+  // Calculate dynamic project bar height
+  const milestoneRows = maxMilestoneStack + 1;
+  const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
+  const projectBarHeight = Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
+
+  const topPosition = 8 + stackIndex * 68; // Matches PROJECT_HEIGHT in Timeline
 
   return (
     <div
@@ -126,6 +191,7 @@ export function ProjectBar({
         left,
         width,
         top: topPosition,
+        height: projectBarHeight,
         backgroundColor: project.statusColor || '#1e3a5f'
       }}
       onContextMenu={(e) => {
@@ -149,17 +215,21 @@ export function ProjectBar({
       <div
         className={styles.dragArea}
         onMouseDown={(e) => handleMouseDown(e, 'move')}
-        onDoubleClick={onEdit}
+        onDoubleClick={onAddMilestone}
       >
         <div className={styles.projectContent}>
           <span className={styles.projectTitle}>{project.title}</span>
+          <span className={styles.projectSeparator}>•</span>
           <span className={styles.projectDates}>
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
         </div>
 
         {/* Milestones as lines within the project bar */}
-        <div className={styles.milestonesContainer}>
+        <div
+          className={styles.milestonesContainer}
+          style={{ height: (maxMilestoneStack + 1) * 24 }}
+        >
           {(project.milestones || []).map((milestone) => (
             <MilestoneLine
               key={milestone.id}
@@ -168,6 +238,8 @@ export function ProjectBar({
               dayWidth={dayWidth}
               projectLeft={left}
               projectWidth={width}
+              stackIndex={milestoneStacks.get(milestone.id) || 0}
+              onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
               onEdit={() => onEditMilestone(milestone.id)}
               onDelete={() => onDeleteMilestone(milestone.id)}
             />

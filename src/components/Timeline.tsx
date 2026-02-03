@@ -40,6 +40,7 @@ interface TimelineProps {
   onAddMilestone: (projectId: string) => void;
   onEditProject: (project: Project) => void;
   onEditMilestone: (projectId: string, milestoneId: string) => void;
+  onUpdateMilestone: (projectId: string, milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
   onDeleteMilestone: (projectId: string, milestoneId: string) => void;
   onAddTeamMember: () => void;
   onEditTeamMember: (member: TeamMember) => void;
@@ -53,9 +54,9 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
   year: 0.8
 };
 
-const PROJECT_HEIGHT = 60;
-const LANE_PADDING = 20;
-const MIN_LANE_HEIGHT = 100;
+const PROJECT_HEIGHT = 68; // Height including spacing between projects
+const LANE_PADDING = 12;
+const MIN_LANE_HEIGHT = 80;
 
 export function Timeline({
   projects,
@@ -67,6 +68,7 @@ export function Timeline({
   onAddMilestone,
   onEditProject,
   onEditMilestone,
+  onUpdateMilestone,
   onDeleteMilestone,
   onAddTeamMember,
   onEditTeamMember,
@@ -322,6 +324,7 @@ export function Timeline({
                       onAddMilestone={() => onAddMilestone(project.id)}
                       onEdit={() => onEditProject(project)}
                       onEditMilestone={(mid) => onEditMilestone(project.id, mid)}
+                      onUpdateMilestone={(mid, updates) => onUpdateMilestone(project.id, mid, updates)}
                       onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
                     />
                   ))}

@@ -154,6 +154,7 @@ function App() {
           onAddMilestone={openAddMilestone}
           onEditProject={openEditProject}
           onEditMilestone={openEditMilestone}
+          onUpdateMilestone={updateMilestone}
           onDeleteMilestone={deleteMilestone}
           onAddTeamMember={() => setModal({ type: 'add-member' })}
           onEditTeamMember={(member) => setModal({ type: 'edit-member', member })}
