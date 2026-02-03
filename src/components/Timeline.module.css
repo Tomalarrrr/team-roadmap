@@ -14,10 +14,12 @@
   border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .sidebarHeader {
   height: 48px;
+  min-height: 48px;
   padding: 0 16px;
   display: flex;
   align-items: center;
@@ -27,10 +29,15 @@
   letter-spacing: 0.05em;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-light);
+  background: var(--bg-primary);
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .memberLane {
   height: 100px;
+  min-height: 100px;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -53,12 +60,18 @@
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .memberTitle {
   display: block;
   font-size: 0.75rem;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .addProjectBtn {
@@ -90,6 +103,7 @@
   color: var(--text-muted);
   font-size: 0.8rem;
   transition: all 0.15s;
+  flex-shrink: 0;
 }
 
 .addMemberBtn:hover {
@@ -102,6 +116,7 @@
 .timelineWrapper {
   flex: 1;
   overflow: hidden;
+  min-width: 0;
 }
 
 .scrollContainer {
@@ -187,14 +202,116 @@
 
 .todayLabel {
   position: absolute;
-  top: -40px;
+  top: 8px;
   left: 50%;
   transform: translateX(-50%);
   background: var(--today-line);
   color: white;
   font-size: 0.65rem;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: var(--radius-full);
   white-space: nowrap;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* Responsive - Tablet */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 160px;
+    min-width: 160px;
+  }
+
+  .memberLane {
+    padding: 12px;
+  }
+
+  .memberName {
+    font-size: 0.85rem;
+  }
+}
+
+/* Responsive - Mobile */
+@media (max-width: 768px) {
+  .container {
+    flex-direction: column;
+    height: calc(100vh - 60px);
+  }
+
+  .sidebar {
+    width: 100%;
+    min-width: 100%;
+    max-height: 200px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: none;
+    border-bottom: 1px solid var(--border-light);
+  }
+
+  .sidebarHeader {
+    display: none;
+  }
+
+  .memberLane {
+    min-width: 140px;
+    height: auto;
+    padding: 12px;
+    border-bottom: none;
+    border-right: 1px solid var(--border-light);
+  }
+
+  .addMemberBtn {
+    min-width: 120px;
+    margin: 12px;
+    white-space: nowrap;
+  }
+
+  .timelineWrapper {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+/* Responsive - Small mobile */
+@media (max-width: 480px) {
+  .memberLane {
+    min-width: 120px;
+    padding: 10px;
+  }
+
+  .memberName {
+    font-size: 0.8rem;
+  }
+
+  .memberTitle {
+    font-size: 0.7rem;
+  }
+
+  .addProjectBtn {
+    width: 24px;
+    height: 24px;
+    font-size: 1rem;
+  }
+}
+
+/* Large screens */
+@media (min-width: 1600px) {
+  .sidebar {
+    width: 240px;
+    min-width: 240px;
+  }
+
+  .memberLane {
+    padding: 20px;
+  }
+
+  .memberName {
+    font-size: 1rem;
+  }
+
+  .memberTitle {
+    font-size: 0.8rem;
+  }
 }
