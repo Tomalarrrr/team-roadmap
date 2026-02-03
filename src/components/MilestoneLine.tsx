@@ -15,7 +15,7 @@ interface MilestoneLineProps {
   projectWidth: number;
   stackIndex?: number;
   laneTop?: number; // Top position of the lane for dependency positioning
-  onUpdate: (updates: Partial<Milestone>) => void;
+  onUpdate: (updates: Partial<Milestone>) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
 }
