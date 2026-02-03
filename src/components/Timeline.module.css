@@ -221,6 +221,11 @@
   background: rgba(0, 0, 0, 0.01);
 }
 
+.laneOver {
+  background: var(--accent-blue-light) !important;
+  transition: background 0.15s ease;
+}
+
 .gridLine {
   position: absolute;
   top: 0;

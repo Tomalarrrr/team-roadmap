@@ -1,7 +1,8 @@
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   DndContext,
   closestCenter,
+  pointerWithin,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -14,8 +15,9 @@ import {
   verticalListSortingStrategy
 } from '@dnd-kit/sortable';
 import type { Project, TeamMember } from '../types';
-import { ProjectBar } from './ProjectBar';
 import { SortableMemberLane } from './SortableMemberLane';
+import { DraggableProjectBar } from './DraggableProjectBar';
+import { DroppableLane } from './DroppableLane';
 import {
   getFYStart,
   getFYEnd,
@@ -52,8 +54,8 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
 };
 
 const PROJECT_HEIGHT = 60;
-const LANE_PADDING = 16;
-const MIN_LANE_HEIGHT = 80;
+const LANE_PADDING = 20;
+const MIN_LANE_HEIGHT = 100;
 
 export function Timeline({
   projects,
@@ -85,7 +87,8 @@ export function Timeline({
     })
   );
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  // Handler for team member reordering
+  const handleMemberDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
       const oldIndex = teamMembers.findIndex(m => m.id === active.id);
@@ -96,26 +99,49 @@ export function Timeline({
     }
   };
 
+  // Handler for project drag to different lanes
+  const handleProjectDragEnd = useCallback((event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+
+    const activeData = active.data.current;
+    const overData = over.data.current;
+
+    // Check if dragging a project onto a lane
+    if (activeData?.type === 'project' && overData?.type === 'lane') {
+      const project = activeData.project as Project;
+      const newOwner = overData.memberName as string;
+
+      // Only update if the owner changed
+      if (project.owner !== newOwner) {
+        onUpdateProject(project.id, { owner: newOwner });
+      }
+    }
+  }, [onUpdateProject]);
+
   const { timelineStart, timelineEnd, visibleFYs } = useMemo(() => {
     const currentFY = getFYFromDate(new Date());
     if (zoomLevel === 'month') {
-      // Start from current month, show 18 months forward
+      // Start 2 months ago, extend to end of 2030
       const today = new Date();
-      const start = startOfMonth(today);
-      const end = addMonths(start, 18);
-      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 3) };
+      const start = startOfMonth(addMonths(today, -2));
+      const end = new Date(2030, 11, 31); // December 31, 2030
+      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 8) };
     } else if (zoomLevel === 'day') {
       const today = new Date();
-      const start = startOfMonth(today);
-      const end = addMonths(start, 3);
-      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 1) };
-    } else if (zoomLevel === 'week') {
-      const today = new Date();
-      const start = startOfMonth(today);
+      const start = startOfMonth(addMonths(today, -2));
       const end = addMonths(start, 6);
       return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 2) };
+    } else if (zoomLevel === 'week') {
+      const today = new Date();
+      const start = startOfMonth(addMonths(today, -2));
+      const end = addMonths(start, 18);
+      return { timelineStart: start, timelineEnd: end, visibleFYs: getVisibleFYs(getFYFromDate(start), 3) };
     } else {
-      const fys = getVisibleFYs(currentFY, 3);
+      // Year view: show from current FY to FY2030
+      const startFY = currentFY;
+      const endFY = 2030;
+      const fys = getVisibleFYs(startFY, endFY - startFY + 1);
       return { timelineStart: getFYStart(fys[0]), timelineEnd: getFYEnd(fys[fys.length - 1]), visibleFYs: fys };
     }
   }, [zoomLevel]);
@@ -207,7 +233,7 @@ export function Timeline({
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
-          onDragEnd={handleDragEnd}
+          onDragEnd={handleMemberDragEnd}
         >
           <SortableContext
             items={teamMembers.map(m => m.id)}
@@ -250,51 +276,59 @@ export function Timeline({
           </div>
 
           {/* Lanes */}
-          <div className={styles.lanes} style={{ width: totalWidth, minHeight: totalLanesHeight }}>
-            {/* Grid lines */}
-            {zoomLevel === 'year' && fySegments.map(({ fy, left, width }) => (
-              <div key={`q-${fy}`}>
-                {[0, 1, 2, 3].map(q => (
-                  <div key={q} className={styles.gridLine} style={{ left: left + (width / 4) * q }} />
-                ))}
-              </div>
-            ))}
-            {zoomLevel === 'month' && monthMarkers.map(({ left }, i) => (
-              <div key={i} className={styles.gridLine} style={{ left }} />
-            ))}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={pointerWithin}
+            onDragEnd={handleProjectDragEnd}
+          >
+            <div className={styles.lanes} style={{ width: totalWidth, minHeight: totalLanesHeight }}>
+              {/* Grid lines */}
+              {zoomLevel === 'year' && fySegments.map(({ fy, left, width }) => (
+                <div key={`q-${fy}`}>
+                  {[0, 1, 2, 3].map(q => (
+                    <div key={q} className={styles.gridLine} style={{ left: left + (width / 4) * q }} />
+                  ))}
+                </div>
+              ))}
+              {zoomLevel === 'month' && monthMarkers.map(({ left }, i) => (
+                <div key={i} className={styles.gridLine} style={{ left }} />
+              ))}
 
-            {/* Today line */}
-            {todayPosition >= 0 && todayPosition <= totalWidth && (
-              <div className={styles.todayLine} style={{ left: todayPosition }}>
-                <div className={styles.todayLabel}>Today</div>
-              </div>
-            )}
+              {/* Today line */}
+              {todayPosition >= 0 && todayPosition <= totalWidth && (
+                <div className={styles.todayLine} style={{ left: todayPosition }}>
+                  <div className={styles.todayLabel}>Today</div>
+                </div>
+              )}
 
-            {/* Project lanes */}
-            {teamMembers.map((member, idx) => (
-              <div
-                key={member.id}
-                className={styles.lane}
-                style={{ top: lanePositions[idx], height: laneHeights[idx] }}
-              >
-                {projectsByOwner[member.name]?.map((project, projectIdx) => (
-                  <ProjectBar
-                    key={project.id}
-                    project={project}
-                    timelineStart={timelineStart}
-                    dayWidth={dayWidth}
-                    stackIndex={projectIdx}
-                    onUpdate={(updates) => onUpdateProject(project.id, updates)}
-                    onDelete={() => onDeleteProject(project.id)}
-                    onAddMilestone={() => onAddMilestone(project.id)}
-                    onEdit={() => onEditProject(project)}
-                    onEditMilestone={(mid) => onEditMilestone(project.id, mid)}
-                    onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
-                  />
-                ))}
-              </div>
-            ))}
-          </div>
+              {/* Project lanes */}
+              {teamMembers.map((member, idx) => (
+                <DroppableLane
+                  key={member.id}
+                  id={`lane-${member.id}`}
+                  memberName={member.name}
+                  top={lanePositions[idx]}
+                  height={laneHeights[idx]}
+                >
+                  {projectsByOwner[member.name]?.map((project, projectIdx) => (
+                    <DraggableProjectBar
+                      key={project.id}
+                      project={project}
+                      timelineStart={timelineStart}
+                      dayWidth={dayWidth}
+                      stackIndex={projectIdx}
+                      onUpdate={(updates) => onUpdateProject(project.id, updates)}
+                      onDelete={() => onDeleteProject(project.id)}
+                      onAddMilestone={() => onAddMilestone(project.id)}
+                      onEdit={() => onEditProject(project)}
+                      onEditMilestone={(mid) => onEditMilestone(project.id, mid)}
+                      onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
+                    />
+                  ))}
+                </DroppableLane>
+              ))}
+            </div>
+          </DndContext>
         </div>
       </div>
     </div>
