@@ -21,7 +21,6 @@ interface ToolbarProps {
 }
 
 const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
-  { value: 'day', label: 'Day' },
   { value: 'week', label: 'Week' },
   { value: 'month', label: 'Month' },
   { value: 'year', label: 'Year' },
@@ -49,7 +48,7 @@ export function Toolbar({
   return (
     <div className={styles.toolbar}>
       <div className={styles.left}>
-        <h1 className={styles.title}>Team Roadmap</h1>
+        <h1 className={styles.title}>Digital Roadmap Overview</h1>
       </div>
 
       <div className={styles.center}>

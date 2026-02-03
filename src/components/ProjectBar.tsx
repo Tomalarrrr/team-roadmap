@@ -109,8 +109,6 @@ export function ProjectBar({
   const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0, below: false, showLeft: false });
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
 
   // Dependency creation context
@@ -120,7 +118,6 @@ export function ProjectBar({
 
   // Click-to-edit tracking (distinguish from drag)
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
-  const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track mounted state to prevent state updates after unmount
   const isMountedRef = useRef(true);
@@ -384,44 +381,11 @@ export function ProjectBar({
         setMenuPosition({ x: Math.max(10, x), y: Math.max(10, y) });
         setShowMenu(true);
       }}
-      onMouseEnter={() => {
-        if (!dragMode && !externalDragging) {
-          tooltipTimeoutRef.current = setTimeout(() => {
-            if (isMountedRef.current) {
-              setShowTooltip(true);
-            }
-          }, 800);
-        }
-      }}
       onMouseMove={(e) => {
         // Track proximity to end for showing dependency arrow
         handleMouseMoveForArrow(e);
-
-        if (!dragMode && !externalDragging && showTooltip) {
-          const tooltipHeight = 150;
-          const tooltipWidth = 200;
-          const cursorOffset = 15; // Distance from cursor
-          // Position near cursor, show below if too close to top
-          const showBelow = e.clientY < tooltipHeight + 20;
-          // Position to the right of cursor, or left if near right edge
-          const showLeft = e.clientX + tooltipWidth + cursorOffset > window.innerWidth;
-          const x = showLeft
-            ? e.clientX - cursorOffset  // Position to left of cursor
-            : e.clientX + cursorOffset; // Position to right of cursor
-          setTooltipPosition({
-            x,
-            y: showBelow ? e.clientY + cursorOffset : e.clientY - cursorOffset,
-            below: showBelow,
-            showLeft
-          });
-        }
       }}
       onMouseLeave={() => {
-        if (tooltipTimeoutRef.current) {
-          clearTimeout(tooltipTimeoutRef.current);
-          tooltipTimeoutRef.current = null;
-        }
-        setShowTooltip(false);
         setShowDependencyArrow(false);
       }}
     >
@@ -513,33 +477,6 @@ export function ProjectBar({
           <button onClick={onAddMilestone}>Add Milestone</button>
           {onCopy && <button onClick={() => { onCopy(); setShowMenu(false); }}>Copy Project</button>}
           <button className={styles.deleteBtn} onClick={onDelete}>Delete</button>
-        </div>
-      )}
-
-      {/* Tooltip - positioned next to cursor */}
-      {showTooltip && !dragMode && !externalDragging && !showMenu && (
-        <div
-          className={styles.tooltip}
-          style={{
-            position: 'fixed',
-            left: tooltipPosition.x,
-            top: tooltipPosition.y,
-            transform: `${tooltipPosition.showLeft ? 'translateX(-100%)' : ''} ${tooltipPosition.below ? '' : 'translateY(-100%)'}`.trim() || 'none'
-          }}
-        >
-          <div className={styles.tooltipTitle}>{project.title}</div>
-          <div className={styles.tooltipDates}>
-            {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
-          </div>
-          {(project.milestones?.length ?? 0) > 0 && (
-            <div className={styles.tooltipMilestones}>
-              {project.milestones.length} milestone{project.milestones.length !== 1 ? 's' : ''}
-            </div>
-          )}
-          {isPast && (
-            <div className={styles.pastBadge}>Complete</div>
-          )}
-          <div className={styles.tooltipHint}>Click to edit • Drag to move</div>
         </div>
       )}
     </div>

@@ -59,9 +59,9 @@ export async function exportTimelineToPDF() {
 
     // Add metadata
     pdf.setProperties({
-      title: `Team Roadmap - ${today}`,
-      subject: 'Team Roadmap Export',
-      creator: 'Team Roadmap App'
+      title: `Digital Roadmap Overview - ${today}`,
+      subject: 'Digital Roadmap Overview Export',
+      creator: 'Digital Roadmap Overview App'
     });
 
     // Save the PDF

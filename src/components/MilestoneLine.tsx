@@ -41,8 +41,6 @@ export function MilestoneLine({
   onDelete
 }: MilestoneLineProps) {
   const milestoneRef = useRef<HTMLDivElement>(null);
-  const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0, below: false, showLeft: false });
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -112,7 +110,6 @@ export function MilestoneLine({
     setDragMode(mode);
     setDragStartX(e.clientX);
     setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
-    setShowTooltip(false);
   }, [milestone.startDate, milestone.endDate]);
 
   // Track the latest preview for committing on mouseUp
@@ -293,42 +290,10 @@ export function MilestoneLine({
       aria-label={`Milestone: ${milestone.title}, ${formatShortDate(milestone.startDate)} to ${formatShortDate(milestone.endDate)}${isPast ? ', Complete' : ''}`}
       onKeyDown={handleKeyDown}
       onClick={isTargetable ? handleDependencyTarget : undefined}
-      onMouseEnter={(e) => {
-        if (!dragMode) {
-          setShowTooltip(true);
-          // Initial position near cursor
-          const tooltipHeight = 120;
-          const tooltipWidth = 180;
-          const cursorOffset = 15;
-          const showBelow = e.clientY < tooltipHeight + 20;
-          const showLeft = e.clientX + tooltipWidth + cursorOffset > window.innerWidth;
-          setTooltipPosition({
-            x: showLeft ? e.clientX - cursorOffset : e.clientX + cursorOffset,
-            y: showBelow ? e.clientY + cursorOffset : e.clientY - cursorOffset,
-            below: showBelow,
-            showLeft
-          });
-        }
-      }}
       onMouseMove={(e) => {
         handleMouseMoveForArrow(e);
-        // Update tooltip position to follow cursor
-        if (!dragMode && showTooltip) {
-          const tooltipHeight = 120;
-          const tooltipWidth = 180;
-          const cursorOffset = 15;
-          const showBelow = e.clientY < tooltipHeight + 20;
-          const showLeft = e.clientX + tooltipWidth + cursorOffset > window.innerWidth;
-          setTooltipPosition({
-            x: showLeft ? e.clientX - cursorOffset : e.clientX + cursorOffset,
-            y: showBelow ? e.clientY + cursorOffset : e.clientY - cursorOffset,
-            below: showBelow,
-            showLeft
-          });
-        }
       }}
       onMouseLeave={() => {
-        setShowTooltip(false);
         setShowDependencyArrow(false);
       }}
       onContextMenu={(e) => {
@@ -381,38 +346,6 @@ export function MilestoneLine({
       >
         <span className={styles.milestoneTitle}>{milestone.title}</span>
       </div>
-
-      {/* Tooltip - positioned next to cursor */}
-      {showTooltip && !dragMode && (
-        <div
-          className={styles.tooltip}
-          style={{
-            position: 'fixed',
-            left: tooltipPosition.x,
-            top: tooltipPosition.y,
-            transform: `${tooltipPosition.showLeft ? 'translateX(-100%)' : ''} ${tooltipPosition.below ? '' : 'translateY(-100%)'}`.trim() || 'none'
-          }}
-        >
-          <div className={styles.tooltipTitle}>{milestone.title}</div>
-          <div className={styles.tooltipDates}>
-            {formatShortDate(milestone.startDate)} - {formatShortDate(milestone.endDate)}
-          </div>
-          {milestone.description && (
-            <div className={styles.tooltipDescription}>{milestone.description}</div>
-          )}
-          {(milestone.tags?.length ?? 0) > 0 && (
-            <div className={styles.tooltipTags}>
-              {(milestone.tags || []).map((tag, i) => (
-                <span key={i} className={styles.tag}>{tag}</span>
-              ))}
-            </div>
-          )}
-          {isPast && (
-            <div className={styles.pastBadge}>Complete</div>
-          )}
-          <div className={styles.tooltipHint}>Click to edit • Drag to move</div>
-        </div>
-      )}
 
       {/* Context menu */}
       {showMenu && (

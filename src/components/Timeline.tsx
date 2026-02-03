@@ -32,7 +32,7 @@ import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
-export type ZoomLevel = 'day' | 'week' | 'month' | 'year';
+export type ZoomLevel = 'week' | 'month' | 'year';
 
 // Calculate stack indices for non-overlapping projects (optimized flight path algorithm)
 // Time complexity: O(n log n) instead of O(n²)
@@ -108,7 +108,6 @@ interface TimelineProps {
 }
 
 const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
-  day: 30,
   week: 8,
   month: 3,
   year: 0.8
