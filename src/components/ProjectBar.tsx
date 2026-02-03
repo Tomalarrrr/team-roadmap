@@ -241,8 +241,17 @@ export function ProjectBar({
 
         // Update preview for smooth visual feedback (no Firebase call)
         const preview = { start: newStart, end: newEnd };
+
+        // Only update if preview actually changed to prevent excessive re-renders
+        const hasChanged = !latestPreviewRef.current ||
+          latestPreviewRef.current.start !== preview.start ||
+          latestPreviewRef.current.end !== preview.end;
+
         latestPreviewRef.current = preview;
-        setPreviewDates(preview);
+
+        if (hasChanged) {
+          setPreviewDates(preview);
+        }
       });
     };
 
