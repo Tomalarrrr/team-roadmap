@@ -25,10 +25,58 @@ import {
   getVisibleFYs,
   getTodayPosition
 } from '../utils/dateUtils';
-import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from 'date-fns';
+import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format, areIntervalsOverlapping } from 'date-fns';
 import styles from './Timeline.module.css';
 
 export type ZoomLevel = 'day' | 'week' | 'month' | 'year';
+
+// Calculate stack indices for non-overlapping projects (flight path algorithm)
+function calculateProjectStacks(projects: Project[]): Map<string, number> {
+  const stacks = new Map<string, number>();
+  if (!projects || projects.length === 0) return stacks;
+
+  // Sort projects by start date, then by end date for consistent ordering
+  const sorted = [...projects].sort((a, b) => {
+    const startDiff = new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
+    if (startDiff !== 0) return startDiff;
+    return new Date(a.endDate).getTime() - new Date(b.endDate).getTime();
+  });
+
+  sorted.forEach((project) => {
+    let stackIndex = 0;
+    const projectInterval = {
+      start: new Date(project.startDate),
+      end: new Date(project.endDate)
+    };
+
+    // Find the lowest available stack index where this project doesn't overlap
+    while (true) {
+      let canUseStack = true;
+      for (const [otherId, otherStack] of stacks) {
+        if (otherStack !== stackIndex) continue;
+        const other = projects.find(p => p.id === otherId);
+        if (!other) continue;
+
+        const otherInterval = {
+          start: new Date(other.startDate),
+          end: new Date(other.endDate)
+        };
+
+        // Check if intervals overlap (inclusive for same-day adjacency)
+        if (areIntervalsOverlapping(projectInterval, otherInterval, { inclusive: true })) {
+          canUseStack = false;
+          break;
+        }
+      }
+      if (canUseStack) break;
+      stackIndex++;
+    }
+    stacks.set(project.id, stackIndex);
+  });
+
+  return stacks;
+
+}
 
 interface TimelineProps {
   projects: Project[];
@@ -203,14 +251,26 @@ export function Timeline({
     return grouped;
   }, [projects, teamMembers]);
 
-  // Calculate lane heights based on project count
+  // Calculate project stacks for each owner (flight path algorithm)
+  const projectStacksByOwner = useMemo(() => {
+    const stacksByOwner: Record<string, Map<string, number>> = {};
+    teamMembers.forEach(m => {
+      const ownerProjects = projectsByOwner[m.name] || [];
+      stacksByOwner[m.name] = calculateProjectStacks(ownerProjects);
+    });
+    return stacksByOwner;
+  }, [teamMembers, projectsByOwner]);
+
+  // Calculate lane heights based on max stack index (not project count)
   const laneHeights = useMemo(() => {
     return teamMembers.map(member => {
-      const projectCount = projectsByOwner[member.name]?.length || 0;
-      const height = Math.max(MIN_LANE_HEIGHT, projectCount * PROJECT_HEIGHT + LANE_PADDING * 2);
+      const stacks = projectStacksByOwner[member.name];
+      const maxStack = stacks && stacks.size > 0 ? Math.max(...stacks.values()) : -1;
+      const rowCount = maxStack + 1; // Number of rows needed
+      const height = Math.max(MIN_LANE_HEIGHT, rowCount * PROJECT_HEIGHT + LANE_PADDING * 2);
       return height;
     });
-  }, [teamMembers, projectsByOwner]);
+  }, [teamMembers, projectStacksByOwner]);
 
   // Calculate cumulative lane positions
   const lanePositions = useMemo(() => {
@@ -304,32 +364,35 @@ export function Timeline({
               )}
 
               {/* Project lanes */}
-              {teamMembers.map((member, idx) => (
-                <DroppableLane
-                  key={member.id}
-                  id={`lane-${member.id}`}
-                  memberName={member.name}
-                  top={lanePositions[idx]}
-                  height={laneHeights[idx]}
-                >
-                  {projectsByOwner[member.name]?.map((project, projectIdx) => (
-                    <DraggableProjectBar
-                      key={project.id}
-                      project={project}
-                      timelineStart={timelineStart}
-                      dayWidth={dayWidth}
-                      stackIndex={projectIdx}
-                      onUpdate={(updates) => onUpdateProject(project.id, updates)}
-                      onDelete={() => onDeleteProject(project.id)}
-                      onAddMilestone={() => onAddMilestone(project.id)}
-                      onEdit={() => onEditProject(project)}
-                      onEditMilestone={(mid) => onEditMilestone(project.id, mid)}
-                      onUpdateMilestone={(mid, updates) => onUpdateMilestone(project.id, mid, updates)}
-                      onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
-                    />
-                  ))}
-                </DroppableLane>
-              ))}
+              {teamMembers.map((member, idx) => {
+                const stacks = projectStacksByOwner[member.name];
+                return (
+                  <DroppableLane
+                    key={member.id}
+                    id={`lane-${member.id}`}
+                    memberName={member.name}
+                    top={lanePositions[idx]}
+                    height={laneHeights[idx]}
+                  >
+                    {projectsByOwner[member.name]?.map((project) => (
+                      <DraggableProjectBar
+                        key={project.id}
+                        project={project}
+                        timelineStart={timelineStart}
+                        dayWidth={dayWidth}
+                        stackIndex={stacks?.get(project.id) ?? 0}
+                        onUpdate={(updates) => onUpdateProject(project.id, updates)}
+                        onDelete={() => onDeleteProject(project.id)}
+                        onAddMilestone={() => onAddMilestone(project.id)}
+                        onEdit={() => onEditProject(project)}
+                        onEditMilestone={(mid) => onEditMilestone(project.id, mid)}
+                        onUpdateMilestone={(mid, updates) => onUpdateMilestone(project.id, mid, updates)}
+                        onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
+                      />
+                    ))}
+                  </DroppableLane>
+                );
+              })}
             </div>
           </DndContext>
         </div>
