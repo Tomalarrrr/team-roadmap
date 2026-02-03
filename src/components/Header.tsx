@@ -19,7 +19,6 @@ export function Header({ onAddProject, zoomLevel, onZoomChange }: HeaderProps) {
     <header className={styles.header}>
       <div className={styles.left}>
         <h1 className={styles.title}>Team Roadmap</h1>
-        <span className={styles.badge}>Live</span>
       </div>
       <div className={styles.center}>
         <div className={styles.zoomControl}>
