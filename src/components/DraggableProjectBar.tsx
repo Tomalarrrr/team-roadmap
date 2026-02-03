@@ -9,12 +9,12 @@ interface DraggableProjectBarProps {
   dayWidth: number;
   stackIndex?: number;
   isSelected?: boolean;
-  onUpdate: (updates: Partial<Project>) => void;
+  onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
   onAddMilestone: () => void;
   onEdit: () => void;
   onEditMilestone: (milestoneId: string) => void;
-  onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
+  onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => Promise<void>;
   onDeleteMilestone: (milestoneId: string) => void;
   onCopy?: () => void;
   onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
