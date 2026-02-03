@@ -240,11 +240,10 @@ export function MilestoneLine({
   useEffect(() => {
     if (!showMenu) return;
     const handleClose = () => closeMenuRef.current();
-    document.addEventListener('click', handleClose);
-    document.addEventListener('contextmenu', handleClose);
+    // Use mousedown instead of click for immediate response, and to catch right-clicks
+    document.addEventListener('mousedown', handleClose);
     return () => {
-      document.removeEventListener('click', handleClose);
-      document.removeEventListener('contextmenu', handleClose);
+      document.removeEventListener('mousedown', handleClose);
     };
   }, [showMenu]);
 
@@ -377,6 +376,7 @@ export function MilestoneLine({
           className={styles.contextMenu}
           style={{ left: menuPosition.x, top: menuPosition.y }}
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <button onClick={onEdit}>Edit Milestone</button>
           <button className={styles.deleteBtn} onClick={onDelete}>Delete</button>

@@ -298,15 +298,14 @@ export function ProjectBar({
     };
   }, [dragMode, dragStartX, originalDates, dayWidth]);
 
-  // Close menu when clicking outside or right-clicking elsewhere
+  // Close menu when clicking outside
   useEffect(() => {
     if (!showMenu) return;
     const handleClose = () => setShowMenu(false);
-    document.addEventListener('click', handleClose);
-    document.addEventListener('contextmenu', handleClose);
+    // Use mousedown instead of click for immediate response, and to catch right-clicks
+    document.addEventListener('mousedown', handleClose);
     return () => {
-      document.removeEventListener('click', handleClose);
-      document.removeEventListener('contextmenu', handleClose);
+      document.removeEventListener('mousedown', handleClose);
     };
   }, [showMenu]);
 
@@ -495,6 +494,7 @@ export function ProjectBar({
           className={styles.contextMenu}
           style={{ left: menuPosition.x, top: menuPosition.y }}
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <button onClick={onEdit}>Edit Project</button>
           <button onClick={onAddMilestone}>Add Milestone</button>
