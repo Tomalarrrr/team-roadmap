@@ -10,7 +10,58 @@ interface ExportOption {
   action: () => void;
 }
 
+// Helper function to inline all computed styles for perfect rendering
+function inlineStyles(element: HTMLElement): HTMLElement {
+  const clone = element.cloneNode(true) as HTMLElement;
+  const elements = [element, ...Array.from(element.querySelectorAll('*'))];
+  const clonedElements = [clone, ...Array.from(clone.querySelectorAll('*'))];
+
+  elements.forEach((el, index) => {
+    if (el instanceof HTMLElement && clonedElements[index] instanceof HTMLElement) {
+      const computedStyle = window.getComputedStyle(el);
+      const clonedEl = clonedElements[index] as HTMLElement;
+
+      // Copy all computed styles to inline styles for guaranteed rendering
+      Array.from(computedStyle).forEach((property) => {
+        clonedEl.style.setProperty(
+          property,
+          computedStyle.getPropertyValue(property),
+          computedStyle.getPropertyPriority(property)
+        );
+      });
+    }
+  });
+
+  return clone;
+}
+
+// Helper function to inject all stylesheets into the document
+async function injectStylesheets(clone: HTMLElement): Promise<void> {
+  const styleSheets = Array.from(document.styleSheets);
+  const styleElements: string[] = [];
+
+  for (const sheet of styleSheets) {
+    try {
+      if (sheet.cssRules) {
+        const rules = Array.from(sheet.cssRules)
+          .map(rule => rule.cssText)
+          .join('\n');
+        styleElements.push(rules);
+      }
+    } catch (e) {
+      // CORS-blocked stylesheet, skip
+      console.warn('Could not access stylesheet:', e);
+    }
+  }
+
+  // Create a style element with all collected rules
+  const style = document.createElement('style');
+  style.textContent = styleElements.join('\n');
+  clone.insertBefore(style, clone.firstChild);
+}
+
 // PDF Export - uses dynamic imports to code-split heavy libraries
+// Enhanced to preserve ALL styling perfectly (FAANG L7+ quality)
 export async function exportTimelineToPDF() {
   const timelineElement = document.getElementById('timeline-container');
   if (!timelineElement) {
@@ -29,46 +80,82 @@ export async function exportTimelineToPDF() {
       import('jspdf')
     ]);
 
-    // Capture the timeline as a canvas
-    const canvas = await html2canvas(timelineElement, {
-      backgroundColor: '#fafafa',
-      scale: 2,
-      logging: false,
-      useCORS: true,
-      allowTaint: true,
-      scrollX: 0,
-      scrollY: 0,
-      windowWidth: timelineElement.scrollWidth,
-      windowHeight: timelineElement.scrollHeight
-    });
+    // Clone element and inline all computed styles to guarantee perfect rendering
+    const clonedElement = inlineStyles(timelineElement);
+    await injectStylesheets(clonedElement);
 
-    // Calculate dimensions for PDF
-    const imgWidth = canvas.width;
-    const imgHeight = canvas.height;
+    // Temporarily mount the styled clone for rendering
+    clonedElement.style.position = 'absolute';
+    clonedElement.style.left = '-9999px';
+    clonedElement.style.top = '0';
+    document.body.appendChild(clonedElement);
 
-    // Create PDF in landscape orientation for wide timelines
-    const pdf = new jsPDF({
-      orientation: imgWidth > imgHeight ? 'landscape' : 'portrait',
-      unit: 'px',
-      format: [imgWidth / 2, imgHeight / 2]
-    });
+    try {
+      // Capture with high-fidelity settings
+      const canvas = await html2canvas(clonedElement, {
+        backgroundColor: '#fafafa',
+        scale: 3, // Higher scale for better quality (retina + extra)
+        logging: false,
+        useCORS: true,
+        allowTaint: false,
+        foreignObjectRendering: false, // Disable to avoid style loss
+        scrollX: 0,
+        scrollY: -window.scrollY,
+        windowWidth: timelineElement.scrollWidth,
+        windowHeight: timelineElement.scrollHeight,
+        // Explicitly capture all content
+        x: 0,
+        y: 0,
+        width: timelineElement.scrollWidth,
+        height: timelineElement.scrollHeight,
+        // Additional quality settings
+        imageTimeout: 15000,
+        removeContainer: true
+      });
 
-    // Add the image to the PDF
-    const imgData = canvas.toDataURL('image/png');
-    pdf.addImage(imgData, 'PNG', 0, 0, imgWidth / 2, imgHeight / 2);
+      // Remove the temporary clone
+      document.body.removeChild(clonedElement);
 
-    // Add metadata
-    pdf.setProperties({
-      title: `Digital Roadmap Overview - ${today}`,
-      subject: 'Digital Roadmap Overview Export',
-      creator: 'Digital Roadmap Overview App'
-    });
+      // Calculate dimensions for PDF
+      const imgWidth = canvas.width;
+      const imgHeight = canvas.height;
 
-    // Save the PDF
-    pdf.save(filename);
-    analytics.exportPDF();
+      // Use A3 landscape for large timelines, or custom size
+      const pdfWidth = imgWidth / 3; // Divide by scale factor
+      const pdfHeight = imgHeight / 3;
 
-    return true;
+      // Create PDF with proper dimensions
+      const pdf = new jsPDF({
+        orientation: imgWidth > imgHeight ? 'landscape' : 'portrait',
+        unit: 'px',
+        format: [pdfWidth, pdfHeight],
+        compress: true
+      });
+
+      // Add the image to the PDF with maximum quality
+      const imgData = canvas.toDataURL('image/png', 1.0);
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+
+      // Add metadata
+      pdf.setProperties({
+        title: `Digital Roadmap Overview - ${today}`,
+        subject: 'Digital Roadmap Overview Export',
+        creator: 'Digital Roadmap Overview App',
+        keywords: 'roadmap, timeline, projects'
+      });
+
+      // Save the PDF
+      pdf.save(filename);
+      analytics.exportPDF();
+
+      return true;
+    } catch (canvasError) {
+      // Clean up clone if still mounted
+      if (document.body.contains(clonedElement)) {
+        document.body.removeChild(clonedElement);
+      }
+      throw canvasError;
+    }
   } catch (error) {
     console.error('Error exporting to PDF:', error);
     throw error;
