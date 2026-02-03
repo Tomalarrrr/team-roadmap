@@ -495,6 +495,34 @@ export function Timeline({
     ? lanePositions[lanePositions.length - 1] + laneHeights[laneHeights.length - 1]
     : 0;
 
+  // Memoize dependency lines to prevent recalculation on every render
+  const dependencyElements = useMemo(() => {
+    return dependencies.map((dep, index) => {
+      const fromProject = projectsById.get(dep.fromProjectId);
+      const toProject = projectsById.get(dep.toProjectId);
+      if (!fromProject || !toProject) return null;
+
+      return (
+        <DependencyLine
+          key={dep.id}
+          fromProject={fromProject}
+          toProject={toProject}
+          fromMilestoneId={dep.fromMilestoneId}
+          toMilestoneId={dep.toMilestoneId}
+          timelineStart={timelineStart}
+          dayWidth={dayWidth}
+          projectStacks={globalProjectStacks}
+          lanePositions={lanePositions}
+          ownerToLaneIndex={ownerToLaneIndex}
+          lineIndex={index}
+          isAnyHovered={hoveredDepId !== null}
+          onHoverChange={(hovered) => setHoveredDepId(hovered ? dep.id : null)}
+          onRemove={() => onRemoveDependency?.(dep.id)}
+        />
+      );
+    });
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, ownerToLaneIndex, hoveredDepId, onRemoveDependency]);
+
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>
     <div id="timeline-container" className={styles.container}>
@@ -592,30 +620,7 @@ export function Timeline({
                 className={styles.dependenciesLayer}
                 style={{ width: totalWidth, height: totalLanesHeight }}
               >
-                {dependencies.map((dep, index) => {
-                  const fromProject = projectsById.get(dep.fromProjectId);
-                  const toProject = projectsById.get(dep.toProjectId);
-                  if (!fromProject || !toProject) return null;
-
-                  return (
-                    <DependencyLine
-                      key={dep.id}
-                      fromProject={fromProject}
-                      toProject={toProject}
-                      fromMilestoneId={dep.fromMilestoneId}
-                      toMilestoneId={dep.toMilestoneId}
-                      timelineStart={timelineStart}
-                      dayWidth={dayWidth}
-                      projectStacks={globalProjectStacks}
-                      lanePositions={lanePositions}
-                      ownerToLaneIndex={ownerToLaneIndex}
-                      lineIndex={index}
-                      isAnyHovered={hoveredDepId !== null}
-                      onHoverChange={(hovered) => setHoveredDepId(hovered ? dep.id : null)}
-                      onRemove={() => onRemoveDependency?.(dep.id)}
-                    />
-                  );
-                })}
+                {dependencyElements}
               </svg>
 
               {/* Project lanes */}

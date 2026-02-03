@@ -32,6 +32,16 @@
   filter: none !important;
 }
 
+/* Disable pointer events on inner content during drag to prevent interference */
+.projectBar.dragging * {
+  pointer-events: none !important;
+}
+
+/* Re-enable pointer events on resize handles so they still work */
+.projectBar.dragging .resizeHandle {
+  pointer-events: auto !important;
+}
+
 .projectBar.selected {
   box-shadow: 0 0 0 3px var(--accent-blue), var(--shadow-lg);
   z-index: 15;
