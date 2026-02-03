@@ -16,6 +16,11 @@ import { getSuggestedProjectDates } from './utils/dateUtils';
 import { TimelineSkeleton } from './components/Skeleton';
 import styles from './App.module.css';
 
+// Sanitize error messages to prevent XSS
+function sanitizeError(error: string): string {
+  return String(error).replace(/<[^>]*>/g, '').trim();
+}
+
 type ModalType =
   | { type: 'add-project'; ownerName: string; suggestedStart: string; suggestedEnd: string }
   | { type: 'edit-project'; project: Project }
@@ -612,7 +617,7 @@ function App() {
       {/* Save Error Toast */}
       {saveError && (
         <div className={styles.errorToast}>
-          <span>Failed to save: {saveError}</span>
+          <span>Failed to save: {sanitizeError(saveError)}</span>
           <button onClick={clearError} className={styles.toastClose}>×</button>
         </div>
       )}

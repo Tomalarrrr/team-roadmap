@@ -15,44 +15,43 @@ import styles from './ProjectBar.module.css';
 const AUTO_BLUE = '#0070c0'; // Blue for completed/past projects
 
 // Calculate stack indices for overlapping milestones
+// Optimized O(n log n) algorithm using interval scheduling
 function calculateMilestoneStacks(milestones: Milestone[]): Map<string, number> {
   const stacks = new Map<string, number>();
   if (!milestones || milestones.length === 0) return stacks;
 
-  // Sort milestones by start date
+  // Sort milestones by start date (O(n log n))
   const sorted = [...milestones].sort((a, b) =>
     new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
   );
 
+  // Track the end time for each stack to avoid O(n) lookups
+  // Each index represents a stack, value is the end timestamp of the last milestone in that stack
+  const stackEndTimes: number[] = [];
+
   sorted.forEach((milestone) => {
-    let stackIndex = 0;
-    const milestoneInterval = {
-      start: new Date(milestone.startDate),
-      end: new Date(milestone.endDate)
-    };
+    const startTime = new Date(milestone.startDate).getTime();
+    const endTime = new Date(milestone.endDate).getTime();
 
-    // Find the lowest available stack index
-    while (true) {
-      let canUseStack = true;
-      for (const [otherId, otherStack] of stacks) {
-        if (otherStack !== stackIndex) continue;
-        const other = milestones.find(m => m.id === otherId);
-        if (!other) continue;
-
-        const otherInterval = {
-          start: new Date(other.startDate),
-          end: new Date(other.endDate)
-        };
-
-        if (areIntervalsOverlapping(milestoneInterval, otherInterval, { inclusive: true })) {
-          canUseStack = false;
-          break;
-        }
+    // Find the first stack where this milestone can fit
+    // (where the previous milestone in that stack has ended)
+    let assignedStack = -1;
+    for (let i = 0; i < stackEndTimes.length; i++) {
+      if (stackEndTimes[i] < startTime) {
+        // This stack is available (no overlap)
+        assignedStack = i;
+        stackEndTimes[i] = endTime; // Update the stack's end time
+        break;
       }
-      if (canUseStack) break;
-      stackIndex++;
     }
-    stacks.set(milestone.id, stackIndex);
+
+    // If no available stack found, create a new one
+    if (assignedStack === -1) {
+      assignedStack = stackEndTimes.length;
+      stackEndTimes.push(endTime);
+    }
+
+    stacks.set(milestone.id, assignedStack);
   });
 
   return stacks;

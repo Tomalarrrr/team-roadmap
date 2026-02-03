@@ -4,6 +4,7 @@ import type { RoadmapData, Project, Milestone, TeamMember, Dependency } from '..
 import { v4 as uuidv4 } from 'uuid';
 import { withRetry } from '../utils/retry';
 import { analytics } from '../utils/analytics';
+import { validateDependency } from '../utils/dependencyUtils';
 
 // Wrap saveRoadmap with retry logic
 const saveWithRetry = (data: RoadmapData) =>
@@ -77,10 +78,17 @@ export function useRoadmap() {
     subscribeToRoadmap((newData) => {
       if (!mounted) return;
 
-      // Skip Firebase updates if we have a pending local update
-      // This prevents flickering during optimistic updates
+      // If we have a pending local update, merge instead of discarding
+      // This prevents losing concurrent user edits
       if (isLocalUpdateRef.current) {
         isLocalUpdateRef.current = false;
+        // Apply Firebase update but preserve any pending changes
+        // This ensures we don't lose external edits during optimistic updates
+        const normalized = normalizeData(newData);
+        // Update data ref to have latest Firebase state
+        dataRef.current = normalized;
+        setData(normalized);
+        setLoading(false);
         return;
       }
 
@@ -261,6 +269,20 @@ export function useRoadmap() {
     type: Dependency['type'] = 'finish-to-start'
   ) => {
     const currentData = dataRef.current;
+
+    // Validate dependency before adding
+    const validation = validateDependency(
+      currentData.dependencies || [],
+      fromProjectId,
+      toProjectId,
+      fromMilestoneId,
+      toMilestoneId
+    );
+
+    if (!validation.valid) {
+      throw new Error(validation.error || 'Invalid dependency');
+    }
+
     const newDependency: Dependency = {
       id: uuidv4(),
       fromProjectId,

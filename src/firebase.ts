@@ -2,15 +2,40 @@ import type { RoadmapData } from './types';
 import type { FirebaseApp } from 'firebase/app';
 import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
 
-// Firebase configuration - Replace with your own config
+// Validate Firebase configuration
+function validateFirebaseConfig() {
+  const requiredEnvVars = [
+    'VITE_FIREBASE_API_KEY',
+    'VITE_FIREBASE_AUTH_DOMAIN',
+    'VITE_FIREBASE_DATABASE_URL',
+    'VITE_FIREBASE_PROJECT_ID',
+    'VITE_FIREBASE_STORAGE_BUCKET',
+    'VITE_FIREBASE_MESSAGING_SENDER_ID',
+    'VITE_FIREBASE_APP_ID'
+  ];
+
+  const missing = requiredEnvVars.filter(key => !import.meta.env[key]);
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required Firebase configuration: ${missing.join(', ')}. ` +
+      'Please set these environment variables in your .env file.'
+    );
+  }
+}
+
+// Validate config on module load
+validateFirebaseConfig();
+
+// Firebase configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "YOUR_API_KEY",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://YOUR_PROJECT.firebaseio.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "YOUR_PROJECT_ID",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "YOUR_PROJECT.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "YOUR_SENDER_ID",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "YOUR_APP_ID"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Lazy-loaded Firebase instances
@@ -23,14 +48,21 @@ let initPromise: Promise<void> | null = null;
 async function initializeFirebase(): Promise<void> {
   if (app && database && roadmapRef) return;
 
-  const [{ initializeApp }, { getDatabase, ref }] = await Promise.all([
-    import('firebase/app'),
-    import('firebase/database')
-  ]);
+  try {
+    const [{ initializeApp }, { getDatabase, ref }] = await Promise.all([
+      import('firebase/app'),
+      import('firebase/database')
+    ]);
 
-  app = initializeApp(firebaseConfig);
-  database = getDatabase(app);
-  roadmapRef = ref(database, 'roadmap');
+    app = initializeApp(firebaseConfig);
+    database = getDatabase(app);
+    roadmapRef = ref(database, 'roadmap');
+  } catch (error) {
+    throw new Error(
+      `Failed to initialize Firebase: ${error instanceof Error ? error.message : 'Unknown error'}. ` +
+      'Please check your Firebase configuration and network connection.'
+    );
+  }
 }
 
 // Ensure Firebase is initialized before use

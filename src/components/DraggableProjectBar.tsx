@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import type { Project } from '../types';
@@ -20,7 +21,7 @@ interface DraggableProjectBarProps {
   onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
 }
 
-export function DraggableProjectBar({
+function DraggableProjectBarComponent({
   project,
   timelineStart,
   dayWidth,
@@ -73,3 +74,16 @@ export function DraggableProjectBar({
     </div>
   );
 }
+
+// Memoize to prevent unnecessary re-renders during filtering/scrolling
+// Only re-render if project data, position, or selection state changes
+export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.project === nextProps.project &&
+    prevProps.timelineStart.getTime() === nextProps.timelineStart.getTime() &&
+    prevProps.dayWidth === nextProps.dayWidth &&
+    prevProps.stackIndex === nextProps.stackIndex &&
+    prevProps.isSelected === nextProps.isSelected
+    // Note: Callback props are excluded from comparison as they're typically stable
+  );
+});
