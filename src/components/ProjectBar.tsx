@@ -89,7 +89,7 @@ export function ProjectBar({
   stackIndex = 0,
   isDragging: externalDragging,
   isSelected,
-  dragListeners,
+  dragListeners: _dragListeners, // Currently unused - manual drag used instead for date changes
   onUpdate,
   onDelete,
   onAddMilestone,
@@ -106,7 +106,7 @@ export function ProjectBar({
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0, below: false });
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0, below: false, showLeft: false });
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
 
   // Dependency creation context
@@ -329,18 +329,19 @@ export function ProjectBar({
         if (!dragMode && !externalDragging && showTooltip) {
           const tooltipHeight = 150;
           const tooltipWidth = 200;
-          const halfWidth = tooltipWidth / 2;
+          const cursorOffset = 15; // Distance from cursor
           // Position near cursor, show below if too close to top
           const showBelow = e.clientY < tooltipHeight + 20;
-          // Clamp horizontal position to stay within viewport
-          const clampedX = Math.min(
-            Math.max(halfWidth + 10, e.clientX),
-            window.innerWidth - halfWidth - 10
-          );
+          // Position to the right of cursor, or left if near right edge
+          const showLeft = e.clientX + tooltipWidth + cursorOffset > window.innerWidth;
+          const x = showLeft
+            ? e.clientX - cursorOffset  // Position to left of cursor
+            : e.clientX + cursorOffset; // Position to right of cursor
           setTooltipPosition({
-            x: clampedX,
-            y: showBelow ? e.clientY + 15 : e.clientY - 15,
-            below: showBelow
+            x,
+            y: showBelow ? e.clientY + cursorOffset : e.clientY - cursorOffset,
+            below: showBelow,
+            showLeft
           });
         }
       }}
@@ -372,11 +373,15 @@ export function ProjectBar({
         onStartDependency={handleStartDependency}
       />
 
-      {/* Draggable area - single click opens edit */}
+      {/* Draggable area - single click opens edit, drag moves dates */}
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+          // Start drag mode for date movement
+          handleMouseDown(e, 'move');
         }}
         onMouseUp={(e) => {
           if (!clickStartRef.current) return;
@@ -393,7 +398,6 @@ export function ProjectBar({
           e.stopPropagation();
           onEdit();
         }}
-        {...dragListeners}
       >
         <div className={styles.projectContent}>
           <span className={styles.projectTitle}>{project.title}</span>
@@ -441,7 +445,7 @@ export function ProjectBar({
         </div>
       )}
 
-      {/* Tooltip */}
+      {/* Tooltip - positioned next to cursor */}
       {showTooltip && !dragMode && !externalDragging && !showMenu && (
         <div
           className={styles.tooltip}
@@ -449,10 +453,7 @@ export function ProjectBar({
             position: 'fixed',
             left: tooltipPosition.x,
             top: tooltipPosition.y,
-            transform: tooltipPosition.below
-              ? 'translateX(-50%) translateY(0)'
-              : 'translateX(-50%) translateY(-100%)',
-            marginTop: tooltipPosition.below ? 8 : -8
+            transform: `${tooltipPosition.showLeft ? 'translateX(-100%)' : ''} ${tooltipPosition.below ? '' : 'translateY(-100%)'}`.trim() || 'none'
           }}
         >
           <div className={styles.tooltipTitle}>{project.title}</div>

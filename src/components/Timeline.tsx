@@ -266,15 +266,24 @@ export function Timeline({
     enabled: true
   });
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    // Only allow horizontal scrolling via wheel when mouse is over the header
-    const target = e.target as HTMLElement;
-    if (!headerRef.current?.contains(target)) return;
+  // Use native wheel event listener with { passive: false } to allow preventDefault
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    if (!scrollEl) return;
 
-    if (scrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-      e.preventDefault();
-      scrollRef.current.scrollLeft += e.deltaY;
-    }
+    const handleWheel = (e: WheelEvent) => {
+      // Only allow horizontal scrolling via wheel when mouse is over the header
+      const target = e.target as HTMLElement;
+      if (!headerRef.current?.contains(target)) return;
+
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        scrollEl.scrollLeft += e.deltaY;
+      }
+    };
+
+    scrollEl.addEventListener('wheel', handleWheel, { passive: false });
+    return () => scrollEl.removeEventListener('wheel', handleWheel);
   }, []);
 
   // Click-drag panning state
@@ -433,7 +442,6 @@ export function Timeline({
         <div
           ref={scrollRef}
           className={`${styles.scrollContainer} ${isPanning ? styles.panning : ''}`}
-          onWheel={handleWheel}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}

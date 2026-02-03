@@ -28,6 +28,7 @@ interface MilestoneFormProps {
 
 // Status-aligned colors matching SearchFilter status indicators
 const STATUS_COLORS = [
+  { hex: '#0070c0', name: 'Complete' },
   { hex: '#04b050', name: 'On Track' },
   { hex: '#ffc002', name: 'At Risk' },
   { hex: '#ff0100', name: 'Off Track' },
