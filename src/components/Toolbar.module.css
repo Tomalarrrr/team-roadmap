@@ -1,0 +1,127 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.left {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.title {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.center {
+  flex: 0 0 auto;
+}
+
+.right {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.undoGroup {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.iconBtn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.iconBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.pasteBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--accent-blue-light);
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-md);
+  color: var(--accent-blue);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  animation: pulseIn 0.2s ease;
+}
+
+@keyframes pulseIn {
+  0% { transform: scale(0.95); opacity: 0; }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.pasteBtn:hover {
+  background: var(--accent-blue);
+  color: white;
+}
+
+.divider {
+  width: 1px;
+  height: 24px;
+  background: var(--border-light);
+  margin: 0 8px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .toolbar {
+    flex-wrap: wrap;
+    padding: 12px 16px;
+  }
+
+  .left {
+    order: 1;
+    flex: 1 1 100%;
+    margin-bottom: 8px;
+  }
+
+  .center {
+    order: 2;
+    flex: 1;
+  }
+
+  .right {
+    order: 3;
+    flex: 0 0 auto;
+  }
+
+  .title {
+    font-size: 1rem;
+  }
+}

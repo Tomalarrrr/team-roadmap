@@ -46,6 +46,7 @@
   box-sizing: border-box;
   background: var(--bg-primary);
   touch-action: none;
+  overflow: hidden;
 }
 
 .memberLane.dragging {
@@ -97,9 +98,9 @@
   font-weight: 600;
   color: var(--text-primary);
   margin-bottom: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .memberTitle {
@@ -113,6 +114,7 @@
 
 .addProjectBtn {
   align-self: flex-start;
+  margin-left: 26px; /* Align with member name (drag handle 18px + gap 8px) */
   padding: 4px 10px;
   display: flex;
   align-items: center;
@@ -263,6 +265,14 @@
   border-radius: var(--radius-full);
   white-space: nowrap;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.dependenciesLayer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 1;
 }
 
 /* Responsive - Tablet */

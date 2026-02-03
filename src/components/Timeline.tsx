@@ -14,15 +14,17 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable';
-import type { Project, TeamMember } from '../types';
+import type { Project, TeamMember, Dependency } from '../types';
 import { SortableMemberLane } from './SortableMemberLane';
 import { DraggableProjectBar } from './DraggableProjectBar';
 import { DroppableLane } from './DroppableLane';
+import { DependencyLine } from './DependencyLine';
 import {
   getFYStart,
   getFYEnd,
   getVisibleFYs,
-  getTodayPosition
+  getTodayPosition,
+  getBarDimensions
 } from '../utils/dateUtils';
 import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format, areIntervalsOverlapping } from 'date-fns';
 import styles from './Timeline.module.css';
@@ -74,13 +76,14 @@ function calculateProjectStacks(projects: Project[]): Map<string, number> {
   });
 
   return stacks;
-
 }
 
 interface TimelineProps {
   projects: Project[];
   teamMembers: TeamMember[];
+  dependencies: Dependency[];
   zoomLevel: ZoomLevel;
+  selectedProjectId?: string | null;
   onAddProject: (ownerName: string) => void;
   onUpdateProject: (projectId: string, updates: Partial<Project>) => void;
   onDeleteProject: (projectId: string) => void;
@@ -92,6 +95,9 @@ interface TimelineProps {
   onAddTeamMember: () => void;
   onEditTeamMember: (member: TeamMember) => void;
   onReorderTeamMembers: (fromIndex: number, toIndex: number) => void;
+  onCopyProject?: (project: Project) => void;
+  onAddDependency?: (fromId: string, toId: string) => void; // Future: for creating dependencies via UI
+  onRemoveDependency?: (depId: string) => void;
 }
 
 const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
@@ -108,7 +114,9 @@ const MIN_LANE_HEIGHT = 80;
 export function Timeline({
   projects,
   teamMembers,
+  dependencies,
   zoomLevel,
+  selectedProjectId,
   onAddProject,
   onUpdateProject,
   onDeleteProject,
@@ -119,7 +127,10 @@ export function Timeline({
   onDeleteMilestone,
   onAddTeamMember,
   onEditTeamMember,
-  onReorderTeamMembers
+  onReorderTeamMembers,
+  onCopyProject,
+  onAddDependency: _onAddDependency,
+  onRemoveDependency
 }: TimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const dayWidth = ZOOM_DAY_WIDTHS[zoomLevel];
@@ -205,13 +216,23 @@ export function Timeline({
 
   const todayPosition = getTodayPosition(timelineStart, dayWidth);
 
+  // Scroll to selected project or today
   useEffect(() => {
     if (scrollRef.current) {
-      // Scroll to show today with some padding on the left
-      const todayPos = todayPosition - 200; // 200px padding from left
-      scrollRef.current.scrollLeft = Math.max(0, todayPos);
+      if (selectedProjectId) {
+        // Find and scroll to the selected project
+        const project = projects.find(p => p.id === selectedProjectId);
+        if (project) {
+          const { left } = getBarDimensions(project.startDate, project.endDate, timelineStart, dayWidth);
+          scrollRef.current.scrollLeft = Math.max(0, left - 200);
+        }
+      } else {
+        // Scroll to show today with some padding on the left
+        const todayPos = todayPosition - 200; // 200px padding from left
+        scrollRef.current.scrollLeft = Math.max(0, todayPos);
+      }
     }
-  }, [zoomLevel, todayPosition]);
+  }, [zoomLevel, todayPosition, selectedProjectId, projects, timelineStart, dayWidth]);
 
   const handleWheel = (e: React.WheelEvent) => {
     if (scrollRef.current && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
@@ -274,6 +295,20 @@ export function Timeline({
     return stacksByOwner;
   }, [teamMembers, projectsByOwner]);
 
+  // Create a global project stacks map for dependency rendering
+  const globalProjectStacks = useMemo(() => {
+    const stacks = new Map<string, number>();
+
+    teamMembers.forEach((member) => {
+      const memberStacks = projectStacksByOwner[member.name];
+      memberStacks?.forEach((stackIdx, projectId) => {
+        stacks.set(projectId, stackIdx);
+      });
+    });
+
+    return stacks;
+  }, [teamMembers, projectStacksByOwner]);
+
   // Calculate lane heights based on max stack index (not project count)
   const laneHeights = useMemo(() => {
     return teamMembers.map(member => {
@@ -296,12 +331,18 @@ export function Timeline({
     return positions;
   }, [laneHeights]);
 
+  // Store lane positions in ref for dependency calculation
+  const lanePositionsRef = useRef(lanePositions);
+  useEffect(() => {
+    lanePositionsRef.current = lanePositions;
+  }, [lanePositions]);
+
   const totalLanesHeight = lanePositions.length > 0
     ? lanePositions[lanePositions.length - 1] + laneHeights[laneHeights.length - 1]
     : 0;
 
   return (
-    <div className={styles.container}>
+    <div id="timeline-container" className={styles.container}>
       {/* Fixed left sidebar with team members */}
       <div className={styles.sidebar}>
         <div className={styles.sidebarHeader}>Team</div>
@@ -384,6 +425,30 @@ export function Timeline({
                 </div>
               )}
 
+              {/* Dependencies SVG layer */}
+              <svg
+                className={styles.dependenciesLayer}
+                style={{ width: totalWidth, height: totalLanesHeight }}
+              >
+                {dependencies.map(dep => {
+                  const fromProject = projects.find(p => p.id === dep.fromProjectId);
+                  const toProject = projects.find(p => p.id === dep.toProjectId);
+                  if (!fromProject || !toProject) return null;
+
+                  return (
+                    <DependencyLine
+                      key={dep.id}
+                      fromProject={fromProject}
+                      toProject={toProject}
+                      timelineStart={timelineStart}
+                      dayWidth={dayWidth}
+                      projectStacks={globalProjectStacks}
+                      onRemove={() => onRemoveDependency?.(dep.id)}
+                    />
+                  );
+                })}
+              </svg>
+
               {/* Project lanes */}
               {teamMembers.map((member, idx) => {
                 const stacks = projectStacksByOwner[member.name];
@@ -402,6 +467,7 @@ export function Timeline({
                         timelineStart={timelineStart}
                         dayWidth={dayWidth}
                         stackIndex={stacks?.get(project.id) ?? 0}
+                        isSelected={project.id === selectedProjectId}
                         onUpdate={(updates) => onUpdateProject(project.id, updates)}
                         onDelete={() => onDeleteProject(project.id)}
                         onAddMilestone={() => onAddMilestone(project.id)}
@@ -409,6 +475,7 @@ export function Timeline({
                         onEditMilestone={(mid) => onEditMilestone(project.id, mid)}
                         onUpdateMilestone={(mid, updates) => onUpdateMilestone(project.id, mid, updates)}
                         onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
+                        onCopy={onCopyProject ? () => onCopyProject(project) : undefined}
                       />
                     ))}
                   </DroppableLane>

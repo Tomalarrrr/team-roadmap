@@ -1,22 +1,37 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useRoadmap } from './hooks/useRoadmap';
+import { useUndoManager, createInverse } from './hooks/useUndoManager';
+import { useClipboard } from './hooks/useClipboard';
 import { Header } from './components/Header';
+import { Toolbar } from './components/Toolbar';
 import { Timeline, type ZoomLevel } from './components/Timeline';
 import { Modal } from './components/Modal';
 import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
 import { TeamMemberForm } from './components/TeamMemberForm';
-import type { Project, Milestone, TeamMember } from './types';
+import type { Project, Milestone, TeamMember, Dependency } from './types';
+import type { FilterState } from './components/SearchFilter';
+import { getSuggestedProjectDates } from './utils/dateUtils';
 import styles from './App.module.css';
 
 type ModalType =
-  | { type: 'add-project'; ownerName: string }
+  | { type: 'add-project'; ownerName: string; suggestedStart: string; suggestedEnd: string }
   | { type: 'edit-project'; project: Project }
   | { type: 'add-milestone'; projectId: string; project: Project }
   | { type: 'edit-milestone'; projectId: string; project: Project; milestone: Milestone }
   | { type: 'add-member' }
   | { type: 'edit-member'; member: TeamMember }
   | null;
+
+// Generate a simple user ID for this session (in production, use auth)
+const getUserId = () => {
+  let userId = sessionStorage.getItem('roadmap-user-id');
+  if (!userId) {
+    userId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    sessionStorage.setItem('roadmap-user-id', userId);
+  }
+  return userId;
+};
 
 function App() {
   const {
@@ -36,8 +51,178 @@ function App() {
 
   const [modal, setModal] = useState<ModalType>(null);
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('month');
+  const [filters, setFilters] = useState<FilterState>({
+    search: '',
+    owners: [],
+    tags: [],
+    dateRange: null,
+    status: 'all'
+  });
+  const [dependencies, setDependencies] = useState<Dependency[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+  // Undo manager
+  const userId = useMemo(() => getUserId(), []);
+  const {
+    recordAction,
+    undo,
+    redo,
+    canUndo,
+    canRedo
+  } = useUndoManager({ userId });
+
+  // Handle paste from clipboard
+  const handlePasteProject = useCallback(async (project: Omit<Project, 'id'>) => {
+    await addProject(project);
+  }, [addProject]);
+
+  const handlePasteMilestone = useCallback(async (milestone: Omit<Milestone, 'id'>, projectId: string) => {
+    await addMilestone(projectId, milestone);
+  }, [addMilestone]);
+
+  // Clipboard
+  const {
+    copyProject,
+    paste,
+    hasContent: hasClipboard
+  } = useClipboard({
+    onPasteProject: handlePasteProject,
+    onPasteMilestone: handlePasteMilestone
+  });
 
   const closeModal = useCallback(() => setModal(null), []);
+
+  // Filter projects based on current filters
+  const filteredProjects = useMemo(() => {
+    let result = data.projects;
+
+    // Filter by owners
+    if (filters.owners.length > 0) {
+      result = result.filter(p => filters.owners.includes(p.owner));
+    }
+
+    // Filter by tags (milestones)
+    if (filters.tags.length > 0) {
+      result = result.filter(p =>
+        p.milestones?.some(m =>
+          m.tags?.some(t => filters.tags.includes(t))
+        )
+      );
+    }
+
+    // Filter by status
+    const today = new Date();
+    if (filters.status === 'past') {
+      result = result.filter(p => new Date(p.endDate) < today);
+    } else if (filters.status === 'active') {
+      result = result.filter(p =>
+        new Date(p.startDate) <= today && new Date(p.endDate) >= today
+      );
+    } else if (filters.status === 'upcoming') {
+      result = result.filter(p => new Date(p.startDate) > today);
+    }
+
+    // Filter by search (already handled in SearchFilter for selection)
+    // But we still filter the display if there's a search term
+    if (filters.search.trim()) {
+      const query = filters.search.toLowerCase();
+      result = result.filter(p =>
+        p.title.toLowerCase().includes(query) ||
+        p.owner.toLowerCase().includes(query) ||
+        p.milestones?.some(m =>
+          m.title.toLowerCase().includes(query) ||
+          m.tags?.some(t => t.toLowerCase().includes(query))
+        )
+      );
+    }
+
+    return result;
+  }, [data.projects, filters]);
+
+  // Scroll to project when selected from search
+  const handleProjectSelect = useCallback((projectId: string) => {
+    setSelectedProjectId(projectId);
+    // The Timeline component will handle scrolling
+    setTimeout(() => setSelectedProjectId(null), 2000);
+  }, []);
+
+  // Handle undo
+  const handleUndo = useCallback(() => {
+    const action = undo();
+    if (!action) return;
+
+    // Apply the inverse action
+    const inverse = action.inverse as { action: string; data: unknown };
+    switch (action.type) {
+      case 'CREATE_PROJECT':
+        if (inverse.action === 'delete') {
+          const proj = inverse.data as Project;
+          deleteProject(proj.id);
+        }
+        break;
+      case 'DELETE_PROJECT':
+        if (inverse.action === 'restore') {
+          const proj = inverse.data as Project;
+          addProject(proj);
+        }
+        break;
+      case 'UPDATE_PROJECT':
+        if (inverse.action === 'update') {
+          const proj = inverse.data as Project;
+          updateProject(proj.id, proj);
+        }
+        break;
+      // Add more cases as needed
+    }
+  }, [undo, deleteProject, addProject, updateProject]);
+
+  // Handle redo
+  const handleRedo = useCallback(() => {
+    const action = redo();
+    if (!action) return;
+
+    // Apply the original action
+    switch (action.type) {
+      case 'CREATE_PROJECT': {
+        const proj = action.data as Project;
+        addProject(proj);
+        break;
+      }
+      case 'DELETE_PROJECT': {
+        const proj = action.data as Project;
+        deleteProject(proj.id);
+        break;
+      }
+      case 'UPDATE_PROJECT': {
+        const proj = action.data as Project;
+        updateProject(proj.id, proj);
+        break;
+      }
+    }
+  }, [redo, addProject, deleteProject, updateProject]);
+
+  // Keyboard shortcuts for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const modifier = isMac ? e.metaKey : e.ctrlKey;
+
+      if (modifier && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if (modifier && e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   // Team member handlers
   const handleAddMember = useCallback(
@@ -65,7 +250,7 @@ function App() {
     }
   }, [modal, deleteTeamMember, closeModal]);
 
-  // Project handlers
+  // Project handlers with undo support
   const handleAddProject = useCallback(
     async (values: Omit<Project, 'id' | 'milestones'>) => {
       await addProject(values);
@@ -77,11 +262,24 @@ function App() {
   const handleEditProject = useCallback(
     async (values: Omit<Project, 'id' | 'milestones'>) => {
       if (modal?.type === 'edit-project') {
+        const beforeState = modal.project;
         await updateProject(modal.project.id, values);
+        recordAction('UPDATE_PROJECT', values, createInverse('UPDATE_PROJECT', beforeState, values));
         closeModal();
       }
     },
-    [modal, updateProject, closeModal]
+    [modal, updateProject, closeModal, recordAction]
+  );
+
+  const handleDeleteProject = useCallback(
+    async (projectId: string) => {
+      const project = data.projects.find(p => p.id === projectId);
+      if (project) {
+        recordAction('DELETE_PROJECT', project, createInverse('DELETE_PROJECT', project, null));
+        await deleteProject(projectId);
+      }
+    },
+    [data.projects, deleteProject, recordAction]
   );
 
   // Milestone handlers
@@ -104,6 +302,21 @@ function App() {
     },
     [modal, updateMilestone, closeModal]
   );
+
+  // Dependency handlers
+  const handleAddDependency = useCallback((fromId: string, toId: string) => {
+    const newDep: Dependency = {
+      id: `dep-${Date.now()}`,
+      fromProjectId: fromId,
+      toProjectId: toId,
+      type: 'finish-to-start'
+    };
+    setDependencies(deps => [...deps, newDep]);
+  }, []);
+
+  const handleRemoveDependency = useCallback((depId: string) => {
+    setDependencies(deps => deps.filter(d => d.id !== depId));
+  }, []);
 
   const openAddMilestone = useCallback(
     (projectId: string) => {
@@ -141,16 +354,36 @@ function App() {
 
   return (
     <div className={styles.app}>
+      <Toolbar
+        projects={data.projects}
+        teamMembers={data.teamMembers}
+        dependencies={dependencies}
+        onFilterChange={setFilters}
+        onProjectSelect={handleProjectSelect}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        hasClipboard={hasClipboard}
+        onPaste={() => paste()}
+      />
+
       <Header zoomLevel={zoomLevel} onZoomChange={setZoomLevel} />
 
       <main className={styles.main}>
         <Timeline
-          projects={data.projects}
+          projects={filteredProjects}
           teamMembers={data.teamMembers}
+          dependencies={dependencies}
           zoomLevel={zoomLevel}
-          onAddProject={(ownerName) => setModal({ type: 'add-project', ownerName })}
+          selectedProjectId={selectedProjectId}
+          onAddProject={(ownerName) => {
+            const ownerProjects = data.projects.filter(p => p.owner === ownerName);
+            const { suggestedStart, suggestedEnd } = getSuggestedProjectDates(ownerProjects);
+            setModal({ type: 'add-project', ownerName, suggestedStart, suggestedEnd });
+          }}
           onUpdateProject={updateProject}
-          onDeleteProject={deleteProject}
+          onDeleteProject={handleDeleteProject}
           onAddMilestone={openAddMilestone}
           onEditProject={openEditProject}
           onEditMilestone={openEditMilestone}
@@ -159,6 +392,9 @@ function App() {
           onAddTeamMember={() => setModal({ type: 'add-member' })}
           onEditTeamMember={(member) => setModal({ type: 'edit-member', member })}
           onReorderTeamMembers={reorderTeamMembers}
+          onCopyProject={copyProject}
+          onAddDependency={handleAddDependency}
+          onRemoveDependency={handleRemoveDependency}
         />
       </main>
 
@@ -184,7 +420,11 @@ function App() {
       <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New Project">
         {modal?.type === 'add-project' && (
           <ProjectForm
-            initialValues={{ owner: modal.ownerName }}
+            initialValues={{
+              owner: modal.ownerName,
+              startDate: modal.suggestedStart,
+              endDate: modal.suggestedEnd
+            }}
             onSubmit={handleAddProject}
             onCancel={closeModal}
             hideOwner
@@ -201,7 +441,8 @@ function App() {
               owner: modal.project.owner,
               startDate: modal.project.startDate,
               endDate: modal.project.endDate,
-              statusColor: modal.project.statusColor
+              statusColor: modal.project.statusColor,
+              manualColorOverride: modal.project.manualColorOverride
             }}
             onSubmit={handleEditProject}
             onCancel={closeModal}
@@ -228,6 +469,7 @@ function App() {
           <MilestoneForm
             initialValues={{
               title: modal.milestone.title,
+              description: modal.milestone.description,
               startDate: modal.milestone.startDate,
               endDate: modal.milestone.endDate,
               tags: modal.milestone.tags,
@@ -238,6 +480,10 @@ function App() {
             projectEndDate={modal.project.endDate}
             onSubmit={handleEditMilestone}
             onCancel={closeModal}
+            onDelete={async () => {
+              await deleteMilestone(modal.projectId, modal.milestone.id);
+              closeModal();
+            }}
             isEditing
           />
         )}

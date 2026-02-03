@@ -8,6 +8,7 @@ interface DraggableProjectBarProps {
   timelineStart: Date;
   dayWidth: number;
   stackIndex?: number;
+  isSelected?: boolean;
   onUpdate: (updates: Partial<Project>) => void;
   onDelete: () => void;
   onAddMilestone: () => void;
@@ -15,6 +16,7 @@ interface DraggableProjectBarProps {
   onEditMilestone: (milestoneId: string) => void;
   onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
   onDeleteMilestone: (milestoneId: string) => void;
+  onCopy?: () => void;
 }
 
 export function DraggableProjectBar({
@@ -22,13 +24,15 @@ export function DraggableProjectBar({
   timelineStart,
   dayWidth,
   stackIndex = 0,
+  isSelected,
   onUpdate,
   onDelete,
   onAddMilestone,
   onEdit,
   onEditMilestone,
   onUpdateMilestone,
-  onDeleteMilestone
+  onDeleteMilestone,
+  onCopy
 }: DraggableProjectBarProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `project-${project.id}`,
@@ -41,17 +45,19 @@ export function DraggableProjectBar({
   const style = {
     transform: CSS.Translate.toString(transform),
     opacity: isDragging ? 0.8 : 1,
-    zIndex: isDragging ? 1000 : undefined,
-    cursor: isDragging ? 'grabbing' : undefined
+    zIndex: isDragging ? 1000 : undefined
   } as React.CSSProperties;
 
   return (
-    <div ref={setNodeRef} style={style} {...listeners} {...attributes}>
+    <div ref={setNodeRef} style={style} {...attributes}>
       <ProjectBar
         project={project}
         timelineStart={timelineStart}
         dayWidth={dayWidth}
         stackIndex={stackIndex}
+        isDragging={isDragging}
+        isSelected={isSelected}
+        dragListeners={listeners}
         onUpdate={onUpdate}
         onDelete={onDelete}
         onAddMilestone={onAddMilestone}
@@ -59,6 +65,7 @@ export function DraggableProjectBar({
         onEditMilestone={onEditMilestone}
         onUpdateMilestone={onUpdateMilestone}
         onDeleteMilestone={onDeleteMilestone}
+        onCopy={onCopy}
       />
     </div>
   );

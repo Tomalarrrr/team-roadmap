@@ -6,7 +6,7 @@
   cursor: grab;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  border: 2px solid rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.8);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -78,17 +78,12 @@
 }
 
 .tooltip {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-bottom: 8px;
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
   padding: 10px 14px;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border-light);
-  z-index: 100;
+  z-index: 9999;
   min-width: 140px;
   animation: fadeUp 0.15s ease;
   pointer-events: none;
@@ -116,6 +111,16 @@
 .tooltipDates {
   font-size: 0.75rem;
   color: var(--text-secondary);
+}
+
+.tooltipDescription {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-light);
+  white-space: pre-wrap;
+  max-width: 200px;
 }
 
 .tooltipTags {
@@ -149,19 +154,19 @@
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-light);
   overflow: hidden;
-  animation: scaleIn 0.1s ease;
+  animation: menuFadeIn 0.1s ease;
   pointer-events: auto;
   min-width: 120px;
 }
 
-@keyframes scaleIn {
+@keyframes menuFadeIn {
   from {
     opacity: 0;
-    transform: translateX(-50%) scale(0.95);
+    transform: scale(0.95);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) scale(1);
+    transform: scale(1);
   }
 }
 

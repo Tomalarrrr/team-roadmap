@@ -4,10 +4,13 @@ import { MilestoneLine } from './MilestoneLine';
 import {
   getBarDimensions,
   toISODateString,
-  formatShortDate
+  formatShortDate,
+  isDatePast
 } from '../utils/dateUtils';
 import { parseISO, areIntervalsOverlapping } from 'date-fns';
 import styles from './ProjectBar.module.css';
+
+const AUTO_BLUE = '#6B8CAE'; // Soft Blue for past projects
 
 // Calculate stack indices for overlapping milestones
 function calculateMilestoneStacks(milestones: Milestone[]): Map<string, number> {
@@ -58,6 +61,9 @@ interface ProjectBarProps {
   timelineStart: Date;
   dayWidth: number;
   stackIndex?: number;
+  isDragging?: boolean;
+  isSelected?: boolean;
+  dragListeners?: React.DOMAttributes<HTMLDivElement>;
   onUpdate: (updates: Partial<Project>) => void;
   onDelete: () => void;
   onAddMilestone: () => void;
@@ -65,6 +71,7 @@ interface ProjectBarProps {
   onEditMilestone: (milestoneId: string) => void;
   onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => void;
   onDeleteMilestone: (milestoneId: string) => void;
+  onCopy?: () => void;
 }
 
 const BASE_PROJECT_HEIGHT = 52;
@@ -78,13 +85,17 @@ export function ProjectBar({
   timelineStart,
   dayWidth,
   stackIndex = 0,
+  isDragging: externalDragging,
+  isSelected,
+  dragListeners,
   onUpdate,
   onDelete,
   onAddMilestone,
   onEdit,
   onEditMilestone,
   onUpdateMilestone,
-  onDeleteMilestone
+  onDeleteMilestone,
+  onCopy
 }: ProjectBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -92,6 +103,11 @@ export function ProjectBar({
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+
+  // Click-to-edit tracking (distinguish from drag)
+  const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
   // Calculate effective dates including milestone extensions
   const effectiveDates = useMemo(() => {
@@ -116,6 +132,12 @@ export function ProjectBar({
     timelineStart,
     dayWidth
   );
+
+  // Auto-blue rule: turn blue if project end date is past and no manual override
+  const isPast = isDatePast(project.endDate);
+  const displayColor = isPast && !project.manualColorOverride
+    ? AUTO_BLUE
+    : project.statusColor;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     e.preventDefault();
@@ -208,13 +230,13 @@ export function ProjectBar({
   return (
     <div
       ref={barRef}
-      className={`${styles.projectBar} ${dragMode ? styles.dragging : ''}`}
+      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''}`}
       style={{
         left,
         width,
         top: topPosition,
         height: projectBarHeight,
-        backgroundColor: project.statusColor || '#1e3a5f'
+        backgroundColor: displayColor || '#1e3a5f'
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -222,6 +244,17 @@ export function ProjectBar({
         setMenuPosition({ x: e.clientX, y: e.clientY });
         setShowMenu(true);
       }}
+      onMouseEnter={() => {
+        if (!dragMode && !externalDragging && barRef.current) {
+          const rect = barRef.current.getBoundingClientRect();
+          setTooltipPosition({
+            x: rect.left + rect.width / 2,
+            y: rect.top
+          });
+          setShowTooltip(true);
+        }
+      }}
+      onMouseLeave={() => setShowTooltip(false)}
     >
       {/* Resize handles */}
       <div
@@ -235,11 +268,28 @@ export function ProjectBar({
         onMouseDown={(e) => handleMouseDown(e, 'resize-end')}
       />
 
-      {/* Draggable area */}
+      {/* Draggable area - single click opens edit */}
       <div
         className={styles.dragArea}
-        onMouseDown={(e) => handleMouseDown(e, 'move')}
-        onDoubleClick={onAddMilestone}
+        onMouseDown={(e) => {
+          clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+        }}
+        onMouseUp={(e) => {
+          if (!clickStartRef.current) return;
+          const dx = Math.abs(e.clientX - clickStartRef.current.x);
+          const dy = Math.abs(e.clientY - clickStartRef.current.y);
+          const elapsed = Date.now() - clickStartRef.current.time;
+          // If minimal movement and quick click, open edit
+          if (dx < 5 && dy < 5 && elapsed < 300) {
+            onEdit();
+          }
+          clickStartRef.current = null;
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onEdit();
+        }}
+        {...dragListeners}
       >
         <div className={styles.projectContent}>
           <span className={styles.projectTitle}>{project.title}</span>
@@ -248,27 +298,27 @@ export function ProjectBar({
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
         </div>
+      </div>
 
-        {/* Milestones as lines within the project bar */}
-        <div
-          className={styles.milestonesContainer}
-          style={{ height: (maxMilestoneStack + 1) * 24 }}
-        >
-          {(project.milestones || []).map((milestone) => (
-            <MilestoneLine
-              key={milestone.id}
-              milestone={milestone}
-              timelineStart={timelineStart}
-              dayWidth={dayWidth}
-              projectLeft={left}
-              projectWidth={width}
-              stackIndex={milestoneStacks.get(milestone.id) || 0}
-              onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
-              onEdit={() => onEditMilestone(milestone.id)}
-              onDelete={() => onDeleteMilestone(milestone.id)}
-            />
-          ))}
-        </div>
+      {/* Milestones as lines within the project bar - OUTSIDE dragArea to prevent interference */}
+      <div
+        className={styles.milestonesContainer}
+        style={{ height: (maxMilestoneStack + 1) * 24 }}
+      >
+        {(project.milestones || []).map((milestone) => (
+          <MilestoneLine
+            key={milestone.id}
+            milestone={milestone}
+            timelineStart={timelineStart}
+            dayWidth={dayWidth}
+            projectLeft={left}
+            projectWidth={width}
+            stackIndex={milestoneStacks.get(milestone.id) || 0}
+            onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
+            onEdit={() => onEditMilestone(milestone.id)}
+            onDelete={() => onDeleteMilestone(milestone.id)}
+          />
+        ))}
       </div>
 
       {/* Context menu */}
@@ -280,7 +330,35 @@ export function ProjectBar({
         >
           <button onClick={onEdit}>Edit Project</button>
           <button onClick={onAddMilestone}>Add Milestone</button>
+          {onCopy && <button onClick={() => { onCopy(); setShowMenu(false); }}>Copy Project</button>}
           <button className={styles.deleteBtn} onClick={onDelete}>Delete</button>
+        </div>
+      )}
+
+      {/* Tooltip */}
+      {showTooltip && !dragMode && !externalDragging && !showMenu && (
+        <div
+          className={styles.tooltip}
+          style={{
+            position: 'fixed',
+            left: tooltipPosition.x,
+            top: tooltipPosition.y,
+            transform: 'translateX(-50%) translateY(-100%)',
+            marginTop: -8
+          }}
+        >
+          <div className={styles.tooltipTitle}>{project.title}</div>
+          <div className={styles.tooltipDates}>
+            {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
+          </div>
+          {(project.milestones?.length ?? 0) > 0 && (
+            <div className={styles.tooltipMilestones}>
+              {project.milestones.length} milestone{project.milestones.length !== 1 ? 's' : ''}
+            </div>
+          )}
+          {isPast && !project.manualColorOverride && (
+            <div className={styles.pastBadge}>Past project</div>
+          )}
         </div>
       )}
     </div>

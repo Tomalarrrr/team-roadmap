@@ -102,3 +102,46 @@ export function clampDateToRange(
 export function toISODateString(date: Date): string {
   return format(date, 'yyyy-MM-dd');
 }
+
+// Find the optimal start date for a new project (flight path algorithm)
+// Returns the earliest available date following any existing project
+export function getSuggestedProjectDates(
+  ownerProjects: { startDate: string; endDate: string }[],
+  defaultDuration: number = 30 // Default project duration in days
+): { suggestedStart: string; suggestedEnd: string; hasExisting: boolean } {
+  const today = startOfDay(new Date());
+
+  if (ownerProjects.length === 0) {
+    // No existing projects, start today
+    const suggestedStart = toISODateString(today);
+    const suggestedEnd = toISODateString(addDays(today, defaultDuration));
+    return { suggestedStart, suggestedEnd, hasExisting: false };
+  }
+
+  // Find the earliest ending project that ends after today
+  // This gives the user the soonest available slot
+  let earliestEndDate: Date | null = null;
+
+  ownerProjects.forEach(proj => {
+    const endDate = parseISO(proj.endDate);
+    // Only consider projects that haven't ended yet
+    if (!isBefore(endDate, today)) {
+      if (!earliestEndDate || isBefore(endDate, earliestEndDate)) {
+        earliestEndDate = endDate;
+      }
+    }
+  });
+
+  // If no future projects, start today
+  if (!earliestEndDate) {
+    const suggestedStart = toISODateString(today);
+    const suggestedEnd = toISODateString(addDays(today, defaultDuration));
+    return { suggestedStart, suggestedEnd, hasExisting: true };
+  }
+
+  // Start the day after the earliest ending project
+  const suggestedStart = toISODateString(addDays(earliestEndDate, 1));
+  const suggestedEnd = toISODateString(addDays(earliestEndDate, 1 + defaultDuration));
+
+  return { suggestedStart, suggestedEnd, hasExisting: true };
+}

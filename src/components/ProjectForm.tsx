@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { format, addDays } from 'date-fns';
 import styles from './Form.module.css';
 
 interface ProjectFormProps {
@@ -8,6 +9,7 @@ interface ProjectFormProps {
     startDate: string;
     endDate: string;
     statusColor: string;
+    manualColorOverride?: boolean;
   }>;
   onSubmit: (values: {
     title: string;
@@ -15,6 +17,7 @@ interface ProjectFormProps {
     startDate: string;
     endDate: string;
     statusColor: string;
+    manualColorOverride?: boolean;
   }) => void;
   onCancel: () => void;
   isEditing?: boolean;
@@ -42,17 +45,29 @@ export function ProjectForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_COLORS[0]);
+  const [manualColorOverride, setManualColorOverride] = useState(
+    initialValues?.manualColorOverride || false
+  );
   const [customColor, setCustomColor] = useState('');
+  const [dateError, setDateError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !owner.trim() || !startDate || !endDate) return;
+
+    if (new Date(endDate) < new Date(startDate)) {
+      setDateError('End date cannot be before start date');
+      return;
+    }
+    setDateError('');
+
     onSubmit({
       title: title.trim(),
       owner: owner.trim(),
       startDate,
       endDate,
-      statusColor
+      statusColor,
+      manualColorOverride
     });
   };
 
@@ -105,12 +120,31 @@ export function ProjectForm({
             id="endDate"
             type="date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e) => {
+              setEndDate(e.target.value);
+              setDateError('');
+            }}
             className={styles.input}
             required
           />
         </div>
       </div>
+
+      {!isEditing && (
+        <button
+          type="button"
+          className={styles.newRowBtn}
+          onClick={() => {
+            const today = new Date();
+            setStartDate(format(today, 'yyyy-MM-dd'));
+            setEndDate(format(addDays(today, 30), 'yyyy-MM-dd'));
+          }}
+        >
+          ↻ Start New Row (from today)
+        </button>
+      )}
+
+      {dateError && <div className={styles.error}>{dateError}</div>}
 
       <div className={styles.field}>
         <label className={styles.label}>Status Color</label>
@@ -121,7 +155,10 @@ export function ProjectForm({
               type="button"
               className={`${styles.colorSwatch} ${statusColor === color ? styles.selected : ''}`}
               style={{ backgroundColor: color }}
-              onClick={() => setStatusColor(color)}
+              onClick={() => {
+                setStatusColor(color);
+                setManualColorOverride(true);
+              }}
               aria-label={`Select color ${color}`}
             />
           ))}
@@ -132,12 +169,25 @@ export function ProjectForm({
               onChange={(e) => {
                 setCustomColor(e.target.value);
                 setStatusColor(e.target.value);
+                setManualColorOverride(true);
               }}
               className={styles.customColorInput}
               aria-label="Custom color picker"
             />
           </div>
         </div>
+      </div>
+
+      <div className={styles.checkboxField}>
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            checked={manualColorOverride}
+            onChange={(e) => setManualColorOverride(e.target.checked)}
+            className={styles.checkbox}
+          />
+          <span>Keep this color (don't auto-change to blue when past due)</span>
+        </label>
       </div>
 
       <div className={styles.actions}>

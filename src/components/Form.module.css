@@ -16,6 +16,26 @@
   gap: 16px;
 }
 
+.newRowBtn {
+  align-self: flex-start;
+  padding: 6px 12px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px dashed var(--border-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-top: -8px;
+}
+
+.newRowBtn:hover {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  background: var(--accent-blue-light);
+}
+
 .label {
   font-size: 0.85rem;
   font-weight: 500;
@@ -44,6 +64,48 @@
 
 .input::placeholder {
   color: var(--text-muted);
+}
+
+.textarea {
+  padding: 10px 14px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+}
+
+.textarea:hover {
+  border-color: var(--text-muted);
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 3px var(--accent-blue-light);
+}
+
+.textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.optional {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.error {
+  color: #ef4444;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  background: #fef2f2;
+  border-radius: var(--radius-sm);
+  border: 1px solid #fecaca;
 }
 
 .hint {
@@ -118,11 +180,32 @@
 
 .actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 12px;
   padding-top: 8px;
   border-top: 1px solid var(--border-light);
   margin-top: 4px;
+}
+
+.actionsSpacer {
+  flex: 1;
+}
+
+.deleteBtn {
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #ef4444;
+  background: transparent;
+  border: 1px solid #fecaca;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.deleteBtn:hover {
+  background: #fef2f2;
+  border-color: #ef4444;
 }
 
 .cancelBtn {

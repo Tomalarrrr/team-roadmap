@@ -1,7 +1,7 @@
 .projectBar {
   position: absolute;
   min-height: 52px;
-  border-radius: 26px;
+  border-radius: var(--radius-full);
   cursor: grab;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   box-shadow: var(--shadow-sm);
@@ -21,6 +21,17 @@
   box-shadow: var(--shadow-lg);
   z-index: 10;
   opacity: 0.95;
+}
+
+.projectBar.selected {
+  box-shadow: 0 0 0 3px var(--accent-blue), var(--shadow-lg);
+  z-index: 15;
+  animation: pulse 1s ease-in-out 2;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--accent-blue), var(--shadow-lg); }
+  50% { box-shadow: 0 0 0 6px var(--accent-blue-light), var(--shadow-lg); }
 }
 
 .resizeHandle {
@@ -45,18 +56,19 @@
   bottom: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   overflow: hidden;
 }
 
 .projectContent {
-  padding: 0 8px;
+  padding: 8px 8px 4px;
   pointer-events: none;
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: nowrap;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .projectTitle {
@@ -101,18 +113,18 @@
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-light);
   overflow: hidden;
-  animation: scaleIn 0.1s ease;
+  animation: menuFadeIn 0.1s ease;
   min-width: 140px;
 }
 
-@keyframes scaleIn {
+@keyframes menuFadeIn {
   from {
     opacity: 0;
-    transform: translateX(-50%) scale(0.95);
+    transform: scale(0.95);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) scale(1);
+    transform: scale(1);
   }
 }
 
@@ -139,4 +151,54 @@
 
 .contextMenu .deleteBtn:hover {
   background: #fef2f2;
+}
+
+/* Tooltip styles */
+.tooltip {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid var(--border-light);
+  z-index: 9999;
+  min-width: 160px;
+  max-width: 280px;
+  animation: tooltipFadeIn 0.15s ease;
+  pointer-events: none;
+}
+
+@keyframes tooltipFadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-100%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-100%);
+  }
+}
+
+.tooltipTitle {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.tooltipDates {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.tooltipMilestones {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.pastBadge {
+  margin-top: 6px;
+  font-size: 0.65rem;
+  color: var(--accent-blue);
+  font-weight: 500;
 }

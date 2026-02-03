@@ -4,6 +4,7 @@ import styles from './Form.module.css';
 interface MilestoneFormProps {
   initialValues?: {
     title: string;
+    description?: string;
     startDate: string;
     endDate: string;
     tags: string[];
@@ -14,6 +15,7 @@ interface MilestoneFormProps {
   projectEndDate: string;
   onSubmit: (values: {
     title: string;
+    description?: string;
     startDate: string;
     endDate: string;
     tags: string[];
@@ -21,6 +23,7 @@ interface MilestoneFormProps {
     manualColorOverride?: boolean;
   }) => void;
   onCancel: () => void;
+  onDelete?: () => void;
   isEditing?: boolean;
 }
 
@@ -38,9 +41,11 @@ export function MilestoneForm({
   projectStartDate,
   onSubmit,
   onCancel,
+  onDelete,
   isEditing = false
 }: MilestoneFormProps) {
   const [title, setTitle] = useState(initialValues?.title || '');
+  const [description, setDescription] = useState(initialValues?.description || '');
   const [startDate, setStartDate] = useState(initialValues?.startDate || projectStartDate);
   const [endDate, setEndDate] = useState(initialValues?.endDate || projectStartDate);
   const [tagsInput, setTagsInput] = useState(initialValues?.tags?.join(', ') || '');
@@ -49,10 +54,17 @@ export function MilestoneForm({
     initialValues?.manualColorOverride || false
   );
   const [customColor, setCustomColor] = useState('');
+  const [dateError, setDateError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || !startDate || !endDate) return;
+
+    if (new Date(endDate) < new Date(startDate)) {
+      setDateError('End date cannot be before start date');
+      return;
+    }
+    setDateError('');
 
     const tags = tagsInput
       .split(',')
@@ -61,6 +73,7 @@ export function MilestoneForm({
 
     onSubmit({
       title: title.trim(),
+      description: description.trim() || undefined,
       startDate,
       endDate,
       tags,
@@ -85,6 +98,18 @@ export function MilestoneForm({
         />
       </div>
 
+      <div className={styles.field}>
+        <label htmlFor="description" className={styles.label}>Description <span className={styles.optional}>(optional)</span></label>
+        <textarea
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          className={styles.textarea}
+          placeholder="Add details about this milestone..."
+          rows={3}
+        />
+      </div>
+
       <div className={styles.row}>
         <div className={styles.field}>
           <label htmlFor="startDate" className={styles.label}>Start Date</label>
@@ -103,12 +128,17 @@ export function MilestoneForm({
             id="endDate"
             type="date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={(e) => {
+              setEndDate(e.target.value);
+              setDateError('');
+            }}
             className={styles.input}
             required
           />
         </div>
       </div>
+
+      {dateError && <div className={styles.error}>{dateError}</div>}
 
       <div className={styles.field}>
         <label htmlFor="tags" className={styles.label}>Tags</label>
@@ -168,6 +198,12 @@ export function MilestoneForm({
       </div>
 
       <div className={styles.actions}>
+        {isEditing && onDelete && (
+          <button type="button" onClick={onDelete} className={styles.deleteBtn}>
+            Delete
+          </button>
+        )}
+        <div className={styles.actionsSpacer} />
         <button type="button" onClick={onCancel} className={styles.cancelBtn}>
           Cancel
         </button>

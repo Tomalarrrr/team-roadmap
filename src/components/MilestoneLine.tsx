@@ -36,11 +36,15 @@ export function MilestoneLine({
 }: MilestoneLineProps) {
   const milestoneRef = useRef<HTMLDivElement>(null);
   const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStartX, setDragStartX] = useState(0);
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
+
+  // Click-to-edit tracking (distinguish from drag)
+  const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
 
   const { left: milestoneLeft, width: milestoneWidth } = getBarDimensions(
     milestone.startDate,
@@ -147,12 +151,17 @@ export function MilestoneLine({
         width: Math.max(displayWidth, 24),
         backgroundColor: displayColor || '#10b981'
       }}
-      onMouseEnter={() => !dragMode && setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-      onDoubleClick={(e) => {
-        e.stopPropagation();
-        onEdit();
+      onMouseEnter={() => {
+        if (!dragMode && milestoneRef.current) {
+          const rect = milestoneRef.current.getBoundingClientRect();
+          setTooltipPosition({
+            x: rect.left + rect.width / 2,
+            y: rect.top
+          });
+          setShowTooltip(true);
+        }
       }}
+      onMouseLeave={() => setShowTooltip(false)}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -170,21 +179,52 @@ export function MilestoneLine({
         onMouseDown={(e) => handleMouseDown(e, 'resize-end')}
       />
 
-      {/* Drag area */}
+      {/* Drag area - single click opens edit */}
       <div
         className={styles.dragArea}
-        onMouseDown={(e) => handleMouseDown(e, 'move')}
+        onMouseDown={(e) => {
+          clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+          handleMouseDown(e, 'move');
+        }}
+        onMouseUp={(e) => {
+          if (!clickStartRef.current) return;
+          const dx = Math.abs(e.clientX - clickStartRef.current.x);
+          const dy = Math.abs(e.clientY - clickStartRef.current.y);
+          const elapsed = Date.now() - clickStartRef.current.time;
+          // If minimal movement and quick click, open edit
+          if (dx < 5 && dy < 5 && elapsed < 300) {
+            e.stopPropagation();
+            onEdit();
+          }
+          clickStartRef.current = null;
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          onEdit();
+        }}
       >
         <span className={styles.milestoneTitle}>{milestone.title}</span>
       </div>
 
       {/* Tooltip */}
       {showTooltip && !dragMode && (
-        <div className={styles.tooltip}>
+        <div
+          className={styles.tooltip}
+          style={{
+            position: 'fixed',
+            left: tooltipPosition.x,
+            top: tooltipPosition.y,
+            transform: 'translateX(-50%) translateY(-100%)',
+            marginTop: -8
+          }}
+        >
           <div className={styles.tooltipTitle}>{milestone.title}</div>
           <div className={styles.tooltipDates}>
             {formatShortDate(milestone.startDate)} - {formatShortDate(milestone.endDate)}
           </div>
+          {milestone.description && (
+            <div className={styles.tooltipDescription}>{milestone.description}</div>
+          )}
           {(milestone.tags?.length ?? 0) > 0 && (
             <div className={styles.tooltipTags}>
               {(milestone.tags || []).map((tag, i) => (
