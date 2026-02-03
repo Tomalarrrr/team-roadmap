@@ -318,45 +318,6 @@ export function Timeline({
   // Track which dependency is hovered for isolation effect
   const [hoveredDepId, setHoveredDepId] = useState<string | null>(null);
 
-  // Track viewport bounds for culling off-screen elements
-  const [viewportBounds, setViewportBounds] = useState({ left: 0, right: 10000, top: 0, bottom: 10000 });
-
-  // Update viewport bounds on scroll and resize for virtual scrolling
-  useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-
-    const updateViewport = () => {
-      const rect = container.getBoundingClientRect();
-      const scrollLeft = container.scrollLeft;
-      const scrollTop = container.scrollTop;
-
-      setViewportBounds({
-        left: scrollLeft - 100,
-        right: scrollLeft + rect.width + 100,
-        top: scrollTop - 100,
-        bottom: scrollTop + rect.height + 100
-      });
-    };
-
-    updateViewport();
-
-    let rafId: number | null = null;
-    const handleScroll = () => {
-      if (rafId !== null) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(updateViewport);
-    };
-
-    container.addEventListener('scroll', handleScroll, { passive: true });
-    window.addEventListener('resize', updateViewport);
-
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-      window.removeEventListener('resize', updateViewport);
-      if (rafId !== null) cancelAnimationFrame(rafId);
-    };
-  }, []);
-
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     // Only start pan if clicking within the header area
     const target = e.target as HTMLElement;
@@ -389,11 +350,13 @@ export function Timeline({
   const handleEdgeDrag = useCallback((mouseX: number, isDragging: boolean) => {
     lastMouseXRef.current = mouseX;
 
+    // Cancel any existing scroll animation
+    if (edgeScrollFrameRef.current !== null) {
+      cancelAnimationFrame(edgeScrollFrameRef.current);
+      edgeScrollFrameRef.current = null;
+    }
+
     if (!isDragging) {
-      if (edgeScrollFrameRef.current) {
-        cancelAnimationFrame(edgeScrollFrameRef.current);
-        edgeScrollFrameRef.current = null;
-      }
       return;
     }
 
@@ -402,7 +365,11 @@ export function Timeline({
 
     const scrollStep = () => {
       const container = scrollRef.current;
-      if (!container) return;
+      // Safety check: stop if container is gone
+      if (!container) {
+        edgeScrollFrameRef.current = null;
+        return;
+      }
 
       const rect = container.getBoundingClientRect();
       const mx = lastMouseXRef.current;
@@ -418,14 +385,25 @@ export function Timeline({
 
       if (scrollDelta !== 0) {
         container.scrollLeft += scrollDelta;
+        // Only continue the loop if we're actually scrolling
+        edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
+      } else {
+        edgeScrollFrameRef.current = null;
       }
-
-      edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
     };
 
-    if (!edgeScrollFrameRef.current) {
-      edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
-    }
+    // Start the scroll loop
+    edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
+  }, []);
+
+  // Cleanup RAF on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (edgeScrollFrameRef.current !== null) {
+        cancelAnimationFrame(edgeScrollFrameRef.current);
+        edgeScrollFrameRef.current = null;
+      }
+    };
   }, []);
 
   // Group projects by owner AND calculate stacks in single pass (batched operations)
@@ -506,20 +484,6 @@ export function Timeline({
     return map;
   }, [displayedTeamMembers]);
 
-  // Virtual scrolling: calculate which lanes are visible (viewport frustum culling)
-  const visibleLaneIndices = useMemo(() => {
-    const indices: number[] = [];
-    displayedTeamMembers.forEach((_, idx) => {
-      const laneTop = lanePositions[idx];
-      const laneBottom = laneTop + laneHeights[idx];
-
-      // Check if lane intersects with viewport (with buffer for smooth scrolling)
-      if (laneBottom >= viewportBounds.top && laneTop <= viewportBounds.bottom) {
-        indices.push(idx);
-      }
-    });
-    return indices;
-  }, [displayedTeamMembers, lanePositions, laneHeights, viewportBounds]);
 
   // Store lane positions in ref for dependency calculation
   const lanePositionsRef = useRef(lanePositions);
@@ -654,9 +618,8 @@ export function Timeline({
                 })}
               </svg>
 
-              {/* Project lanes (virtualized - only render visible lanes) */}
-              {visibleLaneIndices.map((idx) => {
-                const member = displayedTeamMembers[idx];
+              {/* Project lanes */}
+              {displayedTeamMembers.map((member, idx) => {
                 const stacks = projectStacksByOwner[member.name];
                 return (
                   <DroppableLane
