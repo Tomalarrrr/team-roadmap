@@ -8,6 +8,27 @@ import {
   isBefore
 } from 'date-fns';
 
+// Date parsing cache to avoid repeated parseISO calls
+// Using Map instead of WeakMap since strings are primitives
+const parsedDateCache = new Map<string, Date>();
+
+// Cached parseISO with automatic cleanup to prevent memory leaks
+function getCachedDate(dateStr: string): Date {
+  let cached = parsedDateCache.get(dateStr);
+  if (!cached) {
+    cached = parseISO(dateStr);
+    parsedDateCache.set(dateStr, cached);
+
+    // Auto-cleanup: keep cache size under 1000 entries
+    if (parsedDateCache.size > 1000) {
+      // Remove oldest 200 entries
+      const keysToDelete = Array.from(parsedDateCache.keys()).slice(0, 200);
+      keysToDelete.forEach(key => parsedDateCache.delete(key));
+    }
+  }
+  return cached;
+}
+
 // UK Financial Year: April 1 - March 31
 // FY2025 = April 1, 2025 - March 31, 2026
 
@@ -38,7 +59,7 @@ export function dateToTimelinePosition(
   timelineStart: Date,
   dayWidth: number
 ): number {
-  const d = typeof date === 'string' ? parseISO(date) : date;
+  const d = typeof date === 'string' ? getCachedDate(date) : date;
   const days = differenceInDays(startOfDay(d), startOfDay(timelineStart));
   return days * dayWidth;
 }
@@ -53,17 +74,17 @@ export function timelinePositionToDate(
 }
 
 export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? parseISO(date) : date;
+  const d = typeof date === 'string' ? getCachedDate(date) : date;
   return format(d, 'dd MMM yyyy');
 }
 
 export function formatShortDate(date: Date | string): string {
-  const d = typeof date === 'string' ? parseISO(date) : date;
+  const d = typeof date === 'string' ? getCachedDate(date) : date;
   return format(d, 'dd MMM');
 }
 
 export function isDatePast(date: Date | string): boolean {
-  const d = typeof date === 'string' ? parseISO(date) : date;
+  const d = typeof date === 'string' ? getCachedDate(date) : date;
   return isBefore(startOfDay(d), startOfDay(new Date()));
 }
 
@@ -81,8 +102,8 @@ export function getBarDimensions(
   timelineStart: Date,
   dayWidth: number
 ): { left: number; width: number } {
-  const start = parseISO(startDate);
-  const end = parseISO(endDate);
+  const start = getCachedDate(startDate);
+  const end = getCachedDate(endDate);
   const left = dateToTimelinePosition(start, timelineStart, dayWidth);
   const days = differenceInDays(end, start) + 1; // Include end date
   const width = Math.max(days * dayWidth, dayWidth); // Minimum 1 day width

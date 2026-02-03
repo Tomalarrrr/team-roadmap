@@ -411,6 +411,13 @@ export function Timeline({
     return stacksByOwner;
   }, [teamMembers, projectsByOwner]);
 
+  // Create O(1) project lookup map (avoids O(n) .find() in dependency rendering)
+  const projectsById = useMemo(() => {
+    const map = new Map<string, Project>();
+    projects.forEach(p => map.set(p.id, p));
+    return map;
+  }, [projects]);
+
   // Create a global project stacks map for dependency rendering
   const globalProjectStacks = useMemo(() => {
     const stacks = new Map<string, number>();
@@ -564,8 +571,8 @@ export function Timeline({
                 style={{ width: totalWidth, height: totalLanesHeight }}
               >
                 {dependencies.map((dep, index) => {
-                  const fromProject = projects.find(p => p.id === dep.fromProjectId);
-                  const toProject = projects.find(p => p.id === dep.toProjectId);
+                  const fromProject = projectsById.get(dep.fromProjectId);
+                  const toProject = projectsById.get(dep.toProjectId);
                   if (!fromProject || !toProject) return null;
 
                   return (
