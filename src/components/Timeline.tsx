@@ -350,13 +350,19 @@ export function Timeline({
   const handleEdgeDrag = useCallback((mouseX: number, isDragging: boolean) => {
     lastMouseXRef.current = mouseX;
 
-    // Cancel any existing scroll animation
-    if (edgeScrollFrameRef.current !== null) {
-      cancelAnimationFrame(edgeScrollFrameRef.current);
-      edgeScrollFrameRef.current = null;
+    if (!isDragging) {
+      // Stop scrolling when drag ends
+      if (edgeScrollFrameRef.current !== null) {
+        cancelAnimationFrame(edgeScrollFrameRef.current);
+        edgeScrollFrameRef.current = null;
+      }
+      return;
     }
 
-    if (!isDragging) {
+    // CRITICAL FIX: Only start the RAF loop if it's not already running
+    // This prevents creating hundreds of RAF loops on every mouse move
+    if (edgeScrollFrameRef.current !== null) {
+      // Loop already running, just update mouseX ref and return
       return;
     }
 
@@ -385,14 +391,15 @@ export function Timeline({
 
       if (scrollDelta !== 0) {
         container.scrollLeft += scrollDelta;
-        // Only continue the loop if we're actually scrolling
+        // Continue the loop
         edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
       } else {
+        // Stop when not near edge
         edgeScrollFrameRef.current = null;
       }
     };
 
-    // Start the scroll loop
+    // Start the scroll loop (only once)
     edgeScrollFrameRef.current = requestAnimationFrame(scrollStep);
   }, []);
 
