@@ -71,6 +71,10 @@ export function useRoadmap() {
   const pendingUpdateRef = useRef<RoadmapData | null>(null);
   const isLocalUpdateRef = useRef(false);
 
+  // Debounce connection state to prevent rapid state flapping
+  const connectionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastConnectionStateRef = useRef<boolean>(true);
+
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     let unsubscribeConnection: (() => void) | null = null;
@@ -104,13 +108,26 @@ export function useRoadmap() {
       }
     });
 
-    // Monitor connection state
+    // Monitor connection state with debouncing to prevent flapping
     subscribeToConnectionState((connected) => {
       if (!mounted) return;
-      setIsOnline(connected);
-      if (!connected) {
-        console.warn('Firebase connection lost. Changes will be saved when reconnected.');
+
+      // Debounce connection state changes to prevent rapid re-renders
+      // during network instability
+      if (connectionDebounceRef.current) {
+        clearTimeout(connectionDebounceRef.current);
       }
+
+      connectionDebounceRef.current = setTimeout(() => {
+        // Only update if state actually changed
+        if (lastConnectionStateRef.current !== connected) {
+          lastConnectionStateRef.current = connected;
+          setIsOnline(connected);
+          if (!connected) {
+            console.warn('Firebase connection lost. Changes will be saved when reconnected.');
+          }
+        }
+      }, 500); // 500ms debounce prevents flapping cascade
     }).then((unsub) => {
       if (mounted) {
         unsubscribeConnection = unsub;
@@ -123,6 +140,9 @@ export function useRoadmap() {
       mounted = false;
       unsubscribe?.();
       unsubscribeConnection?.();
+      if (connectionDebounceRef.current) {
+        clearTimeout(connectionDebounceRef.current);
+      }
     };
   }, []);
 
