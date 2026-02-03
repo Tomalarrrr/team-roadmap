@@ -15,12 +15,12 @@
   color: rgba(255, 255, 255, 0.6);
   opacity: 0;
   transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-  z-index: 6;
+  z-index: 10;
   pointer-events: none;
 }
 
 .dependencyArrow.visible {
-  opacity: 0.5;
+  opacity: 0.8;
   pointer-events: auto;
 }
 

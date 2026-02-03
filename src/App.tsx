@@ -451,7 +451,7 @@ function App() {
   const openEditMilestone = useCallback(
     (projectId: string, milestoneId: string) => {
       const project = data.projects.find((p) => p.id === projectId);
-      const milestone = project?.milestones.find((m) => m.id === milestoneId);
+      const milestone = project?.milestones?.find((m) => m.id === milestoneId);
       if (project && milestone) {
         setModal({ type: 'edit-milestone', projectId, project, milestone });
       }

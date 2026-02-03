@@ -120,6 +120,15 @@ export function ProjectBar({
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Track mounted state to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Calculate effective dates including milestone extensions
   const effectiveDates = useMemo(() => {
     let effectiveStart = project.startDate;
@@ -324,7 +333,9 @@ export function ProjectBar({
       onMouseEnter={() => {
         if (!dragMode && !externalDragging) {
           tooltipTimeoutRef.current = setTimeout(() => {
-            setShowTooltip(true);
+            if (isMountedRef.current) {
+              setShowTooltip(true);
+            }
           }, 800);
         }
       }}

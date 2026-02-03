@@ -463,7 +463,7 @@ export function Timeline({
     lanePositionsRef.current = lanePositions;
   }, [lanePositions]);
 
-  const totalLanesHeight = lanePositions.length > 0
+  const totalLanesHeight = lanePositions.length > 0 && laneHeights.length > 0
     ? lanePositions[lanePositions.length - 1] + laneHeights[laneHeights.length - 1]
     : 0;
 
