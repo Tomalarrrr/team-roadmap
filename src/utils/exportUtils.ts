@@ -1,5 +1,6 @@
 import { format } from 'date-fns';
 import type { Project, TeamMember, Dependency } from '../types';
+import { analytics } from './analytics';
 
 interface ExportOption {
   id: string;
@@ -65,6 +66,7 @@ export async function exportTimelineToPDF() {
 
     // Save the PDF
     pdf.save(filename);
+    analytics.exportPDF();
 
     return true;
   } catch (error) {
@@ -92,6 +94,17 @@ function exportToJSON(projects: Project[], teamMembers: TeamMember[], dependenci
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+  analytics.exportJSON();
+}
+
+// Escape a value for CSV (handle quotes and special characters)
+function escapeCSV(value: string | number): string {
+  if (typeof value === 'number') return String(value);
+  // If value contains quotes, commas, or newlines, wrap in quotes and escape internal quotes
+  if (value.includes('"') || value.includes(',') || value.includes('\n')) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
 }
 
 // CSV Export - exports projects as CSV
@@ -99,8 +112,8 @@ function exportToCSV(projects: Project[]) {
   const today = format(new Date(), 'yyyy-MM-dd');
   const headers = ['Title', 'Owner', 'Start Date', 'End Date', 'Status Color', 'Milestones Count'];
   const rows = projects.map(p => [
-    `"${p.title}"`,
-    `"${p.owner}"`,
+    escapeCSV(p.title),
+    escapeCSV(p.owner),
     p.startDate,
     p.endDate,
     p.statusColor,
@@ -108,7 +121,7 @@ function exportToCSV(projects: Project[]) {
   ]);
 
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-  const blob = new Blob([csv], { type: 'text/csv' });
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
@@ -117,6 +130,7 @@ function exportToCSV(projects: Project[]) {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+  analytics.exportCSV();
 }
 
 // Get export options for the menu

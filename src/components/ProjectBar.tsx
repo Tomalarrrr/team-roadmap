@@ -231,6 +231,20 @@ export function ProjectBar({
 
   const topPosition = 8 + stackIndex * 68; // Matches PROJECT_HEIGHT in Timeline
 
+  // Keyboard handler for accessibility
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onEdit();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      onDelete();
+    } else if (e.key === 'c' && (e.metaKey || e.ctrlKey) && onCopy) {
+      e.preventDefault();
+      onCopy();
+    }
+  }, [onEdit, onDelete, onCopy]);
+
   return (
     <div
       ref={barRef}
@@ -242,10 +256,19 @@ export function ProjectBar({
         height: projectBarHeight,
         backgroundColor: displayColor || '#1e3a5f'
       }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Project: ${project.title}, ${formatShortDate(project.startDate)} to ${formatShortDate(project.endDate)}${isPast ? ', Complete' : ''}`}
+      onKeyDown={handleKeyDown}
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        setMenuPosition({ x: e.clientX, y: e.clientY });
+        // Clamp menu position to viewport bounds to prevent clipping
+        const menuWidth = 160;
+        const menuHeight = 140;
+        const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
+        const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
+        setMenuPosition({ x: Math.max(10, x), y: Math.max(10, y) });
         setShowMenu(true);
       }}
       onMouseEnter={() => {

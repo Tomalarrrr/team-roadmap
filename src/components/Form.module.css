@@ -146,6 +146,13 @@
 .colorSwatch.selected {
   border-color: var(--text-primary);
   box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--text-muted);
+  animation: bounce 0.2s ease-out;
+}
+
+@keyframes bounce {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1.1); }
 }
 
 .colorSwatch.selected:focus-visible {
@@ -227,6 +234,10 @@
   box-shadow: 0 0 0 2px #ef4444;
 }
 
+.deleteBtn:active {
+  transform: scale(0.97);
+}
+
 .cancelBtn {
   padding: 10px 20px;
   border-radius: var(--radius-md);
@@ -246,6 +257,10 @@
   box-shadow: 0 0 0 2px var(--text-muted);
 }
 
+.cancelBtn:active {
+  transform: scale(0.97);
+}
+
 .submitBtn {
   padding: 10px 24px;
   border-radius: var(--radius-md);
@@ -262,10 +277,88 @@
 }
 
 .submitBtn:active {
-  transform: translateY(0);
+  transform: translateY(0) scale(0.97);
 }
 
 .submitBtn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-blue-light);
+}
+
+/* Field-level error styling */
+.inputError {
+  border-color: #ef4444;
+  animation: shake 0.3s ease;
+}
+
+.inputError:focus {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-4px); }
+  40%, 80% { transform: translateX(4px); }
+}
+
+.fieldError {
+  color: #ef4444;
+  font-size: 0.75rem;
+  margin-top: 2px;
+}
+
+/* Warning styling */
+.warning {
+  color: #b45309;
+  font-size: 0.8rem;
+  padding: 8px 12px;
+  background: #fffbeb;
+  border-radius: var(--radius-sm);
+  border: 1px solid #fcd34d;
+}
+
+/* Delete confirmation dialog */
+.deleteConfirm {
+  padding: 16px;
+  background: #fef2f2;
+  border-radius: var(--radius-md);
+  border: 1px solid #fecaca;
+}
+
+.deleteConfirm p {
+  margin: 0 0 12px 0;
+  color: #991b1b;
+  font-size: 0.9rem;
+}
+
+.deleteConfirmActions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.deleteConfirmBtn {
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: white;
+  background: #ef4444;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.deleteConfirmBtn:hover {
+  background: #dc2626;
+}
+
+.deleteConfirmBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #ef4444;
+}
+
+.deleteConfirmBtn:active {
+  transform: scale(0.97);
 }

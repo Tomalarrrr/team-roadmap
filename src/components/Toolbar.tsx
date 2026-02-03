@@ -42,6 +42,10 @@ export function Toolbar({
   zoomLevel,
   onZoomChange
 }: ToolbarProps) {
+  // Detect platform for shortcut display
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const mod = isMac ? '⌘' : 'Ctrl+';
+
   return (
     <div className={styles.toolbar}>
       <div className={styles.left}>
@@ -82,7 +86,7 @@ export function Toolbar({
             className={styles.iconBtn}
             onClick={onUndo}
             disabled={!canUndo}
-            title="Undo (⌘Z)"
+            title={`Undo (${mod}Z)`}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M3 8H11C12.6569 8 14 9.34315 14 11C14 12.6569 12.6569 14 11 14H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -93,7 +97,7 @@ export function Toolbar({
             className={styles.iconBtn}
             onClick={onRedo}
             disabled={!canRedo}
-            title="Redo (⌘⇧Z)"
+            title={`Redo (${isMac ? '⌘⇧Z' : 'Ctrl+Y'})`}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path d="M13 8H5C3.34315 8 2 9.34315 2 11C2 12.6569 3.34315 14 5 14H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -102,20 +106,19 @@ export function Toolbar({
           </button>
         </div>
 
-        {/* Paste button (shows when clipboard has content) */}
-        {hasClipboard && (
-          <button
-            className={styles.pasteBtn}
-            onClick={onPaste}
-            title="Paste (⌘V)"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <rect x="3" y="4" width="8" height="9" rx="1" stroke="currentColor" strokeWidth="1.2"/>
-              <path d="M5 4V3C5 1.89543 5.89543 1 7 1C8.10457 1 9 1.89543 9 3V4" stroke="currentColor" strokeWidth="1.2"/>
-            </svg>
-            Paste
-          </button>
-        )}
+        {/* Paste button - always visible, disabled when no clipboard content */}
+        <button
+          className={`${styles.pasteBtn} ${!hasClipboard ? styles.disabled : ''}`}
+          onClick={onPaste}
+          disabled={!hasClipboard}
+          title={`Paste (${mod}V)`}
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <rect x="3" y="4" width="8" height="9" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+            <path d="M5 4V3C5 1.89543 5.89543 1 7 1C8.10457 1 9 1.89543 9 3V4" stroke="currentColor" strokeWidth="1.2"/>
+          </svg>
+          Paste
+        </button>
 
         <div className={styles.divider} />
 

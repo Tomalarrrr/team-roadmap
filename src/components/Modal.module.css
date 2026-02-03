@@ -69,6 +69,33 @@
   color: var(--text-primary);
 }
 
+.closeBtn:active {
+  transform: scale(0.9);
+}
+
 .content {
   padding: 24px;
+}
+
+/* Staggered entrance for form fields */
+.content > * {
+  animation: fieldFadeIn 0.2s ease backwards;
+}
+
+.content > *:nth-child(1) { animation-delay: 0.05s; }
+.content > *:nth-child(2) { animation-delay: 0.1s; }
+.content > *:nth-child(3) { animation-delay: 0.15s; }
+.content > *:nth-child(4) { animation-delay: 0.2s; }
+.content > *:nth-child(5) { animation-delay: 0.25s; }
+.content > *:nth-child(6) { animation-delay: 0.3s; }
+
+@keyframes fieldFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

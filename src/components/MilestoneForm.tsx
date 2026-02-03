@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { milestoneSchema, validateForm } from '../utils/validation';
 import styles from './Form.module.css';
 
 interface MilestoneFormProps {
@@ -25,18 +26,19 @@ interface MilestoneFormProps {
   isEditing?: boolean;
 }
 
-const DEFAULT_COLORS = [
-  '#6B8CAE', // Soft Blue
-  '#9F8FBF', // Soft Purple
-  '#C98B8B', // Soft Rose
-  '#D4A574', // Soft Amber
-  '#7BAF8E', // Soft Green
-  '#9CA3AF', // Soft Grey
+// Status-aligned colors matching SearchFilter status indicators
+const STATUS_COLORS = [
+  { hex: '#04b050', name: 'On Track' },
+  { hex: '#ffc002', name: 'At Risk' },
+  { hex: '#ff0100', name: 'Off Track' },
+  { hex: '#7612c3', name: 'On Hold' },
+  { hex: '#9ca3af', name: 'To Start' },
 ];
 
 export function MilestoneForm({
   initialValues,
   projectStartDate,
+  projectEndDate,
   onSubmit,
   onCancel,
   onDelete,
@@ -47,26 +49,24 @@ export function MilestoneForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || projectStartDate);
   const [endDate, setEndDate] = useState(initialValues?.endDate || projectStartDate);
   const [tagsInput, setTagsInput] = useState(initialValues?.tags?.join(', ') || '');
-  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_COLORS[0]);
+  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || STATUS_COLORS[0].hex);
   const [customColor, setCustomColor] = useState('');
-  const [dateError, setDateError] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Check if milestone extends beyond project bounds
+  const extendsBeforeProject = startDate && new Date(startDate) < new Date(projectStartDate);
+  const extendsAfterProject = endDate && new Date(endDate) > new Date(projectEndDate);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !startDate || !endDate) return;
-
-    if (new Date(endDate) < new Date(startDate)) {
-      setDateError('End date cannot be before start date');
-      return;
-    }
-    setDateError('');
 
     const tags = tagsInput
       .split(',')
       .map(t => t.trim())
       .filter(t => t.length > 0);
 
-    onSubmit({
+    const result = validateForm(milestoneSchema, {
       title: title.trim(),
       description: description.trim() || undefined,
       startDate,
@@ -74,6 +74,14 @@ export function MilestoneForm({
       tags,
       statusColor
     });
+
+    if (!result.success) {
+      setErrors(result.errors);
+      return;
+    }
+
+    setErrors({});
+    onSubmit(result.data);
   };
 
   return (
@@ -124,7 +132,7 @@ export function MilestoneForm({
             value={endDate}
             onChange={(e) => {
               setEndDate(e.target.value);
-              setDateError('');
+              setErrors({});
             }}
             className={styles.input}
             required
@@ -132,7 +140,13 @@ export function MilestoneForm({
         </div>
       </div>
 
-      {dateError && <div className={styles.error}>{dateError}</div>}
+      {errors.endDate && <div className={styles.error}>{errors.endDate}</div>}
+
+      {(extendsBeforeProject || extendsAfterProject) && (
+        <div className={styles.warning}>
+          Note: This milestone extends {extendsBeforeProject ? 'before' : ''}{extendsBeforeProject && extendsAfterProject ? ' and ' : ''}{extendsAfterProject ? 'after' : ''} the project dates. The project bar will expand to contain it.
+        </div>
+      )}
 
       <div className={styles.field}>
         <label htmlFor="tags" className={styles.label}>Tags</label>
@@ -148,16 +162,17 @@ export function MilestoneForm({
       </div>
 
       <div className={styles.field}>
-        <label className={styles.label}>Status Color</label>
+        <label className={styles.label}>Status</label>
         <div className={styles.colorPicker}>
-          {DEFAULT_COLORS.map((color) => (
+          {STATUS_COLORS.map(({ hex, name }) => (
             <button
-              key={color}
+              key={hex}
               type="button"
-              className={`${styles.colorSwatch} ${statusColor === color ? styles.selected : ''}`}
-              style={{ backgroundColor: color }}
-              onClick={() => setStatusColor(color)}
-              aria-label={`Select color ${color}`}
+              className={`${styles.colorSwatch} ${statusColor === hex ? styles.selected : ''}`}
+              style={{ backgroundColor: hex }}
+              onClick={() => setStatusColor(hex)}
+              aria-label={`Select ${name} status`}
+              title={name}
             />
           ))}
           <div className={styles.customColorWrapper}>
@@ -173,22 +188,41 @@ export function MilestoneForm({
             />
           </div>
         </div>
+        <span className={styles.hint}>
+          {STATUS_COLORS.find(c => c.hex === statusColor)?.name || 'Custom'}
+        </span>
       </div>
 
-      <div className={styles.actions}>
-        {isEditing && onDelete && (
-          <button type="button" onClick={onDelete} className={styles.deleteBtn}>
-            Delete
+      {showDeleteConfirm && (
+        <div className={styles.deleteConfirm}>
+          <p>Are you sure you want to delete this milestone?</p>
+          <div className={styles.deleteConfirmActions}>
+            <button type="button" onClick={() => setShowDeleteConfirm(false)} className={styles.cancelBtn}>
+              Cancel
+            </button>
+            <button type="button" onClick={onDelete} className={styles.deleteConfirmBtn}>
+              Delete Milestone
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!showDeleteConfirm && (
+        <div className={styles.actions}>
+          {isEditing && onDelete && (
+            <button type="button" onClick={() => setShowDeleteConfirm(true)} className={styles.deleteBtn}>
+              Delete
+            </button>
+          )}
+          <div className={styles.actionsSpacer} />
+          <button type="button" onClick={onCancel} className={styles.cancelBtn}>
+            Cancel
           </button>
-        )}
-        <div className={styles.actionsSpacer} />
-        <button type="button" onClick={onCancel} className={styles.cancelBtn}>
-          Cancel
-        </button>
-        <button type="submit" className={styles.submitBtn}>
-          {isEditing ? 'Save Changes' : 'Add Milestone'}
-        </button>
-      </div>
+          <button type="submit" className={styles.submitBtn}>
+            {isEditing ? 'Save Changes' : 'Add Milestone'}
+          </button>
+        </div>
+      )}
     </form>
   );
 }

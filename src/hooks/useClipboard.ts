@@ -6,11 +6,25 @@ import { toISODateString } from '../utils/dateUtils';
 interface UseClipboardOptions {
   onPasteProject: (project: Omit<Project, 'id'>) => void;
   onPasteMilestone?: (milestone: Omit<Milestone, 'id'>, projectId: string) => void;
+  onShowToast?: (message: string) => void;
 }
 
-export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardOptions) {
+export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: UseClipboardOptions) {
   const [clipboard, setClipboard] = useState<ClipboardData | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+  // Use callback if provided, otherwise fall back to DOM-based toast
+  const toast = useCallback((message: string) => {
+    if (onShowToast) {
+      onShowToast(message);
+    } else {
+      showToast(message);
+    }
+  }, [onShowToast]);
+
+  // Detect platform for shortcut display
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const pasteShortcut = isMac ? '⌘V' : 'Ctrl+V';
 
   // Copy a project (with all its milestones)
   const copyProject = useCallback((project: Project) => {
@@ -20,9 +34,9 @@ export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardO
       copiedAt: Date.now()
     });
 
-    // Show toast/feedback
-    showToast(`Copied "${project.title}"`);
-  }, []);
+    // Show toast/feedback with paste guidance
+    toast(`Copied "${project.title}" — press ${pasteShortcut} to paste`);
+  }, [pasteShortcut, toast]);
 
   // Copy a milestone
   const copyMilestone = useCallback((milestone: Milestone) => {
@@ -32,8 +46,8 @@ export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardO
       copiedAt: Date.now()
     });
 
-    showToast(`Copied "${milestone.title}"`);
-  }, []);
+    toast(`Copied "${milestone.title}" — press ${pasteShortcut} to paste`);
+  }, [pasteShortcut, toast]);
 
   // Paste with date offset from today
   const paste = useCallback((targetOwner?: string, targetProjectId?: string) => {
@@ -56,7 +70,7 @@ export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardO
 
         return {
           ...m,
-          id: `milestone-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          id: `milestone-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
           startDate: toISODateString(addDays(now, startOffset)),
           endDate: toISODateString(addDays(now, endOffset))
         };
@@ -73,7 +87,7 @@ export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardO
       };
 
       onPasteProject(newProject);
-      showToast(`Pasted "${originalProject.title}"`);
+      toast(`Pasted "${originalProject.title}"`);
     } else if (clipboard.type === 'milestone' && onPasteMilestone && targetProjectId) {
       const originalMilestone = clipboard.data as Milestone;
       const originalStart = new Date(originalMilestone.startDate);
@@ -90,9 +104,9 @@ export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardO
       };
 
       onPasteMilestone(newMilestone, targetProjectId);
-      showToast(`Pasted "${originalMilestone.title}"`);
+      toast(`Pasted "${originalMilestone.title}"`);
     }
-  }, [clipboard, onPasteProject, onPasteMilestone]);
+  }, [clipboard, onPasteProject, onPasteMilestone, toast]);
 
   // Keyboard shortcuts
   useEffect(() => {

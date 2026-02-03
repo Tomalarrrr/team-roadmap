@@ -26,12 +26,13 @@ import {
   getTodayPosition,
   getBarDimensions
 } from '../utils/dateUtils';
-import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format, areIntervalsOverlapping } from 'date-fns';
+import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from 'date-fns';
 import styles from './Timeline.module.css';
 
 export type ZoomLevel = 'day' | 'week' | 'month' | 'year';
 
-// Calculate stack indices for non-overlapping projects (flight path algorithm)
+// Calculate stack indices for non-overlapping projects (optimized flight path algorithm)
+// Time complexity: O(n log n) instead of O(n²)
 function calculateProjectStacks(projects: Project[]): Map<string, number> {
   const stacks = new Map<string, number>();
   if (!projects || projects.length === 0) return stacks;
@@ -43,35 +44,32 @@ function calculateProjectStacks(projects: Project[]): Map<string, number> {
     return new Date(a.endDate).getTime() - new Date(b.endDate).getTime();
   });
 
+  // Track the end time of the last project in each stack (for O(1) availability check)
+  const stackEndTimes: number[] = [];
+
   sorted.forEach((project) => {
-    let stackIndex = 0;
-    const projectInterval = {
-      start: new Date(project.startDate),
-      end: new Date(project.endDate)
-    };
+    const projectStart = new Date(project.startDate).getTime();
+    const projectEnd = new Date(project.endDate).getTime();
 
-    // Find the lowest available stack index where this project doesn't overlap
-    while (true) {
-      let canUseStack = true;
-      for (const [otherId, otherStack] of stacks) {
-        if (otherStack !== stackIndex) continue;
-        const other = projects.find(p => p.id === otherId);
-        if (!other) continue;
-
-        const otherInterval = {
-          start: new Date(other.startDate),
-          end: new Date(other.endDate)
-        };
-
-        // Check if intervals overlap (inclusive for same-day adjacency)
-        if (areIntervalsOverlapping(projectInterval, otherInterval, { inclusive: true })) {
-          canUseStack = false;
-          break;
-        }
+    // Find the lowest available stack where this project fits
+    // A stack is available if its last project ended before this one starts
+    let stackIndex = -1;
+    for (let i = 0; i < stackEndTimes.length; i++) {
+      // Allow same-day adjacency (end < start, not <=)
+      if (stackEndTimes[i] < projectStart) {
+        stackIndex = i;
+        break;
       }
-      if (canUseStack) break;
-      stackIndex++;
     }
+
+    // No available stack found, create a new one
+    if (stackIndex === -1) {
+      stackIndex = stackEndTimes.length;
+      stackEndTimes.push(projectEnd);
+    } else {
+      stackEndTimes[stackIndex] = projectEnd;
+    }
+
     stacks.set(project.id, stackIndex);
   });
 
@@ -131,7 +129,7 @@ export function Timeline({
   onEditTeamMember,
   onReorderTeamMembers,
   onCopyProject,
-  onAddDependency: _onAddDependency,
+  // onAddDependency reserved for future UI-based dependency creation
   onRemoveDependency
 }: TimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -341,6 +339,15 @@ export function Timeline({
     return positions;
   }, [laneHeights]);
 
+  // Create owner-to-lane-index mapping for dependency rendering
+  const ownerToLaneIndex = useMemo(() => {
+    const map = new Map<string, number>();
+    displayedTeamMembers.forEach((member, idx) => {
+      map.set(member.name, idx);
+    });
+    return map;
+  }, [displayedTeamMembers]);
+
   // Store lane positions in ref for dependency calculation
   const lanePositionsRef = useRef(lanePositions);
   useEffect(() => {
@@ -356,26 +363,34 @@ export function Timeline({
       {/* Fixed left sidebar with team members */}
       <div className={styles.sidebar}>
         <div className={styles.sidebarHeader}>Team</div>
-        <DndContext
-          sensors={sensors}
-          collisionDetection={closestCenter}
-          onDragEnd={handleMemberDragEnd}
-        >
-          <SortableContext
-            items={displayedTeamMembers.map(m => m.id)}
-            strategy={verticalListSortingStrategy}
+        {displayedTeamMembers.length === 0 ? (
+          <div className={styles.emptyState}>
+            <div className={styles.emptyIcon}>👥</div>
+            <p className={styles.emptyTitle}>No team members yet</p>
+            <p className={styles.emptyText}>Add team members to start planning your roadmap</p>
+          </div>
+        ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleMemberDragEnd}
           >
-            {displayedTeamMembers.map((member, idx) => (
-              <SortableMemberLane
-                key={member.id}
-                member={member}
-                height={laneHeights[idx]}
-                onEdit={() => onEditTeamMember(member)}
-                onAddProject={() => onAddProject(member.name)}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
+            <SortableContext
+              items={displayedTeamMembers.map(m => m.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {displayedTeamMembers.map((member, idx) => (
+                <SortableMemberLane
+                  key={member.id}
+                  member={member}
+                  height={laneHeights[idx]}
+                  onEdit={() => onEditTeamMember(member)}
+                  onAddProject={() => onAddProject(member.name)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+        )}
         <button className={styles.addMemberBtn} onClick={onAddTeamMember}>
           + Add Team Member
         </button>
@@ -453,6 +468,8 @@ export function Timeline({
                       timelineStart={timelineStart}
                       dayWidth={dayWidth}
                       projectStacks={globalProjectStacks}
+                      lanePositions={lanePositions}
+                      ownerToLaneIndex={ownerToLaneIndex}
                       onRemove={() => onRemoveDependency?.(dep.id)}
                     />
                   );

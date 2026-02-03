@@ -1,14 +1,15 @@
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useRoadmap } from './hooks/useRoadmap';
 import { useUndoManager, createInverse } from './hooks/useUndoManager';
 import { useClipboard } from './hooks/useClipboard';
+import { useToast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
 import { Timeline, type ZoomLevel } from './components/Timeline';
 import { Modal } from './components/Modal';
 import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
 import { TeamMemberForm } from './components/TeamMemberForm';
-import type { Project, Milestone, TeamMember, Dependency } from './types';
+import type { Project, Milestone, TeamMember } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates } from './utils/dateUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -27,16 +28,19 @@ type ModalType =
 const getUserId = () => {
   let userId = sessionStorage.getItem('roadmap-user-id');
   if (!userId) {
-    userId = `user-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     sessionStorage.setItem('roadmap-user-id', userId);
   }
   return userId;
 };
 
 function App() {
+  const { showToast } = useToast();
   const {
     data,
     loading,
+    saveError,
+    clearError,
     addTeamMember,
     updateTeamMember,
     deleteTeamMember,
@@ -46,7 +50,9 @@ function App() {
     deleteProject,
     addMilestone,
     updateMilestone,
-    deleteMilestone
+    deleteMilestone,
+    addDependency,
+    removeDependency
   } = useRoadmap();
 
   const [modal, setModal] = useState<ModalType>(null);
@@ -58,8 +64,8 @@ function App() {
     dateRange: null,
     status: 'all'
   });
-  const [dependencies, setDependencies] = useState<Dependency[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Undo manager
   const userId = useMemo(() => getUserId(), []);
@@ -87,7 +93,8 @@ function App() {
     hasContent: hasClipboard
   } = useClipboard({
     onPasteProject: handlePasteProject,
-    onPasteMilestone: handlePasteMilestone
+    onPasteMilestone: handlePasteMilestone,
+    onShowToast: showToast
   });
 
   const closeModal = useCallback(() => setModal(null), []);
@@ -107,7 +114,7 @@ function App() {
     const statusColor = project.statusColor.toLowerCase();
 
     // Map colors to statuses
-    if (statusColor === '#7612c3' || statusColor === '#7612c3') return 'on-hold';
+    if (statusColor === '#7612c3') return 'on-hold';
     if (statusColor === '#9ca3af') return 'to-start';
     if (statusColor === '#04b050') return 'on-track';
     if (statusColor === '#ffc002') return 'at-risk';
@@ -118,51 +125,78 @@ function App() {
     return 'on-track';
   }, []);
 
-  // Filter projects based on current filters
+  // Pre-compute filter Sets for O(1) lookups
+  const filterSets = useMemo(() => ({
+    owners: new Set(filters.owners),
+    tags: new Set(filters.tags),
+    searchQuery: filters.search.trim().toLowerCase()
+  }), [filters.owners, filters.tags, filters.search]);
+
+  // Filter projects based on current filters (optimized with Sets)
   const filteredProjects = useMemo(() => {
-    let result = data.projects;
+    const { owners, tags, searchQuery } = filterSets;
+    const hasOwnerFilter = owners.size > 0;
+    const hasTagFilter = tags.size > 0;
+    const hasStatusFilter = filters.status !== 'all';
+    const hasSearchFilter = searchQuery.length > 0;
 
-    // Filter by owners
-    if (filters.owners.length > 0) {
-      result = result.filter(p => filters.owners.includes(p.owner));
+    // Early return if no filters
+    if (!hasOwnerFilter && !hasTagFilter && !hasStatusFilter && !hasSearchFilter) {
+      return data.projects;
     }
 
-    // Filter by tags (milestones)
-    if (filters.tags.length > 0) {
-      result = result.filter(p =>
-        p.milestones?.some(m =>
-          m.tags?.some(t => filters.tags.includes(t))
-        )
-      );
-    }
+    return data.projects.filter(p => {
+      // Filter by owners (O(1) lookup)
+      if (hasOwnerFilter && !owners.has(p.owner)) {
+        return false;
+      }
 
-    // Filter by status (color-based)
-    if (filters.status !== 'all') {
-      result = result.filter(p => getProjectDisplayStatus(p) === filters.status);
-    }
+      // Filter by tags (O(1) lookup per tag)
+      if (hasTagFilter) {
+        const hasMatchingTag = p.milestones?.some(m =>
+          m.tags?.some(t => tags.has(t))
+        );
+        if (!hasMatchingTag) return false;
+      }
 
-    // Filter by search (already handled in SearchFilter for selection)
-    // But we still filter the display if there's a search term
-    if (filters.search.trim()) {
-      const query = filters.search.toLowerCase();
-      result = result.filter(p =>
-        p.title.toLowerCase().includes(query) ||
-        p.owner.toLowerCase().includes(query) ||
-        p.milestones?.some(m =>
-          m.title.toLowerCase().includes(query) ||
-          m.tags?.some(t => t.toLowerCase().includes(query))
-        )
-      );
-    }
+      // Filter by status
+      if (hasStatusFilter && getProjectDisplayStatus(p) !== filters.status) {
+        return false;
+      }
 
-    return result;
-  }, [data.projects, filters, getProjectDisplayStatus]);
+      // Filter by search
+      if (hasSearchFilter) {
+        const titleMatch = p.title.toLowerCase().includes(searchQuery);
+        const ownerMatch = p.owner.toLowerCase().includes(searchQuery);
+        const milestoneMatch = p.milestones?.some(m =>
+          m.title.toLowerCase().includes(searchQuery) ||
+          m.tags?.some(t => t.toLowerCase().includes(searchQuery))
+        );
+        if (!titleMatch && !ownerMatch && !milestoneMatch) return false;
+      }
+
+      return true;
+    });
+  }, [data.projects, filterSets, filters.status, getProjectDisplayStatus]);
 
   // Scroll to project when selected from search
   const handleProjectSelect = useCallback((projectId: string) => {
+    // Clear any existing timeout
+    if (selectionTimeoutRef.current) {
+      clearTimeout(selectionTimeoutRef.current);
+    }
     setSelectedProjectId(projectId);
     // The Timeline component will handle scrolling
-    setTimeout(() => setSelectedProjectId(null), 2000);
+    selectionTimeoutRef.current = setTimeout(() => setSelectedProjectId(null), 2000);
+  }, []);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (selectionTimeoutRef.current) {
+        clearTimeout(selectionTimeoutRef.current);
+      }
+    };
   }, []);
 
   // Handle undo
@@ -233,7 +267,8 @@ function App() {
       if (modifier && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
-      } else if (modifier && e.key === 'z' && e.shiftKey) {
+      } else if (modifier && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
+        // Support both Cmd+Shift+Z (Mac) and Ctrl+Y (Windows) for redo
         e.preventDefault();
         handleRedo();
       }
@@ -272,10 +307,13 @@ function App() {
   // Project handlers with undo support
   const handleAddProject = useCallback(
     async (values: Omit<Project, 'id' | 'milestones'>) => {
-      await addProject(values);
+      const newProject = await addProject(values);
+      if (newProject) {
+        recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
+      }
       closeModal();
     },
-    [addProject, closeModal]
+    [addProject, closeModal, recordAction]
   );
 
   const handleEditProject = useCallback(
@@ -322,20 +360,14 @@ function App() {
     [modal, updateMilestone, closeModal]
   );
 
-  // Dependency handlers
-  const handleAddDependency = useCallback((fromId: string, toId: string) => {
-    const newDep: Dependency = {
-      id: `dep-${Date.now()}`,
-      fromProjectId: fromId,
-      toProjectId: toId,
-      type: 'finish-to-start'
-    };
-    setDependencies(deps => [...deps, newDep]);
-  }, []);
+  // Dependency handlers (persisted to Firebase)
+  const handleAddDependency = useCallback(async (fromId: string, toId: string) => {
+    await addDependency(fromId, toId);
+  }, [addDependency]);
 
-  const handleRemoveDependency = useCallback((depId: string) => {
-    setDependencies(deps => deps.filter(d => d.id !== depId));
-  }, []);
+  const handleRemoveDependency = useCallback(async (depId: string) => {
+    await removeDependency(depId);
+  }, [removeDependency]);
 
   const openAddMilestone = useCallback(
     (projectId: string) => {
@@ -375,7 +407,7 @@ function App() {
       <Toolbar
         projects={data.projects}
         teamMembers={data.teamMembers}
-        dependencies={dependencies}
+        dependencies={data.dependencies || []}
         onFilterChange={setFilters}
         onProjectSelect={handleProjectSelect}
         canUndo={canUndo}
@@ -392,7 +424,7 @@ function App() {
         <Timeline
           projects={filteredProjects}
           teamMembers={data.teamMembers}
-          dependencies={dependencies}
+          dependencies={data.dependencies || []}
           zoomLevel={zoomLevel}
           selectedProjectId={selectedProjectId}
           filteredOwners={filters.owners.length > 0 ? filters.owners : undefined}
@@ -431,6 +463,7 @@ function App() {
             onCancel={closeModal}
             onDelete={handleDeleteMember}
             isEditing
+            projectCount={data.projects.filter(p => p.owner === modal.member.name).length}
           />
         )}
       </Modal>
@@ -505,6 +538,14 @@ function App() {
           />
         )}
       </Modal>
+
+      {/* Save Error Toast */}
+      {saveError && (
+        <div className={styles.errorToast}>
+          <span>Failed to save: {saveError}</span>
+          <button onClick={clearError} className={styles.toastClose}>×</button>
+        </div>
+      )}
     </div>
   );
 }

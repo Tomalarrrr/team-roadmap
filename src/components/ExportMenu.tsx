@@ -13,6 +13,10 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  // Detect platform for shortcut display
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const exportShortcut = isMac ? '⌘E' : 'Ctrl+E';
+
   const exportOptions = getExportOptions(projects, teamMembers, dependencies);
 
   // Close on click outside
@@ -44,7 +48,7 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
       <button
         className={styles.trigger}
         onClick={() => setIsOpen(o => !o)}
-        title="Export (⌘E)"
+        title={`Export (${exportShortcut})`}
       >
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
           <path d="M8 2V10M8 10L5 7M8 10L11 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -57,7 +61,7 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
         <div className={styles.menu}>
           <div className={styles.menuHeader}>
             <span>Export Options</span>
-            <kbd className={styles.shortcut}>⌘E</kbd>
+            <kbd className={styles.shortcut}>{exportShortcut}</kbd>
           </div>
           <div className={styles.menuList}>
             {exportOptions.map(option => (

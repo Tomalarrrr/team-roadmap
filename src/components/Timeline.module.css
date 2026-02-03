@@ -48,6 +48,11 @@
   touch-action: none;
   overflow: visible;
   min-height: 100px; /* Ensure enough space for name + title + button */
+  transition: background 0.2s ease;
+}
+
+.memberLane:hover {
+  background: var(--bg-tertiary);
 }
 
 .memberLane.dragging {
@@ -136,6 +141,10 @@
   opacity: 1;
 }
 
+.addProjectBtn:active {
+  transform: scale(0.95);
+}
+
 .addMemberBtn {
   margin: 16px;
   padding: 12px;
@@ -152,6 +161,47 @@
   border-color: var(--accent-blue);
   color: var(--accent-blue);
   background: var(--accent-blue-light);
+}
+
+.addMemberBtn:active {
+  transform: scale(0.97);
+}
+
+/* Empty state */
+.emptyState {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  text-align: center;
+}
+
+.emptyIcon {
+  font-size: 2.5rem;
+  margin-bottom: 12px;
+  opacity: 0.6;
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.emptyTitle {
+  margin: 0 0 8px 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.emptyText {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.4;
 }
 
 /* Timeline area */
@@ -266,6 +316,12 @@
   border-radius: var(--radius-full);
   white-space: nowrap;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+  animation: todayPulse 2s ease-in-out infinite;
+}
+
+@keyframes todayPulse {
+  0%, 100% { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15); }
+  50% { box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3); }
 }
 
 .dependenciesLayer {

@@ -1,6 +1,7 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { Project } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
+import styles from './DependencyLine.module.css';
 
 interface DependencyLineProps {
   fromProject: Project;
@@ -8,6 +9,8 @@ interface DependencyLineProps {
   timelineStart: Date;
   dayWidth: number;
   projectStacks: Map<string, number>;
+  lanePositions: number[];
+  ownerToLaneIndex: Map<string, number>;
   onRemove: () => void;
 }
 
@@ -21,8 +24,11 @@ export function DependencyLine({
   timelineStart,
   dayWidth,
   projectStacks,
+  lanePositions,
+  ownerToLaneIndex,
   onRemove
 }: DependencyLineProps) {
+  const [showConfirm, setShowConfirm] = useState(false);
   const line = useMemo(() => {
     const fromDims = getBarDimensions(
       fromProject.startDate,
@@ -40,11 +46,17 @@ export function DependencyLine({
     const fromStack = projectStacks.get(fromProject.id) || 0;
     const toStack = projectStacks.get(toProject.id) || 0;
 
-    // Calculate positions
+    // Get lane offsets for each project's owner
+    const fromLaneIndex = ownerToLaneIndex.get(fromProject.owner) ?? 0;
+    const toLaneIndex = ownerToLaneIndex.get(toProject.owner) ?? 0;
+    const fromLaneOffset = lanePositions[fromLaneIndex] ?? 0;
+    const toLaneOffset = lanePositions[toLaneIndex] ?? 0;
+
+    // Calculate positions with lane offsets
     const fromX = fromDims.left + fromDims.width; // End of from project
-    const fromY = BAR_VERTICAL_OFFSET + fromStack * PROJECT_HEIGHT + BAR_HEIGHT / 2;
+    const fromY = fromLaneOffset + BAR_VERTICAL_OFFSET + fromStack * PROJECT_HEIGHT + BAR_HEIGHT / 2;
     const toX = toDims.left; // Start of to project
-    const toY = BAR_VERTICAL_OFFSET + toStack * PROJECT_HEIGHT + BAR_HEIGHT / 2;
+    const toY = toLaneOffset + BAR_VERTICAL_OFFSET + toStack * PROJECT_HEIGHT + BAR_HEIGHT / 2;
 
     // Create smooth bezier curve
     const midX = (fromX + toX) / 2;
@@ -59,10 +71,24 @@ export function DependencyLine({
       midX,
       midY: (fromY + toY) / 2
     };
-  }, [fromProject, toProject, timelineStart, dayWidth, projectStacks]);
+  }, [fromProject, toProject, timelineStart, dayWidth, projectStacks, lanePositions, ownerToLaneIndex]);
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowConfirm(true);
+  };
+
+  const handleConfirmRemove = () => {
+    setShowConfirm(false);
+    onRemove();
+  };
+
+  const handleCancelRemove = () => {
+    setShowConfirm(false);
+  };
 
   return (
-    <g className="dependency-line" style={{ pointerEvents: 'auto' }}>
+    <g className={styles.dependencyLine} style={{ pointerEvents: 'auto' }}>
       {/* Main line */}
       <path
         d={line.path}
@@ -70,14 +96,13 @@ export function DependencyLine({
         stroke="var(--text-muted)"
         strokeWidth="1.5"
         strokeDasharray="4 3"
-        opacity="0.5"
-        style={{ transition: 'opacity 0.15s, stroke 0.15s' }}
+        className={styles.mainPath}
       />
       {/* Arrow head */}
       <polygon
         points={`${line.toX},${line.toY} ${line.toX - 8},${line.toY - 4} ${line.toX - 8},${line.toY + 4}`}
         fill="var(--text-muted)"
-        opacity="0.5"
+        className={styles.arrowHead}
       />
       {/* Invisible wider path for easier interaction */}
       <path
@@ -86,10 +111,7 @@ export function DependencyLine({
         stroke="transparent"
         strokeWidth="12"
         style={{ cursor: 'pointer' }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove();
-        }}
+        onClick={handleClick}
       />
       {/* Hover indicator dot */}
       <circle
@@ -97,22 +119,29 @@ export function DependencyLine({
         cy={line.midY}
         r="0"
         fill="var(--accent-blue)"
-        className="dependency-remove-indicator"
-        style={{ transition: 'r 0.15s' }}
+        className={styles.removeIndicator}
       />
-      <style>{`
-        .dependency-line:hover path {
-          opacity: 0.8 !important;
-          stroke: var(--accent-blue) !important;
-        }
-        .dependency-line:hover polygon {
-          opacity: 0.8 !important;
-          fill: var(--accent-blue) !important;
-        }
-        .dependency-line:hover .dependency-remove-indicator {
-          r: 6px;
-        }
-      `}</style>
+      {/* Confirmation dialog */}
+      {showConfirm && (
+        <foreignObject
+          x={line.midX - 80}
+          y={line.midY - 50}
+          width="160"
+          height="70"
+        >
+          <div className={styles.confirmDialog}>
+            <p>Remove dependency?</p>
+            <div className={styles.confirmActions}>
+              <button onClick={handleCancelRemove} className={styles.cancelBtn}>
+                Cancel
+              </button>
+              <button onClick={handleConfirmRemove} className={styles.removeBtn}>
+                Remove
+              </button>
+            </div>
+          </div>
+        </foreignObject>
+      )}
     </g>
   );
 }

@@ -23,6 +23,10 @@
   background: var(--accent-blue-light);
 }
 
+.trigger:active {
+  transform: scale(0.98);
+}
+
 .triggerText {
   opacity: 0.8;
 }
@@ -152,6 +156,13 @@
   overflow-y: auto;
 }
 
+.resultCount {
+  padding: 4px 12px 8px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 .resultItem {
   display: flex;
   align-items: center;
@@ -163,7 +174,25 @@
   border-radius: var(--radius-md);
   cursor: pointer;
   text-align: left;
-  transition: background 0.1s;
+  transition: background 0.1s, transform 0.1s;
+  animation: resultFadeIn 0.15s ease backwards;
+}
+
+.resultItem:nth-child(1) { animation-delay: 0s; }
+.resultItem:nth-child(2) { animation-delay: 0.03s; }
+.resultItem:nth-child(3) { animation-delay: 0.06s; }
+.resultItem:nth-child(4) { animation-delay: 0.09s; }
+.resultItem:nth-child(5) { animation-delay: 0.12s; }
+
+@keyframes resultFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .resultItem:hover,
@@ -260,6 +289,13 @@
   border-color: var(--accent-blue);
   color: var(--accent-blue);
   font-weight: 500;
+  animation: chipSelect 0.2s ease;
+}
+
+@keyframes chipSelect {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
 }
 
 .statusChip {
@@ -318,4 +354,27 @@
   border-radius: var(--radius-sm);
   font-family: inherit;
   font-size: 0.7rem;
+}
+
+/* More tags button */
+.moreBtn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  color: var(--accent-blue);
+  background: none;
+  border: 1px dashed var(--accent-blue);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.moreBtn:hover {
+  background: var(--accent-blue-light);
+}
+
+.moreBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
 }

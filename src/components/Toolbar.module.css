@@ -82,6 +82,10 @@
   box-shadow: var(--shadow-sm);
 }
 
+.zoomBtn:active {
+  transform: scale(0.95);
+}
+
 .undoGroup {
   display: flex;
   align-items: center;
@@ -153,8 +157,24 @@
   box-shadow: 0 0 0 2px var(--accent-blue-dark, #1d4ed8);
 }
 
-.pasteBtn:active {
+.pasteBtn:active:not(:disabled) {
   transform: scale(0.98);
+}
+
+.pasteBtn.disabled,
+.pasteBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: var(--bg-tertiary);
+  border-color: var(--border-light);
+  color: var(--text-muted);
+  animation: none;
+}
+
+.pasteBtn.disabled:hover,
+.pasteBtn:disabled:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
 }
 
 .divider {

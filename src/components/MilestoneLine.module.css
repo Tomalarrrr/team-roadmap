@@ -22,7 +22,7 @@
 
 .milestoneLine.dragging {
   cursor: grabbing;
-  transform: scale(1.03);
+  transform: scale(1.03) rotate(1deg);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 20;
   opacity: 0.95;
@@ -86,18 +86,16 @@
   border: 1px solid var(--border-light);
   z-index: 9999;
   min-width: 140px;
-  animation: fadeUp 0.15s ease;
+  animation: tooltipFadeIn 0.15s ease-out;
   pointer-events: none;
 }
 
-@keyframes fadeUp {
+@keyframes tooltipFadeIn {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(4px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
   }
 }
 
@@ -182,10 +180,31 @@
   border: none;
   cursor: pointer;
   white-space: nowrap;
+  animation: menuBtnIn 0.12s ease backwards;
+  transition: background 0.1s ease;
+}
+
+.contextMenu button:nth-child(1) { animation-delay: 0s; }
+.contextMenu button:nth-child(2) { animation-delay: 0.03s; }
+.contextMenu button:nth-child(3) { animation-delay: 0.06s; }
+
+@keyframes menuBtnIn {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .contextMenu button:hover {
   background: var(--bg-tertiary);
+}
+
+.contextMenu button:active {
+  transform: scale(0.98);
 }
 
 .contextMenu .deleteBtn {

@@ -1,6 +1,6 @@
-import { initializeApp } from 'firebase/app';
-import { getDatabase, ref, onValue, set, get } from 'firebase/database';
 import type { RoadmapData } from './types';
+import type { FirebaseApp } from 'firebase/app';
+import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
 
 // Firebase configuration - Replace with your own config
 const firebaseConfig = {
@@ -13,33 +13,67 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "YOUR_APP_ID"
 };
 
-const app = initializeApp(firebaseConfig);
-const database = getDatabase(app);
+// Lazy-loaded Firebase instances
+let app: FirebaseApp | null = null;
+let database: Database | null = null;
+let roadmapRef: DatabaseReference | null = null;
+let initPromise: Promise<void> | null = null;
 
-const roadmapRef = ref(database, 'roadmap');
+// Dynamically import and initialize Firebase (deferred)
+async function initializeFirebase(): Promise<void> {
+  if (app && database && roadmapRef) return;
 
-export function subscribeToRoadmap(callback: (data: RoadmapData) => void): () => void {
-  const unsubscribe = onValue(roadmapRef, (snapshot) => {
+  const [{ initializeApp }, { getDatabase, ref }] = await Promise.all([
+    import('firebase/app'),
+    import('firebase/database')
+  ]);
+
+  app = initializeApp(firebaseConfig);
+  database = getDatabase(app);
+  roadmapRef = ref(database, 'roadmap');
+}
+
+// Ensure Firebase is initialized before use
+function ensureInitialized(): Promise<void> {
+  if (!initPromise) {
+    initPromise = initializeFirebase();
+  }
+  return initPromise;
+}
+
+export async function subscribeToRoadmap(callback: (data: RoadmapData) => void): Promise<Unsubscribe> {
+  await ensureInitialized();
+  const { onValue } = await import('firebase/database');
+
+  const unsubscribe = onValue(roadmapRef!, (snapshot) => {
     const data = snapshot.val();
     callback({
       projects: data?.projects || [],
-      teamMembers: data?.teamMembers || []
+      teamMembers: data?.teamMembers || [],
+      dependencies: data?.dependencies || []
     });
   });
   return unsubscribe;
 }
 
 export async function saveRoadmap(data: RoadmapData): Promise<void> {
-  await set(roadmapRef, data);
+  await ensureInitialized();
+  const { set } = await import('firebase/database');
+  await set(roadmapRef!, data);
 }
 
 export async function getRoadmap(): Promise<RoadmapData> {
-  const snapshot = await get(roadmapRef);
+  await ensureInitialized();
+  const { get } = await import('firebase/database');
+  const snapshot = await get(roadmapRef!);
   const data = snapshot.val();
   return {
     projects: data?.projects || [],
-    teamMembers: data?.teamMembers || []
+    teamMembers: data?.teamMembers || [],
+    dependencies: data?.dependencies || []
   };
 }
 
-export { database };
+export function getDatabaseInstance(): Database | null {
+  return database;
+}

@@ -23,13 +23,13 @@ interface ProjectFormProps {
   hideOwner?: boolean;
 }
 
-const DEFAULT_COLORS = [
-  '#6B8CAE', // Soft Blue
-  '#9F8FBF', // Soft Purple
-  '#C98B8B', // Soft Rose
-  '#D4A574', // Soft Amber
-  '#7BAF8E', // Soft Green
-  '#9CA3AF', // Soft Grey
+// Status-aligned colors matching SearchFilter status indicators
+const STATUS_COLORS = [
+  { hex: '#04b050', name: 'On Track' },
+  { hex: '#ffc002', name: 'At Risk' },
+  { hex: '#ff0100', name: 'Off Track' },
+  { hex: '#7612c3', name: 'On Hold' },
+  { hex: '#9ca3af', name: 'To Start' },
 ];
 
 export function ProjectForm({
@@ -43,7 +43,7 @@ export function ProjectForm({
   const [owner, setOwner] = useState(initialValues?.owner || '');
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
-  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_COLORS[0]);
+  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || STATUS_COLORS[0].hex);
   const [customColor, setCustomColor] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -136,7 +136,7 @@ export function ProjectForm({
             setEndDate(format(addDays(today, 30), 'yyyy-MM-dd'));
           }}
         >
-          ↻ Start New Row (from today)
+          ↻ Reset to Today
         </button>
       )}
 
@@ -147,16 +147,17 @@ export function ProjectForm({
       )}
 
       <div className={styles.field}>
-        <label className={styles.label}>Status Color</label>
+        <label className={styles.label}>Status</label>
         <div className={styles.colorPicker}>
-          {DEFAULT_COLORS.map((color) => (
+          {STATUS_COLORS.map(({ hex, name }) => (
             <button
-              key={color}
+              key={hex}
               type="button"
-              className={`${styles.colorSwatch} ${statusColor === color ? styles.selected : ''}`}
-              style={{ backgroundColor: color }}
-              onClick={() => setStatusColor(color)}
-              aria-label={`Select color ${color}`}
+              className={`${styles.colorSwatch} ${statusColor === hex ? styles.selected : ''}`}
+              style={{ backgroundColor: hex }}
+              onClick={() => setStatusColor(hex)}
+              aria-label={`Select ${name} status`}
+              title={name}
             />
           ))}
           <div className={styles.customColorWrapper}>
@@ -172,6 +173,9 @@ export function ProjectForm({
             />
           </div>
         </div>
+        <span className={styles.hint}>
+          {STATUS_COLORS.find(c => c.hex === statusColor)?.name || 'Custom'}
+        </span>
       </div>
 
       <div className={styles.actions}>

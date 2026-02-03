@@ -141,6 +141,19 @@ export function MilestoneLine({
     };
   }, [showMenu]);
 
+  // Keyboard handler for accessibility
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.stopPropagation();
+      onEdit();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault();
+      e.stopPropagation();
+      onDelete();
+    }
+  }, [onEdit, onDelete]);
+
   if (displayWidth <= 0 || displayLeft >= projectWidth) {
     return null; // Milestone outside project bounds
   }
@@ -155,6 +168,10 @@ export function MilestoneLine({
         width: Math.max(displayWidth, 24),
         backgroundColor: displayColor || '#10b981'
       }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Milestone: ${milestone.title}, ${formatShortDate(milestone.startDate)} to ${formatShortDate(milestone.endDate)}${isPast ? ', Complete' : ''}`}
+      onKeyDown={handleKeyDown}
       onMouseEnter={() => {
         if (!dragMode && milestoneRef.current) {
           const rect = milestoneRef.current.getBoundingClientRect();

@@ -46,7 +46,9 @@ export function SearchFilter({
   const [isOpen, setIsOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [searchResults, setSearchResults] = useState<Project[]>([]);
+  const [totalResultCount, setTotalResultCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [showAllTags, setShowAllTags] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -61,6 +63,10 @@ export function SearchFilter({
     return Array.from(tags).sort();
   }, [projects]);
 
+  // Detect if running on Mac for keyboard shortcut display
+  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const modifierKey = isMac ? '⌘' : 'Ctrl';
+
   // Keyboard shortcut to open (Cmd+K / Ctrl+K)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -70,8 +76,10 @@ export function SearchFilter({
         setTimeout(() => inputRef.current?.focus(), 0);
       }
       if (e.key === 'Escape' && isOpen) {
+        // Only close modal, preserve active filters
         setIsOpen(false);
-        setFilters(INITIAL_FILTERS);
+        // Clear search text but keep filter selections
+        setFilters(f => ({ ...f, search: '' }));
       }
     };
 
@@ -83,6 +91,7 @@ export function SearchFilter({
   useEffect(() => {
     if (!filters.search.trim()) {
       setSearchResults([]);
+      setTotalResultCount(0);
       return;
     }
 
@@ -97,6 +106,7 @@ export function SearchFilter({
       return matchesTitle || matchesOwner || matchesMilestone;
     });
 
+    setTotalResultCount(results.length);
     setSearchResults(results.slice(0, 8));
     setSelectedIndex(0);
   }, [filters.search, projects]);
@@ -113,7 +123,8 @@ export function SearchFilter({
       e.preventDefault();
       onProjectSelect(searchResults[selectedIndex].id);
       setIsOpen(false);
-      setFilters(INITIAL_FILTERS);
+      // Only clear search, preserve other filters
+      setFilters(f => ({ ...f, search: '' }));
     }
   }, [searchResults, selectedIndex, onProjectSelect]);
 
@@ -159,7 +170,7 @@ export function SearchFilter({
         </svg>
         <span className={styles.triggerText}>Search</span>
         <kbd className={styles.shortcut}>
-          <span>⌘</span>K
+          <span>{modifierKey}</span>K
         </kbd>
         {hasActiveFilters && <span className={styles.filterBadge}>{filters.owners.length + filters.tags.length + (filters.status !== 'all' ? 1 : 0)}</span>}
       </button>
@@ -198,6 +209,11 @@ export function SearchFilter({
             {/* Search results */}
             {searchResults.length > 0 && (
               <div className={styles.results}>
+                {totalResultCount > 8 && (
+                  <div className={styles.resultCount}>
+                    Showing 8 of {totalResultCount} results
+                  </div>
+                )}
                 {searchResults.map((project, index) => (
                   <button
                     key={project.id}
@@ -205,7 +221,8 @@ export function SearchFilter({
                     onClick={() => {
                       onProjectSelect(project.id);
                       setIsOpen(false);
-                      setFilters(INITIAL_FILTERS);
+                      // Only clear search, preserve other filters
+                      setFilters(f => ({ ...f, search: '' }));
                     }}
                     onMouseEnter={() => setSelectedIndex(index)}
                   >
@@ -249,7 +266,7 @@ export function SearchFilter({
                 <div className={styles.filterSection}>
                   <span className={styles.filterLabel}>Tags</span>
                   <div className={styles.filterChips}>
-                    {allTags.slice(0, 10).map(tag => (
+                    {(showAllTags ? allTags : allTags.slice(0, 10)).map(tag => (
                       <button
                         key={tag}
                         className={`${styles.chip} ${filters.tags.includes(tag) ? styles.chipActive : ''}`}
@@ -263,6 +280,14 @@ export function SearchFilter({
                         {tag}
                       </button>
                     ))}
+                    {allTags.length > 10 && (
+                      <button
+                        className={styles.moreBtn}
+                        onClick={() => setShowAllTags(prev => !prev)}
+                      >
+                        {showAllTags ? 'Show less' : `+${allTags.length - 10} more`}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import styles from './Modal.module.css';
 
 interface ModalProps {
@@ -8,27 +8,78 @@ interface ModalProps {
   children: React.ReactNode;
 }
 
+// Selector for focusable elements
+const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
 export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  // Handle tab key for focus trap
+  const handleTabKey = useCallback((e: KeyboardEvent) => {
+    if (e.key !== 'Tab' || !modalRef.current) return;
+
+    const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    // No focusable elements
+    if (focusableElements.length === 0) {
+      e.preventDefault();
+      return;
+    }
+
+    if (e.shiftKey) {
+      // Shift+Tab: if on first element, go to last
+      if (document.activeElement === firstElement) {
+        e.preventDefault();
+        lastElement?.focus();
+      }
+    } else {
+      // Tab: if on last element, go to first
+      if (document.activeElement === lastElement) {
+        e.preventDefault();
+        firstElement?.focus();
+      }
+    }
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
 
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+    // Store currently focused element to restore later
+    previouslyFocusedRef.current = document.activeElement as HTMLElement;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      } else if (e.key === 'Tab') {
+        handleTabKey(e);
+      }
     };
 
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleKeyDown);
     document.body.style.overflow = 'hidden';
 
-    // Focus trap
-    modalRef.current?.focus();
+    // Focus first focusable element or modal itself
+    requestAnimationFrame(() => {
+      if (modalRef.current) {
+        const firstFocusable = modalRef.current.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+        if (firstFocusable) {
+          firstFocusable.focus();
+        } else {
+          modalRef.current.focus();
+        }
+      }
+    });
 
     return () => {
-      document.removeEventListener('keydown', handleEscape);
+      document.removeEventListener('keydown', handleKeyDown);
       document.body.style.overflow = '';
+      // Restore focus to previously focused element
+      previouslyFocusedRef.current?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, handleTabKey]);
 
   if (!isOpen) return null;
 

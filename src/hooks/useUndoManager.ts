@@ -16,7 +16,7 @@ export function useUndoManager({ userId, maxHistory = 50 }: UndoManagerOptions) 
   const isUndoingRef = useRef(false);
 
   // Generate unique action ID
-  const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const generateId = () => `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
   // Record an action
   const recordAction = useCallback((
