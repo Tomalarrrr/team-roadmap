@@ -61,6 +61,10 @@ export function useRoadmap() {
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Ref to always access current data (fixes stale closure bug during rapid updates)
+  const dataRef = useRef<RoadmapData>(data);
+  dataRef.current = data;
+
   // Track pending optimistic updates for rollback
   const pendingUpdateRef = useRef<RoadmapData | null>(null);
   const isLocalUpdateRef = useRef(false);
@@ -98,14 +102,17 @@ export function useRoadmap() {
 
   // Optimistic save: update UI immediately, save in background, rollback on failure
   const optimisticSave = useCallback(async (newData: RoadmapData) => {
-    const previousData = pendingUpdateRef.current || data;
+    // Use ref to get current data (avoids stale closure during rapid updates)
+    const currentData = dataRef.current;
+    const previousData = pendingUpdateRef.current || currentData;
     pendingUpdateRef.current = previousData;
 
     // Sanitize data to remove undefined values (Firebase rejects them)
     const sanitizedData = sanitizeForFirebase(normalizeData(newData));
 
-    // Update UI immediately (optimistic)
+    // Update both state and ref immediately (optimistic)
     isLocalUpdateRef.current = true;
+    dataRef.current = sanitizedData;
     setData(sanitizedData);
     setSaveError(null);
 
@@ -115,52 +122,58 @@ export function useRoadmap() {
     } catch (error) {
       // Rollback on failure
       console.error('Save failed, rolling back:', error);
+      dataRef.current = previousData;
       setData(previousData);
       pendingUpdateRef.current = null;
       setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     }
-  }, [data]);
+  }, []);
 
   const clearError = useCallback(() => setSaveError(null), []);
 
   const addTeamMember = useCallback(async (member: Omit<TeamMember, 'id'>) => {
+    const currentData = dataRef.current;
     const newMember: TeamMember = { ...member, id: uuidv4() };
     await optimisticSave({
-      ...data,
-      teamMembers: [...data.teamMembers, newMember]
+      ...currentData,
+      teamMembers: [...currentData.teamMembers, newMember]
     });
     analytics.memberAdded(newMember.id);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const updateTeamMember = useCallback(async (memberId: string, updates: Partial<TeamMember>) => {
-    const newMembers = data.teamMembers.map(m =>
+    const currentData = dataRef.current;
+    const newMembers = currentData.teamMembers.map(m =>
       m.id === memberId ? { ...m, ...updates } : m
     );
-    await optimisticSave({ ...data, teamMembers: newMembers });
+    await optimisticSave({ ...currentData, teamMembers: newMembers });
     analytics.memberUpdated(memberId);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const deleteTeamMember = useCallback(async (memberId: string) => {
-    const member = data.teamMembers.find(m => m.id === memberId);
+    const currentData = dataRef.current;
+    const member = currentData.teamMembers.find(m => m.id === memberId);
     if (!member) return;
 
     // Also delete their projects
-    const newProjects = data.projects.filter(p => p.owner !== member.name);
-    const newMembers = data.teamMembers.filter(m => m.id !== memberId);
-    await optimisticSave({ ...data, projects: newProjects, teamMembers: newMembers });
+    const newProjects = currentData.projects.filter(p => p.owner !== member.name);
+    const newMembers = currentData.teamMembers.filter(m => m.id !== memberId);
+    await optimisticSave({ ...currentData, projects: newProjects, teamMembers: newMembers });
     analytics.memberDeleted(memberId);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const reorderTeamMembers = useCallback(async (fromIndex: number, toIndex: number) => {
-    const newMembers = [...data.teamMembers];
+    const currentData = dataRef.current;
+    const newMembers = [...currentData.teamMembers];
     const [moved] = newMembers.splice(fromIndex, 1);
     newMembers.splice(toIndex, 0, moved);
-    await optimisticSave({ ...data, teamMembers: newMembers });
+    await optimisticSave({ ...currentData, teamMembers: newMembers });
     analytics.memberReordered();
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const addProject = useCallback(async (project: Omit<Project, 'id' | 'milestones'> | Project): Promise<Project> => {
+    const currentData = dataRef.current;
     // If project already has an id (e.g., from undo restore), use it as-is
     const newProject: Project = 'id' in project && project.id ? {
       ...project,
@@ -171,45 +184,49 @@ export function useRoadmap() {
       milestones: []
     };
     await optimisticSave({
-      ...data,
-      projects: [...data.projects, newProject]
+      ...currentData,
+      projects: [...currentData.projects, newProject]
     });
     analytics.projectCreated(newProject.id);
     return newProject;
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const updateProject = useCallback(async (projectId: string, updates: Partial<Project>) => {
-    const newProjects = data.projects.map(p =>
+    const currentData = dataRef.current;
+    const newProjects = currentData.projects.map(p =>
       p.id === projectId ? { ...p, ...updates } : p
     );
-    await optimisticSave({ ...data, projects: newProjects });
+    await optimisticSave({ ...currentData, projects: newProjects });
     analytics.projectUpdated(projectId);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const deleteProject = useCallback(async (projectId: string) => {
-    const newProjects = data.projects.filter(p => p.id !== projectId);
-    await optimisticSave({ ...data, projects: newProjects });
+    const currentData = dataRef.current;
+    const newProjects = currentData.projects.filter(p => p.id !== projectId);
+    await optimisticSave({ ...currentData, projects: newProjects });
     analytics.projectDeleted(projectId);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const addMilestone = useCallback(async (projectId: string, milestone: Omit<Milestone, 'id'>) => {
+    const currentData = dataRef.current;
     const newMilestone: Milestone = { ...milestone, id: uuidv4() };
-    const newProjects = data.projects.map(p => {
+    const newProjects = currentData.projects.map(p => {
       if (p.id === projectId) {
         return { ...p, milestones: [...p.milestones, newMilestone] };
       }
       return p;
     });
-    await optimisticSave({ ...data, projects: newProjects });
+    await optimisticSave({ ...currentData, projects: newProjects });
     analytics.milestoneCreated(newMilestone.id);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const updateMilestone = useCallback(async (
     projectId: string,
     milestoneId: string,
     updates: Partial<Milestone>
   ) => {
-    const newProjects = data.projects.map(p => {
+    const currentData = dataRef.current;
+    const newProjects = currentData.projects.map(p => {
       if (p.id === projectId) {
         return {
           ...p,
@@ -220,20 +237,21 @@ export function useRoadmap() {
       }
       return p;
     });
-    await optimisticSave({ ...data, projects: newProjects });
+    await optimisticSave({ ...currentData, projects: newProjects });
     analytics.milestoneUpdated(milestoneId);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const deleteMilestone = useCallback(async (projectId: string, milestoneId: string) => {
-    const newProjects = data.projects.map(p => {
+    const currentData = dataRef.current;
+    const newProjects = currentData.projects.map(p => {
       if (p.id === projectId) {
         return { ...p, milestones: p.milestones.filter(m => m.id !== milestoneId) };
       }
       return p;
     });
-    await optimisticSave({ ...data, projects: newProjects });
+    await optimisticSave({ ...currentData, projects: newProjects });
     analytics.milestoneDeleted(milestoneId);
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const addDependency = useCallback(async (
     fromProjectId: string,
@@ -242,6 +260,7 @@ export function useRoadmap() {
     toMilestoneId?: string,
     type: Dependency['type'] = 'finish-to-start'
   ) => {
+    const currentData = dataRef.current;
     const newDependency: Dependency = {
       id: uuidv4(),
       fromProjectId,
@@ -250,15 +269,16 @@ export function useRoadmap() {
       toMilestoneId,
       type
     };
-    const newDependencies = [...(data.dependencies || []), newDependency];
-    await optimisticSave({ ...data, dependencies: newDependencies });
+    const newDependencies = [...(currentData.dependencies || []), newDependency];
+    await optimisticSave({ ...currentData, dependencies: newDependencies });
     return newDependency;
-  }, [data, optimisticSave]);
+  }, [optimisticSave]);
 
   const removeDependency = useCallback(async (dependencyId: string) => {
-    const newDependencies = (data.dependencies || []).filter(d => d.id !== dependencyId);
-    await optimisticSave({ ...data, dependencies: newDependencies });
-  }, [data, optimisticSave]);
+    const currentData = dataRef.current;
+    const newDependencies = (currentData.dependencies || []).filter(d => d.id !== dependencyId);
+    await optimisticSave({ ...currentData, dependencies: newDependencies });
+  }, [optimisticSave]);
 
   return {
     data,
