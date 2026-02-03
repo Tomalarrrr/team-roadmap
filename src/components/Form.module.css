@@ -362,3 +362,183 @@
 .deleteConfirmBtn:active {
   transform: scale(0.97);
 }
+
+/* Milestones Section */
+.milestonesSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-light);
+}
+
+.milestonesSectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.milestonesSectionHeader .label {
+  margin: 0;
+}
+
+.milestonesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.milestoneItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  transition: border-color 0.15s;
+}
+
+.milestoneItem:hover {
+  border-color: var(--border-medium);
+}
+
+.milestoneColorDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.milestoneInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.milestoneTitle {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.milestoneDates {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.milestoneActions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.milestoneEditBtn {
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--accent-blue);
+  background: transparent;
+  border: 1px solid var(--accent-blue);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.milestoneEditBtn:hover {
+  background: var(--accent-blue-light);
+}
+
+.milestoneDeleteBtn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.milestoneDeleteBtn:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+.addMilestoneBtn {
+  align-self: flex-start;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px dashed var(--border-medium);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.addMilestoneBtn:hover {
+  color: var(--accent-blue);
+  border-color: var(--accent-blue);
+  background: var(--accent-blue-light);
+}
+
+.addMilestoneBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+}
+
+.milestoneFormInline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+}
+
+.milestoneFormInline .field {
+  gap: 4px;
+}
+
+.milestoneFormInline .label {
+  font-size: 0.8rem;
+}
+
+.milestoneFormInline .input,
+.milestoneFormInline .textarea {
+  padding: 8px 10px;
+  font-size: 0.9rem;
+}
+
+.milestoneFormInline .colorSwatch {
+  width: 26px;
+  height: 26px;
+}
+
+.milestoneFormActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-light);
+}
+
+.milestoneFormActions .cancelBtn,
+.milestoneFormActions .submitBtn {
+  padding: 8px 14px;
+  font-size: 0.85rem;
+}
