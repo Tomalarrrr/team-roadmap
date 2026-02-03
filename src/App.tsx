@@ -5,20 +5,26 @@ import { Timeline, type ZoomLevel } from './components/Timeline';
 import { Modal } from './components/Modal';
 import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
-import type { Project, Milestone } from './types';
+import { TeamMemberForm } from './components/TeamMemberForm';
+import type { Project, Milestone, TeamMember } from './types';
 import styles from './App.module.css';
 
 type ModalType =
-  | { type: 'add-project' }
+  | { type: 'add-project'; ownerName: string }
   | { type: 'edit-project'; project: Project }
   | { type: 'add-milestone'; projectId: string; project: Project }
   | { type: 'edit-milestone'; projectId: string; project: Project; milestone: Milestone }
+  | { type: 'add-member' }
+  | { type: 'edit-member'; member: TeamMember }
   | null;
 
 function App() {
   const {
     data,
     loading,
+    addTeamMember,
+    updateTeamMember,
+    deleteTeamMember,
     addProject,
     updateProject,
     deleteProject,
@@ -28,10 +34,37 @@ function App() {
   } = useRoadmap();
 
   const [modal, setModal] = useState<ModalType>(null);
-  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('month'); // Default to month view
+  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('month');
 
   const closeModal = useCallback(() => setModal(null), []);
 
+  // Team member handlers
+  const handleAddMember = useCallback(
+    async (values: { name: string; jobTitle: string }) => {
+      await addTeamMember(values);
+      closeModal();
+    },
+    [addTeamMember, closeModal]
+  );
+
+  const handleEditMember = useCallback(
+    async (values: { name: string; jobTitle: string }) => {
+      if (modal?.type === 'edit-member') {
+        await updateTeamMember(modal.member.id, values);
+        closeModal();
+      }
+    },
+    [modal, updateTeamMember, closeModal]
+  );
+
+  const handleDeleteMember = useCallback(async () => {
+    if (modal?.type === 'edit-member') {
+      await deleteTeamMember(modal.member.id);
+      closeModal();
+    }
+  }, [modal, deleteTeamMember, closeModal]);
+
+  // Project handlers
   const handleAddProject = useCallback(
     async (values: Omit<Project, 'id' | 'milestones'>) => {
       await addProject(values);
@@ -50,6 +83,7 @@ function App() {
     [modal, updateProject, closeModal]
   );
 
+  // Milestone handlers
   const handleAddMilestone = useCallback(
     async (values: Omit<Milestone, 'id'>) => {
       if (modal?.type === 'add-milestone') {
@@ -106,40 +140,57 @@ function App() {
 
   return (
     <div className={styles.app}>
-      <Header
-        onAddProject={() => setModal({ type: 'add-project' })}
-        zoomLevel={zoomLevel}
-        onZoomChange={setZoomLevel}
-      />
+      <Header zoomLevel={zoomLevel} onZoomChange={setZoomLevel} />
 
       <main className={styles.main}>
         <Timeline
           projects={data.projects}
+          teamMembers={data.teamMembers}
           zoomLevel={zoomLevel}
+          onAddProject={(ownerName) => setModal({ type: 'add-project', ownerName })}
           onUpdateProject={updateProject}
           onDeleteProject={deleteProject}
           onAddMilestone={openAddMilestone}
           onEditProject={openEditProject}
           onEditMilestone={openEditMilestone}
           onDeleteMilestone={deleteMilestone}
+          onAddTeamMember={() => setModal({ type: 'add-member' })}
+          onEditTeamMember={(member) => setModal({ type: 'edit-member', member })}
         />
       </main>
 
+      {/* Add Team Member Modal */}
+      <Modal isOpen={modal?.type === 'add-member'} onClose={closeModal} title="Add Team Member">
+        <TeamMemberForm onSubmit={handleAddMember} onCancel={closeModal} />
+      </Modal>
+
+      {/* Edit Team Member Modal */}
+      <Modal isOpen={modal?.type === 'edit-member'} onClose={closeModal} title="Edit Team Member">
+        {modal?.type === 'edit-member' && (
+          <TeamMemberForm
+            initialValues={{ name: modal.member.name, jobTitle: modal.member.jobTitle }}
+            onSubmit={handleEditMember}
+            onCancel={closeModal}
+            onDelete={handleDeleteMember}
+            isEditing
+          />
+        )}
+      </Modal>
+
       {/* Add Project Modal */}
-      <Modal
-        isOpen={modal?.type === 'add-project'}
-        onClose={closeModal}
-        title="New Project"
-      >
-        <ProjectForm onSubmit={handleAddProject} onCancel={closeModal} />
+      <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New Project">
+        {modal?.type === 'add-project' && (
+          <ProjectForm
+            initialValues={{ owner: modal.ownerName }}
+            onSubmit={handleAddProject}
+            onCancel={closeModal}
+            hideOwner
+          />
+        )}
       </Modal>
 
       {/* Edit Project Modal */}
-      <Modal
-        isOpen={modal?.type === 'edit-project'}
-        onClose={closeModal}
-        title="Edit Project"
-      >
+      <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit Project">
         {modal?.type === 'edit-project' && (
           <ProjectForm
             initialValues={{
@@ -157,11 +208,7 @@ function App() {
       </Modal>
 
       {/* Add Milestone Modal */}
-      <Modal
-        isOpen={modal?.type === 'add-milestone'}
-        onClose={closeModal}
-        title="Add Milestone"
-      >
+      <Modal isOpen={modal?.type === 'add-milestone'} onClose={closeModal} title="Add Milestone">
         {modal?.type === 'add-milestone' && (
           <MilestoneForm
             projectStartDate={modal.project.startDate}
@@ -173,11 +220,7 @@ function App() {
       </Modal>
 
       {/* Edit Milestone Modal */}
-      <Modal
-        isOpen={modal?.type === 'edit-milestone'}
-        onClose={closeModal}
-        title="Edit Milestone"
-      >
+      <Modal isOpen={modal?.type === 'edit-milestone'} onClose={closeModal} title="Edit Milestone">
         {modal?.type === 'edit-milestone' && (
           <MilestoneForm
             initialValues={{

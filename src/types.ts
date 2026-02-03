@@ -1,11 +1,11 @@
 export interface Milestone {
   id: string;
   title: string;
-  startDate: string; // ISO date string
+  startDate: string;
   endDate: string;
   tags: string[];
-  statusColor: string; // RGB/RGBA string
-  manualColorOverride?: boolean; // If true, don't auto-change to blue
+  statusColor: string;
+  manualColorOverride?: boolean;
 }
 
 export interface Project {
@@ -18,6 +18,13 @@ export interface Project {
   milestones: Milestone[];
 }
 
+export interface TeamMember {
+  id: string;
+  name: string;
+  jobTitle: string;
+}
+
 export interface RoadmapData {
   projects: Project[];
+  teamMembers: TeamMember[];
 }

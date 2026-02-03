@@ -2,13 +2,13 @@ import { useState } from 'react';
 import styles from './Form.module.css';
 
 interface ProjectFormProps {
-  initialValues?: {
+  initialValues?: Partial<{
     title: string;
     owner: string;
     startDate: string;
     endDate: string;
     statusColor: string;
-  };
+  }>;
   onSubmit: (values: {
     title: string;
     owner: string;
@@ -18,6 +18,7 @@ interface ProjectFormProps {
   }) => void;
   onCancel: () => void;
   isEditing?: boolean;
+  hideOwner?: boolean;
 }
 
 const DEFAULT_COLORS = [
@@ -35,7 +36,8 @@ export function ProjectForm({
   initialValues,
   onSubmit,
   onCancel,
-  isEditing = false
+  isEditing = false,
+  hideOwner = false
 }: ProjectFormProps) {
   const [title, setTitle] = useState(initialValues?.title || '');
   const [owner, setOwner] = useState(initialValues?.owner || '');
@@ -72,18 +74,20 @@ export function ProjectForm({
         />
       </div>
 
-      <div className={styles.field}>
-        <label htmlFor="owner" className={styles.label}>Owner / Team Member</label>
-        <input
-          id="owner"
-          type="text"
-          value={owner}
-          onChange={(e) => setOwner(e.target.value)}
-          className={styles.input}
-          placeholder="Enter owner name"
-          required
-        />
-      </div>
+      {!hideOwner && (
+        <div className={styles.field}>
+          <label htmlFor="owner" className={styles.label}>Owner / Team Member</label>
+          <input
+            id="owner"
+            type="text"
+            value={owner}
+            onChange={(e) => setOwner(e.target.value)}
+            className={styles.input}
+            placeholder="Enter owner name"
+            required
+          />
+        </div>
+      )}
 
       <div className={styles.row}>
         <div className={styles.field}>

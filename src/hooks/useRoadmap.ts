@@ -1,21 +1,52 @@
 import { useState, useEffect, useCallback } from 'react';
 import { subscribeToRoadmap, saveRoadmap } from '../firebase';
-import type { RoadmapData, Project, Milestone } from '../types';
+import type { RoadmapData, Project, Milestone, TeamMember } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
+const DEFAULT_DATA: RoadmapData = {
+  projects: [],
+  teamMembers: []
+};
+
 export function useRoadmap() {
-  const [data, setData] = useState<RoadmapData>({ projects: [] });
+  const [data, setData] = useState<RoadmapData>(DEFAULT_DATA);
   const [loading, setLoading] = useState(true);
-  const [error] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = subscribeToRoadmap((newData) => {
-      setData(newData);
+      setData({
+        projects: newData.projects || [],
+        teamMembers: newData.teamMembers || []
+      });
       setLoading(false);
     });
-
     return () => unsubscribe();
   }, []);
+
+  const addTeamMember = useCallback(async (member: Omit<TeamMember, 'id'>) => {
+    const newMember: TeamMember = { ...member, id: uuidv4() };
+    await saveRoadmap({
+      ...data,
+      teamMembers: [...data.teamMembers, newMember]
+    });
+  }, [data]);
+
+  const updateTeamMember = useCallback(async (memberId: string, updates: Partial<TeamMember>) => {
+    const newMembers = data.teamMembers.map(m =>
+      m.id === memberId ? { ...m, ...updates } : m
+    );
+    await saveRoadmap({ ...data, teamMembers: newMembers });
+  }, [data]);
+
+  const deleteTeamMember = useCallback(async (memberId: string) => {
+    const member = data.teamMembers.find(m => m.id === memberId);
+    if (!member) return;
+
+    // Also delete their projects
+    const newProjects = data.projects.filter(p => p.owner !== member.name);
+    const newMembers = data.teamMembers.filter(m => m.id !== memberId);
+    await saveRoadmap({ ...data, projects: newProjects, teamMembers: newMembers });
+  }, [data]);
 
   const addProject = useCallback(async (project: Omit<Project, 'id' | 'milestones'>) => {
     const newProject: Project = {
@@ -23,11 +54,10 @@ export function useRoadmap() {
       id: uuidv4(),
       milestones: []
     };
-    const newData = {
+    await saveRoadmap({
       ...data,
       projects: [...data.projects, newProject]
-    };
-    await saveRoadmap(newData);
+    });
   }, [data]);
 
   const updateProject = useCallback(async (projectId: string, updates: Partial<Project>) => {
@@ -43,16 +73,10 @@ export function useRoadmap() {
   }, [data]);
 
   const addMilestone = useCallback(async (projectId: string, milestone: Omit<Milestone, 'id'>) => {
-    const newMilestone: Milestone = {
-      ...milestone,
-      id: uuidv4()
-    };
+    const newMilestone: Milestone = { ...milestone, id: uuidv4() };
     const newProjects = data.projects.map(p => {
       if (p.id === projectId) {
-        return {
-          ...p,
-          milestones: [...p.milestones, newMilestone]
-        };
+        return { ...p, milestones: [...p.milestones, newMilestone] };
       }
       return p;
     });
@@ -81,10 +105,7 @@ export function useRoadmap() {
   const deleteMilestone = useCallback(async (projectId: string, milestoneId: string) => {
     const newProjects = data.projects.map(p => {
       if (p.id === projectId) {
-        return {
-          ...p,
-          milestones: p.milestones.filter(m => m.id !== milestoneId)
-        };
+        return { ...p, milestones: p.milestones.filter(m => m.id !== milestoneId) };
       }
       return p;
     });
@@ -94,7 +115,9 @@ export function useRoadmap() {
   return {
     data,
     loading,
-    error,
+    addTeamMember,
+    updateTeamMember,
+    deleteTeamMember,
     addProject,
     updateProject,
     deleteProject,
