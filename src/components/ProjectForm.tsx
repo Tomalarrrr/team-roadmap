@@ -144,7 +144,7 @@ export function ProjectForm({
 
     const milestoneData = {
       title: milestoneTitle.trim(),
-      description: milestoneDescription.trim() || undefined,
+      description: milestoneDescription.trim() || '',
       startDate: milestoneStartDate,
       endDate: milestoneEndDate,
       tags,
