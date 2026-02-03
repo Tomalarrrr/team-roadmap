@@ -1,5 +1,3 @@
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
 import { format } from 'date-fns';
 import type { Project, TeamMember, Dependency } from '../types';
 
@@ -11,7 +9,7 @@ interface ExportOption {
   action: () => void;
 }
 
-// PDF Export - captures the timeline as an image and saves as PDF
+// PDF Export - uses dynamic imports to code-split heavy libraries
 export async function exportTimelineToPDF() {
   const timelineElement = document.getElementById('timeline-container');
   if (!timelineElement) {
@@ -24,10 +22,16 @@ export async function exportTimelineToPDF() {
   const filename = `team-roadmap-${today}.pdf`;
 
   try {
+    // Dynamic imports - only loaded when export is triggered
+    const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+      import('html2canvas'),
+      import('jspdf')
+    ]);
+
     // Capture the timeline as a canvas
     const canvas = await html2canvas(timelineElement, {
       backgroundColor: '#fafafa',
-      scale: 2, // Higher resolution
+      scale: 2,
       logging: false,
       useCORS: true,
       allowTaint: true,
@@ -45,7 +49,7 @@ export async function exportTimelineToPDF() {
     const pdf = new jsPDF({
       orientation: imgWidth > imgHeight ? 'landscape' : 'portrait',
       unit: 'px',
-      format: [imgWidth / 2, imgHeight / 2] // Scale down by 2 since we used scale: 2 for capture
+      format: [imgWidth / 2, imgHeight / 2]
     });
 
     // Add the image to the PDF

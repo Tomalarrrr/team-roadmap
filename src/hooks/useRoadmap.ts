@@ -2,6 +2,17 @@ import { useState, useEffect, useCallback } from 'react';
 import { subscribeToRoadmap, saveRoadmap } from '../firebase';
 import type { RoadmapData, Project, Milestone, TeamMember } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { withRetry } from '../utils/retry';
+
+// Wrap saveRoadmap with retry logic
+const saveWithRetry = (data: RoadmapData) =>
+  withRetry(() => saveRoadmap(data), {
+    maxRetries: 3,
+    baseDelayMs: 500,
+    onRetry: (error, attempt) => {
+      console.warn(`Save failed, retry ${attempt}/3:`, error.message);
+    }
+  });
 
 const DEFAULT_DATA: RoadmapData = {
   projects: [],
@@ -33,7 +44,7 @@ export function useRoadmap() {
 
   const addTeamMember = useCallback(async (member: Omit<TeamMember, 'id'>) => {
     const newMember: TeamMember = { ...member, id: uuidv4() };
-    await saveRoadmap({
+    await saveWithRetry({
       ...data,
       teamMembers: [...data.teamMembers, newMember]
     });
@@ -43,7 +54,7 @@ export function useRoadmap() {
     const newMembers = data.teamMembers.map(m =>
       m.id === memberId ? { ...m, ...updates } : m
     );
-    await saveRoadmap({ ...data, teamMembers: newMembers });
+    await saveWithRetry({ ...data, teamMembers: newMembers });
   }, [data]);
 
   const deleteTeamMember = useCallback(async (memberId: string) => {
@@ -53,14 +64,14 @@ export function useRoadmap() {
     // Also delete their projects
     const newProjects = data.projects.filter(p => p.owner !== member.name);
     const newMembers = data.teamMembers.filter(m => m.id !== memberId);
-    await saveRoadmap({ ...data, projects: newProjects, teamMembers: newMembers });
+    await saveWithRetry({ ...data, projects: newProjects, teamMembers: newMembers });
   }, [data]);
 
   const reorderTeamMembers = useCallback(async (fromIndex: number, toIndex: number) => {
     const newMembers = [...data.teamMembers];
     const [moved] = newMembers.splice(fromIndex, 1);
     newMembers.splice(toIndex, 0, moved);
-    await saveRoadmap({ ...data, teamMembers: newMembers });
+    await saveWithRetry({ ...data, teamMembers: newMembers });
   }, [data]);
 
   const addProject = useCallback(async (project: Omit<Project, 'id' | 'milestones'>) => {
@@ -69,7 +80,7 @@ export function useRoadmap() {
       id: uuidv4(),
       milestones: []
     };
-    await saveRoadmap({
+    await saveWithRetry({
       ...data,
       projects: [...data.projects, newProject]
     });
@@ -79,12 +90,12 @@ export function useRoadmap() {
     const newProjects = data.projects.map(p =>
       p.id === projectId ? { ...p, ...updates } : p
     );
-    await saveRoadmap({ ...data, projects: newProjects });
+    await saveWithRetry({ ...data, projects: newProjects });
   }, [data]);
 
   const deleteProject = useCallback(async (projectId: string) => {
     const newProjects = data.projects.filter(p => p.id !== projectId);
-    await saveRoadmap({ ...data, projects: newProjects });
+    await saveWithRetry({ ...data, projects: newProjects });
   }, [data]);
 
   const addMilestone = useCallback(async (projectId: string, milestone: Omit<Milestone, 'id'>) => {
@@ -95,7 +106,7 @@ export function useRoadmap() {
       }
       return p;
     });
-    await saveRoadmap({ ...data, projects: newProjects });
+    await saveWithRetry({ ...data, projects: newProjects });
   }, [data]);
 
   const updateMilestone = useCallback(async (
@@ -114,7 +125,7 @@ export function useRoadmap() {
       }
       return p;
     });
-    await saveRoadmap({ ...data, projects: newProjects });
+    await saveWithRetry({ ...data, projects: newProjects });
   }, [data]);
 
   const deleteMilestone = useCallback(async (projectId: string, milestoneId: string) => {
@@ -124,7 +135,7 @@ export function useRoadmap() {
       }
       return p;
     });
-    await saveRoadmap({ ...data, projects: newProjects });
+    await saveWithRetry({ ...data, projects: newProjects });
   }, [data]);
 
   return {

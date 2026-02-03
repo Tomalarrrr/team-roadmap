@@ -11,6 +11,7 @@ import { TeamMemberForm } from './components/TeamMemberForm';
 import type { Project, Milestone, TeamMember, Dependency } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates } from './utils/dateUtils';
+import { TimelineSkeleton } from './components/Skeleton';
 import styles from './App.module.css';
 
 type ModalType =
@@ -363,9 +364,8 @@ function App() {
 
   if (loading) {
     return (
-      <div className={styles.loading}>
-        <div className={styles.spinner} />
-        <p>Loading roadmap...</p>
+      <div className={styles.app}>
+        <TimelineSkeleton />
       </div>
     );
   }

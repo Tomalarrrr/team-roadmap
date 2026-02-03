@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { format, addDays } from 'date-fns';
+import { projectSchema, validateForm } from '../utils/validation';
 import styles from './Form.module.css';
 
 interface ProjectFormProps {
@@ -44,25 +45,26 @@ export function ProjectForm({
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_COLORS[0]);
   const [customColor, setCustomColor] = useState('');
-  const [dateError, setDateError] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || !owner.trim() || !startDate || !endDate) return;
 
-    if (new Date(endDate) < new Date(startDate)) {
-      setDateError('End date cannot be before start date');
-      return;
-    }
-    setDateError('');
-
-    onSubmit({
+    const result = validateForm(projectSchema, {
       title: title.trim(),
       owner: owner.trim(),
       startDate,
       endDate,
       statusColor
     });
+
+    if (!result.success) {
+      setErrors(result.errors);
+      return;
+    }
+
+    setErrors({});
+    onSubmit(result.data);
   };
 
   return (
@@ -116,7 +118,7 @@ export function ProjectForm({
             value={endDate}
             onChange={(e) => {
               setEndDate(e.target.value);
-              setDateError('');
+              setErrors({});
             }}
             className={styles.input}
             required
@@ -138,7 +140,11 @@ export function ProjectForm({
         </button>
       )}
 
-      {dateError && <div className={styles.error}>{dateError}</div>}
+      {Object.keys(errors).length > 0 && (
+        <div className={styles.error}>
+          {Object.values(errors).join('. ')}
+        </div>
+      )}
 
       <div className={styles.field}>
         <label className={styles.label}>Status Color</label>

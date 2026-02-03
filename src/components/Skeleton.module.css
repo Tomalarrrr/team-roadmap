@@ -1,0 +1,62 @@
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-light) 50%, var(--bg-tertiary) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-sm);
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.timelineSkeleton {
+  display: flex;
+  height: calc(100vh - 80px);
+  background: var(--bg-primary);
+}
+
+.sidebarSkeleton {
+  width: 200px;
+  padding: 16px;
+  border-right: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.memberSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.gridSkeleton {
+  flex: 1;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.headerSkeleton {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.lanesSkeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.laneSkeleton {
+  height: 80px;
+  padding: 14px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+}
