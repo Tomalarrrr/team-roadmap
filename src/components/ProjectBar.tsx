@@ -10,7 +10,7 @@ import {
 import { parseISO, areIntervalsOverlapping } from 'date-fns';
 import styles from './ProjectBar.module.css';
 
-const AUTO_BLUE = '#6B8CAE'; // Soft Blue for past projects
+const AUTO_BLUE = '#0070c0'; // Blue for completed/past projects
 
 // Calculate stack indices for overlapping milestones
 function calculateMilestoneStacks(milestones: Milestone[]): Map<string, number> {
@@ -104,7 +104,7 @@ export function ProjectBar({
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0, below: false });
 
   // Click-to-edit tracking (distinguish from drag)
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -133,11 +133,9 @@ export function ProjectBar({
     dayWidth
   );
 
-  // Auto-blue rule: turn blue if project end date is past and no manual override
+  // Auto-blue rule: turn blue if project end date is past
   const isPast = isDatePast(project.endDate);
-  const displayColor = isPast && !project.manualColorOverride
-    ? AUTO_BLUE
-    : project.statusColor;
+  const displayColor = isPast ? AUTO_BLUE : project.statusColor;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     e.preventDefault();
@@ -150,8 +148,14 @@ export function ProjectBar({
   useEffect(() => {
     if (!dragMode) return;
 
+    const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
+
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - dragStartX;
+
+      // Don't start moving until we've exceeded the drag threshold
+      if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
+
       const deltaDays = Math.round(deltaX / dayWidth);
 
       if (deltaDays === 0) return;
@@ -247,9 +251,13 @@ export function ProjectBar({
       onMouseEnter={() => {
         if (!dragMode && !externalDragging && barRef.current) {
           const rect = barRef.current.getBoundingClientRect();
+          const tooltipHeight = 150; // Estimated tooltip height
+          // Check if there's room above, if not show below
+          const showBelow = rect.top < tooltipHeight + 20;
           setTooltipPosition({
             x: rect.left + rect.width / 2,
-            y: rect.top
+            y: showBelow ? rect.bottom : rect.top,
+            below: showBelow
           });
           setShowTooltip(true);
         }
@@ -343,8 +351,10 @@ export function ProjectBar({
             position: 'fixed',
             left: tooltipPosition.x,
             top: tooltipPosition.y,
-            transform: 'translateX(-50%) translateY(-100%)',
-            marginTop: -8
+            transform: tooltipPosition.below
+              ? 'translateX(-50%) translateY(0)'
+              : 'translateX(-50%) translateY(-100%)',
+            marginTop: tooltipPosition.below ? 8 : -8
           }}
         >
           <div className={styles.tooltipTitle}>{project.title}</div>
@@ -356,8 +366,8 @@ export function ProjectBar({
               {project.milestones.length} milestone{project.milestones.length !== 1 ? 's' : ''}
             </div>
           )}
-          {isPast && !project.manualColorOverride && (
-            <div className={styles.pastBadge}>Past project</div>
+          {isPast && (
+            <div className={styles.pastBadge}>Complete</div>
           )}
           <div className={styles.tooltipHint}>Click to edit • Drag to move</div>
         </div>

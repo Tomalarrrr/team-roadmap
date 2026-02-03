@@ -262,6 +262,19 @@
   font-weight: 500;
 }
 
+.statusChip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
 /* Footer */
 .footer {
   display: flex;

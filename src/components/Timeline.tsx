@@ -84,6 +84,7 @@ interface TimelineProps {
   dependencies: Dependency[];
   zoomLevel: ZoomLevel;
   selectedProjectId?: string | null;
+  filteredOwners?: string[]; // When set, only show swimlanes for these owners
   onAddProject: (ownerName: string) => void;
   onUpdateProject: (projectId: string, updates: Partial<Project>) => void;
   onDeleteProject: (projectId: string) => void;
@@ -117,6 +118,7 @@ export function Timeline({
   dependencies,
   zoomLevel,
   selectedProjectId,
+  filteredOwners,
   onAddProject,
   onUpdateProject,
   onDeleteProject,
@@ -146,6 +148,14 @@ export function Timeline({
       coordinateGetter: sortableKeyboardCoordinates
     })
   );
+
+  // Filter team members when owner filter is active
+  const displayedTeamMembers = useMemo(() => {
+    if (!filteredOwners || filteredOwners.length === 0) {
+      return teamMembers;
+    }
+    return teamMembers.filter(m => filteredOwners.includes(m.name));
+  }, [teamMembers, filteredOwners]);
 
   // Handler for team member reordering
   const handleMemberDragEnd = (event: DragEndEvent) => {
@@ -311,14 +321,14 @@ export function Timeline({
 
   // Calculate lane heights based on max stack index (not project count)
   const laneHeights = useMemo(() => {
-    return teamMembers.map(member => {
+    return displayedTeamMembers.map(member => {
       const stacks = projectStacksByOwner[member.name];
       const maxStack = stacks && stacks.size > 0 ? Math.max(...stacks.values()) : -1;
       const rowCount = maxStack + 1; // Number of rows needed
       const height = Math.max(MIN_LANE_HEIGHT, rowCount * PROJECT_HEIGHT + LANE_PADDING * 2);
       return height;
     });
-  }, [teamMembers, projectStacksByOwner]);
+  }, [displayedTeamMembers, projectStacksByOwner]);
 
   // Calculate cumulative lane positions
   const lanePositions = useMemo(() => {
@@ -352,10 +362,10 @@ export function Timeline({
           onDragEnd={handleMemberDragEnd}
         >
           <SortableContext
-            items={teamMembers.map(m => m.id)}
+            items={displayedTeamMembers.map(m => m.id)}
             strategy={verticalListSortingStrategy}
           >
-            {teamMembers.map((member, idx) => (
+            {displayedTeamMembers.map((member, idx) => (
               <SortableMemberLane
                 key={member.id}
                 member={member}
@@ -450,7 +460,7 @@ export function Timeline({
               </svg>
 
               {/* Project lanes */}
-              {teamMembers.map((member, idx) => {
+              {displayedTeamMembers.map((member, idx) => {
                 const stacks = projectStacksByOwner[member.name];
                 return (
                   <DroppableLane

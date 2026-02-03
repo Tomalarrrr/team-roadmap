@@ -9,13 +9,25 @@ interface SearchFilterProps {
   onProjectSelect: (projectId: string) => void;
 }
 
+export type ProjectStatus = 'complete' | 'on-hold' | 'to-start' | 'on-track' | 'at-risk' | 'off-track';
+
 export interface FilterState {
   search: string;
   owners: string[];
   tags: string[];
   dateRange: { start: string; end: string } | null;
-  status: 'all' | 'active' | 'past' | 'upcoming';
+  status: 'all' | ProjectStatus;
 }
+
+// Status color mapping for visual indicators
+export const STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string }> = {
+  'complete': { label: 'Complete', color: '#0070c0' },      // Blue
+  'on-hold': { label: 'On Hold', color: '#7612c3' },        // Purple
+  'to-start': { label: 'To Start', color: '#9ca3af' },      // Gray
+  'on-track': { label: 'On Track', color: '#04b050' },      // Green
+  'at-risk': { label: 'At Risk', color: '#ffc002' },        // Amber
+  'off-track': { label: 'Off Track', color: '#ff0100' },    // Red
+};
 
 const INITIAL_FILTERS: FilterState = {
   search: '',
@@ -258,13 +270,23 @@ export function SearchFilter({
               <div className={styles.filterSection}>
                 <span className={styles.filterLabel}>Status</span>
                 <div className={styles.filterChips}>
-                  {(['all', 'active', 'past', 'upcoming'] as const).map(status => (
+                  <button
+                    className={`${styles.chip} ${filters.status === 'all' ? styles.chipActive : ''}`}
+                    onClick={() => setFilters(f => ({ ...f, status: 'all' }))}
+                  >
+                    All
+                  </button>
+                  {(Object.entries(STATUS_CONFIG) as [ProjectStatus, { label: string; color: string }][]).map(([status, config]) => (
                     <button
                       key={status}
-                      className={`${styles.chip} ${filters.status === status ? styles.chipActive : ''}`}
+                      className={`${styles.chip} ${styles.statusChip} ${filters.status === status ? styles.chipActive : ''}`}
                       onClick={() => setFilters(f => ({ ...f, status }))}
                     >
-                      {status.charAt(0).toUpperCase() + status.slice(1)}
+                      <span
+                        className={styles.statusDot}
+                        style={{ backgroundColor: config.color }}
+                      />
+                      {config.label}
                     </button>
                   ))}
                 </div>

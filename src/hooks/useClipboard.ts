@@ -68,7 +68,6 @@ export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardO
         startDate: toISODateString(now),
         endDate: toISODateString(addDays(now, duration)),
         statusColor: originalProject.statusColor,
-        manualColorOverride: originalProject.manualColorOverride,
         milestones: milestonesOffset,
         dependencies: [] // Don't copy dependencies
       };
@@ -87,8 +86,7 @@ export function useClipboard({ onPasteProject, onPasteMilestone }: UseClipboardO
         startDate: toISODateString(now),
         endDate: toISODateString(addDays(now, duration)),
         tags: [...(originalMilestone.tags || [])],
-        statusColor: originalMilestone.statusColor,
-        manualColorOverride: originalMilestone.manualColorOverride
+        statusColor: originalMilestone.statusColor
       };
 
       onPasteMilestone(newMilestone, targetProjectId);

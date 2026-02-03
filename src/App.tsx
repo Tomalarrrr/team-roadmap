@@ -2,7 +2,6 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import { useRoadmap } from './hooks/useRoadmap';
 import { useUndoManager, createInverse } from './hooks/useUndoManager';
 import { useClipboard } from './hooks/useClipboard';
-import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
 import { Timeline, type ZoomLevel } from './components/Timeline';
 import { Modal } from './components/Modal';
@@ -10,7 +9,7 @@ import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
 import { TeamMemberForm } from './components/TeamMemberForm';
 import type { Project, Milestone, TeamMember, Dependency } from './types';
-import type { FilterState } from './components/SearchFilter';
+import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates } from './utils/dateUtils';
 import styles from './App.module.css';
 
@@ -92,6 +91,32 @@ function App() {
 
   const closeModal = useCallback(() => setModal(null), []);
 
+  // Determine the display status of a project based on its dates and color
+  const getProjectDisplayStatus = useCallback((project: Project): ProjectStatus => {
+    const today = new Date();
+    const endDate = new Date(project.endDate);
+    const startDate = new Date(project.startDate);
+
+    // Past projects are always "complete" (auto-blue)
+    if (endDate < today) {
+      return 'complete';
+    }
+
+    // For active/future projects, determine status from color
+    const statusColor = project.statusColor.toLowerCase();
+
+    // Map colors to statuses
+    if (statusColor === '#7612c3' || statusColor === '#7612c3') return 'on-hold';
+    if (statusColor === '#9ca3af') return 'to-start';
+    if (statusColor === '#04b050') return 'on-track';
+    if (statusColor === '#ffc002') return 'at-risk';
+    if (statusColor === '#ff0100') return 'off-track';
+
+    // Default: if start date is in future, it's "to-start", otherwise "on-track"
+    if (startDate > today) return 'to-start';
+    return 'on-track';
+  }, []);
+
   // Filter projects based on current filters
   const filteredProjects = useMemo(() => {
     let result = data.projects;
@@ -110,16 +135,9 @@ function App() {
       );
     }
 
-    // Filter by status
-    const today = new Date();
-    if (filters.status === 'past') {
-      result = result.filter(p => new Date(p.endDate) < today);
-    } else if (filters.status === 'active') {
-      result = result.filter(p =>
-        new Date(p.startDate) <= today && new Date(p.endDate) >= today
-      );
-    } else if (filters.status === 'upcoming') {
-      result = result.filter(p => new Date(p.startDate) > today);
+    // Filter by status (color-based)
+    if (filters.status !== 'all') {
+      result = result.filter(p => getProjectDisplayStatus(p) === filters.status);
     }
 
     // Filter by search (already handled in SearchFilter for selection)
@@ -137,7 +155,7 @@ function App() {
     }
 
     return result;
-  }, [data.projects, filters]);
+  }, [data.projects, filters, getProjectDisplayStatus]);
 
   // Scroll to project when selected from search
   const handleProjectSelect = useCallback((projectId: string) => {
@@ -366,9 +384,9 @@ function App() {
         onRedo={handleRedo}
         hasClipboard={hasClipboard}
         onPaste={() => paste()}
+        zoomLevel={zoomLevel}
+        onZoomChange={setZoomLevel}
       />
-
-      <Header zoomLevel={zoomLevel} onZoomChange={setZoomLevel} />
 
       <main className={styles.main}>
         <Timeline
@@ -377,6 +395,7 @@ function App() {
           dependencies={dependencies}
           zoomLevel={zoomLevel}
           selectedProjectId={selectedProjectId}
+          filteredOwners={filters.owners.length > 0 ? filters.owners : undefined}
           onAddProject={(ownerName) => {
             const ownerProjects = data.projects.filter(p => p.owner === ownerName);
             const { suggestedStart, suggestedEnd } = getSuggestedProjectDates(ownerProjects);
@@ -441,8 +460,7 @@ function App() {
               owner: modal.project.owner,
               startDate: modal.project.startDate,
               endDate: modal.project.endDate,
-              statusColor: modal.project.statusColor,
-              manualColorOverride: modal.project.manualColorOverride
+              statusColor: modal.project.statusColor
             }}
             onSubmit={handleEditProject}
             onCancel={closeModal}
@@ -473,8 +491,7 @@ function App() {
               startDate: modal.milestone.startDate,
               endDate: modal.milestone.endDate,
               tags: modal.milestone.tags,
-              statusColor: modal.milestone.statusColor,
-              manualColorOverride: modal.milestone.manualColorOverride
+              statusColor: modal.milestone.statusColor
             }}
             projectStartDate={modal.project.startDate}
             projectEndDate={modal.project.endDate}

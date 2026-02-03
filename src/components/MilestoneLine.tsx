@@ -16,7 +16,7 @@ interface MilestoneLineProps {
   onDelete: () => void;
 }
 
-const AUTO_BLUE = '#6B8CAE'; // Soft Blue for past milestones
+const AUTO_BLUE = '#0070c0'; // Blue for completed/past milestones
 
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
@@ -36,7 +36,7 @@ export function MilestoneLine({
 }: MilestoneLineProps) {
   const milestoneRef = useRef<HTMLDivElement>(null);
   const [showTooltip, setShowTooltip] = useState(false);
-  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0 });
+  const [tooltipPosition, setTooltipPosition] = useState({ x: 0, y: 0, below: false });
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -61,11 +61,9 @@ export function MilestoneLine({
     projectWidth - displayLeft - 16 // Account for padding
   );
 
-  // Auto-blue rule: turn blue if milestone end date is past and no manual override
+  // Auto-blue rule: turn blue if milestone end date is past
   const isPast = isMilestonePast(milestone.endDate);
-  const displayColor = isPast && !milestone.manualColorOverride
-    ? AUTO_BLUE
-    : milestone.statusColor;
+  const displayColor = isPast ? AUTO_BLUE : milestone.statusColor;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     e.preventDefault();
@@ -79,8 +77,14 @@ export function MilestoneLine({
   useEffect(() => {
     if (!dragMode) return;
 
+    const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
+
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - dragStartX;
+
+      // Don't start moving until we've exceeded the drag threshold
+      if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
+
       const deltaDays = Math.round(deltaX / dayWidth);
 
       if (deltaDays === 0) return;
@@ -154,9 +158,13 @@ export function MilestoneLine({
       onMouseEnter={() => {
         if (!dragMode && milestoneRef.current) {
           const rect = milestoneRef.current.getBoundingClientRect();
+          const tooltipHeight = 120; // Estimated tooltip height
+          // Check if there's room above, if not show below
+          const showBelow = rect.top < tooltipHeight + 20;
           setTooltipPosition({
             x: rect.left + rect.width / 2,
-            y: rect.top
+            y: showBelow ? rect.bottom : rect.top,
+            below: showBelow
           });
           setShowTooltip(true);
         }
@@ -214,8 +222,10 @@ export function MilestoneLine({
             position: 'fixed',
             left: tooltipPosition.x,
             top: tooltipPosition.y,
-            transform: 'translateX(-50%) translateY(-100%)',
-            marginTop: -8
+            transform: tooltipPosition.below
+              ? 'translateX(-50%) translateY(0)'
+              : 'translateX(-50%) translateY(-100%)',
+            marginTop: tooltipPosition.below ? 8 : -8
           }}
         >
           <div className={styles.tooltipTitle}>{milestone.title}</div>
@@ -232,8 +242,8 @@ export function MilestoneLine({
               ))}
             </div>
           )}
-          {isPast && !milestone.manualColorOverride && (
-            <div className={styles.pastBadge}>Past milestone</div>
+          {isPast && (
+            <div className={styles.pastBadge}>Complete</div>
           )}
           <div className={styles.tooltipHint}>Click to edit • Drag to move</div>
         </div>

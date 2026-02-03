@@ -46,7 +46,8 @@
   box-sizing: border-box;
   background: var(--bg-primary);
   touch-action: none;
-  overflow: hidden;
+  overflow: visible;
+  min-height: 100px; /* Ensure enough space for name + title + button */
 }
 
 .memberLane.dragging {

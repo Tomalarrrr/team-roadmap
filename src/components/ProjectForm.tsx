@@ -9,7 +9,6 @@ interface ProjectFormProps {
     startDate: string;
     endDate: string;
     statusColor: string;
-    manualColorOverride?: boolean;
   }>;
   onSubmit: (values: {
     title: string;
@@ -17,7 +16,6 @@ interface ProjectFormProps {
     startDate: string;
     endDate: string;
     statusColor: string;
-    manualColorOverride?: boolean;
   }) => void;
   onCancel: () => void;
   isEditing?: boolean;
@@ -45,9 +43,6 @@ export function ProjectForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_COLORS[0]);
-  const [manualColorOverride, setManualColorOverride] = useState(
-    initialValues?.manualColorOverride || false
-  );
   const [customColor, setCustomColor] = useState('');
   const [dateError, setDateError] = useState('');
 
@@ -66,8 +61,7 @@ export function ProjectForm({
       owner: owner.trim(),
       startDate,
       endDate,
-      statusColor,
-      manualColorOverride
+      statusColor
     });
   };
 
@@ -155,10 +149,7 @@ export function ProjectForm({
               type="button"
               className={`${styles.colorSwatch} ${statusColor === color ? styles.selected : ''}`}
               style={{ backgroundColor: color }}
-              onClick={() => {
-                setStatusColor(color);
-                setManualColorOverride(true);
-              }}
+              onClick={() => setStatusColor(color)}
               aria-label={`Select color ${color}`}
             />
           ))}
@@ -169,25 +160,12 @@ export function ProjectForm({
               onChange={(e) => {
                 setCustomColor(e.target.value);
                 setStatusColor(e.target.value);
-                setManualColorOverride(true);
               }}
               className={styles.customColorInput}
               aria-label="Custom color picker"
             />
           </div>
         </div>
-      </div>
-
-      <div className={styles.checkboxField}>
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            checked={manualColorOverride}
-            onChange={(e) => setManualColorOverride(e.target.checked)}
-            className={styles.checkbox}
-          />
-          <span>Keep this color (don't auto-change to blue when past due)</span>
-        </label>
       </div>
 
       <div className={styles.actions}>

@@ -1,6 +1,7 @@
 import { SearchFilter, type FilterState } from './SearchFilter';
 import { ExportMenu } from './ExportMenu';
 import type { Project, TeamMember, Dependency } from '../types';
+import type { ZoomLevel } from './Timeline';
 import styles from './Toolbar.module.css';
 
 interface ToolbarProps {
@@ -15,7 +16,16 @@ interface ToolbarProps {
   onRedo: () => void;
   hasClipboard: boolean;
   onPaste: () => void;
+  zoomLevel: ZoomLevel;
+  onZoomChange: (level: ZoomLevel) => void;
 }
+
+const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
+  { value: 'day', label: 'Day' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'year', label: 'Year' },
+];
 
 export function Toolbar({
   projects,
@@ -28,7 +38,9 @@ export function Toolbar({
   onUndo,
   onRedo,
   hasClipboard,
-  onPaste
+  onPaste,
+  zoomLevel,
+  onZoomChange
 }: ToolbarProps) {
   return (
     <div className={styles.toolbar}>
@@ -46,6 +58,24 @@ export function Toolbar({
       </div>
 
       <div className={styles.right}>
+        {/* Zoom Controls */}
+        <div className={styles.zoomControl}>
+          <span className={styles.zoomLabel}>View:</span>
+          <div className={styles.zoomButtons}>
+            {ZOOM_OPTIONS.map(({ value, label }) => (
+              <button
+                key={value}
+                className={`${styles.zoomBtn} ${zoomLevel === value ? styles.active : ''}`}
+                onClick={() => onZoomChange(value)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.divider} />
+
         {/* Undo/Redo */}
         <div className={styles.undoGroup}>
           <button

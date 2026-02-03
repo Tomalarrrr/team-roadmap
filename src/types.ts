@@ -6,7 +6,6 @@ export interface Milestone {
   endDate: string;
   tags: string[];
   statusColor: string;
-  manualColorOverride?: boolean;
 }
 
 export interface Project {
@@ -16,7 +15,6 @@ export interface Project {
   startDate: string;
   endDate: string;
   statusColor: string;
-  manualColorOverride?: boolean;
   milestones: Milestone[];
   dependencies?: string[]; // IDs of projects this depends on
 }
