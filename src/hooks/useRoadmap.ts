@@ -21,12 +21,13 @@ const DEFAULT_DATA: RoadmapData = {
   dependencies: []
 };
 
-// Normalize data to ensure all required arrays exist
+// Normalize data to ensure all required arrays exist and no undefined values
 function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
   const projects = (newData.projects || []).map(p => ({
     ...p,
     milestones: (p.milestones || []).map(m => ({
       ...m,
+      description: m.description ?? '',
       tags: m.tags || []
     }))
   }));
@@ -35,6 +36,24 @@ function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
     teamMembers: newData.teamMembers || [],
     dependencies: newData.dependencies || []
   };
+}
+
+// Remove undefined values recursively (Firebase rejects undefined)
+function sanitizeForFirebase<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return '' as T;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeForFirebase(item)) as T;
+  }
+  if (typeof obj === 'object') {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = value === undefined ? '' : sanitizeForFirebase(value);
+    }
+    return result as T;
+  }
+  return obj;
 }
 
 export function useRoadmap() {
@@ -82,13 +101,16 @@ export function useRoadmap() {
     const previousData = pendingUpdateRef.current || data;
     pendingUpdateRef.current = previousData;
 
+    // Sanitize data to remove undefined values (Firebase rejects them)
+    const sanitizedData = sanitizeForFirebase(normalizeData(newData));
+
     // Update UI immediately (optimistic)
     isLocalUpdateRef.current = true;
-    setData(newData);
+    setData(sanitizedData);
     setSaveError(null);
 
     try {
-      await saveWithRetry(newData);
+      await saveWithRetry(sanitizedData);
       pendingUpdateRef.current = null;
     } catch (error) {
       // Rollback on failure
