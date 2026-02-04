@@ -180,7 +180,7 @@
   left: 12px;
   right: 12px;
   min-height: 20px;
-  pointer-events: auto;
+  pointer-events: none;
 }
 
 .contextMenu {
