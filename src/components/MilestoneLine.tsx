@@ -443,7 +443,9 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   }, [isCreatingDependency, isSource, projectId, milestone.id, completeCreation]);
 
   // Track mouse proximity to end for showing dependency arrow
+  // IMPORTANT: Skip during drag to prevent unnecessary state updates and re-renders
   const handleMouseMoveForArrow = useCallback((e: React.MouseEvent) => {
+    if (dragMode) return; // Skip during drag - don't cause re-renders
     if (!milestoneRef.current || isCreatingDependency) {
       setShowDependencyArrow(false);
       return;
@@ -451,7 +453,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     const rect = milestoneRef.current.getBoundingClientRect();
     const distanceFromEnd = rect.right - e.clientX;
     setShowDependencyArrow(distanceFromEnd <= 30 && distanceFromEnd >= 0);
-  }, [isCreatingDependency]);
+  }, [isCreatingDependency, dragMode]);
 
   const isTargetable = isCreatingDependency && !isSource;
 
@@ -497,7 +499,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
         handleMouseMoveForArrow(e);
       }}
       onMouseLeave={() => {
-        setShowDependencyArrow(false);
+        if (!dragMode) setShowDependencyArrow(false); // Skip during drag
       }}
       onContextMenu={(e) => {
         e.preventDefault();
