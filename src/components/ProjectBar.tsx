@@ -449,16 +449,23 @@ export function ProjectBar({
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
+          console.log('🔵 PROJECT BAR mouseDown', { target: e.target });
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           handleMouseDown(e, 'move');
         }}
         onMouseUp={(e) => {
-          if (!clickStartRef.current) return;
+          console.log('🔵 PROJECT BAR mouseUp', { target: e.target });
+          if (!clickStartRef.current) {
+            console.log('🔴 No clickStartRef');
+            return;
+          }
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
+          console.log('🔵 PROJECT BAR click check', { dx, dy, elapsed, pass: dx < 5 && dy < 5 && elapsed < 300 });
           // If minimal movement and quick click, open edit dialog and select
           if (dx < 5 && dy < 5 && elapsed < 300) {
+            console.log('✅ PROJECT BAR opening edit dialog');
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
@@ -467,6 +474,7 @@ export function ProjectBar({
           clickStartRef.current = null;
         }}
         onDoubleClick={(e) => {
+          console.log('🔵 PROJECT BAR doubleClick');
           e.stopPropagation();
           onEdit();
         }}
