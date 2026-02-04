@@ -479,9 +479,23 @@ export function ProjectBar({
         <div className={styles.projectContent}>
           <span className={styles.projectTitle}>{project.title}</span>
           <span className={styles.projectSeparator}>•</span>
+          <span className={styles.projectLabel}>Start</span>
+          <span className={styles.projectSeparator}>•</span>
           <span className={styles.projectDates}>
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
+        </div>
+        <div className={styles.dragHint}>
+          Click to edit or drag to move
+        </div>
+        <div className={styles.projectContentEnd}>
+          <span className={styles.projectDates}>
+            {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
+          </span>
+          <span className={styles.projectSeparator}>•</span>
+          <span className={styles.projectTitle}>{project.title}</span>
+          <span className={styles.projectSeparator}>•</span>
+          <span className={styles.projectLabel}>End</span>
         </div>
       </div>
 

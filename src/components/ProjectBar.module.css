@@ -115,6 +115,32 @@
   flex-shrink: 0;
 }
 
+.projectContentEnd {
+  position: absolute;
+  top: 0;
+  right: 12px;
+  padding: 8px 8px 4px;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.dragHint {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
 .projectTitle {
   font-size: 0.8rem;
   font-weight: 600;
@@ -136,6 +162,14 @@
 .projectDates {
   font-size: 0.65rem;
   color: rgba(255, 255, 255, 0.85);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.projectLabel {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.75);
   white-space: nowrap;
   flex-shrink: 0;
 }
