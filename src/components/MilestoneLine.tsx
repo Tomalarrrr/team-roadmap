@@ -241,8 +241,8 @@ export function MilestoneLine({
   useEffect(() => {
     if (!showMenu) return;
 
-    let timeoutId: NodeJS.Timeout | null = null;
-    let graceTimeoutId: NodeJS.Timeout | null = null;
+    let timeoutId: number | null = null;
+    let graceTimeoutId: number | null = null;
 
     const handleClose = (e: MouseEvent) => {
       // Layer 2: Only close on left-clicks (button 0), ignore right-clicks
