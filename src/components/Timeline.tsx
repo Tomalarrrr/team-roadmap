@@ -239,7 +239,13 @@ export function Timeline({
     return markers;
   }, [zoomLevel, timelineStart, timelineEnd, dayWidth, totalWidth]);
 
-  const todayPosition = getTodayPosition(timelineStart, dayWidth);
+  // Memoize todayPosition to prevent unnecessary recalculations on every render
+  // getTodayPosition creates new Date() internally, so we only want to recalculate
+  // when timelineStart or dayWidth actually changes
+  const todayPosition = useMemo(
+    () => getTodayPosition(timelineStart, dayWidth),
+    [timelineStart, dayWidth]
+  );
 
   // Effect A: One-time initial scroll - position "today" at 1/3 from left
   useEffect(() => {
