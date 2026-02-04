@@ -9,7 +9,7 @@ import { Modal } from './components/Modal';
 import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
 import { TeamMemberForm } from './components/TeamMemberForm';
-import type { Project, Milestone, TeamMember } from './types';
+import type { Project, Milestone, TeamMember, Dependency } from './types';
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates } from './utils/dateUtils';
@@ -59,7 +59,8 @@ function App() {
     updateMilestone,
     deleteMilestone,
     addDependency,
-    removeDependency
+    removeDependency,
+    updateDependency
   } = useRoadmap();
 
   const [modal, setModal] = useState<ModalType>(null);
@@ -471,6 +472,14 @@ function App() {
     }
   }, [removeDependency, showToast]);
 
+  const handleUpdateDependency = useCallback(async (depId: string, updates: Partial<Dependency>) => {
+    try {
+      await updateDependency(depId, updates);
+    } catch (error) {
+      showToast(`Failed to update dependency: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  }, [updateDependency, showToast]);
+
   const openAddMilestone = useCallback(
     (projectId: string) => {
       const project = data.projects.find((p) => p.id === projectId);
@@ -550,6 +559,7 @@ function App() {
           onSelectMilestone={(_, __, milestone) => setSelectedMilestone(milestone)}
           onAddDependency={handleAddDependency}
           onRemoveDependency={handleRemoveDependency}
+          onUpdateDependency={handleUpdateDependency}
         />
       </main>
 

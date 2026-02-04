@@ -107,6 +107,7 @@ interface TimelineProps {
     toMilestoneId?: string
   ) => void;
   onRemoveDependency?: (depId: string) => void;
+  onUpdateDependency?: (depId: string, updates: Partial<Dependency>) => void;
 }
 
 const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
@@ -193,7 +194,8 @@ export function Timeline({
   onSelectProject,
   onSelectMilestone,
   onAddDependency,
-  onRemoveDependency
+  onRemoveDependency,
+  onUpdateDependency
 }: TimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
@@ -627,10 +629,12 @@ export function Timeline({
           isAnyHovered={hoveredDepId !== null}
           onHoverChange={(hovered) => setHoveredDepId(hovered ? dep.id : null)}
           onRemove={() => onRemoveDependency?.(dep.id)}
+          waypoints={dep.waypoints}
+          onUpdateWaypoints={(waypoints) => onUpdateDependency?.(dep.id, { waypoints })}
         />
       );
     });
-  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, onRemoveDependency]);
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, onRemoveDependency, onUpdateDependency]);
 
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>

@@ -340,6 +340,14 @@ export function useRoadmap() {
     await optimisticSave({ ...currentData, dependencies: newDependencies });
   }, [optimisticSave]);
 
+  const updateDependency = useCallback(async (dependencyId: string, updates: Partial<Dependency>) => {
+    const currentData = dataRef.current;
+    const newDependencies = (currentData.dependencies || []).map(d =>
+      d.id === dependencyId ? { ...d, ...updates } : d
+    );
+    await optimisticSave({ ...currentData, dependencies: newDependencies });
+  }, [optimisticSave]);
+
   return {
     data,
     loading,
@@ -357,6 +365,7 @@ export function useRoadmap() {
     updateMilestone,
     deleteMilestone,
     addDependency,
-    removeDependency
+    removeDependency,
+    updateDependency
   };
 }

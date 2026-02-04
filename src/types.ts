@@ -25,6 +25,11 @@ export interface TeamMember {
   jobTitle: string;
 }
 
+export interface Waypoint {
+  x: number;
+  y: number;
+}
+
 export interface Dependency {
   id: string;
   fromProjectId: string;
@@ -32,6 +37,7 @@ export interface Dependency {
   toProjectId: string;
   toMilestoneId?: string;    // If set, dependency ends at this milestone
   type: 'finish-to-start' | 'start-to-start' | 'finish-to-finish';
+  waypoints?: Waypoint[];    // Custom control points for manual path shaping
 }
 
 // Types for dependency creation UI

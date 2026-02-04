@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import type { Project, Milestone } from '../types';
+import type { Project, Milestone, Waypoint } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
 import styles from './DependencyLine.module.css';
 
@@ -58,6 +58,8 @@ interface DependencyLineProps {
   isAnyHovered?: boolean; // True if any dependency line is hovered
   onHoverChange?: (hovered: boolean) => void;
   onRemove: () => void;
+  waypoints?: Waypoint[]; // Custom control points for manual path shaping
+  onUpdateWaypoints?: (waypoints: Waypoint[]) => void;
 }
 
 const BASE_PROJECT_HEIGHT = 52; // Minimum project bar height
@@ -82,7 +84,9 @@ export function DependencyLine({
   lineIndex = 0,
   isAnyHovered = false,
   onHoverChange,
-  onRemove
+  onRemove,
+  waypoints,
+  onUpdateWaypoints
 }: DependencyLineProps) {
   // Helper to calculate stack top offset based on dynamic heights
   const getStackTopOffset = useCallback((ownerName: string, stackIndex: number): number => {
@@ -95,6 +99,10 @@ export function DependencyLine({
   }, [laneStackHeights]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
+  const [isSelected, setIsSelected] = useState(false);
+  const [draggingWaypointIndex, setDraggingWaypointIndex] = useState<number | null>(null);
+  const [previewWaypoints, setPreviewWaypoints] = useState<Waypoint[] | null>(null);
+  const svgRef = useRef<SVGGElement>(null);
 
   // Memoize milestone stacks to avoid recalculation
   const fromMilestoneStacks = useMemo(
@@ -167,82 +175,161 @@ export function DependencyLine({
     const adjustedFromY = fromY + yStagger;
     const adjustedToY = toY + yStagger;
 
-    // Smart orthogonal routing - automatically determines best path
-    const cornerRadius = 8;
-    const minGap = 16; // Minimum gap for routing
-
-    const deltaY = adjustedToY - adjustedFromY;
-    const absY = Math.abs(deltaY);
-    const ySign = deltaY >= 0 ? 1 : -1;
-    const isForward = toX > fromX;
-    const horizontalDistance = Math.abs(toX - fromX);
+    // Use custom waypoints if available (preview takes precedence during drag)
+    const activeWaypoints = previewWaypoints || waypoints;
 
     // Build path with rounded corners
     let path: string;
     let pathMidX: number; // For hover indicator positioning
+    let controlPoints: Waypoint[] = []; // Points that can be dragged
 
-    // Edge case: elements very close or same level - simple line
-    if (absY < 2 && horizontalDistance < minGap * 2) {
-      path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
-      pathMidX = (fromX + toX) / 2;
-    } else if (isForward) {
-      // FORWARD: Target is to the right of source
-      // Route: exit right → drop/rise → continue right to target
-      // Always enter target from its left side (natural flow)
-      const midX = Math.max(fromX + minGap, (fromX + toX) / 2);
-      const r = Math.max(2, Math.min(cornerRadius, absY / 2, (midX - fromX) / 2, (toX - midX) / 2));
+    // Helper to build orthogonal path through waypoints
+    const buildWaypointPath = (points: Waypoint[]): string => {
+      const cornerRadius = 6;
+      const allPoints = [
+        { x: fromX, y: adjustedFromY },
+        ...points,
+        { x: toX, y: adjustedToY }
+      ];
 
-      if (absY < r * 2) {
-        // Small vertical difference - simple diagonal
-        path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
-      } else {
-        path = [
-          `M ${fromX} ${adjustedFromY}`,
-          `H ${midX - r}`,
-          `Q ${midX} ${adjustedFromY} ${midX} ${adjustedFromY + (ySign * r)}`,
-          `V ${adjustedToY - (ySign * r)}`,
-          `Q ${midX} ${adjustedToY} ${midX + r} ${adjustedToY}`,
-          `H ${toX}`
-        ].join(' ');
+      const segments: string[] = [`M ${allPoints[0].x} ${allPoints[0].y}`];
+
+      for (let i = 1; i < allPoints.length; i++) {
+        const prev = allPoints[i - 1];
+        const curr = allPoints[i];
+        const next = allPoints[i + 1];
+
+        if (next) {
+          // Calculate corner radius based on available space
+          const dxIn = curr.x - prev.x;
+          const dyIn = curr.y - prev.y;
+          const dxOut = next.x - curr.x;
+          const dyOut = next.y - curr.y;
+
+          const distIn = Math.sqrt(dxIn * dxIn + dyIn * dyIn);
+          const distOut = Math.sqrt(dxOut * dxOut + dyOut * dyOut);
+          const r = Math.min(cornerRadius, distIn / 2, distOut / 2);
+
+          if (r > 2) {
+            // Normalize directions
+            const inDirX = dxIn / distIn;
+            const inDirY = dyIn / distIn;
+            const outDirX = dxOut / distOut;
+            const outDirY = dyOut / distOut;
+
+            // Corner points
+            const cornerStartX = curr.x - inDirX * r;
+            const cornerStartY = curr.y - inDirY * r;
+            const cornerEndX = curr.x + outDirX * r;
+            const cornerEndY = curr.y + outDirY * r;
+
+            segments.push(`L ${cornerStartX} ${cornerStartY}`);
+            segments.push(`Q ${curr.x} ${curr.y} ${cornerEndX} ${cornerEndY}`);
+          } else {
+            segments.push(`L ${curr.x} ${curr.y}`);
+          }
+        } else {
+          segments.push(`L ${curr.x} ${curr.y}`);
+        }
       }
-      pathMidX = midX;
+
+      return segments.join(' ');
+    };
+
+    // If we have custom waypoints, use them
+    if (activeWaypoints && activeWaypoints.length > 0) {
+      path = buildWaypointPath(activeWaypoints);
+      controlPoints = activeWaypoints;
+      pathMidX = activeWaypoints.length > 0
+        ? activeWaypoints[Math.floor(activeWaypoints.length / 2)].x
+        : (fromX + toX) / 2;
     } else {
-      // BACKWARD: Target is to the left of source
-      // Route: exit right → drop into gap → go left past target → enter from left
-      const exitX = fromX + minGap; // Exit point (in white space to the right of source)
-      const entryX = toX - minGap; // Entry approach point (left of target)
-      const r = Math.max(2, Math.min(cornerRadius, absY / 2, minGap / 2));
+      // Smart orthogonal routing - automatically determines best path
+      const cornerRadius = 8;
+      const minGap = 16; // Minimum gap for routing
 
-      if (absY < r * 2) {
-        // Same level - go right, then loop around: right → down → left → up → right
-        const loopDepth = minGap; // How far to drop for the loop
-        const loopSign = 1; // Always loop downward for consistency
-        path = [
-          `M ${fromX} ${adjustedFromY}`,
-          `H ${exitX - r}`,
-          `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (loopSign * r)}`,
-          `V ${adjustedFromY + (loopSign * loopDepth) - r}`,
-          `Q ${exitX} ${adjustedFromY + (loopSign * loopDepth)} ${exitX - r} ${adjustedFromY + (loopSign * loopDepth)}`,
-          `H ${entryX + r}`,
-          `Q ${entryX} ${adjustedFromY + (loopSign * loopDepth)} ${entryX} ${adjustedFromY + (loopSign * loopDepth) - (loopSign * r)}`,
-          `V ${adjustedToY + (loopSign * r)}`,
-          `Q ${entryX} ${adjustedToY} ${entryX + r} ${adjustedToY}`,
-          `H ${toX}`
-        ].join(' ');
+      const deltaY = adjustedToY - adjustedFromY;
+      const absY = Math.abs(deltaY);
+      const ySign = deltaY >= 0 ? 1 : -1;
+      const isForward = toX > fromX;
+      const horizontalDistance = Math.abs(toX - fromX);
+
+      // Edge case: elements very close or same level - simple line
+      if (absY < 2 && horizontalDistance < minGap * 2) {
+        path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
+        pathMidX = (fromX + toX) / 2;
+        // For straight lines, add a midpoint that can be dragged
+        controlPoints = [{ x: (fromX + toX) / 2, y: (adjustedFromY + adjustedToY) / 2 }];
+      } else if (isForward) {
+        // FORWARD: Target is to the right of source
+        const midX = Math.max(fromX + minGap, (fromX + toX) / 2);
+        const r = Math.max(2, Math.min(cornerRadius, absY / 2, (midX - fromX) / 2, (toX - midX) / 2));
+
+        if (absY < r * 2) {
+          path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
+          controlPoints = [{ x: (fromX + toX) / 2, y: (adjustedFromY + adjustedToY) / 2 }];
+        } else {
+          path = [
+            `M ${fromX} ${adjustedFromY}`,
+            `H ${midX - r}`,
+            `Q ${midX} ${adjustedFromY} ${midX} ${adjustedFromY + (ySign * r)}`,
+            `V ${adjustedToY - (ySign * r)}`,
+            `Q ${midX} ${adjustedToY} ${midX + r} ${adjustedToY}`,
+            `H ${toX}`
+          ].join(' ');
+          // Control points at the corners
+          controlPoints = [
+            { x: midX, y: adjustedFromY },
+            { x: midX, y: adjustedToY }
+          ];
+        }
+        pathMidX = midX;
       } else {
-        // Different levels - go through vertical gap, approach from right
-        // Path: right → down → left to target
-        path = [
-          `M ${fromX} ${adjustedFromY}`,
-          `H ${exitX - r}`,
-          `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (ySign * r)}`,
-          `V ${adjustedToY - (ySign * r)}`,
-          `Q ${exitX} ${adjustedToY} ${exitX - r} ${adjustedToY}`,
-          `H ${toX}`
-        ].join(' ');
+        // BACKWARD: Target is to the left of source
+        const exitX = fromX + minGap;
+        const entryX = toX - minGap;
+        const r = Math.max(2, Math.min(cornerRadius, absY / 2, minGap / 2));
+
+        if (absY < r * 2) {
+          const loopDepth = minGap;
+          const loopSign = 1;
+          path = [
+            `M ${fromX} ${adjustedFromY}`,
+            `H ${exitX - r}`,
+            `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (loopSign * r)}`,
+            `V ${adjustedFromY + (loopSign * loopDepth) - r}`,
+            `Q ${exitX} ${adjustedFromY + (loopSign * loopDepth)} ${exitX - r} ${adjustedFromY + (loopSign * loopDepth)}`,
+            `H ${entryX + r}`,
+            `Q ${entryX} ${adjustedFromY + (loopSign * loopDepth)} ${entryX} ${adjustedFromY + (loopSign * loopDepth) - (loopSign * r)}`,
+            `V ${adjustedToY + (loopSign * r)}`,
+            `Q ${entryX} ${adjustedToY} ${entryX + r} ${adjustedToY}`,
+            `H ${toX}`
+          ].join(' ');
+          controlPoints = [
+            { x: exitX, y: adjustedFromY },
+            { x: exitX, y: adjustedFromY + loopDepth },
+            { x: entryX, y: adjustedFromY + loopDepth },
+            { x: entryX, y: adjustedToY }
+          ];
+        } else {
+          path = [
+            `M ${fromX} ${adjustedFromY}`,
+            `H ${exitX - r}`,
+            `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (ySign * r)}`,
+            `V ${adjustedToY - (ySign * r)}`,
+            `Q ${exitX} ${adjustedToY} ${exitX - r} ${adjustedToY}`,
+            `H ${toX}`
+          ].join(' ');
+          controlPoints = [
+            { x: exitX, y: adjustedFromY },
+            { x: exitX, y: adjustedToY }
+          ];
+        }
+        pathMidX = (exitX + entryX) / 2;
       }
-      pathMidX = (exitX + entryX) / 2;
     }
+
+    const isForward = toX > fromX;
 
     return {
       fromX,
@@ -252,7 +339,8 @@ export function DependencyLine({
       path,
       midX: pathMidX,
       midY: (adjustedFromY + adjustedToY) / 2,
-      approachFromRight: !isForward // Backward connections approach from right
+      approachFromRight: !isForward, // Backward connections approach from right
+      controlPoints
     };
   }, [
     fromProject.id,
@@ -273,13 +361,10 @@ export function DependencyLine({
     lineIndex,
     fromMilestoneStacks,
     toMilestoneStacks,
-    getStackTopOffset
+    getStackTopOffset,
+    waypoints,
+    previewWaypoints
   ]);
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setShowConfirm(true);
-  };
 
   const handleConfirmRemove = () => {
     setShowConfirm(false);
@@ -314,15 +399,166 @@ export function DependencyLine({
     onHoverChange?.(false);
   };
 
+  // Handle selecting the line (double-click to toggle edit mode)
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsSelected(prev => !prev);
+  }, []);
+
+  // Handle waypoint drag start
+  const handleWaypointMouseDown = useCallback((index: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDraggingWaypointIndex(index);
+    // Initialize preview with current waypoints
+    setPreviewWaypoints(waypoints || line.controlPoints);
+  }, [waypoints, line.controlPoints]);
+
+  // Handle waypoint drag
+  useEffect(() => {
+    if (draggingWaypointIndex === null) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      // Get SVG coordinates
+      const svg = svgRef.current?.closest('svg');
+      if (!svg) return;
+
+      const rect = svg.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      setPreviewWaypoints(prev => {
+        if (!prev) return prev;
+        const newWaypoints = [...prev];
+        newWaypoints[draggingWaypointIndex] = { x, y };
+        return newWaypoints;
+      });
+    };
+
+    const handleMouseUp = () => {
+      if (previewWaypoints && onUpdateWaypoints) {
+        onUpdateWaypoints(previewWaypoints);
+      }
+      setDraggingWaypointIndex(null);
+      setPreviewWaypoints(null);
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingWaypointIndex, previewWaypoints, onUpdateWaypoints]);
+
+  // Handle click outside to deselect
+  useEffect(() => {
+    if (!isSelected) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (svgRef.current && !svgRef.current.contains(e.target as Node)) {
+        setIsSelected(false);
+      }
+    };
+
+    // Delay to avoid immediate deselection from the click that selected
+    const timer = setTimeout(() => {
+      document.addEventListener('click', handleClickOutside);
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('click', handleClickOutside);
+    };
+  }, [isSelected]);
+
+  // Handle adding a new waypoint by clicking on the line
+  const handleLineClick = useCallback((e: React.MouseEvent) => {
+    if (!isSelected) {
+      // If not selected, show confirm dialog
+      e.stopPropagation();
+      setShowConfirm(true);
+      return;
+    }
+
+    // If selected, add a new waypoint at click position
+    e.stopPropagation();
+    const svg = svgRef.current?.closest('svg');
+    if (!svg) return;
+
+    const rect = svg.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const currentWaypoints = waypoints || line.controlPoints;
+
+    // Find the best position to insert the new waypoint
+    // Insert it between the two existing points that would create the smallest detour
+    let bestIndex = currentWaypoints.length;
+    let bestDist = Infinity;
+
+    const allPoints = [
+      { x: line.fromX, y: line.fromY },
+      ...currentWaypoints,
+      { x: line.toX, y: line.toY }
+    ];
+
+    for (let i = 0; i < allPoints.length - 1; i++) {
+      const p1 = allPoints[i];
+      const p2 = allPoints[i + 1];
+
+      // Distance from click to line segment
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      const lengthSq = dx * dx + dy * dy;
+
+      if (lengthSq === 0) continue;
+
+      const t = Math.max(0, Math.min(1, ((x - p1.x) * dx + (y - p1.y) * dy) / lengthSq));
+      const projX = p1.x + t * dx;
+      const projY = p1.y + t * dy;
+      const dist = Math.sqrt((x - projX) ** 2 + (y - projY) ** 2);
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestIndex = i; // Insert after this index in currentWaypoints
+      }
+    }
+
+    const newWaypoints = [...currentWaypoints];
+    newWaypoints.splice(bestIndex, 0, { x, y });
+
+    if (onUpdateWaypoints) {
+      onUpdateWaypoints(newWaypoints);
+    }
+  }, [isSelected, waypoints, line.controlPoints, line.fromX, line.fromY, line.toX, line.toY, onUpdateWaypoints]);
+
+  // Handle removing a waypoint (right-click)
+  const handleWaypointContextMenu = useCallback((index: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const currentWaypoints = waypoints || line.controlPoints;
+    if (currentWaypoints.length <= 1) return; // Keep at least one waypoint
+
+    const newWaypoints = currentWaypoints.filter((_, i) => i !== index);
+    if (onUpdateWaypoints) {
+      onUpdateWaypoints(newWaypoints);
+    }
+  }, [waypoints, line.controlPoints, onUpdateWaypoints]);
+
   // Determine if this line should be dimmed (another line is hovered, but not this one)
   const isDimmed = isAnyHovered && !isHovered;
 
   return (
     <g
-      className={`${styles.dependencyLine} ${isHovered ? styles.hovered : ''} ${isDimmed ? styles.dimmed : ''}`}
+      ref={svgRef}
+      className={`${styles.dependencyLine} ${isHovered ? styles.hovered : ''} ${isDimmed ? styles.dimmed : ''} ${isSelected ? styles.selected : ''}`}
       style={{ pointerEvents: 'auto' }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onDoubleClick={handleDoubleClick}
     >
       {/* Outline/halo for visibility on colored backgrounds */}
       <path
@@ -365,17 +601,46 @@ export function DependencyLine({
         fill="none"
         stroke="transparent"
         strokeWidth="12"
-        style={{ cursor: 'pointer' }}
-        onClick={handleClick}
+        style={{ cursor: isSelected ? 'crosshair' : 'pointer' }}
+        onClick={handleLineClick}
       />
-      {/* Hover indicator dot */}
-      <circle
-        cx={line.midX}
-        cy={line.midY}
-        r="0"
-        fill="var(--accent-blue)"
-        className={styles.removeIndicator}
-      />
+      {/* Hover indicator dot (hidden when selected) */}
+      {!isSelected && (
+        <circle
+          cx={line.midX}
+          cy={line.midY}
+          r="0"
+          fill="var(--accent-blue)"
+          className={styles.removeIndicator}
+        />
+      )}
+      {/* Draggable control points (shown when selected) */}
+      {isSelected && line.controlPoints.map((point, index) => (
+        <g key={index}>
+          {/* Outer ring for visibility */}
+          <circle
+            cx={point.x}
+            cy={point.y}
+            r="8"
+            fill="white"
+            stroke="var(--accent-blue)"
+            strokeWidth="2"
+            style={{ cursor: 'grab' }}
+            className={styles.controlPointOuter}
+            onMouseDown={(e) => handleWaypointMouseDown(index, e)}
+            onContextMenu={(e) => handleWaypointContextMenu(index, e)}
+          />
+          {/* Inner dot */}
+          <circle
+            cx={point.x}
+            cy={point.y}
+            r="4"
+            fill="var(--accent-blue)"
+            style={{ cursor: 'grab', pointerEvents: 'none' }}
+            className={styles.controlPointInner}
+          />
+        </g>
+      ))}
       {/* Confirmation dialog - rendered via portal to appear above project bars */}
       {showConfirm && createPortal(
         <>

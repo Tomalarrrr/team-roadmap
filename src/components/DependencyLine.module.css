@@ -88,6 +88,47 @@
   fill: var(--accent-blue);
 }
 
+/* Selected state for editing */
+.dependencyLine.selected .outlinePath {
+  opacity: 1;
+  stroke: white;
+  stroke-width: 5;
+}
+
+.dependencyLine.selected .mainPath {
+  opacity: 1;
+  stroke: var(--accent-blue);
+  stroke-width: 2.5;
+  stroke-dasharray: none;
+}
+
+.dependencyLine.selected .arrowHead {
+  opacity: 1;
+  fill: var(--accent-blue);
+}
+
+.dependencyLine.selected .arrowOutline {
+  opacity: 1;
+}
+
+/* Control points for path editing */
+.controlPointOuter {
+  transition: r 0.15s, fill 0.15s;
+}
+
+.controlPointOuter:hover {
+  r: 10px;
+  fill: #e0f0ff;
+}
+
+.controlPointInner {
+  transition: r 0.15s;
+}
+
+.controlPointOuter:hover + .controlPointInner {
+  r: 5px;
+}
+
 /* Backdrop for click-outside dismissal */
 .confirmBackdrop {
   position: absolute;
