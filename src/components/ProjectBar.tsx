@@ -484,9 +484,15 @@ export function ProjectBar({
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
         </div>
-        <div className={styles.dragHint}>
-          Click to edit or drag to move
-        </div>
+        {width > 400 && (
+          <div className={styles.projectContentEnd}>
+            <span className={styles.projectDates}>
+              {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
+            </span>
+            <span className={styles.projectSeparator}>•</span>
+            <span className={styles.projectTitle}>{project.title}</span>
+          </div>
+        )}
       </div>
 
       {/* Milestones as lines within the project bar - OUTSIDE dragArea to prevent interference */}
