@@ -43,6 +43,7 @@ export function MilestoneLine({
   const milestoneRef = useRef<HTMLDivElement>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const menuJustOpenedRef = useRef(false);
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStartX, setDragStartX] = useState(0);
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
@@ -239,10 +240,34 @@ export function MilestoneLine({
 
   useEffect(() => {
     if (!showMenu) return;
-    const handleClose = () => closeMenuRef.current();
-    // Use mousedown instead of click for immediate response, and to catch right-clicks
-    document.addEventListener('mousedown', handleClose);
+
+    let timeoutId: NodeJS.Timeout | null = null;
+    let graceTimeoutId: NodeJS.Timeout | null = null;
+
+    const handleClose = (e: MouseEvent) => {
+      // Layer 2: Only close on left-clicks (button 0), ignore right-clicks
+      if (e.button !== 0) return;
+
+      // Layer 3: Grace period - don't close if menu was just opened
+      if (menuJustOpenedRef.current) return;
+
+      // Preserve existing isMountedRef check for safety
+      closeMenuRef.current();
+    };
+
+    // Layer 1: Defer listener attachment to next event loop tick
+    timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClose);
+    }, 0);
+
+    // Layer 3: Clear the "just opened" flag after grace period
+    graceTimeoutId = setTimeout(() => {
+      menuJustOpenedRef.current = false;
+    }, 100);
+
     return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (graceTimeoutId) clearTimeout(graceTimeoutId);
       document.removeEventListener('mousedown', handleClose);
     };
   }, [showMenu]);
@@ -323,6 +348,7 @@ export function MilestoneLine({
         e.preventDefault();
         e.stopPropagation();
         setMenuPosition({ x: e.clientX, y: e.clientY });
+        menuJustOpenedRef.current = true;
         setShowMenu(true);
       }}
     >
@@ -355,10 +381,12 @@ export function MilestoneLine({
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          // If minimal movement and quick click, open edit
+          // If minimal movement and quick click, open context menu
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
-            onEdit();
+            setMenuPosition({ x: e.clientX, y: e.clientY });
+            menuJustOpenedRef.current = true;
+            setShowMenu(true);
           }
           clickStartRef.current = null;
         }}

@@ -108,6 +108,7 @@ export function ProjectBar({
   const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+  const menuJustOpenedRef = useRef(false);
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
 
   // Dependency creation context
@@ -298,13 +299,37 @@ export function ProjectBar({
     };
   }, [dragMode, dragStartX, originalDates, dayWidth]);
 
-  // Close menu when clicking outside
+  // Close menu when clicking outside (with defenses against premature closure)
   useEffect(() => {
     if (!showMenu) return;
-    const handleClose = () => setShowMenu(false);
-    // Use mousedown instead of click for immediate response, and to catch right-clicks
-    document.addEventListener('mousedown', handleClose);
+
+    let timeoutId: NodeJS.Timeout | null = null;
+    let graceTimeoutId: NodeJS.Timeout | null = null;
+
+    const handleClose = (e: MouseEvent) => {
+      // Layer 2: Only close on left-clicks (button 0), ignore right-clicks
+      if (e.button !== 0) return;
+
+      // Layer 3: Grace period - don't close if menu was just opened
+      if (menuJustOpenedRef.current) return;
+
+      setShowMenu(false);
+    };
+
+    // Layer 1: Defer listener attachment to next event loop tick
+    // This ensures the current right-click event cycle completes before we start listening
+    timeoutId = setTimeout(() => {
+      document.addEventListener('mousedown', handleClose);
+    }, 0);
+
+    // Layer 3: Clear the "just opened" flag after grace period
+    graceTimeoutId = setTimeout(() => {
+      menuJustOpenedRef.current = false;
+    }, 100);
+
     return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (graceTimeoutId) clearTimeout(graceTimeoutId);
       document.removeEventListener('mousedown', handleClose);
     };
   }, [showMenu]);
@@ -401,6 +426,7 @@ export function ProjectBar({
         const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
         const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
         setMenuPosition({ x: Math.max(10, x), y: Math.max(10, y) });
+        menuJustOpenedRef.current = true;
         setShowMenu(true);
       }}
       onMouseMove={(e) => {
@@ -445,9 +471,16 @@ export function ProjectBar({
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          // If minimal movement and quick click, open edit
+          // If minimal movement and quick click, open context menu
           if (dx < 5 && dy < 5 && elapsed < 300) {
-            onEdit();
+            // Clamp menu position to viewport bounds
+            const menuWidth = 160;
+            const menuHeight = 140;
+            const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
+            const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
+            setMenuPosition({ x: Math.max(10, x), y: Math.max(10, y) });
+            menuJustOpenedRef.current = true;
+            setShowMenu(true);
           }
           clickStartRef.current = null;
         }}
