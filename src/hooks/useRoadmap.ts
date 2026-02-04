@@ -1,5 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { subscribeToRoadmap, saveRoadmap, subscribeToConnectionState } from '../firebase';
+import {
+  subscribeToRoadmap,
+  saveRoadmap,
+  subscribeToConnectionState,
+  updateProjectAtPath,
+  updateMilestoneAtPath,
+  updateDependencyAtPath,
+  updateTeamMemberAtPath
+} from '../firebase';
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { withRetry } from '../utils/retry';
@@ -190,12 +198,32 @@ export function useRoadmap() {
 
   const updateTeamMember = useCallback(async (memberId: string, updates: Partial<TeamMember>) => {
     const currentData = dataRef.current;
-    const newMembers = currentData.teamMembers.map(m =>
-      m.id === memberId ? { ...m, ...updates } : m
-    );
-    await optimisticSave({ ...currentData, teamMembers: newMembers });
-    analytics.memberUpdated(memberId);
-  }, [optimisticSave]);
+    const memberIndex = currentData.teamMembers.findIndex(m => m.id === memberId);
+    if (memberIndex === -1) return;
+
+    const updatedMember = { ...currentData.teamMembers[memberIndex], ...updates };
+
+    // Optimistic update
+    const newMembers = [...currentData.teamMembers];
+    newMembers[memberIndex] = updatedMember;
+    isLocalUpdateRef.current = true;
+    dataRef.current = { ...currentData, teamMembers: newMembers };
+    setData(dataRef.current);
+
+    try {
+      // Granular Firebase update - only updates this specific team member
+      await withRetry(() => updateTeamMemberAtPath(memberIndex, sanitizeForFirebase(updatedMember)), {
+        maxRetries: 3,
+        baseDelayMs: 500
+      });
+      analytics.memberUpdated(memberId);
+    } catch (error) {
+      // Rollback on failure
+      dataRef.current = currentData;
+      setData(currentData);
+      throw error;
+    }
+  }, []);
 
   const deleteTeamMember = useCallback(async (memberId: string) => {
     const currentData = dataRef.current;
@@ -239,12 +267,32 @@ export function useRoadmap() {
 
   const updateProject = useCallback(async (projectId: string, updates: Partial<Project>) => {
     const currentData = dataRef.current;
-    const newProjects = currentData.projects.map(p =>
-      p.id === projectId ? { ...p, ...updates } : p
-    );
-    await optimisticSave({ ...currentData, projects: newProjects });
-    analytics.projectUpdated(projectId);
-  }, [optimisticSave]);
+    const projectIndex = currentData.projects.findIndex(p => p.id === projectId);
+    if (projectIndex === -1) return;
+
+    const updatedProject = { ...currentData.projects[projectIndex], ...updates };
+
+    // Optimistic update
+    const newProjects = [...currentData.projects];
+    newProjects[projectIndex] = updatedProject;
+    isLocalUpdateRef.current = true;
+    dataRef.current = { ...currentData, projects: newProjects };
+    setData(dataRef.current);
+
+    try {
+      // Granular Firebase update - only updates this specific project
+      await withRetry(() => updateProjectAtPath(projectIndex, sanitizeForFirebase(updatedProject)), {
+        maxRetries: 3,
+        baseDelayMs: 500
+      });
+      analytics.projectUpdated(projectId);
+    } catch (error) {
+      // Rollback on failure
+      dataRef.current = currentData;
+      setData(currentData);
+      throw error;
+    }
+  }, []);
 
   const deleteProject = useCallback(async (projectId: string) => {
     const currentData = dataRef.current;
@@ -272,20 +320,38 @@ export function useRoadmap() {
     updates: Partial<Milestone>
   ) => {
     const currentData = dataRef.current;
-    const newProjects = currentData.projects.map(p => {
-      if (p.id === projectId) {
-        return {
-          ...p,
-          milestones: p.milestones.map(m =>
-            m.id === milestoneId ? { ...m, ...updates } : m
-          )
-        };
-      }
-      return p;
-    });
-    await optimisticSave({ ...currentData, projects: newProjects });
-    analytics.milestoneUpdated(milestoneId);
-  }, [optimisticSave]);
+    const projectIndex = currentData.projects.findIndex(p => p.id === projectId);
+    if (projectIndex === -1) return;
+
+    const project = currentData.projects[projectIndex];
+    const milestoneIndex = project.milestones.findIndex(m => m.id === milestoneId);
+    if (milestoneIndex === -1) return;
+
+    const updatedMilestone = { ...project.milestones[milestoneIndex], ...updates };
+
+    // Optimistic update
+    const newMilestones = [...project.milestones];
+    newMilestones[milestoneIndex] = updatedMilestone;
+    const newProjects = [...currentData.projects];
+    newProjects[projectIndex] = { ...project, milestones: newMilestones };
+    isLocalUpdateRef.current = true;
+    dataRef.current = { ...currentData, projects: newProjects };
+    setData(dataRef.current);
+
+    try {
+      // Granular Firebase update - only updates this specific milestone
+      await withRetry(() => updateMilestoneAtPath(projectIndex, milestoneIndex, sanitizeForFirebase(updatedMilestone)), {
+        maxRetries: 3,
+        baseDelayMs: 500
+      });
+      analytics.milestoneUpdated(milestoneId);
+    } catch (error) {
+      // Rollback on failure
+      dataRef.current = currentData;
+      setData(currentData);
+      throw error;
+    }
+  }, []);
 
   const deleteMilestone = useCallback(async (projectId: string, milestoneId: string) => {
     const currentData = dataRef.current;
@@ -342,11 +408,32 @@ export function useRoadmap() {
 
   const updateDependency = useCallback(async (dependencyId: string, updates: Partial<Dependency>) => {
     const currentData = dataRef.current;
-    const newDependencies = (currentData.dependencies || []).map(d =>
-      d.id === dependencyId ? { ...d, ...updates } : d
-    );
-    await optimisticSave({ ...currentData, dependencies: newDependencies });
-  }, [optimisticSave]);
+    const dependencies = currentData.dependencies || [];
+    const depIndex = dependencies.findIndex(d => d.id === dependencyId);
+    if (depIndex === -1) return;
+
+    const updatedDependency = { ...dependencies[depIndex], ...updates };
+
+    // Optimistic update
+    const newDependencies = [...dependencies];
+    newDependencies[depIndex] = updatedDependency;
+    isLocalUpdateRef.current = true;
+    dataRef.current = { ...currentData, dependencies: newDependencies };
+    setData(dataRef.current);
+
+    try {
+      // Granular Firebase update - only updates this specific dependency
+      await withRetry(() => updateDependencyAtPath(depIndex, sanitizeForFirebase(updatedDependency)), {
+        maxRetries: 3,
+        baseDelayMs: 500
+      });
+    } catch (error) {
+      // Rollback on failure
+      dataRef.current = currentData;
+      setData(currentData);
+      throw error;
+    }
+  }, []);
 
   return {
     data,

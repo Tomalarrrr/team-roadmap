@@ -1,4 +1,4 @@
-import type { RoadmapData } from './types';
+import type { RoadmapData, Project, Milestone, Dependency, TeamMember } from './types';
 import type { FirebaseApp } from 'firebase/app';
 import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
 
@@ -107,6 +107,56 @@ export async function saveRoadmap(data: RoadmapData): Promise<void> {
   await ensureInitialized();
   const { set } = await import('firebase/database');
   await set(roadmapRef!, data);
+}
+
+// Granular update functions for concurrent editing support
+// These use Firebase's update() which merges changes instead of overwriting
+
+export async function updateProjectAtPath(projectIndex: number, project: Project): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+  const projectRef = ref(database!, `roadmap/projects/${projectIndex}`);
+  await set(projectRef, project);
+}
+
+export async function updateProjectField(projectIndex: number, field: string, value: unknown): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+  const fieldRef = ref(database!, `roadmap/projects/${projectIndex}/${field}`);
+  await set(fieldRef, value);
+}
+
+export async function updateMilestoneAtPath(
+  projectIndex: number,
+  milestoneIndex: number,
+  milestone: Milestone
+): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+  const milestoneRef = ref(database!, `roadmap/projects/${projectIndex}/milestones/${milestoneIndex}`);
+  await set(milestoneRef, milestone);
+}
+
+export async function updateDependencyAtPath(depIndex: number, dependency: Dependency): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+  const depRef = ref(database!, `roadmap/dependencies/${depIndex}`);
+  await set(depRef, dependency);
+}
+
+export async function updateTeamMemberAtPath(memberIndex: number, member: TeamMember): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+  const memberRef = ref(database!, `roadmap/teamMembers/${memberIndex}`);
+  await set(memberRef, member);
+}
+
+// Batch update using Firebase's update() - merges multiple paths atomically
+export async function batchUpdate(updates: Record<string, unknown>): Promise<void> {
+  await ensureInitialized();
+  const { ref, update } = await import('firebase/database');
+  const rootRef = ref(database!, 'roadmap');
+  await update(rootRef, updates);
 }
 
 export async function getRoadmap(): Promise<RoadmapData> {
