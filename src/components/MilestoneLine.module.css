@@ -117,10 +117,6 @@
 }
 
 .tooltip {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%);
   background: var(--bg-primary);
   border-radius: 10px;
   padding: 10px 14px;

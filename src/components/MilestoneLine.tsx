@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
+import { createPortal } from 'react-dom';
 import type { Milestone, ContextMenuItem } from '../types';
 import { DependencyArrow } from './DependencyArrow';
 import { ContextMenu } from './ContextMenu';
@@ -96,6 +97,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
   const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Dependency creation context
@@ -472,6 +474,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   const handleMouseEnter = useCallback(() => {
     if (dragMode) return;
     tooltipTimeoutRef.current = setTimeout(() => {
+      if (milestoneRef.current) {
+        const rect = milestoneRef.current.getBoundingClientRect();
+        setTooltipPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top
+        });
+      }
       setShowTooltip(true);
     }, 400); // 400ms delay before showing
   }, [dragMode]);
@@ -482,6 +491,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       tooltipTimeoutRef.current = null;
     }
     setShowTooltip(false);
+    setTooltipPosition(null);
   }, []);
 
   // Clean up tooltip timeout on unmount
@@ -614,14 +624,23 @@ const MilestoneLineComponent = memo(function MilestoneLine({
         isOpeningRef={contextMenu.isOpeningRef}
       />
 
-      {/* Tooltip */}
-      {showTooltip && !dragMode && (
-        <div className={styles.tooltip}>
+      {/* Tooltip - rendered via portal to escape overflow:hidden */}
+      {showTooltip && !dragMode && tooltipPosition && createPortal(
+        <div
+          className={styles.tooltip}
+          style={{
+            position: 'fixed',
+            left: tooltipPosition.x,
+            top: tooltipPosition.y - 8,
+            transform: 'translate(-50%, -100%)'
+          }}
+        >
           <div className={styles.tooltipTitle}>{milestone.title}</div>
           <div className={styles.tooltipDates}>
             {formatShortDate(milestone.startDate)} – {formatShortDate(milestone.endDate)}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
