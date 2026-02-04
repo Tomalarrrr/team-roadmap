@@ -478,19 +478,59 @@ export function ProjectBar({
         }}
       >
         <div className={styles.projectContent}>
-          <span className={styles.projectTitle}>{project.title}</span>
+          <span
+            className={styles.projectTitle}
+            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDragMode(null);
+              onSelect?.();
+              onEdit();
+            }}
+          >
+            {project.title}
+          </span>
           <span className={styles.projectSeparator}>•</span>
-          <span className={styles.projectDates}>
+          <span
+            className={styles.projectDates}
+            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDragMode(null);
+              onSelect?.();
+              onEdit();
+            }}
+          >
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
         </div>
         {width > 400 && (
           <div className={styles.projectContentEnd}>
-            <span className={styles.projectDates}>
+            <span
+              className={styles.projectDates}
+              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDragMode(null);
+                onSelect?.();
+                onEdit();
+              }}
+            >
               {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
             </span>
             <span className={styles.projectSeparator}>•</span>
-            <span className={styles.projectTitle}>{project.title}</span>
+            <span
+              className={styles.projectTitle}
+              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setDragMode(null);
+                onSelect?.();
+                onEdit();
+              }}
+            >
+              {project.title}
+            </span>
           </div>
         )}
       </div>
