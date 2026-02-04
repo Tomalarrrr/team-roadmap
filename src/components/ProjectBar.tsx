@@ -445,10 +445,7 @@ export function ProjectBar({
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-          // Start drag mode for date movement
           handleMouseDown(e, 'move');
         }}
         onMouseUp={(e) => {
@@ -458,6 +455,7 @@ export function ProjectBar({
           const elapsed = Date.now() - clickStartRef.current.time;
           // If minimal movement and quick click, open edit dialog
           if (dx < 5 && dy < 5 && elapsed < 300) {
+            e.stopPropagation();
             onEdit();
           }
           clickStartRef.current = null;
