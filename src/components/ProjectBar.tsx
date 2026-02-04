@@ -221,7 +221,11 @@ export function ProjectBar({
   const rafIdRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!dragMode) return;
+    if (!dragMode) {
+      console.log('🟡 useEffect: dragMode is null, not adding global listeners');
+      return;
+    }
+    console.log(`🟡 useEffect: dragMode is "${dragMode}", ADDING GLOBAL LISTENERS NOW`);
 
     const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
 
@@ -288,6 +292,7 @@ export function ProjectBar({
     };
 
     const handleMouseUp = async () => {
+      console.log('🔴 GLOBAL handleMouseUp fired');
       onEdgeDragRef.current?.(0, false); // Stop edge scrolling
 
       // Commit the final position to Firebase only on release
