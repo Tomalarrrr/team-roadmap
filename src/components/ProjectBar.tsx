@@ -166,16 +166,23 @@ export function ProjectBar({
   onUpdateRef.current = onUpdate;
   onEdgeDragRef.current = onEdgeDrag;
 
+  // Store dayWidth in ref to prevent effect re-runs during drag
+  const dayWidthRef = useRef(dayWidth);
+  dayWidthRef.current = dayWidth;
+
   // Clear preview when actual data matches what we saved
   // This is more robust than timing-based clearing because React's batching
   // means the parent might not have re-rendered yet when mouseUp handler completes
+  // IMPORTANT: Don't clear during active drag - let mouseUp handle completion
   useEffect(() => {
+    if (dragMode) return; // Prevent clearing during drag
+
     if (previewDates &&
         project.startDate === previewDates.start &&
         project.endDate === previewDates.end) {
       setPreviewDates(null);
     }
-  }, [project.startDate, project.endDate, previewDates]);
+  }, [project.startDate, project.endDate, previewDates, dragMode]);
 
   // Calculate effective dates including milestone extensions
   // Use preview dates during drag for smooth visual feedback
@@ -300,7 +307,7 @@ export function ProjectBar({
         // Don't start moving until we've exceeded the drag threshold
         if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
 
-        const deltaDays = Math.round(deltaX / dayWidth);
+        const deltaDays = Math.round(deltaX / dayWidthRef.current);
 
         const originalStart = parseISO(originalDates.start);
         const originalEnd = parseISO(originalDates.end);
@@ -386,7 +393,7 @@ export function ProjectBar({
         rafIdRef.current = null;
       }
     };
-  }, [dragMode, dragStartX, originalDates, dayWidth]);
+  }, [dragMode, dragStartX, originalDates]);
 
   // Calculate milestone stacking
   const milestoneStacks = useMemo(
@@ -513,6 +520,13 @@ export function ProjectBar({
           setupInitialDragDetection(e.clientX, e.clientY);
         }}
         onMouseUp={(e) => {
+          // Always clean up initial listeners on mouseUp
+          if (initialListenersRef.current) {
+            document.removeEventListener('mousemove', initialListenersRef.current.move);
+            document.removeEventListener('mouseup', initialListenersRef.current.up);
+            initialListenersRef.current = null;
+          }
+
           if (!clickStartRef.current) {
             return;
           }
@@ -523,10 +537,11 @@ export function ProjectBar({
           // If minimal movement and quick click, open edit dialog and select
           if (passes) {
             e.stopPropagation();
-            setDragMode(null); // Clear drag mode before opening modal
+            setDragMode(null);
+            clickStartRef.current = null;
             onSelect?.();
             onEdit();
-          } else {
+            return;
           }
           clickStartRef.current = null;
         }}

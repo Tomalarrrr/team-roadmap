@@ -8,6 +8,9 @@ import { getBarDimensions, isMilestonePast, formatShortDate, toISODateString } f
 import { parseISO } from 'date-fns';
 import styles from './MilestoneLine.module.css';
 
+// Debug flag - set to true to diagnose flashing issues
+const DEBUG_DRAG = true;
+
 interface MilestoneLineProps {
   milestone: Milestone;
   projectId: string;
@@ -91,19 +94,43 @@ export function MilestoneLine({
   const onUpdateRef = useRef(onUpdate);
   onUpdateRef.current = onUpdate;
 
+  // Store dayWidth in ref to prevent effect re-runs during drag
+  const dayWidthRef = useRef(dayWidth);
+  dayWidthRef.current = dayWidth;
+
   // Clear preview when actual data matches what we saved
   // This is more robust than timing-based clearing
+  // IMPORTANT: Don't clear during active drag - let mouseUp handle completion
   useEffect(() => {
+    if (dragMode) {
+      if (DEBUG_DRAG) console.log('[MilestoneLine] Skipping preview clear - dragMode active:', dragMode);
+      return; // Prevent clearing during drag
+    }
+
     if (previewDates &&
         milestone.startDate === previewDates.start &&
         milestone.endDate === previewDates.end) {
+      if (DEBUG_DRAG) console.log('[MilestoneLine] Clearing previewDates - data matched');
       setPreviewDates(null);
     }
-  }, [milestone.startDate, milestone.endDate, previewDates]);
+  }, [milestone.startDate, milestone.endDate, previewDates, dragMode]);
 
   // Use preview dates during drag for smooth visual feedback
   const displayStartDate = previewDates?.start ?? milestone.startDate;
   const displayEndDate = previewDates?.end ?? milestone.endDate;
+
+  // Debug render tracking
+  if (DEBUG_DRAG && dragMode) {
+    console.log('[MilestoneLine] RENDER during drag:', {
+      milestoneId: milestone.id,
+      dragMode,
+      previewDates,
+      actualDates: { start: milestone.startDate, end: milestone.endDate },
+      displayDates: { start: displayStartDate, end: displayEndDate },
+      projectLeft,
+      projectWidth
+    });
+  }
 
   const { left: milestoneLeft, width: milestoneWidth } = getBarDimensions(
     displayStartDate,
@@ -163,6 +190,7 @@ export function MilestoneLine({
           initialListenersRef.current = null;
         }
         clickStartRef.current = null;
+        if (DEBUG_DRAG) console.log('[MilestoneLine] Activating dragMode:', mode);
         setDragMode(mode);
       }
     };
@@ -196,6 +224,8 @@ export function MilestoneLine({
   useEffect(() => {
     if (!dragMode) return;
 
+    if (DEBUG_DRAG) console.log('[MilestoneLine] Drag effect SETUP:', { dragMode, dragStartX, originalDates, dayWidth });
+
     const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
 
     const handleMouseMove = (e: MouseEvent) => {
@@ -212,7 +242,7 @@ export function MilestoneLine({
         // Don't start moving until we've exceeded the drag threshold
         if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
 
-        const deltaDays = Math.round(deltaX / dayWidth);
+        const deltaDays = Math.round(deltaX / dayWidthRef.current);
 
         const originalStart = parseISO(originalDates.start);
         const originalEnd = parseISO(originalDates.end);
@@ -258,11 +288,13 @@ export function MilestoneLine({
     };
 
     const handleMouseUp = () => {
+      if (DEBUG_DRAG) console.log('[MilestoneLine] handleMouseUp - ending drag');
       // Commit the final position to Firebase only on release
       const finalPreview = latestPreviewRef.current;
       if (finalPreview && isMountedRef.current) {
         const hasChanged = finalPreview.start !== originalDates.start || finalPreview.end !== originalDates.end;
         if (hasChanged) {
+          if (DEBUG_DRAG) console.log('[MilestoneLine] Committing changes:', finalPreview);
           // Fire the update - let the effect clear preview when props match
           onUpdateRef.current({
             startDate: finalPreview.start,
@@ -270,22 +302,26 @@ export function MilestoneLine({
           }).catch(() => {
             // If save fails, clear preview (rollback will restore old position)
             if (isMountedRef.current) {
+              if (DEBUG_DRAG) console.log('[MilestoneLine] Save failed, clearing preview');
               setPreviewDates(null);
             }
           });
         } else {
           // No change, clear preview immediately
+          if (DEBUG_DRAG) console.log('[MilestoneLine] No change, clearing preview');
           setPreviewDates(null);
         }
       } else {
         // No preview, clear anyway
         if (isMountedRef.current) {
+          if (DEBUG_DRAG) console.log('[MilestoneLine] No preview to commit');
           setPreviewDates(null);
         }
       }
 
       latestPreviewRef.current = null;
       if (isMountedRef.current) {
+        if (DEBUG_DRAG) console.log('[MilestoneLine] Setting dragMode to null');
         setDragMode(null);
       }
     };
@@ -295,6 +331,7 @@ export function MilestoneLine({
 
     // Cleanup on unmount or when dragMode changes - ensures listeners are always removed
     return () => {
+      if (DEBUG_DRAG) console.log('[MilestoneLine] Drag effect CLEANUP');
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
       // Cancel any pending animation frame on cleanup
@@ -303,7 +340,7 @@ export function MilestoneLine({
         rafIdRef.current = null;
       }
     };
-  }, [dragMode, dragStartX, originalDates, dayWidth]);
+  }, [dragMode, dragStartX, originalDates]);
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -412,6 +449,12 @@ export function MilestoneLine({
           setupInitialDragDetection('move', e.clientX, e.clientY);
         }}
         onMouseUp={(e) => {
+          // Always clean up initial listeners on mouseUp
+          if (initialListenersRef.current) {
+            document.removeEventListener('mousemove', initialListenersRef.current.move);
+            document.removeEventListener('mouseup', initialListenersRef.current.up);
+            initialListenersRef.current = null;
+          }
           if (!clickStartRef.current) return;
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
@@ -420,8 +463,10 @@ export function MilestoneLine({
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
+            clickStartRef.current = null;
             onSelect?.();
             onEdit();
+            return;
           }
           clickStartRef.current = null;
         }}
