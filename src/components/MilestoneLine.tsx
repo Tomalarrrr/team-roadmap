@@ -124,14 +124,6 @@ export function MilestoneLine({
   const isPast = isMilestonePast(milestone.endDate);
   const displayColor = isPast ? AUTO_BLUE : milestone.statusColor;
 
-  const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragMode(mode);
-    setDragStartX(e.clientX);
-    setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
-  }, [milestone.startDate, milestone.endDate]);
-
   // Track the latest preview for committing on mouseUp
   const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
   const rafIdRef = useRef<number | null>(null);
@@ -364,14 +356,28 @@ export function MilestoneLine({
         contextMenu.open({ x: e.clientX, y: e.clientY });
       }}
     >
-      {/* Resize handles */}
+      {/* Resize handles - use same deferred pattern as dragArea */}
       <div
         className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`}
-        onMouseDown={(e) => handleMouseDown(e, 'resize-start')}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+          pendingDragModeRef.current = 'resize-start';
+          setDragStartX(e.clientX);
+          setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+        }}
       />
       <div
         className={`${styles.resizeHandle} ${styles.resizeHandleRight}`}
-        onMouseDown={(e) => handleMouseDown(e, 'resize-end')}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+          pendingDragModeRef.current = 'resize-end';
+          setDragStartX(e.clientX);
+          setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+        }}
       />
 
       {/* Dependency arrow button */}
