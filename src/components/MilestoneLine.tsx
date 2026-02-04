@@ -89,7 +89,9 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   const milestoneRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStartX, setDragStartX] = useState(0);
-  const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
+  // Use separate state for original dates to prevent effect re-runs from object reference changes
+  const [originalStartDate, setOriginalStartDate] = useState('');
+  const [originalEndDate, setOriginalEndDate] = useState('');
   // Preview dates for smooth visual feedback during drag
   const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
@@ -202,7 +204,8 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     if (DEBUG_DRAG) console.log('[MilestoneLine] RESIZE mouseDown:', mode);
     setDragMode(mode);
     setDragStartX(e.clientX);
-    setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+    setOriginalStartDate(milestone.startDate);
+    setOriginalEndDate(milestone.endDate);
   }, [milestone.startDate, milestone.endDate]);
 
   // Track the latest preview for committing on mouseUp
@@ -269,7 +272,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   useEffect(() => {
     if (!dragMode) return;
 
-    if (DEBUG_DRAG) console.log('[MilestoneLine] Drag effect SETUP:', { dragMode, dragStartX, originalDates, dayWidth });
+    if (DEBUG_DRAG) console.log('[MilestoneLine] Drag effect SETUP:', { dragMode, dragStartX, originalStartDate, originalEndDate, dayWidth });
 
     const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
 
@@ -284,7 +287,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       rafIdRef.current = requestAnimationFrame(() => {
         try {
           // Safety check: ensure we have valid original dates before proceeding
-          if (!originalDates.start || !originalDates.end) {
+          if (!originalStartDate || !originalEndDate) {
             return;
           }
 
@@ -307,16 +310,16 @@ const MilestoneLineComponent = memo(function MilestoneLine({
           const MAX_DELTA_DAYS = 365;
           deltaDays = Math.max(-MAX_DELTA_DAYS, Math.min(MAX_DELTA_DAYS, deltaDays));
 
-          const originalStart = parseISO(originalDates.start);
-          const originalEnd = parseISO(originalDates.end);
+          const originalStart = parseISO(originalStartDate);
+          const originalEnd = parseISO(originalEndDate);
 
           // Safety check: ensure parsed dates are valid
           if (isNaN(originalStart.getTime()) || isNaN(originalEnd.getTime())) {
             return;
           }
 
-          let newStart = originalDates.start;
-          let newEnd = originalDates.end;
+          let newStart = originalStartDate;
+          let newEnd = originalEndDate;
 
           if (dragMode === 'move') {
             const start = new Date(originalStart);
@@ -364,7 +367,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       // Commit the final position to Firebase only on release
       const finalPreview = latestPreviewRef.current;
       if (finalPreview && isMountedRef.current) {
-        const hasChanged = finalPreview.start !== originalDates.start || finalPreview.end !== originalDates.end;
+        const hasChanged = finalPreview.start !== originalStartDate || finalPreview.end !== originalEndDate;
         if (hasChanged) {
           if (DEBUG_DRAG) console.log('[MilestoneLine] Committing changes:', finalPreview);
           // Fire the update - let the effect clear preview when props match
@@ -412,7 +415,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
         rafIdRef.current = null;
       }
     };
-  }, [dragMode, dragStartX, originalDates]);
+  }, [dragMode, dragStartX, originalStartDate, originalEndDate]);
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -481,8 +484,9 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   }
 
   // During drag, clamp to reasonable values to keep visible
-  const safeDisplayWidth = dragMode ? Math.max(displayWidth, 24) : displayWidth;
-  const safeDisplayLeft = dragMode ? Math.max(0, Math.min(displayLeft, projectWidth - 24)) : displayLeft;
+  // Round to whole pixels to prevent subpixel rendering issues that can cause visual glitches
+  const safeDisplayWidth = Math.round(dragMode ? Math.max(displayWidth, 24) : displayWidth);
+  const safeDisplayLeft = Math.round(dragMode ? Math.max(0, Math.min(displayLeft, projectWidth - 24)) : displayLeft);
 
   return (
     <div
@@ -537,7 +541,8 @@ const MilestoneLineComponent = memo(function MilestoneLine({
           e.stopPropagation();
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           setDragStartX(e.clientX);
-          setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+          setOriginalStartDate(milestone.startDate);
+          setOriginalEndDate(milestone.endDate);
           setupInitialDragDetection('move', e.clientX, e.clientY);
         }}
         onMouseUp={(e) => {

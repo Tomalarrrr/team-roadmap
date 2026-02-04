@@ -14,6 +14,8 @@
   /* Explicit z-index and pointer-events to ensure proper layering */
   z-index: 10;
   pointer-events: auto;
+  /* Prevent subpixel rendering issues */
+  backface-visibility: hidden;
 }
 
 .milestoneLine:hover {
@@ -25,18 +27,23 @@
 
 .milestoneLine.dragging {
   cursor: grabbing;
-  /* transform removed - prevent conflicts during drag */
+  /* Force GPU layer and prevent transform conflicts */
+  transform: translateZ(0) !important;
+  will-change: left, width;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 100;  /* Increased from 20 to be consistent */
+  z-index: 100;
   opacity: 0.9;
   /* Disable ALL transitions during drag to prevent flickering */
   transition: none !important;
+  /* Prevent filter effects during drag */
+  filter: none !important;
 }
 
 /* Disable hover transforms during drag to prevent conflicts */
 .milestoneLine.dragging:hover {
-  transform: none !important;
+  transform: translateZ(0) !important;
   filter: none !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
 }
 
 /* Dependency creation states */
