@@ -34,6 +34,12 @@ import styles from './Timeline.module.css';
 
 export type ZoomLevel = 'week' | 'month' | 'year';
 
+// Display mode thresholds based on dayWidth
+// dayWidth <= 1.5: year view (FY headers)
+// dayWidth > 1.5: month view (month headers)
+const YEAR_VIEW_THRESHOLD = 1.5;
+const WEEK_VIEW_THRESHOLD = 5;
+
 // Calculate stack indices for non-overlapping projects (optimized flight path algorithm)
 // Time complexity: O(n log n) instead of O(n²)
 function calculateProjectStacks(projects: Project[]): Map<string, number> {
@@ -83,7 +89,8 @@ interface TimelineProps {
   projects: Project[];
   teamMembers: TeamMember[];
   dependencies: Dependency[];
-  zoomLevel: ZoomLevel;
+  zoomLevel?: ZoomLevel; // Deprecated: use dayWidth instead
+  dayWidth?: number; // Pixels per day (0.5 - 12)
   selectedProjectId?: string | null;
   filteredOwners?: string[]; // When set, only show swimlanes for these owners
   onAddProject: (ownerName: string) => void;
@@ -115,6 +122,8 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
   month: 3,
   year: 0.8
 };
+
+const DEFAULT_DAY_WIDTH = 3; // Default to month view
 
 const BASE_PROJECT_HEIGHT = 52; // Minimum project bar height
 const MILESTONE_ROW_HEIGHT = 24; // Height per milestone row
@@ -177,6 +186,7 @@ export function Timeline({
   teamMembers,
   dependencies,
   zoomLevel,
+  dayWidth: dayWidthProp,
   selectedProjectId,
   filteredOwners,
   onAddProject,
@@ -204,7 +214,16 @@ export function Timeline({
   const edgeScrollFrameRef = useRef<number | null>(null);
   const lastMouseXRef = useRef<number>(0);
   const prevDayWidthRef = useRef<number | null>(null);
-  const dayWidth = ZOOM_DAY_WIDTHS[zoomLevel];
+
+  // Support both old zoomLevel prop and new dayWidth prop
+  const dayWidth = dayWidthProp ?? (zoomLevel ? ZOOM_DAY_WIDTHS[zoomLevel] : DEFAULT_DAY_WIDTH);
+
+  // Derive display mode from dayWidth for header rendering
+  const displayMode: 'year' | 'month' | 'week' = useMemo(() => {
+    if (dayWidth <= YEAR_VIEW_THRESHOLD) return 'year';
+    if (dayWidth >= WEEK_VIEW_THRESHOLD) return 'week';
+    return 'month';
+  }, [dayWidth]);
 
   // DnD sensors with activation constraint for responsive feel
   const sensors = useSensors(
@@ -280,7 +299,7 @@ export function Timeline({
   }, [visibleFYs, timelineStart, dayWidth, totalWidth]);
 
   const monthMarkers = useMemo(() => {
-    if (zoomLevel === 'year') return [];
+    if (displayMode === 'year') return [];
     const markers: { label: string; left: number; width: number }[] = [];
     let current = startOfMonth(timelineStart);
     while (current < timelineEnd) {
@@ -295,7 +314,7 @@ export function Timeline({
       current = nextMonth;
     }
     return markers;
-  }, [zoomLevel, timelineStart, timelineEnd, dayWidth, totalWidth]);
+  }, [displayMode, timelineStart, timelineEnd, dayWidth, totalWidth]);
 
   // Memoize todayPosition to prevent unnecessary recalculations on every render
   // getTodayPosition creates new Date() internally, so we only want to recalculate
@@ -687,7 +706,7 @@ export function Timeline({
         >
           {/* Header */}
           <div ref={headerRef} className={styles.header} style={{ width: totalWidth }}>
-            {zoomLevel === 'year' ? (
+            {displayMode === 'year' ? (
               fySegments.map(({ fy, left, width }) => (
                 <div key={fy} className={styles.fyHeader} style={{ left, width }}>
                   <span className={styles.fyLabel}>FY{fy}</span>
@@ -697,7 +716,7 @@ export function Timeline({
               monthMarkers.map(({ label, left, width }, i) => (
                 <div
                   key={i}
-                  className={`${styles.monthHeader} ${zoomLevel === 'week' ? styles.weekZoom : styles.monthZoom}`}
+                  className={`${styles.monthHeader} ${displayMode === 'week' ? styles.weekZoom : styles.monthZoom}`}
                   style={{ left, width }}
                 >
                   <span className={styles.monthLabel}>{label}</span>
@@ -714,14 +733,14 @@ export function Timeline({
           >
             <div ref={lanesRef} className={styles.lanes} data-lanes-container style={{ width: totalWidth, minHeight: totalLanesHeight }}>
               {/* Grid lines */}
-              {zoomLevel === 'year' && fySegments.map(({ fy, left, width }) => (
+              {displayMode === 'year' && fySegments.map(({ fy, left, width }) => (
                 <div key={`q-${fy}`}>
                   {[0, 1, 2, 3].map(q => (
                     <div key={q} className={styles.gridLine} style={{ left: left + (width / 4) * q }} />
                   ))}
                 </div>
               ))}
-              {zoomLevel === 'month' && monthMarkers.map(({ left }, i) => (
+              {displayMode === 'month' && monthMarkers.map(({ left }, i) => (
                 <div key={i} className={styles.gridLine} style={{ left }} />
               ))}
 

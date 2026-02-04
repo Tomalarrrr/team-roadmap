@@ -35,58 +35,6 @@
   gap: 6px;
 }
 
-.zoomControl {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.zoomLabel {
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  font-weight: 500;
-}
-
-.zoomButtons {
-  display: flex;
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-md);
-  padding: 3px;
-  gap: 2px;
-}
-
-.zoomBtn {
-  padding: 6px 14px;
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.zoomBtn:hover {
-  color: var(--text-primary);
-  background: rgba(0, 0, 0, 0.04);
-}
-
-.zoomBtn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue);
-}
-
-.zoomBtn.active {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  box-shadow: var(--shadow-sm);
-}
-
-.zoomBtn:active {
-  transform: scale(0.96);
-}
-
 .undoGroup {
   display: flex;
   align-items: center;
@@ -162,9 +110,5 @@
 
   .title {
     font-size: 1rem;
-  }
-
-  .zoomLabel {
-    display: none;
   }
 }

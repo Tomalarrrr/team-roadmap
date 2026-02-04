@@ -4,7 +4,7 @@ import { useUndoManager, createInverse } from './hooks/useUndoManager';
 import { useClipboard } from './hooks/useClipboard';
 import { useToast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
-import { Timeline, type ZoomLevel } from './components/Timeline';
+import { Timeline } from './components/Timeline';
 import { Modal } from './components/Modal';
 import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
@@ -64,7 +64,7 @@ function App() {
   } = useRoadmap();
 
   const [modal, setModal] = useState<ModalType>(null);
-  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('month');
+  const [dayWidth, setDayWidth] = useState(3); // Default to month view (3 px/day)
   const [filters, setFilters] = useState<FilterState>({
     search: '',
     owners: [],
@@ -527,8 +527,8 @@ function App() {
         onRedo={handleRedo}
         hasClipboard={hasClipboard}
         onPaste={() => paste()}
-        zoomLevel={zoomLevel}
-        onZoomChange={setZoomLevel}
+        dayWidth={dayWidth}
+        onDayWidthChange={setDayWidth}
       />
 
       <main className={styles.main}>
@@ -536,7 +536,7 @@ function App() {
           projects={filteredProjects}
           teamMembers={data.teamMembers}
           dependencies={data.dependencies || []}
-          zoomLevel={zoomLevel}
+          dayWidth={dayWidth}
           selectedProjectId={selectedProjectId}
           filteredOwners={filters.owners.length > 0 ? filters.owners : undefined}
           onAddProject={(ownerName) => {

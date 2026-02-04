@@ -1,7 +1,7 @@
 import { SearchFilter, type FilterState } from './SearchFilter';
 import { ExportMenu } from './ExportMenu';
+import { ZoomSlider } from './ZoomSlider';
 import type { Project, TeamMember, Dependency } from '../types';
-import type { ZoomLevel } from './Timeline';
 import styles from './Toolbar.module.css';
 
 interface ToolbarProps {
@@ -16,15 +16,9 @@ interface ToolbarProps {
   onRedo: () => void;
   hasClipboard: boolean;
   onPaste: () => void;
-  zoomLevel: ZoomLevel;
-  onZoomChange: (level: ZoomLevel) => void;
+  dayWidth: number;
+  onDayWidthChange: (width: number) => void;
 }
-
-const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
-  { value: 'week', label: 'Week' },
-  { value: 'month', label: 'Month' },
-  { value: 'year', label: 'Year' },
-];
 
 export function Toolbar({
   projects,
@@ -38,8 +32,8 @@ export function Toolbar({
   onRedo,
   hasClipboard: _hasClipboard,
   onPaste: _onPaste,
-  zoomLevel,
-  onZoomChange
+  dayWidth,
+  onDayWidthChange
 }: ToolbarProps) {
   // Detect platform for shortcut display
   const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -62,20 +56,7 @@ export function Toolbar({
 
       <div className={styles.right}>
         {/* Zoom Controls */}
-        <div className={styles.zoomControl}>
-          <span className={styles.zoomLabel}>View:</span>
-          <div className={styles.zoomButtons}>
-            {ZOOM_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                className={`${styles.zoomBtn} ${zoomLevel === value ? styles.active : ''}`}
-                onClick={() => onZoomChange(value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <ZoomSlider value={dayWidth} onChange={onDayWidthChange} />
 
         <div className={styles.divider} />
 
