@@ -282,74 +282,79 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       // Use requestAnimationFrame to throttle updates to screen refresh rate
       // This prevents excessive re-renders and improves performance dramatically
       rafIdRef.current = requestAnimationFrame(() => {
-        // Safety check: ensure we have valid original dates before proceeding
-        if (!originalDates.start || !originalDates.end) {
-          return;
-        }
+        try {
+          // Safety check: ensure we have valid original dates before proceeding
+          if (!originalDates.start || !originalDates.end) {
+            return;
+          }
 
-        const deltaX = e.clientX - dragStartX;
+          const deltaX = e.clientX - dragStartX;
 
-        // Don't start moving until we've exceeded the drag threshold
-        if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
+          // Don't start moving until we've exceeded the drag threshold
+          if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
 
-        // Safety check: prevent division by zero
-        const currentDayWidth = dayWidthRef.current || 1;
-        let deltaDays = Math.round(deltaX / currentDayWidth);
+          // Safety check: prevent division by zero
+          const currentDayWidth = dayWidthRef.current || 1;
+          let deltaDays = Math.round(deltaX / currentDayWidth);
 
-        // Safety check: ensure deltaDays is a valid number
-        if (!Number.isFinite(deltaDays)) {
-          return;
-        }
+          // Safety check: ensure deltaDays is a valid number
+          if (!Number.isFinite(deltaDays)) {
+            return;
+          }
 
-        // Limit extreme deltas to prevent performance issues with very large drags
-        // Max ~1 year extension in either direction
-        const MAX_DELTA_DAYS = 365;
-        deltaDays = Math.max(-MAX_DELTA_DAYS, Math.min(MAX_DELTA_DAYS, deltaDays));
+          // Limit extreme deltas to prevent performance issues with very large drags
+          // Max ~1 year extension in either direction
+          const MAX_DELTA_DAYS = 365;
+          deltaDays = Math.max(-MAX_DELTA_DAYS, Math.min(MAX_DELTA_DAYS, deltaDays));
 
-        const originalStart = parseISO(originalDates.start);
-        const originalEnd = parseISO(originalDates.end);
+          const originalStart = parseISO(originalDates.start);
+          const originalEnd = parseISO(originalDates.end);
 
-        // Safety check: ensure parsed dates are valid
-        if (isNaN(originalStart.getTime()) || isNaN(originalEnd.getTime())) {
-          return;
-        }
+          // Safety check: ensure parsed dates are valid
+          if (isNaN(originalStart.getTime()) || isNaN(originalEnd.getTime())) {
+            return;
+          }
 
-        let newStart = originalDates.start;
-        let newEnd = originalDates.end;
+          let newStart = originalDates.start;
+          let newEnd = originalDates.end;
 
-        if (dragMode === 'move') {
-          const start = new Date(originalStart);
-          const end = new Date(originalEnd);
-          start.setDate(start.getDate() + deltaDays);
-          end.setDate(end.getDate() + deltaDays);
-          newStart = toISODateString(start);
-          newEnd = toISODateString(end);
-        } else if (dragMode === 'resize-start') {
-          const start = new Date(originalStart);
-          start.setDate(start.getDate() + deltaDays);
-          if (start < originalEnd) {
+          if (dragMode === 'move') {
+            const start = new Date(originalStart);
+            const end = new Date(originalEnd);
+            start.setDate(start.getDate() + deltaDays);
+            end.setDate(end.getDate() + deltaDays);
             newStart = toISODateString(start);
-          }
-        } else if (dragMode === 'resize-end') {
-          const end = new Date(originalEnd);
-          end.setDate(end.getDate() + deltaDays);
-          if (end > originalStart) {
             newEnd = toISODateString(end);
+          } else if (dragMode === 'resize-start') {
+            const start = new Date(originalStart);
+            start.setDate(start.getDate() + deltaDays);
+            if (start < originalEnd) {
+              newStart = toISODateString(start);
+            }
+          } else if (dragMode === 'resize-end') {
+            const end = new Date(originalEnd);
+            end.setDate(end.getDate() + deltaDays);
+            if (end > originalStart) {
+              newEnd = toISODateString(end);
+            }
           }
-        }
 
-        // Update preview for smooth visual feedback (no Firebase call)
-        const preview = { start: newStart, end: newEnd };
+          // Update preview for smooth visual feedback (no Firebase call)
+          const preview = { start: newStart, end: newEnd };
 
-        // Only update if preview actually changed to prevent excessive re-renders
-        const hasChanged = !latestPreviewRef.current ||
-          latestPreviewRef.current.start !== preview.start ||
-          latestPreviewRef.current.end !== preview.end;
+          // Only update if preview actually changed to prevent excessive re-renders
+          const hasChanged = !latestPreviewRef.current ||
+            latestPreviewRef.current.start !== preview.start ||
+            latestPreviewRef.current.end !== preview.end;
 
-        latestPreviewRef.current = preview;
+          latestPreviewRef.current = preview;
 
-        if (hasChanged) {
-          setPreviewDates(preview);
+          if (hasChanged) {
+            setPreviewDates(preview);
+          }
+        } catch (err) {
+          // Log but don't crash on drag calculation errors
+          console.error('[MilestoneLine] Error during drag:', err);
         }
       });
     };
