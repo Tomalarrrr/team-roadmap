@@ -95,6 +95,8 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   // Preview dates for smooth visual feedback during drag
   const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+  const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Dependency creation context
   const { state: depState, startCreation, completeCreation } = useDependencyCreation();
@@ -466,6 +468,31 @@ const MilestoneLineComponent = memo(function MilestoneLine({
 
   const isTargetable = isCreatingDependency && !isSource;
 
+  // Tooltip handlers - show after brief delay
+  const handleMouseEnter = useCallback(() => {
+    if (dragMode) return;
+    tooltipTimeoutRef.current = setTimeout(() => {
+      setShowTooltip(true);
+    }, 400); // 400ms delay before showing
+  }, [dragMode]);
+
+  const handleMouseLeaveTooltip = useCallback(() => {
+    if (tooltipTimeoutRef.current) {
+      clearTimeout(tooltipTimeoutRef.current);
+      tooltipTimeoutRef.current = null;
+    }
+    setShowTooltip(false);
+  }, []);
+
+  // Clean up tooltip timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // CRITICAL: Don't unmount during drag! This was causing the flashing bug.
   // When resizing, the milestone can extend beyond project bounds (based on preview),
   // but projectWidth is based on actual data. If we unmount, we lose all drag state.
@@ -505,11 +532,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       aria-label={`Milestone: ${milestone.title}, ${formatShortDate(milestone.startDate)} to ${formatShortDate(milestone.endDate)}${isPast ? ', Complete' : ''}`}
       onKeyDown={handleKeyDown}
       onClick={isTargetable ? handleDependencyTarget : undefined}
+      onMouseEnter={handleMouseEnter}
       onMouseMove={(e) => {
         handleMouseMoveForArrow(e);
       }}
       onMouseLeave={() => {
         if (!dragMode) setShowDependencyArrow(false); // Skip during drag
+        handleMouseLeaveTooltip();
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -584,6 +613,16 @@ const MilestoneLineComponent = memo(function MilestoneLine({
         onClose={contextMenu.close}
         isOpeningRef={contextMenu.isOpeningRef}
       />
+
+      {/* Tooltip */}
+      {showTooltip && !dragMode && (
+        <div className={styles.tooltip}>
+          <div className={styles.tooltipTitle}>{milestone.title}</div>
+          <div className={styles.tooltipDates}>
+            {formatShortDate(milestone.startDate)} – {formatShortDate(milestone.endDate)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }, areMilestonePropsEqual);
