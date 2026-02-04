@@ -603,6 +603,7 @@ export function DependencyLine({
         strokeWidth="12"
         style={{ cursor: isSelected ? 'crosshair' : 'pointer' }}
         onClick={handleLineClick}
+        onDoubleClick={handleDoubleClick}
       />
       {/* Hover indicator dot (hidden when selected) */}
       {!isSelected && (
