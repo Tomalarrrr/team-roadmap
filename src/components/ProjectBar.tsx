@@ -463,7 +463,8 @@ export function ProjectBar({
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
           // If minimal movement and quick click, open edit dialog and select
-          if (dx < 5 && dy < 5 && elapsed < 300) {
+          // Increased threshold to 10px to account for slight mouse movement
+          if (dx < 10 && dy < 10 && elapsed < 500) {
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
@@ -479,23 +480,12 @@ export function ProjectBar({
         <div className={styles.projectContent}>
           <span className={styles.projectTitle}>{project.title}</span>
           <span className={styles.projectSeparator}>•</span>
-          <span className={styles.projectLabel}>Start</span>
-          <span className={styles.projectSeparator}>•</span>
           <span className={styles.projectDates}>
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
         </div>
         <div className={styles.dragHint}>
           Click to edit or drag to move
-        </div>
-        <div className={styles.projectContentEnd}>
-          <span className={styles.projectDates}>
-            {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
-          </span>
-          <span className={styles.projectSeparator}>•</span>
-          <span className={styles.projectTitle}>{project.title}</span>
-          <span className={styles.projectSeparator}>•</span>
-          <span className={styles.projectLabel}>End</span>
         </div>
       </div>
 
