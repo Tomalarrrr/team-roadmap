@@ -4,6 +4,26 @@
   gap: 20px;
 }
 
+/* Form sections for visual grouping */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+}
+
+.sectionTitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -13,7 +33,7 @@
 .row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 12px;
 }
 
 .newRowBtn {
@@ -24,9 +44,9 @@
   color: var(--text-muted);
   background: transparent;
   border: 1px dashed var(--border-medium);
-  border-radius: var(--radius-md);
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s ease;
   margin-top: -8px;
 }
 
@@ -42,56 +62,76 @@
 }
 
 .label {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 500;
   color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .input {
   padding: 10px 14px;
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
   font-size: 0.95rem;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .input:hover {
-  border-color: var(--text-muted);
+  border-color: var(--border-medium);
 }
 
 .input:focus {
   outline: none;
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px var(--accent-blue-light);
+  box-shadow: 0 0 0 3px var(--accent-blue-light), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .input::placeholder {
   color: var(--text-muted);
 }
 
+/* Date inputs get custom styling */
+.input[type="date"] {
+  cursor: pointer;
+}
+
+.input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.5;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.input[type="date"]:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+
 .textarea {
   padding: 10px 14px;
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
   font-size: 0.95rem;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: all 0.2s ease;
   resize: vertical;
   min-height: 60px;
   font-family: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .textarea:hover {
-  border-color: var(--text-muted);
+  border-color: var(--border-medium);
 }
 
 .textarea:focus {
   outline: none;
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px var(--accent-blue-light);
+  box-shadow: 0 0 0 3px var(--accent-blue-light), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .textarea::placeholder {
@@ -101,16 +141,24 @@
 .optional {
   font-weight: 400;
   color: var(--text-muted);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .error {
-  color: #ef4444;
+  color: #dc2626;
   font-size: 0.8rem;
-  padding: 6px 10px;
-  background: #fef2f2;
-  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  border-radius: 8px;
   border: 1px solid #fecaca;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.error::before {
+  content: "⚠";
+  font-size: 0.9rem;
 }
 
 .hint {
@@ -118,46 +166,116 @@
   color: var(--text-muted);
 }
 
+/* ========================================
+   Enhanced Color Picker
+   ======================================== */
+
+.colorPickerSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .colorPicker {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
   align-items: center;
 }
 
+.colorOption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
 .colorSwatch {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   border: 2px solid transparent;
   cursor: pointer;
-  transition: transform 0.15s ease, border-color 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
 }
 
 .colorSwatch:hover {
   transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .colorSwatch:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue);
+  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--accent-blue);
 }
 
 .colorSwatch.selected {
+  transform: scale(1.1);
   border-color: var(--text-primary);
-  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--text-muted);
-  animation: bounce 0.2s ease-out;
+  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px currentColor;
 }
 
-@keyframes bounce {
+.colorSwatch.selected::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 14px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+@keyframes selectPop {
   0% { transform: scale(1); }
-  50% { transform: scale(1.15); }
+  50% { transform: scale(1.2); }
   100% { transform: scale(1.1); }
 }
 
-.colorSwatch.selected:focus-visible {
-  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--accent-blue);
+.colorSwatch.selected {
+  animation: selectPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+.colorLabel {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-align: center;
+  max-width: 48px;
+  line-height: 1.2;
+}
+
+/* Status preview bar */
+.statusPreview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  margin-top: 4px;
+}
+
+.statusPreviewDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 8px currentColor;
+}
+
+.statusPreviewText {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+/* ========================================
+   Checkbox
+   ======================================== */
 
 .checkboxField {
   padding-top: 4px;
@@ -179,11 +297,15 @@
   cursor: pointer;
 }
 
+/* ========================================
+   Action Buttons
+   ======================================== */
+
 .actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding-top: 8px;
+  gap: 10px;
+  padding-top: 16px;
   border-top: 1px solid var(--border-light);
   margin-top: 4px;
 }
@@ -193,25 +315,25 @@
 }
 
 .deleteBtn {
-  padding: 10px 20px;
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
   font-weight: 500;
-  color: #ef4444;
+  color: var(--text-muted);
   background: transparent;
-  border: 1px solid #fecaca;
+  border: none;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s ease;
 }
 
 .deleteBtn:hover {
+  color: #dc2626;
   background: #fef2f2;
-  border-color: #ef4444;
 }
 
 .deleteBtn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #ef4444;
+  box-shadow: 0 0 0 2px #dc2626;
 }
 
 .deleteBtn:active {
@@ -220,16 +342,18 @@
 
 .cancelBtn {
   padding: 10px 20px;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   font-size: 0.9rem;
   font-weight: 500;
   color: var(--text-secondary);
   background: var(--bg-tertiary);
-  transition: background 0.15s ease;
+  border: 1px solid var(--border-light);
+  transition: all 0.2s ease;
 }
 
 .cancelBtn:hover {
-  background: var(--border-light);
+  background: var(--bg-primary);
+  border-color: var(--border-medium);
 }
 
 .cancelBtn:focus-visible {
@@ -243,73 +367,104 @@
 
 .submitBtn {
   padding: 10px 24px;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: 600;
   color: white;
-  background: var(--accent-blue);
-  transition: background 0.15s ease, transform 0.15s ease;
+  background: linear-gradient(135deg, var(--accent-blue) 0%, #2563eb 100%);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+  transition: all 0.2s ease;
 }
 
 .submitBtn:hover {
-  background: #2563eb;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
   transform: translateY(-1px);
 }
 
 .submitBtn:active {
-  transform: translateY(0) scale(0.97);
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 1px 2px rgba(59, 130, 246, 0.3);
 }
 
 .submitBtn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent-blue-light);
+  box-shadow: 0 0 0 3px var(--accent-blue-light), 0 2px 4px rgba(59, 130, 246, 0.3);
 }
 
-/* Field-level error styling */
+/* ========================================
+   Field Errors
+   ======================================== */
+
 .inputError {
-  border-color: #ef4444;
-  animation: shake 0.3s ease;
+  border-color: #dc2626;
+  animation: shake 0.4s ease;
 }
 
 .inputError:focus {
-  border-color: #ef4444;
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
 }
 
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-4px); }
-  40%, 80% { transform: translateX(4px); }
+  20%, 60% { transform: translateX(-3px); }
+  40%, 80% { transform: translateX(3px); }
 }
 
 .fieldError {
-  color: #ef4444;
+  color: #dc2626;
   font-size: 0.75rem;
   margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fieldError::before {
+  content: "•";
 }
 
 /* Warning styling */
 .warning {
   color: #b45309;
   font-size: 0.8rem;
-  padding: 8px 12px;
-  background: #fffbeb;
-  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  background: linear-gradient(135deg, #fffbeb, #fef3c7);
+  border-radius: 8px;
   border: 1px solid #fcd34d;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-/* Delete confirmation dialog */
+/* ========================================
+   Delete Confirmation
+   ======================================== */
+
 .deleteConfirm {
   padding: 16px;
-  background: #fef2f2;
-  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  border-radius: 12px;
   border: 1px solid #fecaca;
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .deleteConfirm p {
-  margin: 0 0 12px 0;
+  margin: 0 0 14px 0;
   color: #991b1b;
   font-size: 0.9rem;
+  font-weight: 500;
 }
 
 .deleteConfirmActions {
@@ -320,36 +475,43 @@
 
 .deleteConfirmBtn {
   padding: 8px 16px;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   font-size: 0.85rem;
-  font-weight: 500;
+  font-weight: 600;
   color: white;
-  background: #ef4444;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   border: none;
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
 }
 
 .deleteConfirmBtn:hover {
-  background: #dc2626;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+  transform: translateY(-1px);
 }
 
 .deleteConfirmBtn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #ef4444;
+  box-shadow: 0 0 0 2px white, 0 0 0 4px #ef4444;
 }
 
 .deleteConfirmBtn:active {
   transform: scale(0.97);
 }
 
-/* Milestones Section */
+/* ========================================
+   Milestones Section
+   ======================================== */
+
 .milestonesSection {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-light);
+  padding: 16px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
 }
 
 .milestonesSectionHeader {
@@ -360,6 +522,9 @@
 
 .milestonesSectionHeader .label {
   margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .milestonesList {
@@ -371,16 +536,18 @@
 .milestoneItem {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 12px;
+  padding: 12px 14px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  transition: border-color 0.15s;
+  border-radius: 10px;
+  transition: all 0.2s ease;
+  cursor: default;
 }
 
 .milestoneItem:hover {
   border-color: var(--border-medium);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
 .milestoneColorDot {
@@ -388,6 +555,7 @@
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 6px currentColor;
 }
 
 .milestoneInfo {
@@ -410,6 +578,7 @@
 .milestoneDates {
   font-size: 0.75rem;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .milestoneActions {
@@ -417,62 +586,70 @@
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.milestoneItem:hover .milestoneActions {
+  opacity: 1;
 }
 
 .milestoneEditBtn {
-  padding: 4px 10px;
+  padding: 5px 10px;
   font-size: 0.75rem;
   font-weight: 500;
   color: var(--accent-blue);
-  background: transparent;
-  border: 1px solid var(--accent-blue);
-  border-radius: var(--radius-sm);
+  background: var(--accent-blue-light);
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .milestoneEditBtn:hover {
-  background: var(--accent-blue-light);
+  background: var(--accent-blue);
+  color: white;
 }
 
 .milestoneDeleteBtn {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
-  font-weight: 500;
+  font-size: 1.1rem;
+  font-weight: 400;
   color: var(--text-muted);
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.15s ease;
 }
 
 .milestoneDeleteBtn:hover {
-  color: #ef4444;
+  color: #dc2626;
   background: #fef2f2;
 }
 
 .addMilestoneBtn {
   align-self: flex-start;
-  padding: 8px 14px;
+  padding: 10px 16px;
   font-size: 0.85rem;
   font-weight: 500;
-  color: var(--text-muted);
-  background: transparent;
-  border: 1px dashed var(--border-medium);
-  border-radius: var(--radius-md);
+  color: var(--accent-blue);
+  background: var(--bg-secondary);
+  border: 1px dashed var(--accent-blue);
+  border-radius: 8px;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all 0.2s ease;
+  opacity: 0.8;
 }
 
 .addMilestoneBtn:hover {
-  color: var(--accent-blue);
-  border-color: var(--accent-blue);
+  opacity: 1;
   background: var(--accent-blue-light);
+  border-style: solid;
 }
 
 .addMilestoneBtn:focus-visible {
@@ -480,14 +657,29 @@
   box-shadow: 0 0 0 2px var(--accent-blue);
 }
 
+/* Inline milestone form */
 .milestoneFormInline {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   padding: 16px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent-blue);
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px var(--accent-blue-light);
+  animation: expandIn 0.2s ease;
+}
+
+@keyframes expandIn {
+  from {
+    opacity: 0;
+    transform: scaleY(0.95);
+    transform-origin: top;
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
 }
 
 .milestoneFormInline .field {
@@ -495,25 +687,30 @@
 }
 
 .milestoneFormInline .label {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .milestoneFormInline .input,
 .milestoneFormInline .textarea {
-  padding: 8px 10px;
+  padding: 8px 12px;
   font-size: 0.9rem;
 }
 
 .milestoneFormInline .colorSwatch {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.milestoneFormInline .colorSwatch.selected::after {
+  font-size: 11px;
 }
 
 .milestoneFormActions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding-top: 8px;
+  padding-top: 10px;
   border-top: 1px solid var(--border-light);
 }
 

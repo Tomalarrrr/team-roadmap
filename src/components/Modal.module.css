@@ -1,40 +1,50 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  animation: fadeIn 0.2s ease;
+  animation: overlayFadeIn 0.2s ease;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
 }
 
 .modal {
   background: var(--bg-secondary);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
-  max-width: 480px;
-  width: 90%;
+  border-radius: 16px;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  max-width: 520px;
+  width: 92%;
   max-height: 90vh;
-  overflow: auto;
-  animation: slideUp 0.25s ease;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   outline: none;
 }
 
-@keyframes slideUp {
+@keyframes modalSlideIn {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(24px) scale(0.96);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -43,14 +53,16 @@
   align-items: center;
   justify-content: space-between;
   padding: 20px 24px;
+  background: linear-gradient(to bottom, var(--bg-secondary), var(--bg-tertiary));
   border-bottom: 1px solid var(--border-light);
 }
 
 .title {
-  font-size: 1.1rem;
+  font-size: 1.15rem;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
+  letter-spacing: -0.02em;
 }
 
 .closeBtn {
@@ -59,40 +71,64 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   color: var(--text-muted);
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .closeBtn:hover {
-  background: var(--bg-tertiary);
+  background: var(--bg-primary);
   color: var(--text-primary);
+  transform: rotate(90deg);
 }
 
 .closeBtn:active {
-  transform: scale(0.9);
+  transform: rotate(90deg) scale(0.9);
 }
 
 .content {
   padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Smooth scroll behavior */
+.content {
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-medium) transparent;
+}
+
+.content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: 3px;
 }
 
 /* Staggered entrance for form fields */
 .content > * {
-  animation: fieldFadeIn 0.2s ease backwards;
+  animation: fieldFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
 .content > *:nth-child(1) { animation-delay: 0.05s; }
-.content > *:nth-child(2) { animation-delay: 0.1s; }
-.content > *:nth-child(3) { animation-delay: 0.15s; }
-.content > *:nth-child(4) { animation-delay: 0.2s; }
-.content > *:nth-child(5) { animation-delay: 0.25s; }
-.content > *:nth-child(6) { animation-delay: 0.3s; }
+.content > *:nth-child(2) { animation-delay: 0.08s; }
+.content > *:nth-child(3) { animation-delay: 0.11s; }
+.content > *:nth-child(4) { animation-delay: 0.14s; }
+.content > *:nth-child(5) { animation-delay: 0.17s; }
+.content > *:nth-child(6) { animation-delay: 0.2s; }
+.content > *:nth-child(7) { animation-delay: 0.23s; }
 
 @keyframes fieldFadeIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
