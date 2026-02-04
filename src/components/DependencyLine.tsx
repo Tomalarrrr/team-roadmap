@@ -230,15 +230,14 @@ export function DependencyLine({
           `H ${toX}`
         ].join(' ');
       } else {
-        // Different levels - route through the vertical gap
+        // Different levels - go through vertical gap, approach from right
+        // Path: right → down → left to target
         path = [
           `M ${fromX} ${adjustedFromY}`,
           `H ${exitX - r}`,
           `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (ySign * r)}`,
           `V ${adjustedToY - (ySign * r)}`,
           `Q ${exitX} ${adjustedToY} ${exitX - r} ${adjustedToY}`,
-          `H ${entryX + r}`,
-          `Q ${entryX} ${adjustedToY} ${entryX} ${adjustedToY}`,
           `H ${toX}`
         ].join(' ');
       }
@@ -252,7 +251,8 @@ export function DependencyLine({
       toY: adjustedToY,
       path,
       midX: pathMidX,
-      midY: (adjustedFromY + adjustedToY) / 2
+      midY: (adjustedFromY + adjustedToY) / 2,
+      approachFromRight: !isForward // Backward connections approach from right
     };
   }, [
     fromProject.id,
@@ -343,15 +343,19 @@ export function DependencyLine({
         strokeLinecap="round"
         className={styles.mainPath}
       />
-      {/* Arrow head outline */}
+      {/* Arrow head outline - flips direction based on approach */}
       <polygon
-        points={`${line.toX},${line.toY} ${line.toX - 10},${line.toY - 5} ${line.toX - 10},${line.toY + 5}`}
+        points={line.approachFromRight
+          ? `${line.toX},${line.toY} ${line.toX + 10},${line.toY - 5} ${line.toX + 10},${line.toY + 5}`
+          : `${line.toX},${line.toY} ${line.toX - 10},${line.toY - 5} ${line.toX - 10},${line.toY + 5}`}
         fill="rgba(255, 255, 255, 0.9)"
         className={styles.arrowOutline}
       />
-      {/* Arrow head */}
+      {/* Arrow head - flips direction based on approach */}
       <polygon
-        points={`${line.toX},${line.toY} ${line.toX - 8},${line.toY - 4} ${line.toX - 8},${line.toY + 4}`}
+        points={line.approachFromRight
+          ? `${line.toX},${line.toY} ${line.toX + 8},${line.toY - 4} ${line.toX + 8},${line.toY + 4}`
+          : `${line.toX},${line.toY} ${line.toX - 8},${line.toY - 4} ${line.toX - 8},${line.toY + 4}`}
         fill="var(--dependency-line, #666)"
         className={styles.arrowHead}
       />
