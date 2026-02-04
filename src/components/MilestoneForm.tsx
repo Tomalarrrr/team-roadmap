@@ -162,23 +162,31 @@ export function MilestoneForm({
       </div>
 
       <div className={styles.field}>
-        <label className={styles.label}>RAG Colours</label>
+        <label className={styles.label}>Milestone Status</label>
         <div className={styles.colorPicker}>
           {STATUS_COLORS.map(({ hex, name }) => (
-            <button
-              key={hex}
-              type="button"
-              className={`${styles.colorSwatch} ${statusColor === hex ? styles.selected : ''}`}
-              style={{ backgroundColor: hex }}
-              onClick={() => setStatusColor(hex)}
-              aria-label={`Select ${name} status`}
-              title={name}
-            />
+            <div key={hex} className={styles.colorOption}>
+              <button
+                type="button"
+                className={`${styles.colorSwatch} ${statusColor === hex ? styles.selected : ''}`}
+                style={{ backgroundColor: hex }}
+                onClick={() => setStatusColor(hex)}
+                aria-label={`Select ${name} status`}
+                title={name}
+              />
+              <span className={styles.colorLabel}>{name}</span>
+            </div>
           ))}
         </div>
-        <span className={styles.hint}>
-          {STATUS_COLORS.find(c => c.hex === statusColor)?.name || 'Custom'}
-        </span>
+        <div className={styles.statusPreview}>
+          <div
+            className={styles.statusPreviewDot}
+            style={{ backgroundColor: statusColor }}
+          />
+          <span className={styles.statusPreviewText}>
+            {STATUS_COLORS.find(c => c.hex === statusColor)?.name || 'Custom'}
+          </span>
+        </div>
       </div>
 
       {showDeleteConfirm && (
