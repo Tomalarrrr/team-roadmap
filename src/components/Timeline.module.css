@@ -243,14 +243,16 @@
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 20px;
+  padding: 0 24px;
   border-right: 1px solid var(--border-light);
+  background: linear-gradient(to right, transparent 0%, rgba(0,0,0,0.02) 50%, transparent 100%);
 }
 
 .fyLabel {
-  font-size: 0.9rem;
+  font-size: 0.95rem;
   font-weight: 600;
   color: var(--text-primary);
+  letter-spacing: 0.02em;
 }
 
 .monthHeader {
@@ -258,8 +260,25 @@
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 12px;
   border-left: 1px solid var(--border-light);
+}
+
+/* Week zoom: narrower, more compact headers */
+.monthHeader.weekZoom {
+  padding: 0 6px;
+}
+
+.monthHeader.weekZoom .monthLabel {
+  font-size: 0.7rem;
+}
+
+/* Month zoom: standard width headers */
+.monthHeader.monthZoom {
+  padding: 0 14px;
+}
+
+.monthHeader.monthZoom .monthLabel {
+  font-size: 0.8rem;
 }
 
 .monthLabel {
@@ -278,11 +297,17 @@
   position: absolute;
   left: 0;
   right: 0;
-  border-bottom: 1px solid var(--border-light);
+  border-bottom: 2px solid var(--border-light);
+  /* Ensure positioned children are relative to this lane */
+  isolation: isolate;
 }
 
 .lane:nth-child(even) {
-  background: rgba(0, 0, 0, 0.01);
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.lane:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.01);
 }
 
 .laneOver {

@@ -52,6 +52,7 @@ interface DependencyLineProps {
   dayWidth: number;
   projectStacks: Map<string, number>;
   lanePositions: number[];
+  laneStackHeights: Record<string, number[]>; // Stack heights per owner for dynamic positioning
   ownerToLaneIndex: Map<string, number>;
   lineIndex?: number; // For staggering connection points
   isAnyHovered?: boolean; // True if any dependency line is hovered
@@ -59,8 +60,9 @@ interface DependencyLineProps {
   onRemove: () => void;
 }
 
-const PROJECT_HEIGHT = 68;
-const BAR_VERTICAL_OFFSET = 12; // Updated to match LANE_PADDING
+const BASE_PROJECT_HEIGHT = 52; // Minimum project bar height
+const PROJECT_VERTICAL_GAP = 20; // Gap between stacked projects
+const BAR_VERTICAL_OFFSET = 16; // LANE_PADDING
 const BAR_HEIGHT = 52;
 const MILESTONE_HEIGHT = 20;
 const MILESTONE_GAP = 4;
@@ -75,12 +77,22 @@ export function DependencyLine({
   dayWidth,
   projectStacks,
   lanePositions,
+  laneStackHeights,
   ownerToLaneIndex,
   lineIndex = 0,
   isAnyHovered = false,
   onHoverChange,
   onRemove
 }: DependencyLineProps) {
+  // Helper to calculate stack top offset based on dynamic heights
+  const getStackTopOffset = useCallback((ownerName: string, stackIndex: number): number => {
+    const stackHeights = laneStackHeights[ownerName] || [];
+    let offset = BAR_VERTICAL_OFFSET;
+    for (let i = 0; i < stackIndex; i++) {
+      offset += (stackHeights[i] || BASE_PROJECT_HEIGHT) + PROJECT_VERTICAL_GAP;
+    }
+    return offset;
+  }, [laneStackHeights]);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
@@ -122,25 +134,28 @@ export function DependencyLine({
     const fromLaneOffset = lanePositions[fromLaneIndex] ?? 0;
     const toLaneOffset = lanePositions[toLaneIndex] ?? 0;
 
-    // Calculate Y positions
+    // Calculate Y positions using dynamic stack heights
+    const fromStackOffset = getStackTopOffset(fromProject.owner, fromStack);
+    const toStackOffset = getStackTopOffset(toProject.owner, toStack);
+
     let fromY: number;
     let toY: number;
 
     if (fromMilestone) {
       // Milestone position: within project bar, below content
       const milestoneStackIdx = fromMilestoneStacks.get(fromMilestoneId!) ?? 0;
-      const projectTop = fromLaneOffset + BAR_VERTICAL_OFFSET + fromStack * PROJECT_HEIGHT;
+      const projectTop = fromLaneOffset + fromStackOffset;
       fromY = projectTop + PROJECT_CONTENT_HEIGHT + 6 + milestoneStackIdx * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2;
     } else {
-      fromY = fromLaneOffset + BAR_VERTICAL_OFFSET + fromStack * PROJECT_HEIGHT + BAR_HEIGHT / 2;
+      fromY = fromLaneOffset + fromStackOffset + BAR_HEIGHT / 2;
     }
 
     if (toMilestone) {
       const milestoneStackIdx = toMilestoneStacks.get(toMilestoneId!) ?? 0;
-      const projectTop = toLaneOffset + BAR_VERTICAL_OFFSET + toStack * PROJECT_HEIGHT;
+      const projectTop = toLaneOffset + toStackOffset;
       toY = projectTop + PROJECT_CONTENT_HEIGHT + 6 + milestoneStackIdx * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2;
     } else {
-      toY = toLaneOffset + BAR_VERTICAL_OFFSET + toStack * PROJECT_HEIGHT + BAR_HEIGHT / 2;
+      toY = toLaneOffset + toStackOffset + BAR_HEIGHT / 2;
     }
 
     // Calculate X positions
@@ -183,7 +198,8 @@ export function DependencyLine({
     ownerToLaneIndex,
     lineIndex,
     fromMilestoneStacks,
-    toMilestoneStacks
+    toMilestoneStacks,
+    getStackTopOffset
   ]);
 
   const handleClick = (e: React.MouseEvent) => {
@@ -234,19 +250,35 @@ export function DependencyLine({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
+      {/* Outline/halo for visibility on colored backgrounds */}
+      <path
+        d={line.path}
+        fill="none"
+        stroke="rgba(255, 255, 255, 0.9)"
+        strokeWidth="4"
+        strokeLinecap="round"
+        className={styles.outlinePath}
+      />
       {/* Main line */}
       <path
         d={line.path}
         fill="none"
-        stroke="var(--text-muted)"
-        strokeWidth="1.5"
-        strokeDasharray="4 3"
+        stroke="var(--dependency-line, #666)"
+        strokeWidth="2"
+        strokeDasharray="6 4"
+        strokeLinecap="round"
         className={styles.mainPath}
+      />
+      {/* Arrow head outline */}
+      <polygon
+        points={`${line.toX},${line.toY} ${line.toX - 10},${line.toY - 5} ${line.toX - 10},${line.toY + 5}`}
+        fill="rgba(255, 255, 255, 0.9)"
+        className={styles.arrowOutline}
       />
       {/* Arrow head */}
       <polygon
         points={`${line.toX},${line.toY} ${line.toX - 8},${line.toY - 4} ${line.toX - 8},${line.toY + 4}`}
-        fill="var(--text-muted)"
+        fill="var(--dependency-line, #666)"
         className={styles.arrowHead}
       />
       {/* Invisible wider path for easier interaction */}

@@ -2,13 +2,24 @@
   pointer-events: auto;
 }
 
+/* Outline/halo for visibility on colored backgrounds */
+.outlinePath {
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+
+.arrowOutline {
+  opacity: 0.85;
+  transition: opacity 0.15s;
+}
+
 .mainPath {
-  opacity: 0.5;
+  opacity: 0.7;
   transition: opacity 0.15s, stroke 0.15s;
 }
 
 .arrowHead {
-  opacity: 0.5;
+  opacity: 0.7;
   transition: opacity 0.15s, fill 0.15s;
 }
 
@@ -16,13 +27,21 @@
   transition: r 0.15s;
 }
 
+.dependencyLine:hover .outlinePath {
+  opacity: 1;
+}
+
+.dependencyLine:hover .arrowOutline {
+  opacity: 1;
+}
+
 .dependencyLine:hover .mainPath {
-  opacity: 0.8;
+  opacity: 1;
   stroke: var(--accent-blue);
 }
 
 .dependencyLine:hover .arrowHead {
-  opacity: 0.8;
+  opacity: 1;
   fill: var(--accent-blue);
 }
 
@@ -31,23 +50,41 @@
 }
 
 /* Hover isolation - dim other lines when one is hovered */
+.dependencyLine.dimmed .outlinePath {
+  opacity: 0.3;
+}
+
+.dependencyLine.dimmed .arrowOutline {
+  opacity: 0.3;
+}
+
 .dependencyLine.dimmed .mainPath {
-  opacity: 0.2;
+  opacity: 0.25;
 }
 
 .dependencyLine.dimmed .arrowHead {
-  opacity: 0.2;
+  opacity: 0.25;
 }
 
 /* Hovered state - make line more prominent */
+.dependencyLine.hovered .outlinePath {
+  opacity: 1;
+  stroke: white;
+  stroke-width: 5;
+}
+
+.dependencyLine.hovered .arrowOutline {
+  opacity: 1;
+}
+
 .dependencyLine.hovered .mainPath {
-  opacity: 0.9;
+  opacity: 1;
   stroke: var(--accent-blue);
-  stroke-width: 2;
+  stroke-width: 2.5;
 }
 
 .dependencyLine.hovered .arrowHead {
-  opacity: 0.9;
+  opacity: 1;
   fill: var(--accent-blue);
 }
 

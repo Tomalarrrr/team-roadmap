@@ -115,9 +115,61 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
   year: 0.8
 };
 
-const PROJECT_HEIGHT = 68; // Height including spacing between projects
-const LANE_PADDING = 12;
+const BASE_PROJECT_HEIGHT = 52; // Minimum project bar height
+const MILESTONE_ROW_HEIGHT = 24; // Height per milestone row
+const PROJECT_CONTENT_HEIGHT = 28; // Height of the title/dates area
+const PROJECT_VERTICAL_GAP = 20; // Gap between stacked projects (increased for visual clarity)
+const LANE_PADDING = 16; // Padding top and bottom of lane
+const LANE_BOTTOM_BUFFER = 8; // Extra buffer at bottom to prevent spillover
 const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
+
+// Calculate milestone stacks for a single project (replicates ProjectBar logic)
+function calculateMilestoneStacks(milestones: { id: string; startDate: string; endDate: string }[]): Map<string, number> {
+  const stacks = new Map<string, number>();
+  if (!milestones || milestones.length === 0) return stacks;
+
+  const sorted = [...milestones].sort((a, b) =>
+    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+  );
+
+  const stackEndTimes: number[] = [];
+
+  sorted.forEach((milestone) => {
+    const startTime = new Date(milestone.startDate).getTime();
+    const endTime = new Date(milestone.endDate).getTime();
+
+    let assignedStack = -1;
+    for (let i = 0; i < stackEndTimes.length; i++) {
+      if (stackEndTimes[i] < startTime) {
+        assignedStack = i;
+        stackEndTimes[i] = endTime;
+        break;
+      }
+    }
+
+    if (assignedStack === -1) {
+      assignedStack = stackEndTimes.length;
+      stackEndTimes.push(endTime);
+    }
+
+    stacks.set(milestone.id, assignedStack);
+  });
+
+  return stacks;
+}
+
+// Calculate project bar height based on its milestones
+function calculateProjectHeight(milestones: { id: string; startDate: string; endDate: string }[] | undefined): number {
+  if (!milestones || milestones.length === 0) {
+    return BASE_PROJECT_HEIGHT;
+  }
+
+  const milestoneStacks = calculateMilestoneStacks(milestones);
+  const maxStack = milestoneStacks.size > 0 ? Math.max(...milestoneStacks.values()) : -1;
+  const milestoneRows = maxStack + 1;
+  const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
+  return Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
+}
 
 export function Timeline({
   projects,
@@ -470,16 +522,41 @@ export function Timeline({
     return stacks;
   }, [teamMembers, projectStacksByOwner]);
 
-  // Calculate lane heights based on max stack index (not project count)
-  const laneHeights = useMemo(() => {
-    return displayedTeamMembers.map(member => {
+  // Calculate the maximum project height for each stack row in each lane
+  // This accounts for milestones stacking within projects
+  const { laneHeights, laneStackHeights } = useMemo(() => {
+    const heights: number[] = [];
+    const stackHeights: Record<string, number[]> = {};
+
+    displayedTeamMembers.forEach(member => {
+      const ownerProjects = projectsByOwner[member.name] || [];
       const stacks = projectStacksByOwner[member.name];
       const maxStack = stacks && stacks.size > 0 ? Math.max(...stacks.values()) : -1;
-      const rowCount = maxStack + 1; // Number of rows needed
-      const height = Math.max(MIN_LANE_HEIGHT, rowCount * PROJECT_HEIGHT + LANE_PADDING * 2);
-      return height;
+
+      // Calculate max height for each stack row
+      const rowHeights: number[] = [];
+      for (let row = 0; row <= maxStack; row++) {
+        // Find all projects in this stack row and get their max height
+        const projectsInRow = ownerProjects.filter(p => stacks?.get(p.id) === row);
+        const maxHeightInRow = projectsInRow.reduce((max, p) => {
+          const height = calculateProjectHeight(p.milestones);
+          return Math.max(max, height);
+        }, BASE_PROJECT_HEIGHT);
+        rowHeights.push(maxHeightInRow);
+      }
+
+      stackHeights[member.name] = rowHeights;
+
+      // Total lane height is sum of all row heights + gaps + padding + buffer
+      const totalProjectHeight = rowHeights.length > 0
+        ? rowHeights.reduce((sum, h) => sum + h, 0) + (rowHeights.length - 1) * PROJECT_VERTICAL_GAP
+        : 0;
+      const height = Math.max(MIN_LANE_HEIGHT, totalProjectHeight + LANE_PADDING * 2 + LANE_BOTTOM_BUFFER);
+      heights.push(height);
     });
-  }, [displayedTeamMembers, projectStacksByOwner]);
+
+    return { laneHeights: heights, laneStackHeights: stackHeights };
+  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner]);
 
   // Calculate cumulative lane positions
   const lanePositions = useMemo(() => {
@@ -500,6 +577,16 @@ export function Timeline({
     });
     return map;
   }, [displayedTeamMembers]);
+
+  // Helper to calculate cumulative top offset for a project based on stack heights
+  const getStackTopOffset = useCallback((ownerName: string, stackIndex: number): number => {
+    const stackHeights = laneStackHeights[ownerName] || [];
+    let offset = LANE_PADDING;
+    for (let i = 0; i < stackIndex; i++) {
+      offset += (stackHeights[i] || BASE_PROJECT_HEIGHT) + PROJECT_VERTICAL_GAP;
+    }
+    return offset;
+  }, [laneStackHeights]);
 
 
   // Store lane positions in ref for dependency calculation
@@ -530,6 +617,7 @@ export function Timeline({
           dayWidth={dayWidth}
           projectStacks={globalProjectStacks}
           lanePositions={lanePositions}
+          laneStackHeights={laneStackHeights}
           ownerToLaneIndex={ownerToLaneIndex}
           lineIndex={index}
           isAnyHovered={hoveredDepId !== null}
@@ -538,7 +626,7 @@ export function Timeline({
         />
       );
     });
-  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, ownerToLaneIndex, hoveredDepId, onRemoveDependency]);
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, onRemoveDependency]);
 
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>
@@ -599,7 +687,11 @@ export function Timeline({
               ))
             ) : (
               monthMarkers.map(({ label, left }, i) => (
-                <div key={i} className={styles.monthHeader} style={{ left }}>
+                <div
+                  key={i}
+                  className={`${styles.monthHeader} ${zoomLevel === 'week' ? styles.weekZoom : styles.monthZoom}`}
+                  style={{ left }}
+                >
                   <span className={styles.monthLabel}>{label}</span>
                 </div>
               ))
@@ -651,13 +743,16 @@ export function Timeline({
                     top={lanePositions[idx]}
                     height={laneHeights[idx]}
                   >
-                    {projectsByOwner[member.name]?.map((project) => (
+                    {projectsByOwner[member.name]?.map((project) => {
+                      const stackIdx = stacks?.get(project.id) ?? 0;
+                      return (
                       <DraggableProjectBar
                         key={project.id}
                         project={project}
                         timelineStart={timelineStart}
                         dayWidth={dayWidth}
-                        stackIndex={stacks?.get(project.id) ?? 0}
+                        stackIndex={stackIdx}
+                        stackTopOffset={getStackTopOffset(member.name, stackIdx)}
                         isSelected={project.id === selectedProjectId}
                         onUpdate={(updates) => onUpdateProject(project.id, updates)}
                         onDelete={() => onDeleteProject(project.id)}
@@ -674,7 +769,8 @@ export function Timeline({
                         } : undefined}
                         onEdgeDrag={handleEdgeDrag}
                       />
-                    ))}
+                      );
+                    })}
                   </DroppableLane>
                 );
               })}

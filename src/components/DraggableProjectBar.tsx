@@ -9,6 +9,7 @@ interface DraggableProjectBarProps {
   timelineStart: Date;
   dayWidth: number;
   stackIndex?: number;
+  stackTopOffset?: number; // Calculated top position within the lane
   isSelected?: boolean;
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
@@ -28,6 +29,7 @@ function DraggableProjectBarComponent({
   timelineStart,
   dayWidth,
   stackIndex = 0,
+  stackTopOffset,
   isSelected,
   onUpdate,
   onDelete,
@@ -62,6 +64,7 @@ function DraggableProjectBarComponent({
         timelineStart={timelineStart}
         dayWidth={dayWidth}
         stackIndex={stackIndex}
+        stackTopOffset={stackTopOffset}
         isDragging={isDragging}
         isSelected={isSelected}
         dragListeners={listeners}
@@ -89,6 +92,7 @@ export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps
     prevProps.timelineStart.getTime() === nextProps.timelineStart.getTime() &&
     prevProps.dayWidth === nextProps.dayWidth &&
     prevProps.stackIndex === nextProps.stackIndex &&
+    prevProps.stackTopOffset === nextProps.stackTopOffset &&
     prevProps.isSelected === nextProps.isSelected
     // Note: Callback props are excluded from comparison as they're typically stable
   );

@@ -64,6 +64,7 @@ interface ProjectBarProps {
   timelineStart: Date;
   dayWidth: number;
   stackIndex?: number;
+  stackTopOffset?: number; // Calculated top position within the lane (accounts for variable heights)
   isDragging?: boolean;
   isSelected?: boolean;
   dragListeners?: React.DOMAttributes<HTMLDivElement>;
@@ -91,6 +92,7 @@ export function ProjectBar({
   timelineStart,
   dayWidth,
   stackIndex = 0,
+  stackTopOffset,
   isDragging: externalDragging,
   isSelected,
   dragListeners: _dragListeners, // Currently unused - manual drag used instead for date changes
@@ -442,7 +444,9 @@ export function ProjectBar({
   const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
   const projectBarHeight = Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
 
-  const topPosition = 12 + stackIndex * 68; // Matches LANE_PADDING and PROJECT_HEIGHT in Timeline
+  // Use stackTopOffset if provided (dynamic heights), otherwise fall back to fixed calculation
+  // Fallback uses: LANE_PADDING (16) + stackIndex * (BASE_PROJECT_HEIGHT + gap)
+  const topPosition = stackTopOffset !== undefined ? stackTopOffset : (16 + stackIndex * 72);
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
