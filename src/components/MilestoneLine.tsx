@@ -127,44 +127,62 @@ export function MilestoneLine({
   // Track the latest preview for committing on mouseUp
   const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
   const rafIdRef = useRef<number | null>(null);
-  const pendingDragModeRef = useRef<DragMode>(null);
 
-  // Initial drag detection - only activates dragMode after movement threshold
-  // This matches ProjectBar's pattern to prevent conflicting event handling
-  // CRITICAL: Include originalDates in deps so effect runs after mouseDown sets it
-  useEffect(() => {
-    if (dragMode !== null || !clickStartRef.current) return;
+  // Refs for initial drag detection - managed outside of effects for proper cleanup
+  const initialListenersRef = useRef<{ move: (e: MouseEvent) => void; up: () => void } | null>(null);
+
+  // Setup initial drag detection listeners - called from mouseDown handlers
+  const setupInitialDragDetection = useCallback((mode: DragMode, startX: number, startY: number) => {
+    // Clean up any existing listeners first
+    if (initialListenersRef.current) {
+      document.removeEventListener('mousemove', initialListenersRef.current.move);
+      document.removeEventListener('mouseup', initialListenersRef.current.up);
+      initialListenersRef.current = null;
+    }
 
     const DRAG_THRESHOLD = 8;
 
     const handleInitialMouseMove = (e: MouseEvent) => {
-      if (!clickStartRef.current) return;
+      const dx = Math.abs(e.clientX - startX);
+      const dy = Math.abs(e.clientY - startY);
 
-      const dx = Math.abs(e.clientX - clickStartRef.current.x);
-      const dy = Math.abs(e.clientY - clickStartRef.current.y);
-
-      // Only activate drag mode if movement exceeds threshold
       if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
-        const mode = pendingDragModeRef.current || 'move';
+        // Clean up these listeners before activating drag
+        if (initialListenersRef.current) {
+          document.removeEventListener('mousemove', initialListenersRef.current.move);
+          document.removeEventListener('mouseup', initialListenersRef.current.up);
+          initialListenersRef.current = null;
+        }
+        clickStartRef.current = null;
         setDragMode(mode);
-        clickStartRef.current = null; // Clear click tracking since we're dragging
       }
     };
 
     const handleInitialMouseUp = () => {
-      // Clean up without activating drag mode (this was a click)
-      pendingDragModeRef.current = null;
+      // Clean up - this was a click, not a drag
+      if (initialListenersRef.current) {
+        document.removeEventListener('mousemove', initialListenersRef.current.move);
+        document.removeEventListener('mouseup', initialListenersRef.current.up);
+        initialListenersRef.current = null;
+      }
       clickStartRef.current = null;
     };
 
+    initialListenersRef.current = { move: handleInitialMouseMove, up: handleInitialMouseUp };
     document.addEventListener('mousemove', handleInitialMouseMove);
     document.addEventListener('mouseup', handleInitialMouseUp);
+  }, []);
 
+  // Cleanup initial listeners on unmount
+  useEffect(() => {
     return () => {
-      document.removeEventListener('mousemove', handleInitialMouseMove);
-      document.removeEventListener('mouseup', handleInitialMouseUp);
+      if (initialListenersRef.current) {
+        document.removeEventListener('mousemove', initialListenersRef.current.move);
+        document.removeEventListener('mouseup', initialListenersRef.current.up);
+        initialListenersRef.current = null;
+      }
     };
-  }, [dragMode, originalDates]);
+  }, []);
 
   useEffect(() => {
     if (!dragMode) return;
@@ -356,16 +374,16 @@ export function MilestoneLine({
         contextMenu.open({ x: e.clientX, y: e.clientY });
       }}
     >
-      {/* Resize handles - use same deferred pattern as dragArea */}
+      {/* Resize handles */}
       <div
         className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`}
         onMouseDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-          pendingDragModeRef.current = 'resize-start';
           setDragStartX(e.clientX);
           setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+          setupInitialDragDetection('resize-start', e.clientX, e.clientY);
         }}
       />
       <div
@@ -374,9 +392,9 @@ export function MilestoneLine({
           e.preventDefault();
           e.stopPropagation();
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-          pendingDragModeRef.current = 'resize-end';
           setDragStartX(e.clientX);
           setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+          setupInitialDragDetection('resize-end', e.clientX, e.clientY);
         }}
       />
 
@@ -394,9 +412,9 @@ export function MilestoneLine({
           e.preventDefault();
           e.stopPropagation();
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-          pendingDragModeRef.current = 'move';
           setDragStartX(e.clientX);
           setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+          setupInitialDragDetection('move', e.clientX, e.clientY);
         }}
         onMouseUp={(e) => {
           if (!clickStartRef.current) return;
