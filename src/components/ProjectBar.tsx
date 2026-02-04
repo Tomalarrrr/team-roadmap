@@ -458,6 +458,8 @@ export function ProjectBar({
           const elapsed = Date.now() - clickStartRef.current.time;
           // If minimal movement and quick click, open edit dialog
           if (dx < 5 && dy < 5 && elapsed < 300) {
+            setDragMode(null); // Cancel any active drag before opening modal
+            setPreviewDates(null); // Clear any preview
             onEdit();
           }
           clickStartRef.current = null;
