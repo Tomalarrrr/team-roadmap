@@ -1,7 +1,9 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
-import type { Project, Milestone } from '../types';
+import type { Project, Milestone, ContextMenuItem } from '../types';
 import { MilestoneLine } from './MilestoneLine';
 import { DependencyArrow } from './DependencyArrow';
+import { ContextMenu } from './ContextMenu';
+import { useContextMenu } from '../hooks/useContextMenu';
 import { useDependencyCreation } from '../contexts/DependencyCreationContext';
 import {
   getBarDimensions,
@@ -106,10 +108,35 @@ export function ProjectBar({
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
   // Preview dates for smooth visual feedback during drag (separate from actual data)
   const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
-  const [showMenu, setShowMenu] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const menuJustOpenedRef = useRef(false);
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
+
+  // Context menu state
+  const contextMenu = useContextMenu();
+
+  // Context menu items configuration
+  const menuItems: ContextMenuItem[] = useMemo(() => [
+    {
+      id: 'edit',
+      label: 'Edit Project',
+      onClick: onEdit
+    },
+    {
+      id: 'add-milestone',
+      label: 'Add Milestone',
+      onClick: onAddMilestone
+    },
+    ...(onCopy ? [{
+      id: 'copy',
+      label: 'Copy Project',
+      onClick: onCopy
+    }] : []),
+    {
+      id: 'delete',
+      label: 'Delete',
+      onClick: onDelete,
+      variant: 'danger' as const
+    }
+  ], [onEdit, onAddMilestone, onCopy, onDelete]);
 
   // Dependency creation context
   const { state: depState, startCreation, completeCreation } = useDependencyCreation();
@@ -299,41 +326,6 @@ export function ProjectBar({
     };
   }, [dragMode, dragStartX, originalDates, dayWidth]);
 
-  // Close menu when clicking outside (with defenses against premature closure)
-  useEffect(() => {
-    if (!showMenu) return;
-
-    let timeoutId: number | null = null;
-    let graceTimeoutId: number | null = null;
-
-    const handleClose = (e: MouseEvent) => {
-      // Layer 2: Only close on left-clicks (button 0), ignore right-clicks
-      if (e.button !== 0) return;
-
-      // Layer 3: Grace period - don't close if menu was just opened
-      if (menuJustOpenedRef.current) return;
-
-      setShowMenu(false);
-    };
-
-    // Layer 1: Defer listener attachment to next event loop tick
-    // This ensures the current right-click event cycle completes before we start listening
-    timeoutId = setTimeout(() => {
-      document.addEventListener('mousedown', handleClose);
-    }, 0);
-
-    // Layer 3: Clear the "just opened" flag after grace period
-    graceTimeoutId = setTimeout(() => {
-      menuJustOpenedRef.current = false;
-    }, 100);
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (graceTimeoutId) clearTimeout(graceTimeoutId);
-      document.removeEventListener('mousedown', handleClose);
-    };
-  }, [showMenu]);
-
   // Calculate milestone stacking
   const milestoneStacks = useMemo(
     () => calculateMilestoneStacks(project.milestones || []),
@@ -420,14 +412,7 @@ export function ProjectBar({
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        // Clamp menu position to viewport bounds to prevent clipping
-        const menuWidth = 160;
-        const menuHeight = 140;
-        const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
-        const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
-        setMenuPosition({ x: Math.max(10, x), y: Math.max(10, y) });
-        menuJustOpenedRef.current = true;
-        setShowMenu(true);
+        contextMenu.open({ x: e.clientX, y: e.clientY });
       }}
       onMouseMove={(e) => {
         // Track proximity to end for showing dependency arrow
@@ -473,14 +458,8 @@ export function ProjectBar({
           const elapsed = Date.now() - clickStartRef.current.time;
           // If minimal movement and quick click, open context menu
           if (dx < 5 && dy < 5 && elapsed < 300) {
-            // Clamp menu position to viewport bounds
-            const menuWidth = 160;
-            const menuHeight = 140;
-            const x = Math.min(e.clientX, window.innerWidth - menuWidth - 10);
-            const y = Math.min(e.clientY, window.innerHeight - menuHeight - 10);
-            setMenuPosition({ x: Math.max(10, x), y: Math.max(10, y) });
-            menuJustOpenedRef.current = true;
-            setShowMenu(true);
+            e.stopPropagation();
+            contextMenu.open({ x: e.clientX, y: e.clientY });
           }
           clickStartRef.current = null;
         }}
@@ -522,19 +501,13 @@ export function ProjectBar({
       </div>
 
       {/* Context menu */}
-      {showMenu && (
-        <div
-          className={styles.contextMenu}
-          style={{ left: menuPosition.x, top: menuPosition.y }}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <button onClick={onEdit}>Edit Project</button>
-          <button onClick={onAddMilestone}>Add Milestone</button>
-          {onCopy && <button onClick={() => { onCopy(); setShowMenu(false); }}>Copy Project</button>}
-          <button className={styles.deleteBtn} onClick={onDelete}>Delete</button>
-        </div>
-      )}
+      <ContextMenu
+        isOpen={contextMenu.isOpen}
+        position={contextMenu.position}
+        items={menuItems}
+        onClose={contextMenu.close}
+        isOpeningRef={contextMenu.isOpeningRef}
+      />
     </div>
   );
 }

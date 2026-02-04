@@ -171,3 +171,19 @@ export function isMilestone(value: unknown): value is Milestone {
     Array.isArray(obj.tags)
   );
 }
+
+// Context menu types
+export interface ContextMenuItem {
+  id: string;
+  label: string;
+  icon?: React.ReactNode;
+  onClick: () => void;
+  variant?: 'default' | 'danger';
+  disabled?: boolean;
+  divider?: boolean;
+}
+
+export interface ContextMenuPosition {
+  x: number;
+  y: number;
+}

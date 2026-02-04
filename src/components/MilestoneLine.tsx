@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import type { Milestone } from '../types';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import type { Milestone, ContextMenuItem } from '../types';
 import { DependencyArrow } from './DependencyArrow';
+import { ContextMenu } from './ContextMenu';
+import { useContextMenu } from '../hooks/useContextMenu';
 import { useDependencyCreation } from '../contexts/DependencyCreationContext';
 import { getBarDimensions, isMilestonePast, formatShortDate, toISODateString } from '../utils/dateUtils';
 import { parseISO } from 'date-fns';
@@ -41,9 +43,6 @@ export function MilestoneLine({
   onDelete
 }: MilestoneLineProps) {
   const milestoneRef = useRef<HTMLDivElement>(null);
-  const [showMenu, setShowMenu] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const menuJustOpenedRef = useRef(false);
   const [dragMode, setDragMode] = useState<DragMode>(null);
   const [dragStartX, setDragStartX] = useState(0);
   const [originalDates, setOriginalDates] = useState({ start: '', end: '' });
@@ -55,6 +54,24 @@ export function MilestoneLine({
   const { state: depState, startCreation, completeCreation } = useDependencyCreation();
   const isCreatingDependency = depState.isCreating;
   const isSource = depState.source?.projectId === projectId && depState.source?.milestoneId === milestone.id;
+
+  // Context menu state
+  const contextMenu = useContextMenu();
+
+  // Context menu items configuration
+  const menuItems: ContextMenuItem[] = useMemo(() => [
+    {
+      id: 'edit',
+      label: 'Edit Milestone',
+      onClick: onEdit
+    },
+    {
+      id: 'delete',
+      label: 'Delete',
+      onClick: onDelete,
+      variant: 'danger' as const
+    }
+  ], [onEdit, onDelete]);
 
   // Click-to-edit tracking (distinguish from drag)
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -229,49 +246,6 @@ export function MilestoneLine({
     };
   }, [dragMode, dragStartX, originalDates, dayWidth]);
 
-  // Close menu when clicking outside or right-clicking elsewhere
-  // Use ref for handler to ensure we always remove the exact same function
-  const closeMenuRef = useRef<() => void>(() => {});
-  closeMenuRef.current = () => {
-    if (isMountedRef.current) {
-      setShowMenu(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!showMenu) return;
-
-    let timeoutId: number | null = null;
-    let graceTimeoutId: number | null = null;
-
-    const handleClose = (e: MouseEvent) => {
-      // Layer 2: Only close on left-clicks (button 0), ignore right-clicks
-      if (e.button !== 0) return;
-
-      // Layer 3: Grace period - don't close if menu was just opened
-      if (menuJustOpenedRef.current) return;
-
-      // Preserve existing isMountedRef check for safety
-      closeMenuRef.current();
-    };
-
-    // Layer 1: Defer listener attachment to next event loop tick
-    timeoutId = setTimeout(() => {
-      document.addEventListener('mousedown', handleClose);
-    }, 0);
-
-    // Layer 3: Clear the "just opened" flag after grace period
-    graceTimeoutId = setTimeout(() => {
-      menuJustOpenedRef.current = false;
-    }, 100);
-
-    return () => {
-      if (timeoutId) clearTimeout(timeoutId);
-      if (graceTimeoutId) clearTimeout(graceTimeoutId);
-      document.removeEventListener('mousedown', handleClose);
-    };
-  }, [showMenu]);
-
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -347,9 +321,7 @@ export function MilestoneLine({
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        setMenuPosition({ x: e.clientX, y: e.clientY });
-        menuJustOpenedRef.current = true;
-        setShowMenu(true);
+        contextMenu.open({ x: e.clientX, y: e.clientY });
       }}
     >
       {/* Resize handles */}
@@ -384,9 +356,7 @@ export function MilestoneLine({
           // If minimal movement and quick click, open context menu
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
-            setMenuPosition({ x: e.clientX, y: e.clientY });
-            menuJustOpenedRef.current = true;
-            setShowMenu(true);
+            contextMenu.open({ x: e.clientX, y: e.clientY });
           }
           clickStartRef.current = null;
         }}
@@ -399,17 +369,13 @@ export function MilestoneLine({
       </div>
 
       {/* Context menu */}
-      {showMenu && (
-        <div
-          className={styles.contextMenu}
-          style={{ left: menuPosition.x, top: menuPosition.y }}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <button onClick={onEdit}>Edit Milestone</button>
-          <button className={styles.deleteBtn} onClick={onDelete}>Delete</button>
-        </div>
-      )}
+      <ContextMenu
+        isOpen={contextMenu.isOpen}
+        position={contextMenu.position}
+        items={menuItems}
+        onClose={contextMenu.close}
+        isOpeningRef={contextMenu.isOpeningRef}
+      />
     </div>
   );
 }
