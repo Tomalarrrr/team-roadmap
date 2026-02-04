@@ -9,6 +9,8 @@
   min-width: 80px;
   /* Prevent subpixel rendering issues */
   backface-visibility: hidden;
+  /* Ensure child content respects the pill-shaped border-radius */
+  overflow: hidden;
 }
 
 .projectBar:hover {
