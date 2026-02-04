@@ -602,7 +602,7 @@ export function Timeline({
             collisionDetection={pointerWithin}
             onDragEnd={handleProjectDragEnd}
           >
-            <div ref={lanesRef} className={styles.lanes} style={{ width: totalWidth, minHeight: totalLanesHeight }}>
+            <div ref={lanesRef} className={styles.lanes} data-lanes-container style={{ width: totalWidth, minHeight: totalLanesHeight }}>
               {/* Grid lines */}
               {zoomLevel === 'year' && fySegments.map(({ fy, left, width }) => (
                 <div key={`q-${fy}`}>

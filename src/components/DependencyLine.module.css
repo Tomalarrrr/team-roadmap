@@ -51,6 +51,24 @@
   fill: var(--accent-blue);
 }
 
+/* Backdrop for click-outside dismissal */
+.confirmBackdrop {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  /* Transparent but captures clicks */
+}
+
+/* Confirmation dialog overlay - positioned absolutely within lanes container */
+.confirmDialogOverlay {
+  position: absolute;
+  z-index: 10000;
+  pointer-events: auto;
+}
+
 /* Confirmation dialog */
 .confirmDialog {
   background: var(--bg-primary);

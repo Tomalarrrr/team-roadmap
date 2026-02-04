@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Project, Milestone } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
 import styles from './DependencyLine.module.css';
@@ -195,9 +196,23 @@ export function DependencyLine({
     onRemove();
   };
 
-  const handleCancelRemove = () => {
+  const handleCancelRemove = useCallback(() => {
     setShowConfirm(false);
-  };
+  }, []);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!showConfirm) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        handleCancelRemove();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showConfirm, handleCancelRemove]);
 
   const handleMouseEnter = () => {
     setIsHovered(true);
@@ -251,26 +266,35 @@ export function DependencyLine({
         fill="var(--accent-blue)"
         className={styles.removeIndicator}
       />
-      {/* Confirmation dialog */}
-      {showConfirm && (
-        <foreignObject
-          x={line.midX - 80}
-          y={line.midY - 50}
-          width="160"
-          height="70"
-        >
-          <div className={styles.confirmDialog}>
-            <p>Remove dependency?</p>
-            <div className={styles.confirmActions}>
-              <button onClick={handleCancelRemove} className={styles.cancelBtn}>
-                Cancel
-              </button>
-              <button onClick={handleConfirmRemove} className={styles.removeBtn}>
-                Remove
-              </button>
+      {/* Confirmation dialog - rendered via portal to appear above project bars */}
+      {showConfirm && createPortal(
+        <>
+          {/* Backdrop for click-outside dismissal */}
+          <div
+            className={styles.confirmBackdrop}
+            onClick={handleCancelRemove}
+          />
+          <div
+            className={styles.confirmDialogOverlay}
+            style={{
+              left: line.midX - 80,
+              top: line.midY - 35
+            }}
+          >
+            <div className={styles.confirmDialog}>
+              <p>Remove dependency?</p>
+              <div className={styles.confirmActions}>
+                <button onClick={handleCancelRemove} className={styles.cancelBtn}>
+                  Cancel
+                </button>
+                <button onClick={handleConfirmRemove} className={styles.removeBtn}>
+                  Remove
+                </button>
+              </div>
             </div>
           </div>
-        </foreignObject>
+        </>,
+        document.querySelector('[data-lanes-container]') || document.body
       )}
     </g>
   );
