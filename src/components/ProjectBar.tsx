@@ -302,12 +302,24 @@ export function ProjectBar({
       // Use requestAnimationFrame to throttle updates to screen refresh rate
       // This prevents excessive re-renders and improves performance dramatically
       rafIdRef.current = requestAnimationFrame(() => {
+        // Safety check: ensure we have valid original dates before proceeding
+        if (!originalDates.start || !originalDates.end) {
+          return;
+        }
+
         const deltaX = e.clientX - dragStartX;
 
         // Don't start moving until we've exceeded the drag threshold
         if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
 
-        let deltaDays = Math.round(deltaX / dayWidthRef.current);
+        // Safety check: prevent division by zero
+        const currentDayWidth = dayWidthRef.current || 1;
+        let deltaDays = Math.round(deltaX / currentDayWidth);
+
+        // Safety check: ensure deltaDays is a valid number
+        if (!Number.isFinite(deltaDays)) {
+          return;
+        }
 
         // Limit extreme deltas to prevent performance issues with very large drags
         // Max ~1 year extension in either direction
@@ -316,6 +328,11 @@ export function ProjectBar({
 
         const originalStart = parseISO(originalDates.start);
         const originalEnd = parseISO(originalDates.end);
+
+        // Safety check: ensure parsed dates are valid
+        if (isNaN(originalStart.getTime()) || isNaN(originalEnd.getTime())) {
+          return;
+        }
 
         let newStart = originalDates.start;
         let newEnd = originalDates.end;
