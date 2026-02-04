@@ -445,14 +445,9 @@ export function ProjectBar({
         onStartDependency={handleStartDependency}
       />
 
-      {/* Draggable area - single click opens edit, drag moves dates */}
+      {/* Drag area - single click opens edit */}
       <div
         className={styles.dragArea}
-        style={{
-          height: BASE_PROJECT_HEIGHT - 12,
-          bottom: 'auto',
-          zIndex: 1
-        }}
         onMouseDown={(e) => {
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           handleMouseDown(e, 'move');
@@ -463,8 +458,7 @@ export function ProjectBar({
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
           // If minimal movement and quick click, open edit dialog and select
-          // Increased threshold to 10px to account for slight mouse movement
-          if (dx < 10 && dy < 10 && elapsed < 500) {
+          if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
@@ -478,57 +472,21 @@ export function ProjectBar({
         }}
       >
         <div className={styles.projectContent}>
-          <span
-            className={styles.projectTitle}
-            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setDragMode(null);
-              onSelect?.();
-              onEdit();
-            }}
-          >
+          <span className={styles.projectTitle}>
             {project.title}
           </span>
           <span className={styles.projectSeparator}>•</span>
-          <span
-            className={styles.projectDates}
-            style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-            onClick={(e) => {
-              e.stopPropagation();
-              setDragMode(null);
-              onSelect?.();
-              onEdit();
-            }}
-          >
+          <span className={styles.projectDates}>
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
         </div>
         {width > 400 && (
           <div className={styles.projectContentEnd}>
-            <span
-              className={styles.projectDates}
-              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setDragMode(null);
-                onSelect?.();
-                onEdit();
-              }}
-            >
+            <span className={styles.projectDates}>
               {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
             </span>
             <span className={styles.projectSeparator}>•</span>
-            <span
-              className={styles.projectTitle}
-              style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-              onClick={(e) => {
-                e.stopPropagation();
-                setDragMode(null);
-                onSelect?.();
-                onEdit();
-              }}
-            >
+            <span className={styles.projectTitle}>
               {project.title}
             </span>
           </div>
