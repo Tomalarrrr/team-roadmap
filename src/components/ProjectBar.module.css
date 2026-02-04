@@ -7,6 +7,8 @@
   box-shadow: var(--shadow-sm);
   z-index: 2;
   min-width: 80px;
+  /* Prevent subpixel rendering issues */
+  backface-visibility: hidden;
 }
 
 .projectBar:hover {
@@ -18,18 +20,23 @@
 
 .projectBar.dragging {
   cursor: grabbing;
-  /* transform removed - let DnD kit handle it to prevent conflicts */
+  /* Force GPU layer and prevent transform conflicts */
+  transform: translateZ(0) !important;
+  will-change: left, width;
   box-shadow: var(--shadow-lg);
   z-index: 100;  /* Increased from 10 to be above everything */
   opacity: 0.8;  /* Match DnD kit inline opacity */
   /* Disable ALL transitions during drag to prevent flickering */
   transition: none !important;
+  /* Prevent filter effects during drag */
+  filter: none !important;
 }
 
 /* Disable hover transforms during drag to prevent conflicts */
 .projectBar.dragging:hover {
-  transform: none !important;
+  transform: translateZ(0) !important;
   filter: none !important;
+  box-shadow: var(--shadow-lg) !important;
 }
 
 /* Disable pointer events on inner content during drag to prevent interference */
