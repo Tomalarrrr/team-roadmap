@@ -70,6 +70,27 @@ const MILESTONE_HEIGHT = 20;
 const MILESTONE_GAP = 4;
 const PROJECT_CONTENT_HEIGHT = 28;
 
+// Waypoints are stored in a zoom-independent format:
+// - x is stored as "days from timeline start" (not pixels)
+// - y is stored as absolute pixels (vertical position doesn't change with zoom)
+// This ensures waypoints maintain their relative position when zooming
+
+// Convert stored waypoints (days) to pixel coordinates for rendering
+function waypointsToPixels(waypoints: Waypoint[], dayWidth: number): Waypoint[] {
+  return waypoints.map(wp => ({
+    x: wp.x * dayWidth,
+    y: wp.y
+  }));
+}
+
+// Convert pixel waypoints back to storage format (days)
+function pixelsToDays(waypoints: Waypoint[], dayWidth: number): Waypoint[] {
+  return waypoints.map(wp => ({
+    x: wp.x / dayWidth,
+    y: wp.y
+  }));
+}
+
 export function DependencyLine({
   fromProject,
   toProject,
@@ -176,7 +197,9 @@ export function DependencyLine({
     const adjustedToY = toY + yStagger;
 
     // Use custom waypoints if available (preview takes precedence during drag)
-    const activeWaypoints = previewWaypoints || waypoints;
+    // Convert stored waypoints from days to pixels for rendering
+    const storedWaypointsAsPixels = waypoints ? waypointsToPixels(waypoints, dayWidth) : undefined;
+    const activeWaypoints = previewWaypoints || storedWaypointsAsPixels;
 
     // Build path with rounded corners
     let path: string;
@@ -417,9 +440,9 @@ export function DependencyLine({
     e.stopPropagation();
     e.preventDefault();
     setDraggingWaypointIndex(index);
-    // Initialize preview with current waypoints
-    setPreviewWaypoints(waypoints || line.controlPoints);
-  }, [waypoints, line.controlPoints]);
+    // Initialize preview with current waypoints (in pixel coordinates for dragging)
+    setPreviewWaypoints(line.controlPoints);
+  }, [line.controlPoints]);
 
   // Handle waypoint drag
   useEffect(() => {
@@ -444,7 +467,8 @@ export function DependencyLine({
 
     const handleMouseUp = () => {
       if (previewWaypoints && onUpdateWaypoints) {
-        onUpdateWaypoints(previewWaypoints);
+        // Convert pixel coordinates to days for storage
+        onUpdateWaypoints(pixelsToDays(previewWaypoints, dayWidth));
       }
       setDraggingWaypointIndex(null);
       setPreviewWaypoints(null);
@@ -457,7 +481,7 @@ export function DependencyLine({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingWaypointIndex, previewWaypoints, onUpdateWaypoints]);
+  }, [draggingWaypointIndex, previewWaypoints, onUpdateWaypoints, dayWidth]);
 
   // Handle click outside to deselect
   useEffect(() => {
@@ -498,16 +522,17 @@ export function DependencyLine({
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    const currentWaypoints = waypoints || line.controlPoints;
+    // Use pixel coordinates for display (line.controlPoints are already in pixels)
+    const currentWaypointsPixels = line.controlPoints;
 
     // Find the best position to insert the new waypoint
     // Insert it between the two existing points that would create the smallest detour
-    let bestIndex = currentWaypoints.length;
+    let bestIndex = currentWaypointsPixels.length;
     let bestDist = Infinity;
 
     const allPoints = [
       { x: line.fromX, y: line.fromY },
-      ...currentWaypoints,
+      ...currentWaypointsPixels,
       { x: line.toX, y: line.toY }
     ];
 
@@ -533,27 +558,30 @@ export function DependencyLine({
       }
     }
 
-    const newWaypoints = [...currentWaypoints];
-    newWaypoints.splice(bestIndex, 0, { x, y });
+    const newWaypointsPixels = [...currentWaypointsPixels];
+    newWaypointsPixels.splice(bestIndex, 0, { x, y });
 
     if (onUpdateWaypoints) {
-      onUpdateWaypoints(newWaypoints);
+      // Convert pixel coordinates to days for storage
+      onUpdateWaypoints(pixelsToDays(newWaypointsPixels, dayWidth));
     }
-  }, [isSelected, waypoints, line.controlPoints, line.fromX, line.fromY, line.toX, line.toY, onUpdateWaypoints]);
+  }, [isSelected, line.controlPoints, line.fromX, line.fromY, line.toX, line.toY, onUpdateWaypoints, dayWidth]);
 
   // Handle removing a waypoint (right-click)
   const handleWaypointContextMenu = useCallback((index: number, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const currentWaypoints = waypoints || line.controlPoints;
-    if (currentWaypoints.length <= 1) return; // Keep at least one waypoint
+    // Use pixel coordinates (line.controlPoints are in pixels)
+    const currentWaypointsPixels = line.controlPoints;
+    if (currentWaypointsPixels.length <= 1) return; // Keep at least one waypoint
 
-    const newWaypoints = currentWaypoints.filter((_, i) => i !== index);
+    const newWaypointsPixels = currentWaypointsPixels.filter((_, i) => i !== index);
     if (onUpdateWaypoints) {
-      onUpdateWaypoints(newWaypoints);
+      // Convert pixel coordinates to days for storage
+      onUpdateWaypoints(pixelsToDays(newWaypointsPixels, dayWidth));
     }
-  }, [waypoints, line.controlPoints, onUpdateWaypoints]);
+  }, [line.controlPoints, onUpdateWaypoints, dayWidth]);
 
   // Determine if this line should be dimmed (another line is hovered, but not this one)
   const isDimmed = isAnyHovered && !isHovered;
