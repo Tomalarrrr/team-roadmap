@@ -347,23 +347,16 @@ export function MilestoneLine({
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
-          console.log('🟢 MILESTONE mouseDown', { target: e.target });
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           handleMouseDown(e, 'move');
         }}
         onMouseUp={(e) => {
-          console.log('🟢 MILESTONE mouseUp', { target: e.target });
-          if (!clickStartRef.current) {
-            console.log('🔴 No clickStartRef');
-            return;
-          }
+          if (!clickStartRef.current) return;
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          console.log('🟢 MILESTONE click check', { dx, dy, elapsed, pass: dx < 5 && dy < 5 && elapsed < 300 });
           // If minimal movement and quick click, open edit dialog and select
           if (dx < 5 && dy < 5 && elapsed < 300) {
-            console.log('✅ MILESTONE opening edit dialog');
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
@@ -372,7 +365,6 @@ export function MilestoneLine({
           clickStartRef.current = null;
         }}
         onDoubleClick={(e) => {
-          console.log('🟢 MILESTONE doubleClick');
           e.stopPropagation();
           onEdit();
         }}

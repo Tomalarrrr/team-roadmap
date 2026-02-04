@@ -235,7 +235,6 @@ export function ProjectBar({
 
       // Only activate drag mode if movement exceeds threshold
       if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
-        console.log(`🟢 Movement threshold exceeded (dx=${dx} dy=${dy}), activating dragMode`);
         const mode = pendingDragModeRef.current || 'move';
         setDragMode(mode);
         clickStartRef.current = null; // Clear click tracking since we're dragging
@@ -243,7 +242,6 @@ export function ProjectBar({
     };
 
     const handleInitialMouseUp = () => {
-      console.log('🟢 Initial mouseUp - cleaning up pending drag listeners');
       // Clean up without activating drag mode (this was a click)
       pendingDragModeRef.current = null;
     };
@@ -259,10 +257,8 @@ export function ProjectBar({
 
   useEffect(() => {
     if (!dragMode) {
-      console.log('🟡 useEffect: dragMode is null, not adding global listeners');
       return;
     }
-    console.log(`🟡 useEffect: dragMode is "${dragMode}", ADDING GLOBAL LISTENERS NOW`);
 
     const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
 
@@ -329,7 +325,6 @@ export function ProjectBar({
     };
 
     const handleMouseUp = async () => {
-      console.log('🔴 GLOBAL handleMouseUp fired');
       onEdgeDragRef.current?.(0, false); // Stop edge scrolling
 
       // Commit the final position to Firebase only on release
@@ -491,38 +486,30 @@ export function ProjectBar({
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
-          console.log('🔵 PROJECT BAR mouseDown - setting up pending drag detection');
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           pendingDragModeRef.current = 'move';
           setDragStartX(e.clientX);
           setOriginalDates({ start: project.startDate, end: project.endDate });
         }}
         onMouseUp={(e) => {
-          console.log('🔵 PROJECT BAR mouseUp');
           if (!clickStartRef.current) {
-            console.log('🔴 PROJECT BAR: No clickStartRef - returning');
             return;
           }
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
           const passes = dx < 5 && dy < 5 && elapsed < 300;
-          console.log(`🔵 PROJECT BAR: dx=${dx} dy=${dy} elapsed=${elapsed}ms passes=${passes}`);
           // If minimal movement and quick click, open edit dialog and select
           if (passes) {
-            console.log('✅ PROJECT BAR: CALLING onEdit() NOW');
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
             onEdit();
-            console.log('✅ PROJECT BAR: onEdit() completed');
           } else {
-            console.log(`❌ PROJECT BAR: FAILED - need dx<5 dy<5 elapsed<300ms`);
           }
           clickStartRef.current = null;
         }}
         onDoubleClick={(e) => {
-          console.log('🔵 PROJECT BAR doubleClick - calling onEdit()');
           e.stopPropagation();
           onEdit();
         }}
