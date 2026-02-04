@@ -219,6 +219,43 @@ export function ProjectBar({
   // Track the latest preview for committing on mouseUp
   const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
   const rafIdRef = useRef<number | null>(null);
+  const pendingDragModeRef = useRef<DragMode>(null);
+
+  // Initial drag detection - only activates dragMode after movement threshold
+  useEffect(() => {
+    if (dragMode !== null || !clickStartRef.current) return;
+
+    const DRAG_THRESHOLD = 8;
+
+    const handleInitialMouseMove = (e: MouseEvent) => {
+      if (!clickStartRef.current) return;
+
+      const dx = Math.abs(e.clientX - clickStartRef.current.x);
+      const dy = Math.abs(e.clientY - clickStartRef.current.y);
+
+      // Only activate drag mode if movement exceeds threshold
+      if (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD) {
+        console.log(`🟢 Movement threshold exceeded (dx=${dx} dy=${dy}), activating dragMode`);
+        const mode = pendingDragModeRef.current || 'move';
+        setDragMode(mode);
+        clickStartRef.current = null; // Clear click tracking since we're dragging
+      }
+    };
+
+    const handleInitialMouseUp = () => {
+      console.log('🟢 Initial mouseUp - cleaning up pending drag listeners');
+      // Clean up without activating drag mode (this was a click)
+      pendingDragModeRef.current = null;
+    };
+
+    document.addEventListener('mousemove', handleInitialMouseMove);
+    document.addEventListener('mouseup', handleInitialMouseUp);
+
+    return () => {
+      document.removeEventListener('mousemove', handleInitialMouseMove);
+      document.removeEventListener('mouseup', handleInitialMouseUp);
+    };
+  }, [dragMode]);
 
   useEffect(() => {
     if (!dragMode) {
@@ -454,9 +491,11 @@ export function ProjectBar({
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
-          console.log('🔵 PROJECT BAR mouseDown');
+          console.log('🔵 PROJECT BAR mouseDown - setting up pending drag detection');
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-          handleMouseDown(e, 'move');
+          pendingDragModeRef.current = 'move';
+          setDragStartX(e.clientX);
+          setOriginalDates({ start: project.startDate, end: project.endDate });
         }}
         onMouseUp={(e) => {
           console.log('🔵 PROJECT BAR mouseUp');
