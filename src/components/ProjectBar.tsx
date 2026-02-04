@@ -307,7 +307,12 @@ export function ProjectBar({
         // Don't start moving until we've exceeded the drag threshold
         if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
 
-        const deltaDays = Math.round(deltaX / dayWidthRef.current);
+        let deltaDays = Math.round(deltaX / dayWidthRef.current);
+
+        // Limit extreme deltas to prevent performance issues with very large drags
+        // Max ~1 year extension in either direction
+        const MAX_DELTA_DAYS = 365;
+        deltaDays = Math.max(-MAX_DELTA_DAYS, Math.min(MAX_DELTA_DAYS, deltaDays));
 
         const originalStart = parseISO(originalDates.start);
         const originalEnd = parseISO(originalDates.end);

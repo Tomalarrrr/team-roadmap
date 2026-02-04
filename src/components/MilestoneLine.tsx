@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import type { Milestone, ContextMenuItem } from '../types';
 import { DependencyArrow } from './DependencyArrow';
 import { ContextMenu } from './ContextMenu';
@@ -9,7 +9,7 @@ import { parseISO } from 'date-fns';
 import styles from './MilestoneLine.module.css';
 
 // Debug flag - set to true to diagnose flashing issues
-const DEBUG_DRAG = true;
+const DEBUG_DRAG = false; // Turned off - excessive logging was causing performance issues
 
 interface MilestoneLineProps {
   milestone: Milestone;
@@ -33,7 +33,38 @@ type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 const MILESTONE_HEIGHT = 20;
 const MILESTONE_GAP = 4;
 
-export function MilestoneLine({
+// Custom comparison for React.memo to prevent unnecessary re-renders
+function areMilestonePropsEqual(prevProps: MilestoneLineProps, nextProps: MilestoneLineProps): boolean {
+  // Compare milestone by key fields (not deep equality)
+  if (prevProps.milestone.id !== nextProps.milestone.id ||
+      prevProps.milestone.startDate !== nextProps.milestone.startDate ||
+      prevProps.milestone.endDate !== nextProps.milestone.endDate ||
+      prevProps.milestone.title !== nextProps.milestone.title ||
+      prevProps.milestone.statusColor !== nextProps.milestone.statusColor) {
+    return false;
+  }
+
+  // Compare primitive props
+  if (prevProps.projectId !== nextProps.projectId ||
+      prevProps.dayWidth !== nextProps.dayWidth ||
+      prevProps.projectLeft !== nextProps.projectLeft ||
+      prevProps.projectWidth !== nextProps.projectWidth ||
+      prevProps.stackIndex !== nextProps.stackIndex ||
+      prevProps.laneTop !== nextProps.laneTop) {
+    return false;
+  }
+
+  // Compare Date by timestamp (Date objects are recreated each render)
+  if (prevProps.timelineStart.getTime() !== nextProps.timelineStart.getTime()) {
+    return false;
+  }
+
+  // Callback props (onUpdate, onEdit, etc.) are ignored - they don't affect rendering
+  // and are stored in refs anyway
+  return true;
+}
+
+const MilestoneLineComponent = memo(function MilestoneLine({
   milestone,
   projectId,
   timelineStart,
@@ -243,7 +274,12 @@ export function MilestoneLine({
         // Don't start moving until we've exceeded the drag threshold
         if (Math.abs(deltaX) < DRAG_THRESHOLD) return;
 
-        const deltaDays = Math.round(deltaX / dayWidthRef.current);
+        let deltaDays = Math.round(deltaX / dayWidthRef.current);
+
+        // Limit extreme deltas to prevent performance issues with very large drags
+        // Max ~1 year extension in either direction
+        const MAX_DELTA_DAYS = 365;
+        deltaDays = Math.max(-MAX_DELTA_DAYS, Math.min(MAX_DELTA_DAYS, deltaDays));
 
         const originalStart = parseISO(originalDates.start);
         const originalEnd = parseISO(originalDates.end);
@@ -507,4 +543,7 @@ export function MilestoneLine({
       />
     </div>
   );
-}
+}, areMilestonePropsEqual);
+
+// Export the memoized component
+export { MilestoneLineComponent as MilestoneLine };
