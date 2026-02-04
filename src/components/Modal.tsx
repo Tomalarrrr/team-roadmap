@@ -81,12 +81,12 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
     };
   }, [isOpen, onClose, handleTabKey]);
 
-  if (!isOpen) return null;
-
   // Block all mouse events from reaching background (prevents drag operations)
   const handleMouseEvent = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
   }, []);
+
+  if (!isOpen) return null;
 
   return (
     <div
