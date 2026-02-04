@@ -155,6 +155,7 @@ export function MilestoneLine({
   const handleResizeMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     e.preventDefault();
     e.stopPropagation();
+    if (DEBUG_DRAG) console.log('[MilestoneLine] RESIZE mouseDown:', mode);
     setDragMode(mode);
     setDragStartX(e.clientX);
     setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
@@ -388,9 +389,27 @@ export function MilestoneLine({
 
   const isTargetable = isCreatingDependency && !isSource;
 
-  if (displayWidth <= 0 || displayLeft >= projectWidth) {
-    return null; // Milestone outside project bounds
+  // CRITICAL: Don't unmount during drag! This was causing the flashing bug.
+  // When resizing, the milestone can extend beyond project bounds (based on preview),
+  // but projectWidth is based on actual data. If we unmount, we lose all drag state.
+  const isOutOfBounds = displayWidth <= 0 || displayLeft >= projectWidth;
+  if (!dragMode && isOutOfBounds) {
+    return null; // Milestone outside project bounds (only when not dragging)
   }
+
+  // Log when we would have unmounted but didn't because of drag
+  if (DEBUG_DRAG && dragMode && isOutOfBounds) {
+    console.log('[MilestoneLine] PREVENTED UNMOUNT during drag:', {
+      displayWidth,
+      displayLeft,
+      projectWidth,
+      dragMode
+    });
+  }
+
+  // During drag, clamp to reasonable values to keep visible
+  const safeDisplayWidth = dragMode ? Math.max(displayWidth, 24) : displayWidth;
+  const safeDisplayLeft = dragMode ? Math.max(0, Math.min(displayLeft, projectWidth - 24)) : displayLeft;
 
   return (
     <div
@@ -398,9 +417,9 @@ export function MilestoneLine({
       data-dependency-target
       className={`${styles.milestoneLine} ${dragMode ? styles.dragging : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''}`}
       style={{
-        left: displayLeft,
+        left: safeDisplayLeft,
         top: stackIndex * (MILESTONE_HEIGHT + MILESTONE_GAP),
-        width: Math.max(displayWidth, 24),
+        width: Math.max(safeDisplayWidth, 24),
         backgroundColor: displayColor || '#10b981'
       }}
       role="button"
