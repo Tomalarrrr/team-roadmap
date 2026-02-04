@@ -124,6 +124,15 @@ export function MilestoneLine({
   const isPast = isMilestonePast(milestone.endDate);
   const displayColor = isPast ? AUTO_BLUE : milestone.statusColor;
 
+  // Immediate drag handler for resize handles (no click detection needed)
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragMode(mode);
+    setDragStartX(e.clientX);
+    setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
+  }, [milestone.startDate, milestone.endDate]);
+
   // Track the latest preview for committing on mouseUp
   const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
   const rafIdRef = useRef<number | null>(null);
@@ -374,28 +383,14 @@ export function MilestoneLine({
         contextMenu.open({ x: e.clientX, y: e.clientY });
       }}
     >
-      {/* Resize handles */}
+      {/* Resize handles - use immediate drag mode (no click detection needed) */}
       <div
         className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-          setDragStartX(e.clientX);
-          setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
-          setupInitialDragDetection('resize-start', e.clientX, e.clientY);
-        }}
+        onMouseDown={(e) => handleResizeMouseDown(e, 'resize-start')}
       />
       <div
         className={`${styles.resizeHandle} ${styles.resizeHandleRight}`}
-        onMouseDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
-          setDragStartX(e.clientX);
-          setOriginalDates({ start: milestone.startDate, end: milestone.endDate });
-          setupInitialDragDetection('resize-end', e.clientX, e.clientY);
-        }}
+        onMouseDown={(e) => handleResizeMouseDown(e, 'resize-end')}
       />
 
       {/* Dependency arrow button */}
