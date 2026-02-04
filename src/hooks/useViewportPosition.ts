@@ -7,7 +7,7 @@ interface ViewportPositionOptions {
 
 export function useViewportPosition(
   options: ViewportPositionOptions,
-  menuRef: React.RefObject<HTMLDivElement>
+  menuRef: React.RefObject<HTMLDivElement | null>
 ) {
   const { position, isOpen } = options;
   const [computedPosition, setComputedPosition] = useState<{ x: number; y: number } | null>(null);
