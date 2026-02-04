@@ -169,7 +169,6 @@ export function DependencyLine({
 
     // Orthogonal elbow routing with rounded corners
     // Pattern: horizontal -> vertical -> horizontal
-    const horizontalGap = 20; // Minimum horizontal extension from source/target
     const cornerRadius = 8; // Radius for rounded corners
 
     // Calculate midpoint X for the vertical segment
@@ -177,9 +176,16 @@ export function DependencyLine({
 
     // Determine the vertical segment X position
     const isForward = toX > fromX;
-    const verticalX = isForward
-      ? Math.max(fromX + horizontalGap, midX)
-      : fromX + horizontalGap; // When backward, extend right first
+    let verticalX: number;
+
+    if (isForward) {
+      // Forward: place vertical segment at midpoint or slightly past source
+      verticalX = Math.max(fromX + 20, midX);
+    } else {
+      // Backward: place vertical segment just past source edge (tighter)
+      // Use smaller gap so it doesn't jut out too far
+      verticalX = fromX + 12;
+    }
 
     const deltaY = adjustedToY - adjustedFromY;
     const absY = Math.abs(deltaY);
@@ -210,7 +216,8 @@ export function DependencyLine({
       ].join(' ');
     } else {
       // Backward elbow: right -> down/up -> left (to reach target behind source)
-      const r = Math.max(2, Math.min(cornerRadius, absY / 2, horizontalGap / 2));
+      const backwardGap = 12; // Tighter gap for backward connections
+      const r = Math.max(2, Math.min(cornerRadius, absY / 2, backwardGap / 2));
       const corner1X = verticalX - r;
       const corner2Y = adjustedToY - (ySign * r);
 
