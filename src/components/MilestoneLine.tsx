@@ -353,10 +353,10 @@ export function MilestoneLine({
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          // If minimal movement and quick click, open context menu
+          // If minimal movement and quick click, open edit dialog
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
-            contextMenu.open({ x: e.clientX, y: e.clientY });
+            onEdit();
           }
           clickStartRef.current = null;
         }}
