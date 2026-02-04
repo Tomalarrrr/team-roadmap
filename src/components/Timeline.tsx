@@ -98,6 +98,8 @@ interface TimelineProps {
   onEditTeamMember: (member: TeamMember) => void;
   onReorderTeamMembers: (fromIndex: number, toIndex: number) => void;
   onCopyProject?: (project: Project) => void;
+  onSelectProject?: (project: Project) => void;
+  onSelectMilestone?: (projectId: string, milestoneId: string, milestone: import('../types').Milestone) => void;
   onAddDependency?: (
     fromProjectId: string,
     toProjectId: string,
@@ -136,6 +138,8 @@ export function Timeline({
   onEditTeamMember,
   onReorderTeamMembers,
   onCopyProject,
+  onSelectProject,
+  onSelectMilestone,
   onAddDependency,
   onRemoveDependency
 }: TimelineProps) {
@@ -657,6 +661,11 @@ export function Timeline({
                         onUpdateMilestone={(mid, updates) => onUpdateMilestone(project.id, mid, updates)}
                         onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
                         onCopy={onCopyProject ? () => onCopyProject(project) : undefined}
+                        onSelect={onSelectProject ? () => onSelectProject(project) : undefined}
+                        onSelectMilestone={onSelectMilestone ? (mid) => {
+                          const milestone = project.milestones?.find(m => m.id === mid);
+                          if (milestone) onSelectMilestone(project.id, mid, milestone);
+                        } : undefined}
                         onEdgeDrag={handleEdgeDrag}
                       />
                     ))}

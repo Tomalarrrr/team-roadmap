@@ -75,6 +75,8 @@ interface ProjectBarProps {
   onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => Promise<void>;
   onDeleteMilestone: (milestoneId: string) => void;
   onCopy?: () => void;
+  onSelect?: () => void;
+  onSelectMilestone?: (milestoneId: string) => void;
   onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
 }
 
@@ -100,6 +102,8 @@ export function ProjectBar({
   onUpdateMilestone,
   onDeleteMilestone,
   onCopy,
+  onSelect,
+  onSelectMilestone,
   onEdgeDrag
 }: ProjectBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
@@ -454,9 +458,10 @@ export function ProjectBar({
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          // If minimal movement and quick click, open edit dialog
+          // If minimal movement and quick click, open edit dialog and select
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
+            onSelect?.();
             onEdit();
           }
           clickStartRef.current = null;
@@ -494,6 +499,7 @@ export function ProjectBar({
             onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
             onEdit={() => onEditMilestone(milestone.id)}
             onDelete={() => onDeleteMilestone(milestone.id)}
+            onSelect={onSelectMilestone ? () => onSelectMilestone(milestone.id) : undefined}
           />
         ))}
       </div>

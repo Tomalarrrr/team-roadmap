@@ -20,6 +20,7 @@ interface MilestoneLineProps {
   onUpdate: (updates: Partial<Milestone>) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
+  onSelect?: () => void;
 }
 
 const AUTO_BLUE = '#0070c0'; // Blue for completed/past milestones
@@ -40,7 +41,8 @@ export function MilestoneLine({
   laneTop = 0,
   onUpdate,
   onEdit,
-  onDelete
+  onDelete,
+  onSelect
 }: MilestoneLineProps) {
   const milestoneRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -353,9 +355,10 @@ export function MilestoneLine({
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          // If minimal movement and quick click, open edit dialog
+          // If minimal movement and quick click, open edit dialog and select
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
+            onSelect?.();
             onEdit();
           }
           clickStartRef.current = null;

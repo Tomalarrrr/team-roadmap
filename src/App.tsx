@@ -105,7 +105,9 @@ function App() {
   const {
     copyProject,
     paste,
-    hasContent: hasClipboard
+    hasContent: hasClipboard,
+    setSelectedProject,
+    setSelectedMilestone
   } = useClipboard({
     onPasteProject: handlePasteProject,
     onPasteMilestone: handlePasteMilestone,
@@ -544,6 +546,8 @@ function App() {
           onEditTeamMember={(member) => setModal({ type: 'edit-member', member })}
           onReorderTeamMembers={reorderTeamMembers}
           onCopyProject={copyProject}
+          onSelectProject={setSelectedProject}
+          onSelectMilestone={(_, __, milestone) => setSelectedMilestone(milestone)}
           onAddDependency={handleAddDependency}
           onRemoveDependency={handleRemoveDependency}
         />

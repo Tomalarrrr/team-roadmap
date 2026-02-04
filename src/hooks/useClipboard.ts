@@ -12,6 +12,9 @@ interface UseClipboardOptions {
 export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: UseClipboardOptions) {
   const [clipboard, setClipboard] = useState<ClipboardData | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  const [selectedMilestone, setSelectedMilestone] = useState<Milestone | null>(null);
 
   // Use callback if provided, otherwise fall back to DOM-based toast
   const toast = useCallback((message: string) => {
@@ -122,6 +125,18 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const modifier = isMac ? e.metaKey : e.ctrlKey;
 
+      // Copy (Ctrl+C / Cmd+C)
+      if (modifier && e.key === 'c') {
+        if (selectedProject) {
+          e.preventDefault();
+          copyProject(selectedProject);
+        } else if (selectedMilestone) {
+          e.preventDefault();
+          copyMilestone(selectedMilestone);
+        }
+      }
+
+      // Paste (Ctrl+V / Cmd+V)
       if (modifier && e.key === 'v' && clipboard) {
         e.preventDefault();
         paste();
@@ -130,7 +145,7 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [clipboard, paste]);
+  }, [clipboard, paste, selectedProject, selectedMilestone, copyProject, copyMilestone]);
 
   // Check if clipboard has content
   const hasContent = clipboard !== null;
@@ -143,7 +158,11 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
     hasContent,
     clipboardType,
     setSelectedProjectId,
-    selectedProjectId
+    selectedProjectId,
+    setSelectedMilestoneId,
+    selectedMilestoneId,
+    setSelectedProject,
+    setSelectedMilestone
   };
 }
 
