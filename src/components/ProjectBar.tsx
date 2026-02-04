@@ -449,32 +449,36 @@ export function ProjectBar({
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
-          console.log('🔵 PROJECT BAR mouseDown', { target: e.target });
+          console.log('🔵 PROJECT BAR mouseDown');
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           handleMouseDown(e, 'move');
         }}
         onMouseUp={(e) => {
-          console.log('🔵 PROJECT BAR mouseUp', { target: e.target });
+          console.log('🔵 PROJECT BAR mouseUp');
           if (!clickStartRef.current) {
-            console.log('🔴 No clickStartRef');
+            console.log('🔴 PROJECT BAR: No clickStartRef - returning');
             return;
           }
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          console.log('🔵 PROJECT BAR click check', { dx, dy, elapsed, pass: dx < 5 && dy < 5 && elapsed < 300 });
+          const passes = dx < 5 && dy < 5 && elapsed < 300;
+          console.log(`🔵 PROJECT BAR: dx=${dx} dy=${dy} elapsed=${elapsed}ms passes=${passes}`);
           // If minimal movement and quick click, open edit dialog and select
-          if (dx < 5 && dy < 5 && elapsed < 300) {
-            console.log('✅ PROJECT BAR opening edit dialog');
+          if (passes) {
+            console.log('✅ PROJECT BAR: CALLING onEdit() NOW');
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
             onEdit();
+            console.log('✅ PROJECT BAR: onEdit() completed');
+          } else {
+            console.log(`❌ PROJECT BAR: FAILED - need dx<5 dy<5 elapsed<300ms`);
           }
           clickStartRef.current = null;
         }}
         onDoubleClick={(e) => {
-          console.log('🔵 PROJECT BAR doubleClick');
+          console.log('🔵 PROJECT BAR doubleClick - calling onEdit()');
           e.stopPropagation();
           onEdit();
         }}
