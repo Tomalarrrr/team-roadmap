@@ -302,6 +302,8 @@ export function Timeline({
     if (displayMode === 'year') return [];
     const markers: { label: string; left: number; width: number }[] = [];
     let current = startOfMonth(timelineStart);
+    // Use shorter date format when zoomed out (month view) to prevent squashing
+    const dateFormat = displayMode === 'week' ? 'MMM yyyy' : "MMM ''yy";
     while (current < timelineEnd) {
       const left = dateFnsDiff(current, timelineStart) * dayWidth;
       // Calculate days in this month for width
@@ -309,7 +311,7 @@ export function Timeline({
       const daysInMonth = dateFnsDiff(nextMonth, current);
       const width = daysInMonth * dayWidth;
       if (left >= 0 && left < totalWidth) {
-        markers.push({ label: format(current, 'MMM yyyy'), left, width });
+        markers.push({ label: format(current, dateFormat), left, width });
       }
       current = nextMonth;
     }
