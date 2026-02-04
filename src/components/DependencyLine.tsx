@@ -167,68 +167,82 @@ export function DependencyLine({
     const adjustedFromY = fromY + yStagger;
     const adjustedToY = toY + yStagger;
 
-    // Orthogonal elbow routing with rounded corners
-    // Pattern: horizontal -> vertical -> horizontal
-    const cornerRadius = 8; // Radius for rounded corners
-
-    // Calculate midpoint X for the vertical segment
-    const midX = (fromX + toX) / 2;
-
-    // Determine the vertical segment X position
-    const isForward = toX > fromX;
-    let verticalX: number;
-
-    if (isForward) {
-      // Forward: place vertical segment at midpoint or slightly past source
-      verticalX = Math.max(fromX + 20, midX);
-    } else {
-      // Backward: place vertical segment just past source edge (tighter)
-      // Use smaller gap so it doesn't jut out too far
-      verticalX = fromX + 12;
-    }
+    // Smart orthogonal routing - automatically determines best path
+    const cornerRadius = 8;
+    const minGap = 16; // Minimum gap for routing
 
     const deltaY = adjustedToY - adjustedFromY;
     const absY = Math.abs(deltaY);
     const ySign = deltaY >= 0 ? 1 : -1;
+    const isForward = toX > fromX;
+    const horizontalDistance = Math.abs(toX - fromX);
 
     // Build path with rounded corners
     let path: string;
+    let pathMidX: number; // For hover indicator positioning
 
-    // Edge case: minimal or no vertical difference - use simple direct line
-    if (absY < 2) {
+    // Edge case: elements very close or same level - simple line
+    if (absY < 2 && horizontalDistance < minGap * 2) {
       path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
-    } else if (isForward && absY < cornerRadius * 2) {
-      // Forward with small Y diff - simple diagonal
-      path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
+      pathMidX = (fromX + toX) / 2;
     } else if (isForward) {
-      // Forward elbow: right -> down/up -> right
-      const r = Math.max(2, Math.min(cornerRadius, absY / 2, Math.abs(verticalX - fromX) / 2, Math.abs(toX - verticalX) / 2));
-      const corner1X = verticalX - r;
-      const corner2Y = adjustedToY - (ySign * r);
+      // FORWARD: Target is to the right of source
+      // Route: exit right → drop/rise → continue right to target
+      // Always enter target from its left side (natural flow)
+      const midX = Math.max(fromX + minGap, (fromX + toX) / 2);
+      const r = Math.max(2, Math.min(cornerRadius, absY / 2, (midX - fromX) / 2, (toX - midX) / 2));
 
-      path = [
-        `M ${fromX} ${adjustedFromY}`,
-        `H ${corner1X}`,
-        `Q ${verticalX} ${adjustedFromY} ${verticalX} ${adjustedFromY + (ySign * r)}`,
-        `V ${corner2Y}`,
-        `Q ${verticalX} ${adjustedToY} ${verticalX + r} ${adjustedToY}`,
-        `H ${toX}`
-      ].join(' ');
+      if (absY < r * 2) {
+        // Small vertical difference - simple diagonal
+        path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
+      } else {
+        path = [
+          `M ${fromX} ${adjustedFromY}`,
+          `H ${midX - r}`,
+          `Q ${midX} ${adjustedFromY} ${midX} ${adjustedFromY + (ySign * r)}`,
+          `V ${adjustedToY - (ySign * r)}`,
+          `Q ${midX} ${adjustedToY} ${midX + r} ${adjustedToY}`,
+          `H ${toX}`
+        ].join(' ');
+      }
+      pathMidX = midX;
     } else {
-      // Backward elbow: right -> down/up -> left (to reach target behind source)
-      const backwardGap = 12; // Tighter gap for backward connections
-      const r = Math.max(2, Math.min(cornerRadius, absY / 2, backwardGap / 2));
-      const corner1X = verticalX - r;
-      const corner2Y = adjustedToY - (ySign * r);
+      // BACKWARD: Target is to the left of source
+      // Route: exit right → drop into gap → go left past target → enter from left
+      const exitX = fromX + minGap; // Exit point (in white space to the right of source)
+      const entryX = toX - minGap; // Entry approach point (left of target)
+      const r = Math.max(2, Math.min(cornerRadius, absY / 2, minGap / 2));
 
-      path = [
-        `M ${fromX} ${adjustedFromY}`,
-        `H ${corner1X}`,
-        `Q ${verticalX} ${adjustedFromY} ${verticalX} ${adjustedFromY + (ySign * r)}`,
-        `V ${corner2Y}`,
-        `Q ${verticalX} ${adjustedToY} ${verticalX - r} ${adjustedToY}`,
-        `H ${toX}`
-      ].join(' ');
+      if (absY < r * 2) {
+        // Same level - go right, then loop around: right → down → left → up → right
+        const loopDepth = minGap; // How far to drop for the loop
+        const loopSign = 1; // Always loop downward for consistency
+        path = [
+          `M ${fromX} ${adjustedFromY}`,
+          `H ${exitX - r}`,
+          `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (loopSign * r)}`,
+          `V ${adjustedFromY + (loopSign * loopDepth) - r}`,
+          `Q ${exitX} ${adjustedFromY + (loopSign * loopDepth)} ${exitX - r} ${adjustedFromY + (loopSign * loopDepth)}`,
+          `H ${entryX + r}`,
+          `Q ${entryX} ${adjustedFromY + (loopSign * loopDepth)} ${entryX} ${adjustedFromY + (loopSign * loopDepth) - (loopSign * r)}`,
+          `V ${adjustedToY + (loopSign * r)}`,
+          `Q ${entryX} ${adjustedToY} ${entryX + r} ${adjustedToY}`,
+          `H ${toX}`
+        ].join(' ');
+      } else {
+        // Different levels - route through the vertical gap
+        path = [
+          `M ${fromX} ${adjustedFromY}`,
+          `H ${exitX - r}`,
+          `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (ySign * r)}`,
+          `V ${adjustedToY - (ySign * r)}`,
+          `Q ${exitX} ${adjustedToY} ${exitX - r} ${adjustedToY}`,
+          `H ${entryX + r}`,
+          `Q ${entryX} ${adjustedToY} ${entryX} ${adjustedToY}`,
+          `H ${toX}`
+        ].join(' ');
+      }
+      pathMidX = (exitX + entryX) / 2;
     }
 
     return {
@@ -237,7 +251,7 @@ export function DependencyLine({
       toX,
       toY: adjustedToY,
       path,
-      midX: verticalX,
+      midX: pathMidX,
       midY: (adjustedFromY + adjustedToY) / 2
     };
   }, [
