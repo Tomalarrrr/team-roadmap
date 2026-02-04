@@ -14,8 +14,6 @@ interface ToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  hasClipboard: boolean;
-  onPaste: () => void;
   zoomLevel: ZoomLevel;
   onZoomChange: (level: ZoomLevel) => void;
 }
@@ -36,8 +34,6 @@ export function Toolbar({
   canRedo,
   onUndo,
   onRedo,
-  hasClipboard,
-  onPaste,
   zoomLevel,
   onZoomChange
 }: ToolbarProps) {
@@ -104,20 +100,6 @@ export function Toolbar({
             </svg>
           </button>
         </div>
-
-        {/* Paste button - always visible, disabled when no clipboard content */}
-        <button
-          className={`${styles.pasteBtn} ${!hasClipboard ? styles.disabled : ''}`}
-          onClick={onPaste}
-          disabled={!hasClipboard}
-          title={`Paste (${mod}V)`}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <rect x="3" y="4" width="8" height="9" rx="1" stroke="currentColor" strokeWidth="1.2"/>
-            <path d="M5 4V3C5 1.89543 5.89543 1 7 1C8.10457 1 9 1.89543 9 3V4" stroke="currentColor" strokeWidth="1.2"/>
-          </svg>
-          Paste
-        </button>
 
         <div className={styles.divider} />
 

@@ -121,14 +121,14 @@
 .colorPicker {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
 }
 
 .colorSwatch {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   border: 2px solid transparent;
   cursor: pointer;
   transition: transform 0.15s ease, border-color 0.15s ease;
@@ -157,26 +157,6 @@
 
 .colorSwatch.selected:focus-visible {
   box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--accent-blue);
-}
-
-.customColorWrapper {
-  position: relative;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  border: 1px dashed var(--border-medium);
-}
-
-.customColorInput {
-  position: absolute;
-  top: -8px;
-  left: -8px;
-  width: 48px;
-  height: 48px;
-  cursor: pointer;
-  border: none;
-  background: none;
 }
 
 .checkboxField {
@@ -525,8 +505,8 @@
 }
 
 .milestoneFormInline .colorSwatch {
-  width: 26px;
-  height: 26px;
+  width: 20px;
+  height: 20px;
 }
 
 .milestoneFormActions {

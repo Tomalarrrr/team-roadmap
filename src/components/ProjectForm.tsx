@@ -72,7 +72,6 @@ export function ProjectForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(initialValues?.statusColor || STATUS_COLORS[0].hex);
-  const [customColor, setCustomColor] = useState('');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -272,7 +271,7 @@ export function ProjectForm({
       )}
 
       <div className={styles.field}>
-        <label className={styles.label}>Status Color</label>
+        <label className={styles.label}>RAG Colours</label>
         <div className={styles.colorPicker}>
           {STATUS_COLORS.map(({ hex, name }) => (
             <button
@@ -285,18 +284,6 @@ export function ProjectForm({
               title={name}
             />
           ))}
-          <div className={styles.customColorWrapper}>
-            <input
-              type="color"
-              value={customColor || statusColor}
-              onChange={(e) => {
-                setCustomColor(e.target.value);
-                setStatusColor(e.target.value);
-              }}
-              className={styles.customColorInput}
-              aria-label="Custom color picker"
-            />
-          </div>
         </div>
         <span className={styles.hint}>
           {STATUS_COLORS.find(c => c.hex === statusColor)?.name || 'Custom'}
