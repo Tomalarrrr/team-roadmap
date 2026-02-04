@@ -444,7 +444,8 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   }, [projectId, milestone.id, milestoneLeft, milestoneWidth, laneTop, stackIndex, startCreation]);
 
   // Handle click when in dependency creation mode
-  const handleDependencyTarget = useCallback(() => {
+  const handleDependencyTarget = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent click from bubbling to ProjectBar (which would create a second dependency)
     if (isCreatingDependency && !isSource) {
       completeCreation({ projectId, milestoneId: milestone.id });
     }

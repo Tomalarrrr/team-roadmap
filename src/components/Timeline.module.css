@@ -272,13 +272,14 @@
   font-size: 0.7rem;
 }
 
-/* Month zoom: standard width headers */
+/* Month zoom: wider headers for better readability */
 .monthHeader.monthZoom {
-  padding: 0 14px;
+  padding: 0 24px;
+  min-width: 80px;
 }
 
 .monthHeader.monthZoom .monthLabel {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
 }
 
 .monthLabel {
