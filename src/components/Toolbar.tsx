@@ -14,6 +14,8 @@ interface ToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  hasClipboard: boolean;
+  onPaste: () => void;
   zoomLevel: ZoomLevel;
   onZoomChange: (level: ZoomLevel) => void;
 }
@@ -34,6 +36,8 @@ export function Toolbar({
   canRedo,
   onUndo,
   onRedo,
+  hasClipboard: _hasClipboard,
+  onPaste: _onPaste,
   zoomLevel,
   onZoomChange
 }: ToolbarProps) {

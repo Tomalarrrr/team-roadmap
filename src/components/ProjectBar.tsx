@@ -444,6 +444,7 @@ export function ProjectBar({
       {/* Draggable area - single click opens edit, drag moves dates */}
       <div
         className={styles.dragArea}
+        style={{ bottom: (maxMilestoneStack + 1) * 24 + 6 }}
         onMouseDown={(e) => {
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           handleMouseDown(e, 'move');
