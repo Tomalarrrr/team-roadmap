@@ -1,7 +1,7 @@
 .projectBar {
   position: absolute;
   min-height: 52px;
-  border-radius: var(--radius-full);
+  border-radius: 16px;
   cursor: pointer;
   transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
   box-shadow: var(--shadow-sm);
@@ -9,7 +9,7 @@
   min-width: 80px;
   /* Prevent subpixel rendering issues */
   backface-visibility: hidden;
-  /* Ensure child content respects the pill-shaped border-radius */
+  /* Ensure child content respects the rounded corners */
   overflow: hidden;
 }
 
@@ -89,7 +89,7 @@
   width: 12px;
   cursor: ew-resize;
   z-index: 5;
-  border-radius: var(--radius-full);
+  border-radius: 16px;
 }
 
 .resizeHandle:hover {
