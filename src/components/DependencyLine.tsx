@@ -167,17 +167,63 @@ export function DependencyLine({
     const adjustedFromY = fromY + yStagger;
     const adjustedToY = toY + yStagger;
 
-    // Create smooth bezier curve
+    // Orthogonal elbow routing with rounded corners
+    // Pattern: horizontal -> vertical -> horizontal
+    const horizontalGap = 20; // Minimum horizontal extension from source/target
+    const cornerRadius = 8; // Radius for rounded corners
+
+    // Calculate midpoint X for the vertical segment
+    // Position it between the two elements, closer to the midpoint
     const midX = (fromX + toX) / 2;
-    const controlOffset = Math.min(Math.abs(toX - fromX) * 0.4, 80);
+
+    // Determine the vertical segment X position
+    // If going forward (left to right), use midpoint
+    // If going backward, extend further out
+    const isForward = toX > fromX;
+    const verticalX = isForward
+      ? Math.max(fromX + horizontalGap, midX)
+      : fromX + horizontalGap;
+
+    const deltaY = adjustedToY - adjustedFromY;
+    const absY = Math.abs(deltaY);
+    const ySign = deltaY >= 0 ? 1 : -1;
+
+    // Build path with rounded corners
+    let path: string;
+
+    if (absY < cornerRadius * 2) {
+      // Minimal vertical difference - use simple horizontal line with small curve
+      path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
+    } else {
+      // Full elbow with two rounded corners
+      const r = Math.min(cornerRadius, absY / 2, Math.abs(verticalX - fromX) / 2, Math.abs(toX - verticalX) / 2);
+
+      // First horizontal segment (from source to first corner)
+      // First corner (turn from horizontal to vertical)
+      // Vertical segment
+      // Second corner (turn from vertical to horizontal)
+      // Final horizontal segment (to target)
+
+      const corner1X = verticalX - r;
+      const corner2Y = adjustedToY - (ySign * r);
+
+      path = [
+        `M ${fromX} ${adjustedFromY}`,
+        `H ${corner1X}`,
+        `Q ${verticalX} ${adjustedFromY} ${verticalX} ${adjustedFromY + (ySign * r)}`,
+        `V ${corner2Y}`,
+        `Q ${verticalX} ${adjustedToY} ${verticalX + r} ${adjustedToY}`,
+        `H ${toX}`
+      ].join(' ');
+    }
 
     return {
       fromX,
       fromY: adjustedFromY,
       toX,
       toY: adjustedToY,
-      path: `M ${fromX} ${adjustedFromY} C ${fromX + controlOffset} ${adjustedFromY}, ${toX - controlOffset} ${adjustedToY}, ${toX} ${adjustedToY}`,
-      midX,
+      path,
+      midX: verticalX,
       midY: (adjustedFromY + adjustedToY) / 2
     };
   }, [
