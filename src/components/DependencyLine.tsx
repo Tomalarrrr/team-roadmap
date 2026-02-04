@@ -188,12 +188,15 @@ export function DependencyLine({
     // Build path with rounded corners
     let path: string;
 
-    if (absY < cornerRadius * 2 && isForward) {
-      // Minimal vertical difference and going forward - use simple line
+    // Edge case: minimal or no vertical difference - use simple direct line
+    if (absY < 2) {
+      path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
+    } else if (isForward && absY < cornerRadius * 2) {
+      // Forward with small Y diff - simple diagonal
       path = `M ${fromX} ${adjustedFromY} L ${toX} ${adjustedToY}`;
     } else if (isForward) {
       // Forward elbow: right -> down/up -> right
-      const r = Math.min(cornerRadius, absY / 2, Math.abs(verticalX - fromX) / 2, Math.abs(toX - verticalX) / 2);
+      const r = Math.max(2, Math.min(cornerRadius, absY / 2, Math.abs(verticalX - fromX) / 2, Math.abs(toX - verticalX) / 2));
       const corner1X = verticalX - r;
       const corner2Y = adjustedToY - (ySign * r);
 
@@ -207,7 +210,7 @@ export function DependencyLine({
       ].join(' ');
     } else {
       // Backward elbow: right -> down/up -> left (to reach target behind source)
-      const r = Math.min(cornerRadius, absY / 2, horizontalGap / 2);
+      const r = Math.max(2, Math.min(cornerRadius, absY / 2, horizontalGap / 2));
       const corner1X = verticalX - r;
       const corner2Y = adjustedToY - (ySign * r);
 
