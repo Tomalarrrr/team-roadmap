@@ -83,8 +83,19 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
 
   if (!isOpen) return null;
 
+  // Block all mouse events from reaching background (prevents drag operations)
+  const handleMouseEvent = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+  }, []);
+
   return (
-    <div className={styles.overlay} onClick={onClose}>
+    <div
+      className={styles.overlay}
+      onClick={onClose}
+      onMouseDown={handleMouseEvent}
+      onMouseMove={handleMouseEvent}
+      onMouseUp={handleMouseEvent}
+    >
       <div
         ref={modalRef}
         className={styles.modal}
