@@ -358,6 +358,7 @@ export function MilestoneLine({
           // If minimal movement and quick click, open edit dialog and select
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
+            setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
             onEdit();
           }

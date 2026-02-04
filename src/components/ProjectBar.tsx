@@ -448,7 +448,7 @@ export function ProjectBar({
       {/* Draggable area - single click opens edit, drag moves dates */}
       <div
         className={styles.dragArea}
-        style={{ bottom: (maxMilestoneStack + 1) * 24 + 6 }}
+        style={{ height: PROJECT_CONTENT_HEIGHT + 8 }}
         onMouseDown={(e) => {
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           handleMouseDown(e, 'move');
@@ -461,6 +461,7 @@ export function ProjectBar({
           // If minimal movement and quick click, open edit dialog and select
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
+            setDragMode(null); // Clear drag mode before opening modal
             onSelect?.();
             onEdit();
           }
