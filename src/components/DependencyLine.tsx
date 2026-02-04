@@ -399,6 +399,13 @@ export function DependencyLine({
     onHoverChange?.(false);
   };
 
+  // Right-click to show delete dialog
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setShowConfirm(true);
+  }, []);
+
   // Handle selecting the line (double-click to toggle edit mode)
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -473,17 +480,17 @@ export function DependencyLine({
     };
   }, [isSelected]);
 
-  // Handle adding a new waypoint by clicking on the line
+  // Handle clicking on the line - single click to select, click while selected to add waypoint
   const handleLineClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+
     if (!isSelected) {
-      // If not selected, show confirm dialog
-      e.stopPropagation();
-      setShowConfirm(true);
+      // Single click enters edit mode
+      setIsSelected(true);
       return;
     }
 
-    // If selected, add a new waypoint at click position
-    e.stopPropagation();
+    // If already selected, add a new waypoint at click position
     const svg = svgRef.current?.closest('svg');
     if (!svg) return;
 
@@ -604,6 +611,7 @@ export function DependencyLine({
         style={{ cursor: isSelected ? 'crosshair' : 'pointer' }}
         onClick={handleLineClick}
         onDoubleClick={handleDoubleClick}
+        onContextMenu={handleContextMenu}
       />
       {/* Hover indicator dot (hidden when selected) */}
       {!isSelected && (
