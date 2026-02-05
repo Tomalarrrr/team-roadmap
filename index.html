@@ -4,10 +4,42 @@
     <meta charset="UTF-8" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#fafafa" />
+    <meta name="description" content="Team Roadmap - Visual project planning and timeline management" />
+
+    <!-- Preconnect to Firebase for faster data fetching -->
+    <link rel="preconnect" href="https://firestore.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://firebase.googleapis.com" crossorigin />
+    <link rel="preconnect" href="https://apis.google.com" crossorigin />
+    <link rel="dns-prefetch" href="https://firestore.googleapis.com" />
+    <link rel="dns-prefetch" href="https://firebase.googleapis.com" />
+
     <title>Team Roadmap</title>
+
+    <!-- Inline critical styles for instant first paint -->
+    <style>
+      body { margin: 0; background: #fafafa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+      #root { min-height: 100vh; }
+      .initial-loader { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #666; }
+      .initial-loader-spinner { width: 32px; height: 32px; border: 3px solid #e5e5e5; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Initial loader shown before React hydrates -->
+      <div class="initial-loader">
+        <div class="initial-loader-spinner"></div>
+        <div>Loading...</div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <!-- Register service worker for instant repeat visits -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      }
+    </script>
   </body>
 </html>

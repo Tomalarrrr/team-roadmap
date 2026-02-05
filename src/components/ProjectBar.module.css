@@ -92,38 +92,6 @@
   50% { box-shadow: 0 0 0 4px var(--accent-blue-light), var(--shadow-md); }
 }
 
-/* Conflict warning state - overlapping projects */
-.projectBar.hasConflict {
-  box-shadow: 0 0 0 2px #f97316, var(--shadow-sm);
-}
-
-.projectBar.hasConflict:hover {
-  box-shadow: 0 0 0 2px #f97316, var(--shadow-md);
-}
-
-.projectBar.hasConflict::before {
-  content: '⚠';
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 18px;
-  height: 18px;
-  background: #f97316;
-  border-radius: 50%;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  animation: conflictPulse 2s ease-in-out infinite;
-}
-
-@keyframes conflictPulse {
-  0%, 100% { transform: scale(1); opacity: 1; }
-  50% { transform: scale(1.1); opacity: 0.9; }
-}
-
 .resizeHandle {
   position: absolute;
   top: 0;

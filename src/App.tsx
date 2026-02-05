@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef, lazy, Suspense } from 'react';
 import { useRoadmap } from './hooks/useRoadmap';
 import { useUndoManager, createInverse } from './hooks/useUndoManager';
 import { useClipboard } from './hooks/useClipboard';
@@ -6,9 +6,6 @@ import { useToast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
 import { Timeline, type TimelineRef } from './components/Timeline';
 import { Modal } from './components/Modal';
-import { ProjectForm } from './components/ProjectForm';
-import { MilestoneForm } from './components/MilestoneForm';
-import { TeamMemberForm } from './components/TeamMemberForm';
 import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage } from './types';
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
@@ -17,8 +14,13 @@ import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
 import { OfflineBanner } from './components/OfflineBanner';
 import { usePresence } from './hooks/usePresence';
-import { ShortcutsModal } from './components/ShortcutsModal';
 import styles from './App.module.css';
+
+// Lazy load form components (not needed until user clicks)
+const ProjectForm = lazy(() => import('./components/ProjectForm').then(m => ({ default: m.ProjectForm })));
+const MilestoneForm = lazy(() => import('./components/MilestoneForm').then(m => ({ default: m.MilestoneForm })));
+const TeamMemberForm = lazy(() => import('./components/TeamMemberForm').then(m => ({ default: m.TeamMemberForm })));
+const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then(m => ({ default: m.ShortcutsModal })));
 
 // Sanitize error messages to prevent XSS
 function sanitizeError(error: string): string {
@@ -123,6 +125,41 @@ function App() {
       // Ignore localStorage errors
     }
   }, [dayWidth]);
+
+  // Collapsed lanes state - persisted to localStorage
+  const [collapsedLanes, setCollapsedLanes] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('roadmap-collapsed-lanes');
+      if (stored) {
+        return new Set(JSON.parse(stored));
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    return new Set();
+  });
+
+  // Save collapsed lanes to localStorage when they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('roadmap-collapsed-lanes', JSON.stringify(Array.from(collapsedLanes)));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [collapsedLanes]);
+
+  // Toggle lane collapse
+  const toggleLaneCollapse = useCallback((memberId: string) => {
+    setCollapsedLanes(prev => {
+      const next = new Set(prev);
+      if (next.has(memberId)) {
+        next.delete(memberId);
+      } else {
+        next.add(memberId);
+      }
+      return next;
+    });
+  }, []);
 
   // Ref for Timeline to call scrollToToday
   const timelineRef = useRef<TimelineRef>(null);
@@ -558,80 +595,6 @@ function App() {
         return;
       }
 
-      // Arrow keys to navigate between projects
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && !hasModifierKey(e)) {
-        e.preventDefault();
-
-        // Get team member order for lane navigation
-        const memberOrder = data.teamMembers.map(m => m.name);
-
-        // Sort all visible projects by owner (lane) then by start date
-        const sortedProjects = [...filteredProjects].sort((a, b) => {
-          const aLaneIdx = memberOrder.indexOf(a.owner);
-          const bLaneIdx = memberOrder.indexOf(b.owner);
-          if (aLaneIdx !== bLaneIdx) return aLaneIdx - bLaneIdx;
-          return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
-        });
-
-        if (sortedProjects.length === 0) return;
-
-        // If no project selected, select the first one
-        if (!selectedProjectId) {
-          handleProjectSelect(sortedProjects[0].id);
-          return;
-        }
-
-        const currentProject = sortedProjects.find(p => p.id === selectedProjectId);
-        if (!currentProject) {
-          handleProjectSelect(sortedProjects[0].id);
-          return;
-        }
-
-        const currentLaneIdx = memberOrder.indexOf(currentProject.owner);
-        const projectsInCurrentLane = sortedProjects.filter(p => p.owner === currentProject.owner);
-        const currentIdxInLane = projectsInCurrentLane.findIndex(p => p.id === selectedProjectId);
-
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-          // Navigate within same lane by date
-          const direction = e.key === 'ArrowRight' ? 1 : -1;
-          const newIdxInLane = currentIdxInLane + direction;
-
-          if (newIdxInLane >= 0 && newIdxInLane < projectsInCurrentLane.length) {
-            handleProjectSelect(projectsInCurrentLane[newIdxInLane].id);
-          }
-        } else {
-          // ArrowUp/ArrowDown - navigate between lanes
-          const direction = e.key === 'ArrowDown' ? 1 : -1;
-          let newLaneIdx = currentLaneIdx + direction;
-
-          // Find next lane with projects
-          while (newLaneIdx >= 0 && newLaneIdx < memberOrder.length) {
-            const newOwner = memberOrder[newLaneIdx];
-            const projectsInNewLane = sortedProjects.filter(p => p.owner === newOwner);
-
-            if (projectsInNewLane.length > 0) {
-              // Select the project closest to the current one's start date
-              const currentStartTime = new Date(currentProject.startDate).getTime();
-              let closestProject = projectsInNewLane[0];
-              let closestDiff = Math.abs(new Date(closestProject.startDate).getTime() - currentStartTime);
-
-              for (const p of projectsInNewLane) {
-                const diff = Math.abs(new Date(p.startDate).getTime() - currentStartTime);
-                if (diff < closestDiff) {
-                  closestDiff = diff;
-                  closestProject = p;
-                }
-              }
-
-              handleProjectSelect(closestProject.id);
-              break;
-            }
-            newLaneIdx += direction;
-          }
-        }
-        return;
-      }
-
       if (hasModifierKey(e) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
@@ -644,7 +607,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, data.projects, data.teamMembers, selectedProjectId, filteredProjects, addProject, updateProject, showToast, handleProjectSelect]);
+  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, data.projects, selectedProjectId, addProject, updateProject, showToast]);
 
   // Team member handlers
   const handleAddMember = useCallback(
@@ -1024,110 +987,126 @@ function App() {
           onDeletePeriodMarker={handleDeletePeriodMarker}
           onDayWidthChange={setDayWidth}
           onHoveredMemberChange={setHoveredMember}
+          collapsedLanes={collapsedLanes}
+          onToggleLaneCollapse={toggleLaneCollapse}
         />
       </main>
 
       {/* Add Team Member Modal */}
       <Modal isOpen={modal?.type === 'add-member'} onClose={closeModal} title="Add Team Member">
-        <TeamMemberForm onSubmit={handleAddMember} onCancel={closeModal} />
+        <Suspense fallback={null}>
+          <TeamMemberForm onSubmit={handleAddMember} onCancel={closeModal} />
+        </Suspense>
       </Modal>
 
       {/* Edit Team Member Modal */}
       <Modal isOpen={modal?.type === 'edit-member'} onClose={closeModal} title="Edit Team Member">
-        {modal?.type === 'edit-member' && (
-          <TeamMemberForm
-            initialValues={{ name: modal.member.name, jobTitle: modal.member.jobTitle }}
-            onSubmit={handleEditMember}
-            onCancel={closeModal}
-            onDelete={handleDeleteMember}
-            isEditing
-            projectCount={data.projects.filter(p => p.owner === modal.member.name).length}
-          />
-        )}
+        <Suspense fallback={null}>
+          {modal?.type === 'edit-member' && (
+            <TeamMemberForm
+              initialValues={{ name: modal.member.name, jobTitle: modal.member.jobTitle }}
+              onSubmit={handleEditMember}
+              onCancel={closeModal}
+              onDelete={handleDeleteMember}
+              isEditing
+              projectCount={data.projects.filter(p => p.owner === modal.member.name).length}
+            />
+          )}
+        </Suspense>
       </Modal>
 
       {/* Add Project Modal */}
       <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New Project">
-        {modal?.type === 'add-project' && (
-          <ProjectForm
-            initialValues={{
-              owner: modal.ownerName,
-              startDate: modal.suggestedStart,
-              endDate: modal.suggestedEnd
-            }}
-            onSubmit={handleAddProject}
-            onCancel={closeModal}
-            hideOwner
-          />
-        )}
+        <Suspense fallback={null}>
+          {modal?.type === 'add-project' && (
+            <ProjectForm
+              initialValues={{
+                owner: modal.ownerName,
+                startDate: modal.suggestedStart,
+                endDate: modal.suggestedEnd
+              }}
+              onSubmit={handleAddProject}
+              onCancel={closeModal}
+              hideOwner
+            />
+          )}
+        </Suspense>
       </Modal>
 
       {/* Edit Project Modal */}
       <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit Project">
-        {modal?.type === 'edit-project' && (
-          <ProjectForm
-            initialValues={{
-              title: modal.project.title,
-              owner: modal.project.owner,
-              startDate: modal.project.startDate,
-              endDate: modal.project.endDate,
-              statusColor: modal.project.statusColor
-            }}
-            initialMilestones={modal.project.milestones}
-            teamMembers={data.teamMembers}
-            onSubmit={handleEditProject}
-            onCancel={closeModal}
-            onDelete={async () => {
-              await handleDeleteProject(modal.project.id);
-              closeModal();
-            }}
-            isEditing
-          />
-        )}
+        <Suspense fallback={null}>
+          {modal?.type === 'edit-project' && (
+            <ProjectForm
+              initialValues={{
+                title: modal.project.title,
+                owner: modal.project.owner,
+                startDate: modal.project.startDate,
+                endDate: modal.project.endDate,
+                statusColor: modal.project.statusColor
+              }}
+              initialMilestones={modal.project.milestones}
+              teamMembers={data.teamMembers}
+              onSubmit={handleEditProject}
+              onCancel={closeModal}
+              onDelete={async () => {
+                await handleDeleteProject(modal.project.id);
+                closeModal();
+              }}
+              isEditing
+            />
+          )}
+        </Suspense>
       </Modal>
 
       {/* Add Milestone Modal */}
       <Modal isOpen={modal?.type === 'add-milestone'} onClose={closeModal} title="Add Milestone">
-        {modal?.type === 'add-milestone' && (
-          <MilestoneForm
-            projectStartDate={modal.project.startDate}
-            projectEndDate={modal.project.endDate}
-            onSubmit={handleAddMilestone}
-            onCancel={closeModal}
-          />
-        )}
+        <Suspense fallback={null}>
+          {modal?.type === 'add-milestone' && (
+            <MilestoneForm
+              projectStartDate={modal.project.startDate}
+              projectEndDate={modal.project.endDate}
+              onSubmit={handleAddMilestone}
+              onCancel={closeModal}
+            />
+          )}
+        </Suspense>
       </Modal>
 
       {/* Edit Milestone Modal */}
       <Modal isOpen={modal?.type === 'edit-milestone'} onClose={closeModal} title="Edit Milestone">
-        {modal?.type === 'edit-milestone' && (
-          <MilestoneForm
-            initialValues={{
-              title: modal.milestone.title,
-              description: modal.milestone.description,
-              startDate: modal.milestone.startDate,
-              endDate: modal.milestone.endDate,
-              tags: modal.milestone.tags,
-              statusColor: modal.milestone.statusColor
-            }}
-            projectStartDate={modal.project.startDate}
-            projectEndDate={modal.project.endDate}
-            onSubmit={handleEditMilestone}
-            onCancel={closeModal}
-            onDelete={async () => {
-              await deleteMilestone(modal.projectId, modal.milestone.id);
-              closeModal();
-            }}
-            isEditing
-          />
-        )}
+        <Suspense fallback={null}>
+          {modal?.type === 'edit-milestone' && (
+            <MilestoneForm
+              initialValues={{
+                title: modal.milestone.title,
+                description: modal.milestone.description,
+                startDate: modal.milestone.startDate,
+                endDate: modal.milestone.endDate,
+                tags: modal.milestone.tags,
+                statusColor: modal.milestone.statusColor
+              }}
+              projectStartDate={modal.project.startDate}
+              projectEndDate={modal.project.endDate}
+              onSubmit={handleEditMilestone}
+              onCancel={closeModal}
+              onDelete={async () => {
+                await deleteMilestone(modal.projectId, modal.milestone.id);
+                closeModal();
+              }}
+              isEditing
+            />
+          )}
+        </Suspense>
       </Modal>
 
       {/* Offline/Sync Status Banner */}
       <OfflineBanner isOnline={isOnline} isSyncing={isSaving} />
 
       {/* Keyboard Shortcuts Modal */}
-      <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      <Suspense fallback={null}>
+        <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      </Suspense>
     </div>
   );
 }

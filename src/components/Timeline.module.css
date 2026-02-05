@@ -40,6 +40,7 @@
   padding: 0 16px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -50,6 +51,36 @@
   position: sticky;
   top: 0;
   z-index: 5;
+}
+
+.addMemberHeaderBtn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  opacity: 0.6;
+  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+}
+
+.addMemberHeaderBtn:hover {
+  opacity: 1;
+  background: var(--bg-tertiary);
+  color: var(--accent-blue);
+}
+
+.addMemberHeaderBtn:active {
+  transform: scale(0.92);
+}
+
+.addMemberHeaderBtn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .memberLane {
@@ -80,6 +111,56 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+}
+
+/* Collapse button */
+.collapseBtn {
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s, color 0.15s, transform 0.15s;
+  flex-shrink: 0;
+  margin-top: 2px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+}
+
+.collapseBtn:hover {
+  opacity: 1;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+}
+
+.collapseBtn:active {
+  transform: scale(0.9);
+}
+
+/* Collapsed lane state */
+.memberLane.collapsed {
+  min-height: auto;
+  padding: 8px 16px;
+  background: var(--bg-tertiary);
+}
+
+.memberLane.collapsed .memberLaneContent {
+  align-items: center;
+}
+
+.memberLane.collapsed .memberInfo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.memberLane.collapsed .memberName {
+  margin-bottom: 0;
 }
 
 .dragHandle {
@@ -270,6 +351,14 @@
   border-bottom: 1px solid var(--border-light);
   z-index: 10;
   cursor: grab;
+  /* GPU acceleration for smooth zoom */
+  will-change: transform;
+  transform-origin: var(--zoom-origin-x, 0) top;
+}
+
+/* Smooth zoom animation for header */
+.header.zooming {
+  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .header:active {
@@ -323,6 +412,14 @@
 .lanes {
   position: relative;
   min-height: calc(100% - 48px);
+  /* GPU acceleration for smooth zoom */
+  will-change: transform;
+  transform-origin: var(--zoom-origin-x, 0) top;
+}
+
+/* Smooth zoom animation class */
+.lanes.zooming {
+  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .lane {
@@ -334,6 +431,8 @@
   isolation: isolate;
   /* Smooth background transitions */
   transition: background-color 150ms ease;
+  /* CSS containment for better performance - limits style/layout recalculations */
+  contain: layout style;
 }
 
 .lane:nth-child(even) {
@@ -354,6 +453,12 @@
 /* Drag-to-create state */
 .laneDragging {
   cursor: crosshair;
+}
+
+/* Collapsed lane in timeline area */
+.laneCollapsed {
+  background: var(--bg-tertiary) !important;
+  opacity: 0.6;
 }
 
 .dragCreatePreview {

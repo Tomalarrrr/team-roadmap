@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import type { Project, TeamMember } from '../types';
 import { STATUS_CONFIG } from '../utils/statusColors';
 import { getModifierKeySymbol } from '../utils/platformUtils';
@@ -63,7 +63,7 @@ function saveRecentProjectId(projectId: string): void {
   }
 }
 
-export function SearchFilter({
+export const SearchFilter = memo(function SearchFilter({
   projects,
   teamMembers,
   onFilterChange,
@@ -375,4 +375,4 @@ export function SearchFilter({
       )}
     </>
   );
-}
+});

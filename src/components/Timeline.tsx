@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, useLayoutEffect, useMemo, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -44,41 +44,6 @@ export type ZoomLevel = 'week' | 'month' | 'year';
 const YEAR_VIEW_THRESHOLD = 1.5;
 const WEEK_VIEW_THRESHOLD = 5;
 
-// Detect overlapping projects for conflict highlighting
-// Returns a Set of project IDs that have conflicts (overlap with other projects from same owner)
-function detectProjectConflicts(projectsByOwner: Record<string, Project[]>): Set<string> {
-  const conflicts = new Set<string>();
-
-  Object.values(projectsByOwner).forEach(projects => {
-    if (projects.length < 2) return; // Need at least 2 projects to have a conflict
-
-    // Sort by start date for efficient overlap detection
-    const sorted = [...projects].sort((a, b) =>
-      new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-    );
-
-    // Check each pair of consecutive projects for overlap
-    for (let i = 0; i < sorted.length; i++) {
-      for (let j = i + 1; j < sorted.length; j++) {
-        const a = sorted[i];
-        const b = sorted[j];
-
-        const aStart = new Date(a.startDate).getTime();
-        const aEnd = new Date(a.endDate).getTime();
-        const bStart = new Date(b.startDate).getTime();
-        const bEnd = new Date(b.endDate).getTime();
-
-        // Check for overlap: startA <= endB AND endA >= startB
-        if (aStart <= bEnd && aEnd >= bStart) {
-          conflicts.add(a.id);
-          conflicts.add(b.id);
-        }
-      }
-    }
-  });
-
-  return conflicts;
-}
 
 // Calculate stack indices for non-overlapping projects (optimized flight path algorithm)
 // Time complexity: O(n log n) instead of O(n²)
@@ -179,6 +144,8 @@ interface TimelineProps {
   onDeletePeriodMarker?: (markerId: string) => void;
   onDayWidthChange?: (newDayWidth: number) => void; // For Ctrl/Cmd + scroll zoom
   onHoveredMemberChange?: (memberName: string | null) => void; // For N key quick create
+  collapsedLanes?: Set<string>; // IDs of collapsed team member lanes
+  onToggleLaneCollapse?: (memberId: string) => void; // Toggle collapse state of a lane
 }
 
 const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
@@ -196,6 +163,7 @@ const PROJECT_VERTICAL_GAP = 20; // Gap between stacked projects (increased for 
 const LANE_PADDING = 16; // Padding top and bottom of lane
 const LANE_BOTTOM_BUFFER = 8; // Extra buffer at bottom to prevent spillover
 const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
+const COLLAPSED_LANE_HEIGHT = 40; // Height for collapsed lanes
 
 // Calculate milestone stacks for a single project (replicates ProjectBar logic)
 function calculateMilestoneStacks(milestones: { id: string; startDate: string; endDate: string }[]): Map<string, number> {
@@ -286,7 +254,9 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   onAddPeriodMarker,
   onDeletePeriodMarker,
   onDayWidthChange,
-  onHoveredMemberChange
+  onHoveredMemberChange,
+  collapsedLanes = new Set(),
+  onToggleLaneCollapse
 }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -297,6 +267,9 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   const edgeScrollFrameRef = useRef<number | null>(null);
   const lastMouseXRef = useRef<number>(0);
   const prevDayWidthRef = useRef<number | null>(null);
+
+  // Zoom animation ref for cleanup
+  const zoomTimeoutRef = useRef<number | null>(null);
 
   // Support both old zoomLevel prop and new dayWidth prop
   const dayWidth = dayWidthProp ?? (zoomLevel ? ZOOM_DAY_WIDTHS[zoomLevel] : DEFAULT_DAY_WIDTH);
@@ -437,22 +410,72 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId, timelineStart, dayWidth]);
 
-  // Effect C: Maintain scroll position when zoom level changes
-  useEffect(() => {
-    if (!scrollRef.current || !hasInitialScrolledRef.current) return;
+  // Effect C: Smooth zoom animation when dayWidth changes
+  // Uses direct DOM manipulation for synchronous transform application
+  useLayoutEffect(() => {
+    if (!scrollRef.current || !lanesRef.current || !headerRef.current || !hasInitialScrolledRef.current) return;
     if (prevDayWidthRef.current === null || prevDayWidthRef.current === dayWidth) return;
 
-    // Calculate what date was at the 1/3 point before zoom
-    const viewportWidth = scrollRef.current.clientWidth;
-    const prevScrollLeft = scrollRef.current.scrollLeft;
-    const prevCenterDate = (prevScrollLeft + viewportWidth / 3) / prevDayWidthRef.current;
+    const lanes = lanesRef.current;
+    const header = headerRef.current;
+    const scroll = scrollRef.current;
 
-    // Scroll to put that same date at 1/3 with new dayWidth
-    const newScrollLeft = prevCenterDate * dayWidth - viewportWidth / 3;
-    scrollRef.current.scrollLeft = Math.max(0, newScrollLeft);
+    // Calculate the scale ratio (inverse to counteract the DOM size change)
+    const scaleRatio = prevDayWidthRef.current / dayWidth;
+
+    // Calculate what position was at viewport center before zoom
+    const viewportWidth = scroll.clientWidth;
+    const prevScrollLeft = scroll.scrollLeft;
+    const viewportCenterX = prevScrollLeft + viewportWidth / 2;
+
+    // Cancel any existing animation
+    if (zoomTimeoutRef.current !== null) {
+      clearTimeout(zoomTimeoutRef.current);
+      lanes.classList.remove(styles.zooming);
+      header.classList.remove(styles.zooming);
+    }
+
+    // Step 1: Set transform origin to left edge (simpler math)
+    lanes.style.transformOrigin = 'left top';
+    header.style.transformOrigin = 'left top';
+
+    // Step 2: Apply inverse scale immediately via DOM (synchronous!)
+    lanes.style.transform = `scaleX(${scaleRatio})`;
+    header.style.transform = `scaleX(${scaleRatio})`;
+
+    // Step 3: Adjust scroll to keep the same content centered
+    // The position that was at viewportCenterX is now at viewportCenterX * (newDayWidth/oldDayWidth)
+    const newCenterX = viewportCenterX * (dayWidth / prevDayWidthRef.current);
+    scroll.scrollLeft = Math.max(0, newCenterX - viewportWidth / 2);
+
+    // Step 4: In next frame, enable transition and animate to scale(1)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        lanes.classList.add(styles.zooming);
+        header.classList.add(styles.zooming);
+        lanes.style.transform = '';
+        header.style.transform = '';
+
+        // Step 5: After animation completes, clean up
+        zoomTimeoutRef.current = window.setTimeout(() => {
+          lanes.classList.remove(styles.zooming);
+          header.classList.remove(styles.zooming);
+          zoomTimeoutRef.current = null;
+        }, 300); // Match CSS transition duration
+      });
+    });
 
     prevDayWidthRef.current = dayWidth;
   }, [dayWidth]);
+
+  // Cleanup zoom timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (zoomTimeoutRef.current !== null) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Keyboard navigation for timeline panning
   const KEYBOARD_SCROLL_AMOUNT = 100;
@@ -717,7 +740,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   }, [isLocked, onAddPeriodMarker]);
 
   // Group projects by owner AND calculate stacks in single pass (batched operations)
-  const { projectsByOwner, projectStacksByOwner, projectConflicts } = useMemo(() => {
+  const { projectsByOwner, projectStacksByOwner } = useMemo(() => {
     const grouped: Record<string, Project[]> = {};
     const stacksByOwner: Record<string, Map<string, number>> = {};
 
@@ -739,10 +762,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       stacksByOwner[m.name] = calculateProjectStacks(ownerProjects);
     });
 
-    // Detect conflicts (overlapping projects)
-    const conflicts = detectProjectConflicts(grouped);
-
-    return { projectsByOwner: grouped, projectStacksByOwner: stacksByOwner, projectConflicts: conflicts };
+    return { projectsByOwner: grouped, projectStacksByOwner: stacksByOwner };
   }, [projects, teamMembers]);
 
   // Group leave blocks by member ID
@@ -787,6 +807,13 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     const stackHeights: Record<string, number[]> = {};
 
     displayedTeamMembers.forEach(member => {
+      // Use collapsed height for collapsed lanes
+      if (collapsedLanes.has(member.id)) {
+        heights.push(COLLAPSED_LANE_HEIGHT);
+        stackHeights[member.name] = [];
+        return;
+      }
+
       const ownerProjects = projectsByOwner[member.name] || [];
       const stacks = projectStacksByOwner[member.name];
       const maxStack = stacks && stacks.size > 0 ? Math.max(...stacks.values()) : -1;
@@ -814,7 +841,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     });
 
     return { laneHeights: heights, laneStackHeights: stackHeights };
-  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner]);
+  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes]);
 
   // Calculate cumulative lane positions
   const lanePositions = useMemo(() => {
@@ -896,7 +923,19 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       {/* Fixed left sidebar with team members - hidden in fullscreen */}
       {!isFullscreen && (
       <div ref={sidebarRef} className={styles.sidebar}>
-        <div className={styles.sidebarHeader}>Team</div>
+        <div className={styles.sidebarHeader}>
+          <span>Team</span>
+          <button
+            className={styles.addMemberHeaderBtn}
+            onClick={onAddTeamMember}
+            disabled={isLocked}
+            title="Add team member"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
         <div ref={sidebarContentRef} className={styles.sidebarContent}>
           {displayedTeamMembers.length === 0 ? (
             <div className={styles.emptyState}>
@@ -920,6 +959,8 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                     member={member}
                     height={laneHeights[idx]}
                     isLocked={isLocked}
+                    isCollapsed={collapsedLanes.has(member.id)}
+                    onToggleCollapse={onToggleLaneCollapse ? () => onToggleLaneCollapse(member.id) : undefined}
                     onEdit={() => onEditTeamMember(member)}
                     onAddProject={() => onAddProject(member.name)}
                   />
@@ -945,7 +986,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           onMouseLeave={handleMouseLeave}
         >
           {/* Header */}
-          <div ref={headerRef} className={styles.header} style={{ width: totalWidth }}>
+          <div
+            ref={headerRef}
+            className={styles.header}
+            style={{ width: totalWidth }}
+          >
             {displayMode === 'year' ? (
               fySegments.map(({ fy, left, width }) => (
                 <div key={fy} className={styles.fyHeader} style={{ left, width }}>
@@ -972,7 +1017,12 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
             collisionDetection={pointerWithin}
             onDragEnd={handleProjectDragEnd}
           >
-            <div ref={lanesRef} className={styles.lanes} data-lanes-container style={{ width: totalWidth, minHeight: totalLanesHeight }}>
+            <div
+              ref={lanesRef}
+              className={styles.lanes}
+              data-lanes-container
+              style={{ width: totalWidth, minHeight: totalLanesHeight }}
+            >
               {/* Grid lines */}
               {displayMode === 'year' && fySegments.map(({ fy, left, width }) => (
                 <div key={`q-${fy}`}>
@@ -1017,6 +1067,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
               {displayedTeamMembers.map((member, idx) => {
                 const stacks = projectStacksByOwner[member.name];
                 const memberLeaves = leaveBlocksByMember[member.id] || [];
+                const isLaneCollapsed = collapsedLanes.has(member.id);
                 return (
                   <DroppableLane
                     key={member.id}
@@ -1029,6 +1080,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                     timelineStart={timelineStart}
                     dayWidth={dayWidth}
                     isLocked={isLocked}
+                    isCollapsed={isLaneCollapsed}
                     onDragCreate={(startDate, endDate) => {
                       // Open add project modal with pre-filled dates from drag
                       onAddProject(member.name, startDate, endDate);
@@ -1059,7 +1111,6 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                         stackTopOffset={getStackTopOffset(member.name, stackIdx)}
                         laneTop={lanePositions[idx]}
                         isSelected={project.id === selectedProjectId}
-                        hasConflict={projectConflicts.has(project.id)}
                         newMilestoneIds={newMilestoneIds}
                         isLocked={isLocked}
                         onUpdate={(updates) => onUpdateProject(project.id, updates)}

@@ -12,7 +12,6 @@ interface DraggableProjectBarProps {
   stackTopOffset?: number; // Calculated top position within the lane
   laneTop?: number; // Absolute top position of the lane for dependency positioning
   isSelected?: boolean;
-  hasConflict?: boolean; // When true, show conflict warning (overlapping dates with other projects)
   newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
   isLocked?: boolean; // When true, disable drag and edit actions
   onUpdate: (updates: Partial<Project>) => Promise<void>;
@@ -37,7 +36,6 @@ function DraggableProjectBarComponent({
   stackTopOffset,
   laneTop = 0,
   isSelected,
-  hasConflict = false,
   newMilestoneIds,
   isLocked = false,
   onUpdate,
@@ -79,7 +77,6 @@ function DraggableProjectBarComponent({
         laneTop={laneTop}
         isDragging={isDragging}
         isSelected={isSelected}
-        hasConflict={hasConflict}
         newMilestoneIds={newMilestoneIds}
         isLocked={isLocked}
         dragListeners={listeners}
@@ -111,7 +108,6 @@ export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps
     prevProps.stackTopOffset === nextProps.stackTopOffset &&
     prevProps.laneTop === nextProps.laneTop &&
     prevProps.isSelected === nextProps.isSelected &&
-    prevProps.hasConflict === nextProps.hasConflict &&
     prevProps.isLocked === nextProps.isLocked
     // Note: Callback props are excluded from comparison as they're typically stable
   );

@@ -14,6 +14,7 @@ interface DroppableLaneProps {
   timelineStart?: Date;
   dayWidth?: number;
   isLocked?: boolean;
+  isCollapsed?: boolean; // When true, hide lane content
   onDragCreate?: (startDate: string, endDate: string) => void;
 }
 
@@ -28,6 +29,7 @@ export function DroppableLane({
   timelineStart,
   dayWidth,
   isLocked,
+  isCollapsed = false,
   onDragCreate
 }: DroppableLaneProps) {
   const { setNodeRef, isOver } = useDroppable({
@@ -58,15 +60,22 @@ export function DroppableLane({
     return date.toISOString().split('T')[0];
   };
 
-  // Handle mouse down to start drag-to-create
+  // Handle mouse down - Shift+click to start drag-to-create
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    // Prevent text selection during drag
+    if (isDragging) {
+      e.preventDefault();
+      return;
+    }
+
     // Only start drag-to-create if:
+    // - Shift key is held
+    // - Left mouse button
     // - Not locked
     // - Feature is enabled (has required props)
-    // - Left mouse button
     // - Clicked on the lane itself (not on a child element like a project)
+    if (!e.shiftKey || e.button !== 0) return;
     if (isLocked || !timelineStart || !dayWidth || !onDragCreate) return;
-    if (e.button !== 0) return;
 
     // Check if click target is the lane itself
     const target = e.target as HTMLElement;
@@ -82,7 +91,7 @@ export function DroppableLane({
     dragStartRef.current = { x, date };
     setIsDragging(true);
     setDragPreview({ left: x, width: 0 });
-  }, [isLocked, timelineStart, dayWidth, onDragCreate, xToDate]);
+  }, [isDragging, isLocked, timelineStart, dayWidth, onDragCreate, xToDate]);
 
   // Handle mouse move during drag
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -99,7 +108,7 @@ export function DroppableLane({
     setDragPreview({ left, width });
   }, [isDragging, dayWidth]);
 
-  // Handle mouse up to complete drag-to-create
+  // Handle mouse up to complete drag-to-create (any button releases it)
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     if (!isDragging || !dragStartRef.current || !laneRef.current || !onDragCreate || !dayWidth) {
       setIsDragging(false);
@@ -107,6 +116,8 @@ export function DroppableLane({
       dragStartRef.current = null;
       return;
     }
+
+    e.preventDefault();
 
     const rect = laneRef.current.getBoundingClientRect();
     const endX = e.clientX - rect.left + laneRef.current.scrollLeft;
@@ -140,6 +151,28 @@ export function DroppableLane({
     onHoverChange?.(false);
   }, [isDragging, onHoverChange]);
 
+  // Handle double-click to quick-create project at that date
+  const handleDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (isLocked || !timelineStart || !dayWidth || !onDragCreate) return;
+
+    // Check if click target is the lane itself (not a project)
+    const target = e.target as HTMLElement;
+    const lane = laneRef.current;
+    if (!lane || target !== lane) return;
+
+    e.preventDefault();
+
+    const rect = lane.getBoundingClientRect();
+    const x = e.clientX - rect.left + lane.scrollLeft;
+    const startDate = xToDate(x);
+
+    // Default to 2 weeks duration
+    const endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + 13);
+
+    onDragCreate(toISODateString(startDate), toISODateString(endDate));
+  }, [isLocked, timelineStart, dayWidth, onDragCreate, xToDate]);
+
   // Combine refs
   const setRefs = useCallback((node: HTMLDivElement | null) => {
     setNodeRef(node);
@@ -149,20 +182,21 @@ export function DroppableLane({
   return (
     <div
       ref={setRefs}
-      className={`${styles.lane} ${isOver ? styles.laneOver : ''} ${isDragging ? styles.laneDragging : ''}`}
+      className={`${styles.lane} ${isOver ? styles.laneOver : ''} ${isDragging ? styles.laneDragging : ''} ${isCollapsed ? styles.laneCollapsed : ''}`}
       style={{ top, height }}
       data-member={memberName}
-      onContextMenu={onContextMenu}
+      onContextMenu={isCollapsed ? undefined : onContextMenu}
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={handleMouseLeave}
-      onMouseDown={handleMouseDown}
-      onMouseMove={handleMouseMove}
-      onMouseUp={handleMouseUp}
+      onMouseDown={isCollapsed ? undefined : handleMouseDown}
+      onMouseMove={isCollapsed ? undefined : handleMouseMove}
+      onMouseUp={isCollapsed ? undefined : handleMouseUp}
+      onDoubleClick={isCollapsed ? undefined : handleDoubleClick}
     >
-      {children}
+      {!isCollapsed && children}
 
       {/* Drag-to-create preview */}
-      {isDragging && dragPreview && (
+      {!isCollapsed && isDragging && dragPreview && (
         <div
           className={styles.dragCreatePreview}
           style={{

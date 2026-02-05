@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { SearchFilter, type FilterState } from './SearchFilter';
 import { ExportMenu } from './ExportMenu';
 import { ZoomSlider } from './ZoomSlider';
@@ -33,7 +34,7 @@ interface ToolbarProps {
   currentUserId?: string;
 }
 
-export function Toolbar({
+export const Toolbar = memo(function Toolbar({
   projects,
   teamMembers,
   dependencies,
@@ -154,4 +155,4 @@ export function Toolbar({
       </div>
     </div>
   );
-}
+});

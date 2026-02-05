@@ -38,9 +38,19 @@ export default defineConfig({
     },
     // Target modern browsers for smaller bundle
     target: 'es2020',
-    // Minify for smaller size
+    // Minify with aggressive settings
     minify: 'esbuild',
+    // CSS code splitting for faster first paint
+    cssCodeSplit: true,
+    // Generate source maps only for production debugging (can disable for smaller files)
+    sourcemap: false,
     // Reduce chunk size warnings threshold
-    chunkSizeWarningLimit: 500
+    chunkSizeWarningLimit: 500,
+    // Inline small assets for fewer requests
+    assetsInlineLimit: 4096
+  },
+  // Optimize dependency pre-bundling for faster dev and build
+  optimizeDeps: {
+    include: ['react', 'react-dom', '@dnd-kit/core', '@dnd-kit/sortable', 'date-fns']
   }
 })

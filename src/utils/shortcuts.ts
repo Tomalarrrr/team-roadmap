@@ -217,34 +217,6 @@ export const DEFAULT_SHORTCUTS: Shortcut[] = [
     modifiers: [],
     description: 'Shift selected project +1 week',
     category: 'editing'
-  },
-  {
-    id: 'nav-prev',
-    key: 'ArrowLeft',
-    modifiers: [],
-    description: 'Select previous project',
-    category: 'navigation'
-  },
-  {
-    id: 'nav-next',
-    key: 'ArrowRight',
-    modifiers: [],
-    description: 'Select next project',
-    category: 'navigation'
-  },
-  {
-    id: 'nav-up',
-    key: 'ArrowUp',
-    modifiers: [],
-    description: 'Select project in lane above',
-    category: 'navigation'
-  },
-  {
-    id: 'nav-down',
-    key: 'ArrowDown',
-    modifiers: [],
-    description: 'Select project in lane below',
-    category: 'navigation'
   }
 ];
 

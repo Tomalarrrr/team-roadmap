@@ -78,7 +78,6 @@ interface ProjectBarProps {
   laneTop?: number; // Absolute top position of the lane for dependency positioning
   isDragging?: boolean;
   isSelected?: boolean;
-  hasConflict?: boolean; // When true, show conflict warning (overlapping dates with other projects)
   newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
   isLocked?: boolean; // When true, disable drag and edit actions (view mode)
   dragListeners?: React.DOMAttributes<HTMLDivElement>;
@@ -111,7 +110,6 @@ export function ProjectBar({
   laneTop = 0,
   isDragging: externalDragging,
   isSelected,
-  hasConflict = false,
   newMilestoneIds,
   isLocked = false,
   dragListeners, // Used for cross-lane dragging (reassign owner)
@@ -554,7 +552,7 @@ export function ProjectBar({
     <div
       ref={barRef}
       data-dependency-target
-      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''} ${hasConflict ? styles.hasConflict : ''}`}
+      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''}`}
       style={{
         left,
         width,
@@ -565,7 +563,7 @@ export function ProjectBar({
       role="button"
       tabIndex={0}
       aria-label={`Project: ${project.title}, ${formatShortDate(project.startDate)} to ${formatShortDate(project.endDate)}${isPast ? ', Complete' : ''}`}
-      title={`${project.title} · ${formatDuration(project.startDate, project.endDate)}${hasConflict ? ' ⚠️ Overlaps with another project' : ''}`}
+      title={`${project.title} · ${formatDuration(project.startDate, project.endDate)}`}
       onKeyDown={handleKeyDown}
       onClick={isTargetable ? handleDependencyTarget : undefined}
       onContextMenu={(e) => {

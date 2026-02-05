@@ -24,6 +24,11 @@ export function ZoomSlider({
   const trackRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
+  // Instant zoom - Timeline's useLayoutEffect handles smooth centering
+  const handleZoom = useCallback((targetValue: number) => {
+    onChange(Math.max(min, Math.min(max, targetValue)));
+  }, [min, max, onChange]);
+
   // Convert dayWidth to slider position (0-1) using logarithmic scale
   // This makes zooming feel more natural - equal slider movement = equal visual change
   const valueToPosition = useCallback((val: number) => {
@@ -90,7 +95,7 @@ export function ZoomSlider({
     <div className={styles.zoomSlider}>
       <button
         className={styles.zoomBtn}
-        onClick={() => onChange(Math.max(min, value / 1.3))}
+        onClick={() => handleZoom(value / 1.3)}
         title="Zoom out"
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -135,7 +140,7 @@ export function ZoomSlider({
 
       <button
         className={styles.zoomBtn}
-        onClick={() => onChange(Math.min(max, value * 1.3))}
+        onClick={() => handleZoom(value * 1.3)}
         title="Zoom in"
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">

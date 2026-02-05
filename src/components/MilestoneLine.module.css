@@ -4,15 +4,16 @@
   height: 20px;
   border-radius: 8px;
   cursor: pointer;
-  /* Snappy transitions using GPU-accelerated transforms */
-  transition: transform 100ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)),
+  /* Snappy transitions - includes min-width for hover expansion */
+  transition: transform 150ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)),
               box-shadow 150ms ease,
-              filter 150ms ease;
+              filter 150ms ease,
+              min-width 200ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1));
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.8);
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start; /* Align content to start for expansion */
   overflow: visible;
   /* Explicit z-index and pointer-events to ensure proper layering */
   z-index: 10;
@@ -24,10 +25,12 @@
 }
 
 .milestoneLine:hover {
-  transform: scale(1.03) translateZ(0);
-  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+  /* Expand width to show full title */
+  min-width: fit-content;
+  transform: translateY(-1px) translateZ(0);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   filter: brightness(1.08);
-  z-index: 20;
+  z-index: 100; /* High z-index to appear above other milestones */
 }
 
 .milestoneLine:active:not(.dragging) {
@@ -140,6 +143,12 @@
   text-overflow: ellipsis;
   padding: 0 8px;
   pointer-events: none;
+}
+
+/* Show full title on hover */
+.milestoneLine:hover .milestoneTitle {
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .tooltip {

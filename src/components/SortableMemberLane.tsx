@@ -7,11 +7,13 @@ interface SortableMemberLaneProps {
   member: TeamMember;
   height: number;
   isLocked?: boolean; // When true, disable sorting and add project
+  isCollapsed?: boolean; // When true, lane is collapsed to minimal height
+  onToggleCollapse?: () => void;
   onEdit: () => void;
   onAddProject: () => void;
 }
 
-export function SortableMemberLane({ member, height, isLocked = false, onEdit, onAddProject }: SortableMemberLaneProps) {
+export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
   const {
     attributes,
     listeners,
@@ -36,9 +38,27 @@ export function SortableMemberLane({ member, height, isLocked = false, onEdit, o
     <div
       ref={setNodeRef}
       style={style}
-      className={`${styles.memberLane} ${isDragging ? styles.dragging : ''}`}
+      className={`${styles.memberLane} ${isDragging ? styles.dragging : ''} ${isCollapsed ? styles.collapsed : ''}`}
     >
       <div className={styles.memberLaneContent}>
+        {/* Collapse toggle button */}
+        {onToggleCollapse && (
+          <button
+            className={styles.collapseBtn}
+            onClick={onToggleCollapse}
+            title={isCollapsed ? 'Expand lane' : 'Collapse lane'}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              {isCollapsed ? (
+                // Chevron right (expand)
+                <path d="M4 2L8 6L4 10" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              ) : (
+                // Chevron down (collapse)
+                <path d="M2 4L6 8L10 4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              )}
+            </svg>
+          </button>
+        )}
         {!isLocked && (
           <div
             className={styles.dragHandle}
@@ -57,16 +77,18 @@ export function SortableMemberLane({ member, height, isLocked = false, onEdit, o
         )}
         <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
           <span className={styles.memberName}>{member.name}</span>
-          <span className={styles.memberTitle}>{member.jobTitle}</span>
+          {!isCollapsed && <span className={styles.memberTitle}>{member.jobTitle}</span>}
         </div>
       </div>
-      <button
-        className={styles.addProjectBtn}
-        onClick={onAddProject}
-        disabled={isLocked}
-      >
-        + Add Project
-      </button>
+      {!isCollapsed && (
+        <button
+          className={styles.addProjectBtn}
+          onClick={onAddProject}
+          disabled={isLocked}
+        >
+          + Add Project
+        </button>
+      )}
     </div>
   );
 }
