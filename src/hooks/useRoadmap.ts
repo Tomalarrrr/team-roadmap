@@ -354,7 +354,8 @@ export function useRoadmap() {
     const newMilestone: Milestone = { ...milestone, id: uuidv4() };
     const newProjects = currentData.projects.map(p => {
       if (p.id === projectId) {
-        return { ...p, milestones: [...p.milestones, newMilestone] };
+        // Guard against undefined milestones array
+        return { ...p, milestones: [...(p.milestones || []), newMilestone] };
       }
       return p;
     });

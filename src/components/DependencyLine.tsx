@@ -165,9 +165,12 @@ function areDependencyPropsEqual(
     return false;
   }
 
-  // Check lane positions (layout changed)
+  // Check layout-affecting props
   if (prevProps.lanePositions !== nextProps.lanePositions ||
-      prevProps.projectStacks !== nextProps.projectStacks) {
+      prevProps.projectStacks !== nextProps.projectStacks ||
+      prevProps.laneStackHeights !== nextProps.laneStackHeights ||
+      prevProps.ownerToLaneIndex !== nextProps.ownerToLaneIndex ||
+      prevProps.timelineStart?.getTime() !== nextProps.timelineStart?.getTime()) {
     return false;
   }
 
