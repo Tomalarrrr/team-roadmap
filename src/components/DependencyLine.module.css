@@ -192,13 +192,13 @@
 }
 
 .removeBtn {
-  background: #ef4444;
+  background: var(--error-red);
   border: none;
   color: white;
 }
 
 .removeBtn:hover {
-  background: #dc2626;
+  background: var(--error-red-dark);
 }
 
 /* Entrance animation for newly created dependencies */

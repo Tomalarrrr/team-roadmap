@@ -140,6 +140,13 @@ export function useRoadmap() {
       } else {
         unsub(); // Component unmounted, clean up immediately
       }
+    }).catch((error) => {
+      // Handle subscription failures gracefully
+      if (mounted) {
+        console.error('[useRoadmap] Failed to subscribe to roadmap:', error);
+        setSaveError('Connection failed. Please refresh the page.');
+        setLoading(false);
+      }
     });
 
     // Monitor connection state with debouncing to prevent flapping
@@ -168,6 +175,9 @@ export function useRoadmap() {
       } else {
         unsub();
       }
+    }).catch((error) => {
+      // Connection monitoring is non-critical, just log
+      console.warn('[useRoadmap] Failed to monitor connection state:', error);
     });
 
     return () => {
@@ -375,13 +385,15 @@ export function useRoadmap() {
     if (projectIndex === -1) return;
 
     const project = currentData.projects[projectIndex];
-    const milestoneIndex = project.milestones.findIndex(m => m.id === milestoneId);
+    // Guard against undefined milestones array
+    const milestones = project.milestones || [];
+    const milestoneIndex = milestones.findIndex(m => m.id === milestoneId);
     if (milestoneIndex === -1) return;
 
-    const updatedMilestone = { ...project.milestones[milestoneIndex], ...updates };
+    const updatedMilestone = { ...milestones[milestoneIndex], ...updates };
 
     // Optimistic update
-    const newMilestones = [...project.milestones];
+    const newMilestones = [...milestones];
     newMilestones[milestoneIndex] = updatedMilestone;
     const newProjects = [...currentData.projects];
     newProjects[projectIndex] = { ...project, milestones: newMilestones };
@@ -412,7 +424,8 @@ export function useRoadmap() {
     const currentData = dataRef.current;
     const newProjects = currentData.projects.map(p => {
       if (p.id === projectId) {
-        return { ...p, milestones: p.milestones.filter(m => m.id !== milestoneId) };
+        // Guard against undefined milestones array
+        return { ...p, milestones: (p.milestones || []).filter(m => m.id !== milestoneId) };
       }
       return p;
     });

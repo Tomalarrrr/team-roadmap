@@ -213,7 +213,7 @@ export const SearchFilter = memo(function SearchFilter({
         <kbd className={styles.shortcut}>
           <span>{modifierKey}</span>K
         </kbd>
-        {hasActiveFilters && <span className={styles.filterBadge}>{filters.owners.length + filters.tags.length + (filters.status !== 'all' ? 1 : 0)}</span>}
+        {hasActiveFilters && <span className={styles.filterBadge}>{filters.owners.length + filters.tags.length + (filters.status !== 'all' ? 1 : 0) + (filters.dateRange ? 1 : 0)}</span>}
       </button>
 
       {/* Modal */}
@@ -248,7 +248,7 @@ export const SearchFilter = memo(function SearchFilter({
             </div>
 
             {/* Search results */}
-            {searchResults.length > 0 && (
+            {searchResults.length > 0 ? (
               <div className={styles.results}>
                 {!filters.search.trim() && recentProjects.length > 0 && (
                   <div className={styles.resultCount}>Recent</div>
@@ -277,7 +277,12 @@ export const SearchFilter = memo(function SearchFilter({
                   </button>
                 ))}
               </div>
-            )}
+            ) : filters.search.trim() ? (
+              <div className={styles.emptyResults}>
+                <span className={styles.emptyIcon}>🔍</span>
+                <span>No projects found for "{filters.search}"</span>
+              </div>
+            ) : null}
 
             {/* Filters */}
             <div className={styles.filters}>

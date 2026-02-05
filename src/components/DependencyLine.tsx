@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Project, Milestone, Waypoint } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
@@ -133,7 +133,73 @@ function pixelsToDays(
   });
 }
 
-export function DependencyLine({
+// Custom comparison for memo to optimize hover performance
+// Only re-render if non-hover props change, OR if this line is directly involved in hover
+function areDependencyPropsEqual(
+  prevProps: DependencyLineProps,
+  nextProps: DependencyLineProps
+): boolean {
+  // If core data changed, must re-render
+  if (prevProps.fromProject.id !== nextProps.fromProject.id ||
+      prevProps.toProject.id !== nextProps.toProject.id ||
+      prevProps.fromProject.startDate !== nextProps.fromProject.startDate ||
+      prevProps.fromProject.endDate !== nextProps.fromProject.endDate ||
+      prevProps.toProject.startDate !== nextProps.toProject.startDate ||
+      prevProps.toProject.endDate !== nextProps.toProject.endDate ||
+      prevProps.fromMilestoneId !== nextProps.fromMilestoneId ||
+      prevProps.toMilestoneId !== nextProps.toMilestoneId ||
+      prevProps.dayWidth !== nextProps.dayWidth ||
+      prevProps.lineIndex !== nextProps.lineIndex ||
+      prevProps.isNew !== nextProps.isNew) {
+    return false;
+  }
+
+  // Check if milestones arrays changed (affects positioning)
+  const prevFromMilestones = prevProps.fromProject.milestones || [];
+  const nextFromMilestones = nextProps.fromProject.milestones || [];
+  const prevToMilestones = prevProps.toProject.milestones || [];
+  const nextToMilestones = nextProps.toProject.milestones || [];
+
+  if (prevFromMilestones.length !== nextFromMilestones.length ||
+      prevToMilestones.length !== nextToMilestones.length) {
+    return false;
+  }
+
+  // Check lane positions (layout changed)
+  if (prevProps.lanePositions !== nextProps.lanePositions ||
+      prevProps.projectStacks !== nextProps.projectStacks) {
+    return false;
+  }
+
+  // For hover state: only re-render if THIS dependency is involved
+  const prevIsConnected = prevProps.hoveredItemId && (
+    prevProps.hoveredItemId.projectId === prevProps.fromProject.id ||
+    prevProps.hoveredItemId.projectId === prevProps.toProject.id
+  );
+  const nextIsConnected = nextProps.hoveredItemId && (
+    nextProps.hoveredItemId.projectId === nextProps.fromProject.id ||
+    nextProps.hoveredItemId.projectId === nextProps.toProject.id
+  );
+
+  // If connection status changed for THIS line, re-render
+  if (prevIsConnected !== nextIsConnected) {
+    return false;
+  }
+
+  // If global hover state changed (dimming), re-render
+  if (prevProps.isAnyHovered !== nextProps.isAnyHovered) {
+    return false;
+  }
+
+  // Waypoints changed
+  if (prevProps.waypoints?.length !== nextProps.waypoints?.length) {
+    return false;
+  }
+
+  return true;
+}
+
+export const DependencyLine = memo(function DependencyLine({
   fromProject,
   toProject,
   fromMilestoneId,
@@ -771,4 +837,4 @@ export function DependencyLine({
       )}
     </g>
   );
-}
+}, areDependencyPropsEqual);

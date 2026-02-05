@@ -79,6 +79,9 @@ export function LeaveBlock({
       onClick={handleClick}
       onContextMenu={handleContextMenu}
       title="Annual Leave"
+      role="button"
+      aria-label={`Annual leave: ${leave.startDate} to ${leave.endDate}`}
+      tabIndex={isLocked ? -1 : 0}
     >
       {!isLocked && (
         <button

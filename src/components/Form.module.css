@@ -150,12 +150,12 @@
 }
 
 .error {
-  color: #dc2626;
+  color: var(--error-red-dark);
   font-size: 0.8rem;
   padding: 10px 12px;
-  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  background: var(--error-red-light);
   border-radius: 8px;
-  border: 1px solid #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.25);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -340,13 +340,13 @@
 }
 
 .deleteBtn:hover {
-  color: #dc2626;
-  background: #fef2f2;
+  color: var(--error-red-dark);
+  background: var(--error-red-light);
 }
 
 .deleteBtn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px #dc2626;
+  box-shadow: 0 0 0 2px var(--error-red-dark);
 }
 
 .deleteBtn:active {
@@ -443,13 +443,13 @@
    ======================================== */
 
 .inputError {
-  border-color: #dc2626;
+  border-color: var(--error-red-dark);
   animation: shake 0.4s ease;
 }
 
 .inputError:focus {
-  border-color: #dc2626;
-  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
+  border-color: var(--error-red-dark);
+  box-shadow: 0 0 0 3px var(--error-red-light);
 }
 
 @keyframes shake {
@@ -459,7 +459,7 @@
 }
 
 .fieldError {
-  color: #dc2626;
+  color: var(--error-red-dark);
   font-size: 0.75rem;
   margin-top: 2px;
   display: flex;
@@ -490,9 +490,9 @@
 
 .deleteConfirm {
   padding: 16px;
-  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  background: var(--error-red-light);
   border-radius: 12px;
-  border: 1px solid #fecaca;
+  border: 1px solid rgba(239, 68, 68, 0.25);
   animation: slideDown 0.2s ease;
 }
 
@@ -509,7 +509,7 @@
 
 .deleteConfirm p {
   margin: 0 0 14px 0;
-  color: #991b1b;
+  color: var(--error-red-dark);
   font-size: 0.9rem;
   font-weight: 500;
 }
@@ -526,7 +526,7 @@
   font-size: 0.85rem;
   font-weight: 600;
   color: white;
-  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  background: linear-gradient(135deg, var(--error-red) 0%, var(--error-red-dark) 100%);
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -540,7 +540,7 @@
 
 .deleteConfirmBtn:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px white, 0 0 0 4px #ef4444;
+  box-shadow: 0 0 0 2px white, 0 0 0 4px var(--error-red);
 }
 
 .deleteConfirmBtn:active {
@@ -675,8 +675,8 @@
 }
 
 .milestoneDeleteBtn:hover {
-  color: #dc2626;
-  background: #fef2f2;
+  color: var(--error-red-dark);
+  background: var(--error-red-light);
 }
 
 .addMilestoneBtn {

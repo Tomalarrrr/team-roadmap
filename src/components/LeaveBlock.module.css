@@ -51,6 +51,6 @@
 }
 
 .deleteBtn:hover {
-  background: var(--accent-red-light);
-  color: var(--accent-red);
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--error-red);
 }

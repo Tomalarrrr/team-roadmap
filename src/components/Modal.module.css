@@ -97,10 +97,7 @@
   padding: 24px;
   overflow-y: auto;
   flex: 1;
-}
-
-/* Smooth scroll behavior */
-.content {
+  /* Smooth scroll behavior */
   scroll-behavior: smooth;
   scrollbar-width: thin;
   scrollbar-color: var(--border-medium) transparent;

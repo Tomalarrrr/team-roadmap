@@ -21,8 +21,8 @@
 }
 
 .error {
-  color: var(--status-red);
-  background: rgba(255, 1, 0, 0.1);
+  color: var(--error-red);
+  background: rgba(239, 68, 68, 0.1);
 }
 
 .icon {
@@ -31,7 +31,7 @@
 
 .checkIcon {
   font-size: 0.7rem;
-  color: #22c55e;
+  color: var(--success-green);
 }
 
 .spinner {
@@ -58,12 +58,12 @@
 }
 
 .connectionDot.online {
-  background-color: #22c55e;
+  background-color: var(--success-green);
   box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
 }
 
 .connectionDot.offline {
-  background-color: #ef4444;
+  background-color: var(--error-red);
   animation: pulse 1.5s ease-in-out infinite;
 }
 

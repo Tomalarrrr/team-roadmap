@@ -62,6 +62,7 @@ export function PeriodMarker({
         backgroundSize: '6px 6px'
       }}
       title={marker.label || `Period marker (${marker.color})`}
+      aria-label={marker.label || `${marker.color} period marker: ${marker.startDate} to ${marker.endDate}`}
     >
       {!isLocked && onDelete && (
         <button

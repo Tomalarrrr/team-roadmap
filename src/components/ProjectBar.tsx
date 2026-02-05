@@ -336,6 +336,10 @@ export function ProjectBar({
       // Use requestAnimationFrame to throttle updates to screen refresh rate
       // This prevents excessive re-renders and improves performance dramatically
       rafIdRef.current = requestAnimationFrame(() => {
+        // CRITICAL: Check if component is still mounted before state updates
+        // This prevents "Can't perform state update on unmounted component" errors
+        if (!isMountedRef.current) return;
+
         try {
           // Safety check: ensure we have valid original dates before proceeding
           if (!originalStartDate || !originalEndDate) {

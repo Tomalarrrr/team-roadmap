@@ -55,11 +55,11 @@
 }
 
 .menuItem.danger {
-  color: #ef4444;
+  color: var(--error-red);
 }
 
 .menuItem.danger:hover:not(:disabled) {
-  background: #fef2f2;
+  background: var(--error-red-light);
 }
 
 .icon {
