@@ -884,12 +884,29 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     ? lanePositions[lanePositions.length - 1] + laneHeights[laneHeights.length - 1]
     : 0;
 
+  // Create owner name to member ID lookup for collapsed lane checks
+  const ownerNameToMemberId = useMemo(() => {
+    const map = new Map<string, string>();
+    displayedTeamMembers.forEach(member => {
+      map.set(member.name, member.id);
+    });
+    return map;
+  }, [displayedTeamMembers]);
+
   // Memoize dependency lines to prevent recalculation on every render
   const dependencyElements = useMemo(() => {
     return dependencies.map((dep, index) => {
       const fromProject = projectsById.get(dep.fromProjectId);
       const toProject = projectsById.get(dep.toProjectId);
       if (!fromProject || !toProject) return null;
+
+      // Hide dependencies when either project's lane is collapsed
+      const fromMemberId = ownerNameToMemberId.get(fromProject.owner);
+      const toMemberId = ownerNameToMemberId.get(toProject.owner);
+      if ((fromMemberId && collapsedLanes.has(fromMemberId)) ||
+          (toMemberId && collapsedLanes.has(toMemberId))) {
+        return null;
+      }
 
       return (
         <DependencyLine
@@ -915,7 +932,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         />
       );
     });
-  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds]);
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds, ownerNameToMemberId, collapsedLanes]);
 
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>
