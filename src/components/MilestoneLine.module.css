@@ -4,7 +4,10 @@
   height: 20px;
   border-radius: 8px;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  /* Snappy transitions using GPU-accelerated transforms */
+  transition: transform 100ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)),
+              box-shadow 150ms ease,
+              filter 150ms ease;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.8);
   display: flex;
@@ -14,15 +17,22 @@
   /* Explicit z-index and pointer-events to ensure proper layering */
   z-index: 10;
   pointer-events: auto;
-  /* Prevent subpixel rendering issues */
+  /* Force GPU layer for smooth animations */
+  transform: translateZ(0);
   backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 .milestoneLine:hover {
-  transform: scale(1.02);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  transform: scale(1.03) translateZ(0);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
   filter: brightness(1.08);
   z-index: 20;
+}
+
+.milestoneLine:active:not(.dragging) {
+  transform: scale(0.98) translateZ(0);
+  transition-duration: 50ms;
 }
 
 .milestoneLine.dragging {
@@ -64,6 +74,22 @@
 @keyframes milestoneSourceGlow {
   0%, 100% { box-shadow: 0 0 0 2px var(--accent-blue), 0 2px 6px rgba(0, 0, 0, 0.25); }
   50% { box-shadow: 0 0 0 3px var(--accent-blue-light), 0 2px 6px rgba(0, 0, 0, 0.25); }
+}
+
+/* Entrance animation for newly created milestones */
+.milestoneLine.isNew {
+  animation: milestoneEnter 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes milestoneEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .resizeHandle {

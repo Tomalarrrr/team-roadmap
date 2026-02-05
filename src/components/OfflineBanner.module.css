@@ -1,0 +1,108 @@
+.banner {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  padding: 10px 16px;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-lg);
+  animation: slideUp 0.3s var(--ease-out-expo);
+}
+
+.content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.message {
+  font-size: 0.85rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Offline state - amber/warning color */
+.offline {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #f59e0b;
+  color: #92400e;
+}
+
+.offline .icon {
+  color: #d97706;
+}
+
+/* Syncing state - blue */
+.syncing {
+  background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+  border: 1px solid var(--accent-blue);
+  color: var(--accent-blue-dark);
+}
+
+.syncing .icon {
+  color: var(--accent-blue);
+}
+
+/* Synced state - green */
+.synced {
+  background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+  border: 1px solid var(--success-green);
+  color: #166534;
+}
+
+.synced .icon {
+  color: var(--success-green);
+}
+
+/* Spinning animation for sync icon */
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .banner {
+    animation: none;
+  }
+
+  .spinning {
+    animation: none;
+  }
+}
+
+/* Mobile positioning */
+@media (max-width: 480px) {
+  .banner {
+    left: 16px;
+    right: 16px;
+    transform: none;
+    bottom: 16px;
+  }
+}

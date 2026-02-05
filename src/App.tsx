@@ -4,16 +4,20 @@ import { useUndoManager, createInverse } from './hooks/useUndoManager';
 import { useClipboard } from './hooks/useClipboard';
 import { useToast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
-import { Timeline } from './components/Timeline';
+import { Timeline, type TimelineRef } from './components/Timeline';
 import { Modal } from './components/Modal';
 import { ProjectForm } from './components/ProjectForm';
 import { MilestoneForm } from './components/MilestoneForm';
 import { TeamMemberForm } from './components/TeamMemberForm';
-import type { Project, Milestone, TeamMember, Dependency } from './types';
+import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage } from './types';
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates } from './utils/dateUtils';
+import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
+import { OfflineBanner } from './components/OfflineBanner';
+import { usePresence } from './hooks/usePresence';
+import { ShortcutsModal } from './components/ShortcutsModal';
 import styles from './App.module.css';
 
 // Sanitize error messages to prevent XSS
@@ -31,14 +35,30 @@ type ModalType =
   | null;
 
 // Generate a simple user ID for this session (in production, use auth)
-const getUserId = () => {
+const getSessionInfo = () => {
   let userId = sessionStorage.getItem('roadmap-user-id');
+  let userName = sessionStorage.getItem('roadmap-user-name');
+
   if (!userId) {
     userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
     sessionStorage.setItem('roadmap-user-id', userId);
   }
-  return userId;
+
+  if (!userName) {
+    // Generate anonymous user name
+    const adjectives = ['Swift', 'Bright', 'Calm', 'Bold', 'Keen', 'Wise', 'Quick', 'Sharp'];
+    const nouns = ['Planner', 'Builder', 'Mapper', 'Maker', 'Viewer', 'Editor', 'Designer', 'Thinker'];
+    const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
+    const noun = nouns[Math.floor(Math.random() * nouns.length)];
+    userName = `${adj} ${noun}`;
+    sessionStorage.setItem('roadmap-user-name', userName);
+  }
+
+  return { userId, userName };
 };
+
+// Get session info once at module load
+const sessionInfo = getSessionInfo();
 
 function App() {
   const { showToast } = useToast();
@@ -47,6 +67,10 @@ function App() {
     loading,
     saveError,
     isOnline,
+    isSaving,
+    lastSaved,
+    newMilestoneIds,
+    newDependencyIds,
     clearError,
     addTeamMember,
     updateTeamMember,
@@ -60,20 +84,125 @@ function App() {
     deleteMilestone,
     addDependency,
     removeDependency,
-    updateDependency
+    updateDependency,
+    addLeaveBlock,
+    deleteLeaveBlock,
+    addPeriodMarker,
+    deletePeriodMarker
   } = useRoadmap();
 
-  const [modal, setModal] = useState<ModalType>(null);
-  const [dayWidth, setDayWidth] = useState(3); // Default to month view (3 px/day)
-  const [filters, setFilters] = useState<FilterState>({
-    search: '',
-    owners: [],
-    tags: [],
-    dateRange: null,
-    status: 'all'
+  // Real-time presence for collaboration
+  const { users: presenceUsers } = usePresence({
+    sessionId: sessionInfo.userId,
+    userName: sessionInfo.userName,
+    enabled: isOnline
   });
+
+  const [modal, setModal] = useState<ModalType>(null);
+  // Zoom level persistence - load from localStorage
+  const [dayWidth, setDayWidth] = useState(() => {
+    try {
+      const stored = localStorage.getItem('roadmap-zoom');
+      if (stored) {
+        const parsed = parseFloat(stored);
+        if (!isNaN(parsed) && parsed >= 0.5 && parsed <= 12) {
+          return parsed;
+        }
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    return 3; // Default to month view (3 px/day)
+  });
+
+  // Save zoom level to localStorage when it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('roadmap-zoom', String(dayWidth));
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, [dayWidth]);
+
+  // Ref for Timeline to call scrollToToday
+  const timelineRef = useRef<TimelineRef>(null);
+  // Filter persistence - load from localStorage
+  const [filters, setFilters] = useState<FilterState>(() => {
+    try {
+      const stored = localStorage.getItem('roadmap-filters');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        // Validate structure and return, but always clear search on fresh load
+        if (parsed && typeof parsed === 'object') {
+          return {
+            search: '', // Always start with empty search
+            owners: Array.isArray(parsed.owners) ? parsed.owners : [],
+            tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+            dateRange: parsed.dateRange || null,
+            status: parsed.status || 'all'
+          };
+        }
+      }
+    } catch {
+      // Ignore localStorage errors
+    }
+    return {
+      search: '',
+      owners: [],
+      tags: [],
+      dateRange: null,
+      status: 'all'
+    };
+  });
+
+  // Save filters to localStorage when they change (debounced, excluding search)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        // Don't persist search text, only the filter selections
+        const toStore = {
+          owners: filters.owners,
+          tags: filters.tags,
+          dateRange: filters.dateRange,
+          status: filters.status
+        };
+        localStorage.setItem('roadmap-filters', JSON.stringify(toStore));
+      } catch {
+        // Ignore localStorage errors
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [filters.owners, filters.tags, filters.dateRange, filters.status]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showFullscreenHint, setShowFullscreenHint] = useState(false);
+  const [hoveredMember, setHoveredMember] = useState<string | null>(null);
+
+  // View mode lock - persisted in localStorage (defaults to locked for new users)
+  const [isLocked, setIsLocked] = useState(() => {
+    try {
+      const stored = localStorage.getItem('roadmap-view-lock');
+      // Default to locked (true) if no preference saved yet
+      return stored === null ? true : stored === 'true';
+    } catch {
+      return true; // Default to locked on error
+    }
+  });
+
+  // Persist lock state to localStorage
+  const handleToggleLock = useCallback(() => {
+    setIsLocked(prev => {
+      const newValue = !prev;
+      try {
+        localStorage.setItem('roadmap-view-lock', String(newValue));
+      } catch {
+        // Ignore localStorage errors
+      }
+      return newValue;
+    });
+  }, []);
 
   // Show save errors as toasts
   useEffect(() => {
@@ -84,14 +213,13 @@ function App() {
   }, [saveError, showToast, clearError]);
 
   // Undo manager
-  const userId = useMemo(() => getUserId(), []);
   const {
     recordAction,
     undo,
     redo,
     canUndo,
     canRedo
-  } = useUndoManager({ userId });
+  } = useUndoManager({ userId: sessionInfo.userId });
 
   // Handle paste from clipboard
   const handlePasteProject = useCallback(async (project: Omit<Project, 'id'>) => {
@@ -204,6 +332,16 @@ function App() {
       clearTimeout(selectionTimeoutRef.current);
     }
     setSelectedProjectId(projectId);
+
+    // Update URL hash for deep linking (shareable link)
+    try {
+      const url = new URL(window.location.href);
+      url.hash = `project=${projectId}`;
+      window.history.replaceState({}, '', url.toString());
+    } catch {
+      // Ignore URL errors
+    }
+
     // The Timeline component will handle scrolling
     selectionTimeoutRef.current = setTimeout(() => setSelectedProjectId(null), 2000);
   }, []);
@@ -216,6 +354,27 @@ function App() {
       }
     };
   }, []);
+
+  // URL Deep Linking - scroll to project from URL hash on initial load
+  const hasHandledDeepLink = useRef(false);
+  useEffect(() => {
+    if (loading || hasHandledDeepLink.current || data.projects.length === 0) return;
+
+    try {
+      const hash = window.location.hash;
+      if (hash.startsWith('#project=')) {
+        const projectId = hash.replace('#project=', '');
+        const project = data.projects.find(p => p.id === projectId);
+        if (project) {
+          hasHandledDeepLink.current = true;
+          // Use setTimeout to ensure Timeline is rendered
+          setTimeout(() => handleProjectSelect(projectId), 100);
+        }
+      }
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }, [loading, data.projects, handleProjectSelect]);
 
   // Handle undo
   const handleUndo = useCallback(() => {
@@ -295,20 +454,188 @@ function App() {
     }
   }, [redo, addProject, deleteProject, updateProject]);
 
-  // Keyboard shortcuts for undo/redo
+  // Keyboard shortcuts for undo/redo, shortcuts modal, and fullscreen
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // F11 or Cmd/Ctrl+Shift+F to toggle fullscreen
+      if (e.key === 'F11' || (hasModifierKey(e) && e.shiftKey && e.key.toLowerCase() === 'f')) {
+        e.preventDefault();
+        setIsFullscreen(prev => {
+          const newValue = !prev;
+          if (newValue) {
+            setShowFullscreenHint(true);
+            setTimeout(() => setShowFullscreenHint(false), 3000);
+          }
+          return newValue;
+        });
+        return;
+      }
+
+      // Escape to exit fullscreen or deselect (always handle, even in inputs)
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (isFullscreen) {
+          setIsFullscreen(false);
+        } else if (selectedProjectId) {
+          // Clear selection
+          setSelectedProjectId(null);
+          // Also clear URL hash
+          try {
+            const url = new URL(window.location.href);
+            url.hash = '';
+            window.history.replaceState({}, '', url.toString());
+          } catch {
+            // Ignore URL errors
+          }
+        }
+        return;
+      }
+
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
 
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const modifier = isMac ? e.metaKey : e.ctrlKey;
+      // Show shortcuts modal with '?'
+      if (e.key === '?' && !hasModifierKey(e)) {
+        e.preventDefault();
+        setShowShortcuts(prev => !prev);
+        return;
+      }
 
-      if (modifier && e.key === 'z' && !e.shiftKey) {
+      // T key to jump to today
+      if (e.key.toLowerCase() === 't' && !hasModifierKey(e)) {
+        e.preventDefault();
+        timelineRef.current?.scrollToToday();
+        return;
+      }
+
+      // Quick create project with N when hovering a lane
+      if (e.key.toLowerCase() === 'n' && !hasModifierKey(e) && hoveredMember && !isLocked) {
+        e.preventDefault();
+        const ownerProjects = data.projects.filter(p => p.owner === hoveredMember);
+        const { suggestedStart, suggestedEnd } = getSuggestedProjectDates(ownerProjects);
+        setModal({ type: 'add-project', ownerName: hoveredMember, suggestedStart, suggestedEnd });
+        return;
+      }
+
+      // Duplicate selected project with Cmd+D
+      if (hasModifierKey(e) && e.key.toLowerCase() === 'd' && selectedProjectId && !isLocked) {
+        e.preventDefault();
+        const project = data.projects.find(p => p.id === selectedProjectId);
+        if (project) {
+          // Duplicate with 1 week offset
+          const startDate = new Date(project.startDate);
+          const endDate = new Date(project.endDate);
+          startDate.setDate(startDate.getDate() + 7);
+          endDate.setDate(endDate.getDate() + 7);
+          addProject({
+            title: `${project.title} (copy)`,
+            owner: project.owner,
+            startDate: startDate.toISOString().split('T')[0],
+            endDate: endDate.toISOString().split('T')[0],
+            statusColor: project.statusColor
+          });
+          showToast('Project duplicated', 'success');
+        }
+        return;
+      }
+
+      // [ and ] to shift selected project dates by 1 week
+      if ((e.key === '[' || e.key === ']') && selectedProjectId && !isLocked) {
+        e.preventDefault();
+        const project = data.projects.find(p => p.id === selectedProjectId);
+        if (project) {
+          const shift = e.key === ']' ? 7 : -7;
+          const startDate = new Date(project.startDate);
+          const endDate = new Date(project.endDate);
+          startDate.setDate(startDate.getDate() + shift);
+          endDate.setDate(endDate.getDate() + shift);
+          updateProject(project.id, {
+            startDate: startDate.toISOString().split('T')[0],
+            endDate: endDate.toISOString().split('T')[0]
+          });
+        }
+        return;
+      }
+
+      // Arrow keys to navigate between projects
+      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key) && !hasModifierKey(e)) {
+        e.preventDefault();
+
+        // Get team member order for lane navigation
+        const memberOrder = data.teamMembers.map(m => m.name);
+
+        // Sort all visible projects by owner (lane) then by start date
+        const sortedProjects = [...filteredProjects].sort((a, b) => {
+          const aLaneIdx = memberOrder.indexOf(a.owner);
+          const bLaneIdx = memberOrder.indexOf(b.owner);
+          if (aLaneIdx !== bLaneIdx) return aLaneIdx - bLaneIdx;
+          return new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
+        });
+
+        if (sortedProjects.length === 0) return;
+
+        // If no project selected, select the first one
+        if (!selectedProjectId) {
+          handleProjectSelect(sortedProjects[0].id);
+          return;
+        }
+
+        const currentProject = sortedProjects.find(p => p.id === selectedProjectId);
+        if (!currentProject) {
+          handleProjectSelect(sortedProjects[0].id);
+          return;
+        }
+
+        const currentLaneIdx = memberOrder.indexOf(currentProject.owner);
+        const projectsInCurrentLane = sortedProjects.filter(p => p.owner === currentProject.owner);
+        const currentIdxInLane = projectsInCurrentLane.findIndex(p => p.id === selectedProjectId);
+
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          // Navigate within same lane by date
+          const direction = e.key === 'ArrowRight' ? 1 : -1;
+          const newIdxInLane = currentIdxInLane + direction;
+
+          if (newIdxInLane >= 0 && newIdxInLane < projectsInCurrentLane.length) {
+            handleProjectSelect(projectsInCurrentLane[newIdxInLane].id);
+          }
+        } else {
+          // ArrowUp/ArrowDown - navigate between lanes
+          const direction = e.key === 'ArrowDown' ? 1 : -1;
+          let newLaneIdx = currentLaneIdx + direction;
+
+          // Find next lane with projects
+          while (newLaneIdx >= 0 && newLaneIdx < memberOrder.length) {
+            const newOwner = memberOrder[newLaneIdx];
+            const projectsInNewLane = sortedProjects.filter(p => p.owner === newOwner);
+
+            if (projectsInNewLane.length > 0) {
+              // Select the project closest to the current one's start date
+              const currentStartTime = new Date(currentProject.startDate).getTime();
+              let closestProject = projectsInNewLane[0];
+              let closestDiff = Math.abs(new Date(closestProject.startDate).getTime() - currentStartTime);
+
+              for (const p of projectsInNewLane) {
+                const diff = Math.abs(new Date(p.startDate).getTime() - currentStartTime);
+                if (diff < closestDiff) {
+                  closestDiff = diff;
+                  closestProject = p;
+                }
+              }
+
+              handleProjectSelect(closestProject.id);
+              break;
+            }
+            newLaneIdx += direction;
+          }
+        }
+        return;
+      }
+
+      if (hasModifierKey(e) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
-      } else if (modifier && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
+      } else if (hasModifierKey(e) && ((e.key === 'z' && e.shiftKey) || e.key === 'y')) {
         // Support both Cmd+Shift+Z (Mac) and Ctrl+Y (Windows) for redo
         e.preventDefault();
         handleRedo();
@@ -317,7 +644,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, data.projects, data.teamMembers, selectedProjectId, filteredProjects, addProject, updateProject, showToast, handleProjectSelect]);
 
   // Team member handlers
   const handleAddMember = useCallback(
@@ -351,14 +678,18 @@ function App() {
       try {
         const { milestones: newMilestones, ...projectData } = values;
         const newProject = await addProject(projectData);
+        const addedMilestones: Milestone[] = [];
         if (newProject && newMilestones && newMilestones.length > 0) {
           // Add milestones to the newly created project
           for (const milestone of newMilestones) {
-            await addMilestone(newProject.id, milestone);
+            const added = await addMilestone(newProject.id, milestone);
+            if (added) addedMilestones.push(added);
           }
         }
         if (newProject) {
-          recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
+          // Record full project state including milestones for proper undo
+          const fullProject = { ...newProject, milestones: addedMilestones };
+          recordAction('CREATE_PROJECT', fullProject, createInverse('CREATE_PROJECT', null, fullProject));
         }
         showToast('Project created successfully', 'success');
         closeModal();
@@ -430,21 +761,69 @@ function App() {
   const handleAddMilestone = useCallback(
     async (values: Omit<Milestone, 'id'>) => {
       if (modal?.type === 'add-milestone') {
+        const project = modal.project;
+
+        // Check if milestone extends beyond project bounds
+        const milestoneStart = new Date(values.startDate);
+        const milestoneEnd = new Date(values.endDate);
+        const projectStart = new Date(project.startDate);
+        const projectEnd = new Date(project.endDate);
+
+        const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
+
+        // Add the milestone
         await addMilestone(modal.projectId, values);
+
+        // Auto-expand project bounds if milestone extends beyond
+        if (needsExpansion) {
+          const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
+          const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
+
+          await updateProject(modal.projectId, {
+            startDate: newStartDate,
+            endDate: newEndDate
+          });
+          showToast('Project dates expanded to fit milestone', 'info');
+        }
+
         closeModal();
       }
     },
-    [modal, addMilestone, closeModal]
+    [modal, addMilestone, updateProject, closeModal, showToast]
   );
 
   const handleEditMilestone = useCallback(
     async (values: Omit<Milestone, 'id'>) => {
       if (modal?.type === 'edit-milestone') {
+        const project = modal.project;
+
+        // Check if milestone extends beyond project bounds
+        const milestoneStart = new Date(values.startDate);
+        const milestoneEnd = new Date(values.endDate);
+        const projectStart = new Date(project.startDate);
+        const projectEnd = new Date(project.endDate);
+
+        const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
+
+        // Update the milestone
         await updateMilestone(modal.projectId, modal.milestone.id, values);
+
+        // Auto-expand project bounds if milestone extends beyond
+        if (needsExpansion) {
+          const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
+          const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
+
+          await updateProject(modal.projectId, {
+            startDate: newStartDate,
+            endDate: newEndDate
+          });
+          showToast('Project dates expanded to fit milestone', 'info');
+        }
+
         closeModal();
       }
     },
-    [modal, updateMilestone, closeModal]
+    [modal, updateMilestone, updateProject, closeModal, showToast]
   );
 
   // Dependency handlers (persisted to Firebase)
@@ -480,6 +859,55 @@ function App() {
     }
   }, [updateDependency, showToast]);
 
+  // Leave block handlers
+  const handleAddLeaveBlock = useCallback(async (leaveData: {
+    memberId: string;
+    startDate: string;
+    endDate: string;
+    type: LeaveType;
+    coverage: LeaveCoverage;
+    label?: string;
+  }) => {
+    try {
+      await addLeaveBlock(leaveData);
+      showToast('Leave added', 'success');
+    } catch (error) {
+      showToast(`Failed to add leave: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  }, [addLeaveBlock, showToast]);
+
+  const handleDeleteLeaveBlock = useCallback(async (leaveId: string) => {
+    try {
+      await deleteLeaveBlock(leaveId);
+      showToast('Leave removed', 'success');
+    } catch (error) {
+      showToast(`Failed to remove leave: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  }, [deleteLeaveBlock, showToast]);
+
+  const handleAddPeriodMarker = useCallback(async (markerData: {
+    startDate: string;
+    endDate: string;
+    color: 'grey' | 'yellow' | 'orange' | 'red' | 'green';
+    label?: string;
+  }) => {
+    try {
+      await addPeriodMarker(markerData);
+      showToast('Period marker added', 'success');
+    } catch (error) {
+      showToast(`Failed to add marker: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  }, [addPeriodMarker, showToast]);
+
+  const handleDeletePeriodMarker = useCallback(async (markerId: string) => {
+    try {
+      await deletePeriodMarker(markerId);
+      showToast('Marker removed', 'success');
+    } catch (error) {
+      showToast(`Failed to remove marker: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  }, [deletePeriodMarker, showToast]);
+
   const openAddMilestone = useCallback(
     (projectId: string) => {
       const project = data.projects.find((p) => p.id === projectId);
@@ -514,35 +942,64 @@ function App() {
   }
 
   return (
-    <div className={styles.app}>
-      <Toolbar
-        projects={data.projects}
-        teamMembers={data.teamMembers}
-        dependencies={data.dependencies || []}
-        onFilterChange={setFilters}
-        onProjectSelect={handleProjectSelect}
-        canUndo={canUndo}
-        canRedo={canRedo}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        hasClipboard={hasClipboard}
-        onPaste={() => paste()}
-        dayWidth={dayWidth}
-        onDayWidthChange={setDayWidth}
-      />
+    <div className={`${styles.app} ${isFullscreen ? styles.fullscreen : ''}`}>
+      {/* Fullscreen hint */}
+      {showFullscreenHint && (
+        <div className={styles.fullscreenHint}>
+          Press Esc to exit fullscreen
+        </div>
+      )}
+
+      {/* Hide toolbar in fullscreen mode */}
+      {!isFullscreen && (
+        <Toolbar
+          projects={data.projects}
+          teamMembers={data.teamMembers}
+          dependencies={data.dependencies || []}
+          onFilterChange={setFilters}
+          onProjectSelect={handleProjectSelect}
+          canUndo={canUndo}
+          canRedo={canRedo}
+          onUndo={handleUndo}
+          onRedo={handleRedo}
+          hasClipboard={hasClipboard}
+          onPaste={() => paste()}
+          dayWidth={dayWidth}
+          onDayWidthChange={setDayWidth}
+          isSaving={isSaving}
+          lastSaved={lastSaved}
+          saveError={saveError}
+          isOnline={isOnline}
+          isLocked={isLocked}
+          onToggleLock={handleToggleLock}
+          presenceUsers={presenceUsers}
+          currentUserId={sessionInfo.userId}
+        />
+      )}
 
       <main className={styles.main}>
         <Timeline
+          ref={timelineRef}
           projects={filteredProjects}
           teamMembers={data.teamMembers}
           dependencies={data.dependencies || []}
+          leaveBlocks={data.leaveBlocks || []}
           dayWidth={dayWidth}
           selectedProjectId={selectedProjectId}
           filteredOwners={filters.owners.length > 0 ? filters.owners : undefined}
-          onAddProject={(ownerName) => {
-            const ownerProjects = data.projects.filter(p => p.owner === ownerName);
-            const { suggestedStart, suggestedEnd } = getSuggestedProjectDates(ownerProjects);
-            setModal({ type: 'add-project', ownerName, suggestedStart, suggestedEnd });
+          newMilestoneIds={newMilestoneIds}
+          newDependencyIds={newDependencyIds}
+          isLocked={isLocked}
+          isFullscreen={isFullscreen}
+          onAddProject={(ownerName, dragStart, dragEnd) => {
+            // If dates are provided (drag-to-create), use them; otherwise calculate suggestions
+            if (dragStart && dragEnd) {
+              setModal({ type: 'add-project', ownerName, suggestedStart: dragStart, suggestedEnd: dragEnd });
+            } else {
+              const ownerProjects = data.projects.filter(p => p.owner === ownerName);
+              const { suggestedStart, suggestedEnd } = getSuggestedProjectDates(ownerProjects);
+              setModal({ type: 'add-project', ownerName, suggestedStart, suggestedEnd });
+            }
           }}
           onUpdateProject={updateProject}
           onDeleteProject={handleDeleteProject}
@@ -560,6 +1017,13 @@ function App() {
           onAddDependency={handleAddDependency}
           onRemoveDependency={handleRemoveDependency}
           onUpdateDependency={handleUpdateDependency}
+          onAddLeaveBlock={handleAddLeaveBlock}
+          onDeleteLeaveBlock={handleDeleteLeaveBlock}
+          periodMarkers={data.periodMarkers || []}
+          onAddPeriodMarker={handleAddPeriodMarker}
+          onDeletePeriodMarker={handleDeletePeriodMarker}
+          onDayWidthChange={setDayWidth}
+          onHoveredMemberChange={setHoveredMember}
         />
       </main>
 
@@ -610,6 +1074,7 @@ function App() {
               statusColor: modal.project.statusColor
             }}
             initialMilestones={modal.project.milestones}
+            teamMembers={data.teamMembers}
             onSubmit={handleEditProject}
             onCancel={closeModal}
             onDelete={async () => {
@@ -658,12 +1123,11 @@ function App() {
         )}
       </Modal>
 
-      {/* Offline Indicator */}
-      {!isOnline && (
-        <div className={styles.offlineToast}>
-          <span>📡 Offline - Changes will be saved when reconnected</span>
-        </div>
-      )}
+      {/* Offline/Sync Status Banner */}
+      <OfflineBanner isOnline={isOnline} isSyncing={isSaving} />
+
+      {/* Keyboard Shortcuts Modal */}
+      <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
     </div>
   );
 }

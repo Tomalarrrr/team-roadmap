@@ -23,14 +23,25 @@ export function DependencyCreationOverlay({
     }
 
     rafRef.current = requestAnimationFrame(() => {
-      const containerRect = containerRef.current?.getBoundingClientRect();
+      const scrollContainerRect = scrollRef.current?.getBoundingClientRect();
       const scrollLeft = scrollRef.current?.scrollLeft ?? 0;
       const scrollTop = scrollRef.current?.scrollTop ?? 0;
 
-      if (containerRect) {
+      if (scrollContainerRect) {
+        // Use scrollContainerRect as a stable reference that doesn't change when scrolling.
+        // When scrolled, the content moves but scrollContainerRect stays fixed.
+        // Adding scroll values converts viewport coords to content coords.
+
+        // For X: scrollContainerRect.left is stable regardless of horizontal scroll
+        const cursorX = e.clientX - scrollContainerRect.left + scrollLeft;
+
+        // For Y: account for the sticky header (48px) that stays at the top
+        const HEADER_HEIGHT = 48;
+        const cursorY = e.clientY - scrollContainerRect.top - HEADER_HEIGHT + scrollTop;
+
         updateCursorPosition({
-          x: e.clientX - containerRect.left + scrollLeft,
-          y: e.clientY - containerRect.top + scrollTop
+          x: cursorX,
+          y: cursorY
         });
       }
     });
@@ -77,11 +88,10 @@ export function DependencyCreationOverlay({
 
   const { source, cursorPosition } = state;
 
-  // Calculate bezier curve from source to cursor
-  const controlOffset = Math.min(Math.abs(cursorPosition.x - source.position.x) * 0.4, 80);
-  const path = `M ${source.position.x} ${source.position.y} C ${source.position.x + controlOffset} ${source.position.y}, ${cursorPosition.x - controlOffset} ${cursorPosition.y}, ${cursorPosition.x} ${cursorPosition.y}`;
+  // Simple straight line from source to cursor
+  const path = `M ${source.position.x} ${source.position.y} L ${cursorPosition.x} ${cursorPosition.y}`;
 
-  // Arrow head at cursor position
+  // Arrow head pointing in the direction of travel
   const angle = Math.atan2(
     cursorPosition.y - source.position.y,
     cursorPosition.x - source.position.x

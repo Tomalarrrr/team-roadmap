@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { Project, TeamMember } from '../types';
+import { STATUS_CONFIG } from '../utils/statusColors';
+import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
 
 interface SearchFilterProps {
@@ -19,15 +21,8 @@ export interface FilterState {
   status: 'all' | ProjectStatus;
 }
 
-// Status color mapping for visual indicators
-export const STATUS_CONFIG: Record<ProjectStatus, { label: string; color: string }> = {
-  'complete': { label: 'Complete', color: '#0070c0' },      // Blue
-  'on-hold': { label: 'On Hold', color: '#7612c3' },        // Purple
-  'to-start': { label: 'To Start', color: '#9ca3af' },      // Gray
-  'on-track': { label: 'On Track', color: '#04b050' },      // Green
-  'at-risk': { label: 'At Risk', color: '#ffc002' },        // Amber
-  'off-track': { label: 'Off Track', color: '#ff0100' },    // Red
-};
+// Re-export STATUS_CONFIG for consumers that import from here
+export { STATUS_CONFIG };
 
 const INITIAL_FILTERS: FilterState = {
   search: '',
@@ -36,6 +31,37 @@ const INITIAL_FILTERS: FilterState = {
   dateRange: null,
   status: 'all'
 };
+
+// Recent projects storage key
+const RECENT_PROJECTS_KEY = 'roadmap-recent-projects';
+const MAX_RECENT = 3;
+
+// Load recent project IDs from localStorage
+function loadRecentProjectIds(): string[] {
+  try {
+    const stored = localStorage.getItem(RECENT_PROJECTS_KEY);
+    if (stored) {
+      const ids = JSON.parse(stored);
+      if (Array.isArray(ids)) return ids.slice(0, MAX_RECENT);
+    }
+  } catch {
+    // Ignore errors
+  }
+  return [];
+}
+
+// Save recent project ID to localStorage
+function saveRecentProjectId(projectId: string): void {
+  try {
+    const existing = loadRecentProjectIds();
+    // Remove if already exists, then add to front
+    const filtered = existing.filter(id => id !== projectId);
+    const updated = [projectId, ...filtered].slice(0, MAX_RECENT);
+    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(updated));
+  } catch {
+    // Ignore errors
+  }
+}
 
 export function SearchFilter({
   projects,
@@ -49,8 +75,16 @@ export function SearchFilter({
   const [totalResultCount, setTotalResultCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAllTags, setShowAllTags] = useState(false);
+  const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Get recent projects from IDs
+  const recentProjects = useMemo(() => {
+    return recentProjectIds
+      .map(id => projects.find(p => p.id === id))
+      .filter((p): p is Project => p !== undefined);
+  }, [recentProjectIds, projects]);
 
   // Extract all unique tags from projects
   const allTags = useMemo(() => {
@@ -63,9 +97,8 @@ export function SearchFilter({
     return Array.from(tags).sort();
   }, [projects]);
 
-  // Detect if running on Mac for keyboard shortcut display
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const modifierKey = isMac ? '⌘' : 'Ctrl';
+  // Get platform-appropriate modifier key symbol
+  const modifierKey = getModifierKeySymbol();
 
   // Keyboard shortcut to open (Cmd+K / Ctrl+K)
   useEffect(() => {
@@ -90,8 +123,10 @@ export function SearchFilter({
   // Search projects
   useEffect(() => {
     if (!filters.search.trim()) {
-      setSearchResults([]);
-      setTotalResultCount(0);
+      // Show recent projects when search is empty
+      setSearchResults(recentProjects);
+      setTotalResultCount(recentProjects.length);
+      setSelectedIndex(0);
       return;
     }
 
@@ -109,7 +144,16 @@ export function SearchFilter({
     setTotalResultCount(results.length);
     setSearchResults(results.slice(0, 8));
     setSelectedIndex(0);
-  }, [filters.search, projects]);
+  }, [filters.search, projects, recentProjects]);
+
+  // Handle selecting a project (saves to recent)
+  const handleSelectProject = useCallback((projectId: string) => {
+    saveRecentProjectId(projectId);
+    setRecentProjectIds(loadRecentProjectIds());
+    onProjectSelect(projectId);
+    setIsOpen(false);
+    setFilters(f => ({ ...f, search: '' }));
+  }, [onProjectSelect]);
 
   // Navigate results with arrow keys
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -121,12 +165,9 @@ export function SearchFilter({
       setSelectedIndex(i => Math.max(i - 1, 0));
     } else if (e.key === 'Enter' && searchResults[selectedIndex]) {
       e.preventDefault();
-      onProjectSelect(searchResults[selectedIndex].id);
-      setIsOpen(false);
-      // Only clear search, preserve other filters
-      setFilters(f => ({ ...f, search: '' }));
+      handleSelectProject(searchResults[selectedIndex].id);
     }
-  }, [searchResults, selectedIndex, onProjectSelect]);
+  }, [searchResults, selectedIndex, handleSelectProject]);
 
   // Apply filters
   useEffect(() => {
@@ -209,7 +250,10 @@ export function SearchFilter({
             {/* Search results */}
             {searchResults.length > 0 && (
               <div className={styles.results}>
-                {totalResultCount > 8 && (
+                {!filters.search.trim() && recentProjects.length > 0 && (
+                  <div className={styles.resultCount}>Recent</div>
+                )}
+                {filters.search.trim() && totalResultCount > 8 && (
                   <div className={styles.resultCount}>
                     Showing 8 of {totalResultCount} results
                   </div>
@@ -218,12 +262,7 @@ export function SearchFilter({
                   <button
                     key={project.id}
                     className={`${styles.resultItem} ${index === selectedIndex ? styles.selected : ''}`}
-                    onClick={() => {
-                      onProjectSelect(project.id);
-                      setIsOpen(false);
-                      // Only clear search, preserve other filters
-                      setFilters(f => ({ ...f, search: '' }));
-                    }}
+                    onClick={() => handleSelectProject(project.id)}
                     onMouseEnter={() => setSelectedIndex(index)}
                   >
                     <div

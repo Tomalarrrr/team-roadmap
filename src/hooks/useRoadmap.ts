@@ -6,13 +6,15 @@ import {
   updateProjectAtPath,
   updateMilestoneAtPath,
   updateDependencyAtPath,
-  updateTeamMemberAtPath
+  updateTeamMemberAtPath,
+  updateLeaveBlockAtPath
 } from '../firebase';
-import type { RoadmapData, Project, Milestone, TeamMember, Dependency } from '../types';
+import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { withRetry } from '../utils/retry';
 import { analytics } from '../utils/analytics';
 import { validateDependency } from '../utils/dependencyUtils';
+import { safeValidateRoadmapData, formatValidationErrors } from '../schemas/roadmap';
 
 // Wrap saveRoadmap with retry logic
 const saveWithRetry = (data: RoadmapData) =>
@@ -27,11 +29,27 @@ const saveWithRetry = (data: RoadmapData) =>
 const DEFAULT_DATA: RoadmapData = {
   projects: [],
   teamMembers: [],
-  dependencies: []
+  dependencies: [],
+  leaveBlocks: [],
+  periodMarkers: []
 };
 
 // Normalize data to ensure all required arrays exist and no undefined values
+// Uses Zod schema validation for data integrity
 function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
+  // Try Zod validation first for better type safety and normalization
+  const result = safeValidateRoadmapData(newData);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  // Log validation errors in development
+  if (import.meta.env.DEV) {
+    console.warn('Data validation warnings:', formatValidationErrors(result.error));
+  }
+
+  // Fall back to manual normalization for backwards compatibility
   const projects = (newData.projects || []).map(p => ({
     ...p,
     milestones: (p.milestones || []).map(m => ({
@@ -43,7 +61,9 @@ function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
   return {
     projects,
     teamMembers: newData.teamMembers || [],
-    dependencies: newData.dependencies || []
+    dependencies: newData.dependencies || [],
+    leaveBlocks: newData.leaveBlocks || [],
+    periodMarkers: newData.periodMarkers || []
   };
 }
 
@@ -70,6 +90,12 @@ export function useRoadmap() {
   const [loading, setLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Track newly created IDs for entrance animations
+  const [newMilestoneIds, setNewMilestoneIds] = useState<Set<string>>(new Set());
+  const [newDependencyIds, setNewDependencyIds] = useState<Set<string>>(new Set());
 
   // Ref to always access current data (fixes stale closure bug during rapid updates)
   const dataRef = useRef<RoadmapData>(data);
@@ -169,10 +195,12 @@ export function useRoadmap() {
     dataRef.current = sanitizedData;
     setData(sanitizedData);
     setSaveError(null);
+    setIsSaving(true);
 
     try {
       await saveWithRetry(sanitizedData);
       pendingUpdateRef.current = null;
+      setLastSaved(new Date());
     } catch (error) {
       // Rollback on failure
       console.error('Save failed, rolling back:', error);
@@ -181,6 +209,8 @@ export function useRoadmap() {
       pendingUpdateRef.current = null;
       setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
+    } finally {
+      setIsSaving(false);
     }
   }, []);
 
@@ -209,6 +239,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, teamMembers: newMembers };
     setData(dataRef.current);
+    setIsSaving(true);
 
     try {
       // Granular Firebase update - only updates this specific team member
@@ -217,11 +248,14 @@ export function useRoadmap() {
         baseDelayMs: 500
       });
       analytics.memberUpdated(memberId);
+      setLastSaved(new Date());
     } catch (error) {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
       throw error;
+    } finally {
+      setIsSaving(false);
     }
   }, []);
 
@@ -278,6 +312,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
+    setIsSaving(true);
 
     try {
       // Granular Firebase update - only updates this specific project
@@ -286,11 +321,14 @@ export function useRoadmap() {
         baseDelayMs: 500
       });
       analytics.projectUpdated(projectId);
+      setLastSaved(new Date());
     } catch (error) {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
       throw error;
+    } finally {
+      setIsSaving(false);
     }
   }, []);
 
@@ -301,7 +339,7 @@ export function useRoadmap() {
     analytics.projectDeleted(projectId);
   }, [optimisticSave]);
 
-  const addMilestone = useCallback(async (projectId: string, milestone: Omit<Milestone, 'id'>) => {
+  const addMilestone = useCallback(async (projectId: string, milestone: Omit<Milestone, 'id'>): Promise<Milestone> => {
     const currentData = dataRef.current;
     const newMilestone: Milestone = { ...milestone, id: uuidv4() };
     const newProjects = currentData.projects.map(p => {
@@ -312,6 +350,19 @@ export function useRoadmap() {
     });
     await optimisticSave({ ...currentData, projects: newProjects });
     analytics.milestoneCreated(newMilestone.id);
+
+    // Track new milestone for entrance animation
+    setNewMilestoneIds(prev => new Set(prev).add(newMilestone.id));
+    // Clear after animation duration
+    setTimeout(() => {
+      setNewMilestoneIds(prev => {
+        const next = new Set(prev);
+        next.delete(newMilestone.id);
+        return next;
+      });
+    }, 500);
+
+    return newMilestone;
   }, [optimisticSave]);
 
   const updateMilestone = useCallback(async (
@@ -337,6 +388,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
+    setIsSaving(true);
 
     try {
       // Granular Firebase update - only updates this specific milestone
@@ -345,11 +397,14 @@ export function useRoadmap() {
         baseDelayMs: 500
       });
       analytics.milestoneUpdated(milestoneId);
+      setLastSaved(new Date());
     } catch (error) {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
       throw error;
+    } finally {
+      setIsSaving(false);
     }
   }, []);
 
@@ -397,6 +452,18 @@ export function useRoadmap() {
     };
     const newDependencies = [...(currentData.dependencies || []), newDependency];
     await optimisticSave({ ...currentData, dependencies: newDependencies });
+
+    // Track new dependency for entrance animation
+    setNewDependencyIds(prev => new Set(prev).add(newDependency.id));
+    // Clear after animation duration
+    setTimeout(() => {
+      setNewDependencyIds(prev => {
+        const next = new Set(prev);
+        next.delete(newDependency.id);
+        return next;
+      });
+    }, 600);
+
     return newDependency;
   }, [optimisticSave]);
 
@@ -420,6 +487,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, dependencies: newDependencies };
     setData(dataRef.current);
+    setIsSaving(true);
 
     try {
       // Granular Firebase update - only updates this specific dependency
@@ -427,19 +495,99 @@ export function useRoadmap() {
         maxRetries: 3,
         baseDelayMs: 500
       });
+      setLastSaved(new Date());
     } catch (error) {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
       throw error;
+    } finally {
+      setIsSaving(false);
     }
   }, []);
+
+  // Leave block operations
+  const addLeaveBlock = useCallback(async (leaveBlock: Omit<LeaveBlock, 'id'>) => {
+    const currentData = dataRef.current;
+    const newLeaveBlock: LeaveBlock = { ...leaveBlock, id: uuidv4() };
+    const newLeaveBlocks = [...(currentData.leaveBlocks || []), newLeaveBlock];
+    await optimisticSave({ ...currentData, leaveBlocks: newLeaveBlocks });
+    return newLeaveBlock;
+  }, [optimisticSave]);
+
+  const updateLeaveBlock = useCallback(async (leaveId: string, updates: Partial<LeaveBlock>) => {
+    const currentData = dataRef.current;
+    const leaveBlocks = currentData.leaveBlocks || [];
+    const leaveIndex = leaveBlocks.findIndex(l => l.id === leaveId);
+    if (leaveIndex === -1) return;
+
+    const updatedLeaveBlock = { ...leaveBlocks[leaveIndex], ...updates };
+
+    // Optimistic update
+    const newLeaveBlocks = [...leaveBlocks];
+    newLeaveBlocks[leaveIndex] = updatedLeaveBlock;
+    isLocalUpdateRef.current = true;
+    dataRef.current = { ...currentData, leaveBlocks: newLeaveBlocks };
+    setData(dataRef.current);
+    setIsSaving(true);
+
+    try {
+      await withRetry(() => updateLeaveBlockAtPath(leaveIndex, sanitizeForFirebase(updatedLeaveBlock)), {
+        maxRetries: 3,
+        baseDelayMs: 500
+      });
+      setLastSaved(new Date());
+    } catch (error) {
+      dataRef.current = currentData;
+      setData(currentData);
+      throw error;
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
+
+  const deleteLeaveBlock = useCallback(async (leaveId: string) => {
+    const currentData = dataRef.current;
+    const newLeaveBlocks = (currentData.leaveBlocks || []).filter(l => l.id !== leaveId);
+    await optimisticSave({ ...currentData, leaveBlocks: newLeaveBlocks });
+  }, [optimisticSave]);
+
+  // Period marker CRUD operations
+  const addPeriodMarker = useCallback(async (marker: Omit<PeriodMarker, 'id'>) => {
+    const currentData = dataRef.current;
+    const newMarker: PeriodMarker = { ...marker, id: uuidv4() };
+    const newMarkers = [...(currentData.periodMarkers || []), newMarker];
+    await optimisticSave({ ...currentData, periodMarkers: newMarkers });
+    return newMarker;
+  }, [optimisticSave]);
+
+  const updatePeriodMarker = useCallback(async (markerId: string, updates: Partial<PeriodMarker>) => {
+    const currentData = dataRef.current;
+    const markers = currentData.periodMarkers || [];
+    const markerIndex = markers.findIndex(m => m.id === markerId);
+    if (markerIndex === -1) return;
+
+    const updatedMarker = { ...markers[markerIndex], ...updates };
+    const newMarkers = [...markers];
+    newMarkers[markerIndex] = updatedMarker;
+    await optimisticSave({ ...currentData, periodMarkers: newMarkers });
+  }, [optimisticSave]);
+
+  const deletePeriodMarker = useCallback(async (markerId: string) => {
+    const currentData = dataRef.current;
+    const newMarkers = (currentData.periodMarkers || []).filter(m => m.id !== markerId);
+    await optimisticSave({ ...currentData, periodMarkers: newMarkers });
+  }, [optimisticSave]);
 
   return {
     data,
     loading,
     saveError,
     isOnline,
+    isSaving,
+    lastSaved,
+    newMilestoneIds,
+    newDependencyIds,
     clearError,
     addTeamMember,
     updateTeamMember,
@@ -453,6 +601,12 @@ export function useRoadmap() {
     deleteMilestone,
     addDependency,
     removeDependency,
-    updateDependency
+    updateDependency,
+    addLeaveBlock,
+    updateLeaveBlock,
+    deleteLeaveBlock,
+    addPeriodMarker,
+    updatePeriodMarker,
+    deletePeriodMarker
   };
 }

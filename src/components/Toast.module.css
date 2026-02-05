@@ -35,6 +35,27 @@
   flex: 1;
 }
 
+.actionBtn {
+  padding: 4px 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.actionBtn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.actionBtn:active {
+  background: rgba(255, 255, 255, 0.4);
+}
+
 .toast.success {
   background: #10b981;
   border-left-color: #059669;

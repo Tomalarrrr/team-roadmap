@@ -5,6 +5,13 @@
   border-radius: var(--radius-lg);
   overflow: hidden;
   min-height: 0;
+  transition: height 200ms ease, border-radius 200ms ease;
+}
+
+/* Fullscreen mode */
+.container.fullscreen {
+  height: 100vh;
+  border-radius: 0;
 }
 
 /* Left sidebar */
@@ -15,7 +22,16 @@
   border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
-  overflow-y: auto;
+  overflow: hidden; /* Content is synced via CSS transform */
+}
+
+/* Scrollable sidebar content - synced with timeline via transform */
+.sidebarContent {
+  flex: 1;
+  will-change: transform;
+  transform: translateZ(0); /* Force GPU layer */
+  backface-visibility: hidden; /* Prevent flickering */
+  -webkit-backface-visibility: hidden;
 }
 
 .sidebarHeader {
@@ -130,7 +146,10 @@
   border-radius: var(--radius-full);
   font-size: 0.7rem;
   font-weight: 500;
-  transition: all 0.15s;
+  transition: transform 80ms ease,
+              background-color 120ms ease,
+              color 120ms ease,
+              opacity 120ms ease;
   border: none;
   opacity: 0.6;
 }
@@ -139,10 +158,12 @@
   background: rgba(107, 140, 174, 0.15);
   color: var(--text-primary);
   opacity: 1;
+  transform: translateY(-1px);
 }
 
 .addProjectBtn:active {
-  transform: scale(0.95);
+  transform: scale(0.94) translateY(0);
+  transition-duration: 40ms;
 }
 
 .addMemberBtn {
@@ -153,7 +174,11 @@
   border-radius: var(--radius-md);
   color: var(--text-muted);
   font-size: 0.8rem;
-  transition: all 0.15s;
+  transition: transform 80ms ease,
+              border-color 120ms ease,
+              color 120ms ease,
+              background-color 120ms ease,
+              box-shadow 120ms ease;
   flex-shrink: 0;
 }
 
@@ -161,10 +186,13 @@
   border-color: var(--accent-blue);
   color: var(--accent-blue);
   background: var(--accent-blue-light);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
 }
 
 .addMemberBtn:active {
-  transform: scale(0.97);
+  transform: scale(0.97) translateY(0);
+  transition-duration: 40ms;
 }
 
 /* Empty state */
@@ -217,6 +245,16 @@
   overflow-x: auto;
   overflow-y: auto;
   cursor: default;
+  /* Smooth momentum scrolling on touch devices */
+  -webkit-overflow-scrolling: touch;
+  /* Optimize scroll performance */
+  overscroll-behavior: contain;
+  /* Smooth programmatic scrolling */
+  scroll-behavior: smooth;
+  /* Hint to browser for scroll optimization */
+  will-change: scroll-position;
+  /* Contain paint to prevent layout thrash */
+  contain: strict;
 }
 
 .scrollContainer.panning {
@@ -294,6 +332,8 @@
   border-bottom: 2px solid var(--border-light);
   /* Ensure positioned children are relative to this lane */
   isolation: isolate;
+  /* Smooth background transitions */
+  transition: background-color 150ms ease;
 }
 
 .lane:nth-child(even) {
@@ -306,7 +346,32 @@
 
 .laneOver {
   background: var(--accent-blue-light) !important;
-  transition: background 0.15s ease;
+  transition: background-color 100ms ease;
+  /* Subtle glow effect when dragging over */
+  box-shadow: inset 0 0 20px rgba(59, 130, 246, 0.1);
+}
+
+/* Drag-to-create state */
+.laneDragging {
+  cursor: crosshair;
+}
+
+.dragCreatePreview {
+  position: absolute;
+  top: 16px;
+  height: calc(100% - 32px);
+  background: var(--accent-blue-light);
+  border: 2px dashed var(--accent-blue);
+  border-radius: 12px;
+  opacity: 0.7;
+  pointer-events: none;
+  z-index: 3;
+  animation: previewPulse 1s ease-in-out infinite;
+}
+
+@keyframes previewPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.8; }
 }
 
 .gridLine {
@@ -354,6 +419,44 @@
   left: 0;
   pointer-events: none;
   z-index: 1;
+}
+
+/* Jump to Today floating button */
+.jumpToTodayBtn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  font-size: 0.85rem;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  z-index: 100;
+  transition: transform 150ms var(--ease-out-quart, ease),
+              box-shadow 150ms ease,
+              background-color 150ms ease;
+}
+
+.jumpToTodayBtn:hover {
+  background: var(--bg-secondary);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.jumpToTodayBtn:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 50ms;
+}
+
+.jumpToTodayBtn svg {
+  color: var(--today-line, #ef4444);
 }
 
 /* Responsive - Tablet */

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Project, TeamMember, Dependency } from '../types';
 import { getExportOptions } from '../utils/exportUtils';
+import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './ExportMenu.module.css';
 
 interface ExportMenuProps {
@@ -13,9 +14,8 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Detect platform for shortcut display
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const exportShortcut = isMac ? '⌘E' : 'Ctrl+E';
+  // Get platform-appropriate shortcut display
+  const exportShortcut = `${getModifierKeySymbol()}E`;
 
   const exportOptions = getExportOptions(projects, teamMembers, dependencies);
 

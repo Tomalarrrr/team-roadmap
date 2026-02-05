@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { format, addDays } from 'date-fns';
 import { projectSchema, validateForm, milestoneSchema } from '../utils/validation';
-import type { Milestone } from '../types';
+import { STATUS_COLORS, DEFAULT_STATUS_COLOR } from '../utils/statusColors';
+import type { Milestone, TeamMember } from '../types';
 import styles from './Form.module.css';
 
 interface MilestoneData {
@@ -23,6 +24,7 @@ interface ProjectFormProps {
     statusColor: string;
   }>;
   initialMilestones?: Milestone[];
+  teamMembers?: TeamMember[];
   onSubmit: (values: {
     title: string;
     owner: string;
@@ -38,29 +40,12 @@ interface ProjectFormProps {
   milestoneCount?: number;
 }
 
-// Status-aligned colors matching SearchFilter status indicators
-const STATUS_COLORS = [
-  { hex: '#0070c0', name: 'Complete' },
-  { hex: '#04b050', name: 'On Track' },
-  { hex: '#ffc002', name: 'At Risk' },
-  { hex: '#ff0100', name: 'Off Track' },
-  { hex: '#7612c3', name: 'On Hold' },
-  { hex: '#9ca3af', name: 'To Start' },
-];
-
-// Milestone status colors
-const MILESTONE_COLORS = [
-  { hex: '#0070c0', name: 'Complete' },
-  { hex: '#04b050', name: 'On Track' },
-  { hex: '#ffc002', name: 'At Risk' },
-  { hex: '#ff0100', name: 'Off Track' },
-  { hex: '#7612c3', name: 'On Hold' },
-  { hex: '#9ca3af', name: 'To Start' },
-];
+// Milestone colors use the same STATUS_COLORS from shared utility
 
 export function ProjectForm({
   initialValues,
   initialMilestones,
+  teamMembers,
   onSubmit,
   onCancel,
   onDelete,
@@ -71,7 +56,7 @@ export function ProjectForm({
   const [owner, setOwner] = useState(initialValues?.owner || '');
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
-  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || STATUS_COLORS[0].hex);
+  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_STATUS_COLOR);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -94,8 +79,15 @@ export function ProjectForm({
   const [milestoneStartDate, setMilestoneStartDate] = useState('');
   const [milestoneEndDate, setMilestoneEndDate] = useState('');
   const [milestoneTags, setMilestoneTags] = useState('');
-  const [milestoneColor, setMilestoneColor] = useState(MILESTONE_COLORS[0].hex);
+  const [milestoneColor, setMilestoneColor] = useState(STATUS_COLORS[0].hex);
   const [milestoneErrors, setMilestoneErrors] = useState<Record<string, string>>({});
+
+  // Sorted milestones for display (soonest first), with original index for edit/delete operations
+  const sortedMilestones = useMemo(() => {
+    return milestones
+      .map((m, index) => ({ ...m, originalIndex: index }))
+      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+  }, [milestones]);
 
   const resetMilestoneForm = () => {
     setMilestoneTitle('');
@@ -103,7 +95,7 @@ export function ProjectForm({
     setMilestoneStartDate(startDate || '');
     setMilestoneEndDate(startDate || '');
     setMilestoneTags('');
-    setMilestoneColor(MILESTONE_COLORS[0].hex);
+    setMilestoneColor(STATUS_COLORS[0].hex);
     setMilestoneErrors({});
     setShowMilestoneForm(false);
     setEditingMilestoneIndex(null);
@@ -217,8 +209,17 @@ export function ProjectForm({
             onChange={(e) => setOwner(e.target.value)}
             className={styles.input}
             placeholder="Enter owner name"
+            list="owner-suggestions"
+            autoComplete="off"
             required
           />
+          {teamMembers && teamMembers.length > 0 && (
+            <datalist id="owner-suggestions">
+              {teamMembers.map(member => (
+                <option key={member.id} value={member.name} />
+              ))}
+            </datalist>
+          )}
         </div>
       )}
 
@@ -240,6 +241,7 @@ export function ProjectForm({
             id="endDate"
             type="date"
             value={endDate}
+            min={startDate}
             onChange={(e) => {
               setEndDate(e.target.value);
               setErrors({});
@@ -305,11 +307,11 @@ export function ProjectForm({
           <span className={styles.hint}>Optional</span>
         </div>
 
-        {/* Existing milestones list */}
-        {milestones.length > 0 && (
+        {/* Existing milestones list (sorted by soonest date first) */}
+        {sortedMilestones.length > 0 && (
           <div className={styles.milestonesList}>
-            {milestones.map((m, index) => (
-              <div key={m.id || index} className={styles.milestoneItem}>
+            {sortedMilestones.map((m) => (
+              <div key={m.id || m.originalIndex} className={styles.milestoneItem}>
                 <div
                   className={styles.milestoneColorDot}
                   style={{ backgroundColor: m.statusColor }}
@@ -324,7 +326,7 @@ export function ProjectForm({
                   <button
                     type="button"
                     className={styles.milestoneEditBtn}
-                    onClick={() => handleEditMilestone(index)}
+                    onClick={() => handleEditMilestone(m.originalIndex)}
                     aria-label="Edit milestone"
                   >
                     Edit
@@ -332,7 +334,7 @@ export function ProjectForm({
                   <button
                     type="button"
                     className={styles.milestoneDeleteBtn}
-                    onClick={() => handleDeleteMilestone(index)}
+                    onClick={() => handleDeleteMilestone(m.originalIndex)}
                     aria-label="Delete milestone"
                   >
                     ×
@@ -355,6 +357,7 @@ export function ProjectForm({
                 onChange={(e) => setMilestoneTitle(e.target.value)}
                 className={styles.input}
                 placeholder="Milestone title"
+                autoFocus
               />
               {milestoneErrors.title && (
                 <span className={styles.fieldError}>{milestoneErrors.title}</span>
@@ -392,6 +395,7 @@ export function ProjectForm({
                   id="milestoneEndDate"
                   type="date"
                   value={milestoneEndDate}
+                  min={milestoneStartDate}
                   onChange={(e) => {
                     setMilestoneEndDate(e.target.value);
                     setMilestoneErrors(prev => ({ ...prev, endDate: '' }));
@@ -419,7 +423,7 @@ export function ProjectForm({
             <div className={styles.field}>
               <label className={styles.label}>Status</label>
               <div className={styles.colorPicker}>
-                {MILESTONE_COLORS.map(({ hex, name }) => (
+                {STATUS_COLORS.map(({ hex, name }) => (
                   <div key={hex} className={styles.colorOption}>
                     <button
                       type="button"

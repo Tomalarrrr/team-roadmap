@@ -84,6 +84,29 @@
   margin: 0 6px;
 }
 
+/* Lock button states */
+.iconBtn.locked {
+  color: var(--accent-blue);
+  background: var(--accent-blue-light);
+}
+
+.iconBtn.locked:hover {
+  background: var(--accent-blue-light);
+  color: var(--accent-blue);
+}
+
+.lockLabel {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 3px 8px;
+  background: var(--accent-blue-light);
+  border-radius: var(--radius-full);
+  margin-left: 4px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .toolbar {

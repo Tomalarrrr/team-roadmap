@@ -11,10 +11,20 @@ import {
   formatShortDate,
   isDatePast
 } from '../utils/dateUtils';
-import { parseISO } from 'date-fns';
+import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
 
 const AUTO_BLUE = '#0070c0'; // Blue for completed/past projects
+
+// Format duration for tooltip
+function formatDuration(startDate: string, endDate: string): string {
+  const days = differenceInDays(new Date(endDate), new Date(startDate)) + 1;
+  if (days < 7) return `${days} day${days === 1 ? '' : 's'}`;
+  const weeks = Math.round(days / 7);
+  if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'}`;
+  const months = Math.round(days / 30);
+  return `${months} month${months === 1 ? '' : 's'}`;
+}
 
 // Calculate stack indices for overlapping milestones
 // Optimized O(n log n) algorithm using interval scheduling
@@ -65,8 +75,12 @@ interface ProjectBarProps {
   dayWidth: number;
   stackIndex?: number;
   stackTopOffset?: number; // Calculated top position within the lane (accounts for variable heights)
+  laneTop?: number; // Absolute top position of the lane for dependency positioning
   isDragging?: boolean;
   isSelected?: boolean;
+  hasConflict?: boolean; // When true, show conflict warning (overlapping dates with other projects)
+  newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
+  isLocked?: boolean; // When true, disable drag and edit actions (view mode)
   dragListeners?: React.DOMAttributes<HTMLDivElement>;
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
@@ -79,6 +93,7 @@ interface ProjectBarProps {
   onSelect?: () => void;
   onSelectMilestone?: (milestoneId: string) => void;
   onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
+  onHoverChange?: (hovered: boolean, milestoneId?: string) => void; // For dependency highlighting
 }
 
 const BASE_PROJECT_HEIGHT = 52;
@@ -93,9 +108,13 @@ export function ProjectBar({
   dayWidth,
   stackIndex = 0,
   stackTopOffset,
+  laneTop = 0,
   isDragging: externalDragging,
   isSelected,
-  dragListeners: _dragListeners, // Currently unused - manual drag used instead for date changes
+  hasConflict = false,
+  newMilestoneIds,
+  isLocked = false,
+  dragListeners, // Used for cross-lane dragging (reassign owner)
   onUpdate,
   onDelete,
   onAddMilestone,
@@ -106,7 +125,8 @@ export function ProjectBar({
   onCopy,
   onSelect,
   onSelectMilestone,
-  onEdgeDrag
+  onEdgeDrag,
+  onHoverChange
 }: ProjectBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -121,30 +141,40 @@ export function ProjectBar({
   // Context menu state
   const contextMenu = useContextMenu();
 
-  // Context menu items configuration
-  const menuItems: ContextMenuItem[] = useMemo(() => [
-    {
-      id: 'edit',
-      label: 'Edit Project',
-      onClick: onEdit
-    },
-    {
-      id: 'add-milestone',
-      label: 'Add Milestone',
-      onClick: onAddMilestone
-    },
-    ...(onCopy ? [{
-      id: 'copy',
-      label: 'Copy Project',
-      onClick: onCopy
-    }] : []),
-    {
-      id: 'delete',
-      label: 'Delete',
-      onClick: onDelete,
-      variant: 'danger' as const
+  // Context menu items configuration - only Copy when locked
+  const menuItems: ContextMenuItem[] = useMemo(() => {
+    if (isLocked) {
+      // Only show Copy option when locked (non-destructive action)
+      return onCopy ? [{
+        id: 'copy',
+        label: 'Copy Project',
+        onClick: onCopy
+      }] : [];
     }
-  ], [onEdit, onAddMilestone, onCopy, onDelete]);
+    return [
+      {
+        id: 'edit',
+        label: 'Edit Project',
+        onClick: onEdit
+      },
+      {
+        id: 'add-milestone',
+        label: 'Add Milestone',
+        onClick: onAddMilestone
+      },
+      ...(onCopy ? [{
+        id: 'copy',
+        label: 'Copy Project',
+        onClick: onCopy
+      }] : []),
+      {
+        id: 'delete',
+        label: 'Delete',
+        onClick: onDelete,
+        variant: 'danger' as const
+      }
+    ];
+  }, [onEdit, onAddMilestone, onCopy, onDelete, isLocked]);
 
   // Dependency creation context
   const { state: depState, startCreation, completeCreation } = useDependencyCreation();
@@ -220,13 +250,14 @@ export function ProjectBar({
   const displayColor = isPast ? AUTO_BLUE : project.statusColor;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
+    if (isLocked) return; // Disable drag when locked
     e.preventDefault();
     e.stopPropagation();
     setDragMode(mode);
     setDragStartX(e.clientX);
     setOriginalStartDate(project.startDate);
     setOriginalEndDate(project.endDate);
-  }, [project.startDate, project.endDate]);
+  }, [project.startDate, project.endDate, isLocked]);
 
   // Track the latest preview for committing on mouseUp
   const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
@@ -263,13 +294,13 @@ export function ProjectBar({
     };
 
     const handleInitialMouseUp = () => {
-      // Clean up - this was a click, not a drag
+      // Clean up listeners only - let element's onMouseUp handle click detection
       if (initialListenersRef.current) {
         document.removeEventListener('mousemove', initialListenersRef.current.move);
         document.removeEventListener('mouseup', initialListenersRef.current.up);
         initialListenersRef.current = null;
       }
-      clickStartRef.current = null;
+      // Don't clear clickStartRef here - the element's onMouseUp needs it for click detection
     };
 
     initialListenersRef.current = { move: handleInitialMouseMove, up: handleInitialMouseUp };
@@ -325,6 +356,11 @@ export function ProjectBar({
           // Safety check: ensure deltaDays is a valid number
           if (!Number.isFinite(deltaDays)) {
             return;
+          }
+
+          // Snap to week boundary when Shift is held
+          if (e.shiftKey) {
+            deltaDays = Math.round(deltaDays / 7) * 7;
           }
 
           // Limit extreme deltas to prevent performance issues with very large drags
@@ -413,7 +449,8 @@ export function ProjectBar({
       setDragMode(null);
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
+    // Use passive listeners where possible for better scroll performance
+    document.addEventListener('mousemove', handleMouseMove, { passive: true });
     document.addEventListener('mouseup', handleMouseUp);
 
     return () => {
@@ -445,33 +482,49 @@ export function ProjectBar({
   const projectBarHeight = Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
 
   // Use stackTopOffset if provided (dynamic heights), otherwise fall back to fixed calculation
+  // The fallback is a safety net - Timeline should always provide stackTopOffset
   // Fallback uses: LANE_PADDING (16) + stackIndex * (BASE_PROJECT_HEIGHT + gap)
-  const topPosition = stackTopOffset !== undefined ? stackTopOffset : (16 + stackIndex * 72);
+  const topPosition = useMemo(() => {
+    if (stackTopOffset !== undefined) {
+      return stackTopOffset;
+    }
+    // Fallback should rarely be used - log warning in development
+    if (import.meta.env.DEV) {
+      console.warn('[ProjectBar] stackTopOffset not provided, using fallback calculation. This may cause positioning issues with variable-height projects.');
+    }
+    return 16 + stackIndex * 72;
+  }, [stackTopOffset, stackIndex]);
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Copy is allowed even when locked
+    if (e.key === 'c' && (e.metaKey || e.ctrlKey) && onCopy) {
+      e.preventDefault();
+      onCopy();
+      return;
+    }
+    // All other actions are disabled when locked
+    if (isLocked) return;
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       onEdit();
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       e.preventDefault();
       onDelete();
-    } else if (e.key === 'c' && (e.metaKey || e.ctrlKey) && onCopy) {
-      e.preventDefault();
-      onCopy();
     }
-  }, [onEdit, onDelete, onCopy]);
+  }, [onEdit, onDelete, onCopy, isLocked]);
 
   // Handle starting a dependency from this project
+  // Position uses absolute coordinates: laneTop (lane's position in timeline) + topPosition (project's position within lane)
   const handleStartDependency = useCallback(() => {
     startCreation({
       projectId: project.id,
       position: {
         x: left + width,
-        y: topPosition + projectBarHeight / 2
+        y: laneTop + topPosition + projectBarHeight / 2
       }
     });
-  }, [project.id, left, width, topPosition, projectBarHeight, startCreation]);
+  }, [project.id, left, width, laneTop, topPosition, projectBarHeight, startCreation]);
 
   // Handle click when in dependency creation mode (this project becomes the target)
   const handleDependencyTarget = useCallback(() => {
@@ -501,7 +554,7 @@ export function ProjectBar({
     <div
       ref={barRef}
       data-dependency-target
-      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''}`}
+      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''} ${hasConflict ? styles.hasConflict : ''}`}
       style={{
         left,
         width,
@@ -512,6 +565,7 @@ export function ProjectBar({
       role="button"
       tabIndex={0}
       aria-label={`Project: ${project.title}, ${formatShortDate(project.startDate)} to ${formatShortDate(project.endDate)}${isPast ? ', Complete' : ''}`}
+      title={`${project.title} · ${formatDuration(project.startDate, project.endDate)}${hasConflict ? ' ⚠️ Overlaps with another project' : ''}`}
       onKeyDown={handleKeyDown}
       onClick={isTargetable ? handleDependencyTarget : undefined}
       onContextMenu={(e) => {
@@ -519,37 +573,66 @@ export function ProjectBar({
         e.stopPropagation();
         contextMenu.open({ x: e.clientX, y: e.clientY });
       }}
+      onMouseEnter={() => {
+        onHoverChange?.(true);
+      }}
       onMouseMove={(e) => {
         // Track proximity to end for showing dependency arrow
         handleMouseMoveForArrow(e);
       }}
       onMouseLeave={() => {
         if (!dragMode) setShowDependencyArrow(false); // Skip during drag
+        onHoverChange?.(false);
       }}
     >
-      {/* Resize handles */}
-      <div
-        className={styles.resizeHandle}
-        style={{ left: 0 }}
-        onMouseDown={(e) => handleMouseDown(e, 'resize-start')}
-      />
-      <div
-        className={styles.resizeHandle}
-        style={{ right: 0 }}
-        onMouseDown={(e) => handleMouseDown(e, 'resize-end')}
-      />
+      {/* Cross-lane drag handle (reassign owner) */}
+      {!isLocked && dragListeners && (
+        <div
+          className={styles.laneHandle}
+          title="Drag to move to another team member"
+          {...dragListeners}
+        >
+          <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor">
+            <circle cx="2" cy="2" r="1.5" />
+            <circle cx="6" cy="2" r="1.5" />
+            <circle cx="2" cy="7" r="1.5" />
+            <circle cx="6" cy="7" r="1.5" />
+            <circle cx="2" cy="12" r="1.5" />
+            <circle cx="6" cy="12" r="1.5" />
+          </svg>
+        </div>
+      )}
 
-      {/* Dependency arrow button - appears on hover near end */}
-      <DependencyArrow
-        isVisible={showDependencyArrow}
-        isCreatingDependency={isCreatingDependency}
-        onStartDependency={handleStartDependency}
-      />
+      {/* Resize handles - hidden when locked */}
+      {!isLocked && (
+        <>
+          <div
+            className={styles.resizeHandle}
+            style={{ left: 0 }}
+            onMouseDown={(e) => handleMouseDown(e, 'resize-start')}
+          />
+          <div
+            className={styles.resizeHandle}
+            style={{ right: 0 }}
+            onMouseDown={(e) => handleMouseDown(e, 'resize-end')}
+          />
+        </>
+      )}
+
+      {/* Dependency arrow button - appears on hover near end, hidden when locked */}
+      {!isLocked && (
+        <DependencyArrow
+          isVisible={showDependencyArrow}
+          isCreatingDependency={isCreatingDependency}
+          onStartDependency={handleStartDependency}
+        />
+      )}
 
       {/* Drag area - single click opens edit */}
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
+          if (isLocked) return; // Disable drag when locked
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
           setDragStartX(e.clientX);
           setOriginalStartDate(project.startDate);
@@ -571,18 +654,19 @@ export function ProjectBar({
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
           const passes = dx < 5 && dy < 5 && elapsed < 300;
-          // If minimal movement and quick click, open edit dialog and select
+          // If minimal movement and quick click, open edit dialog and select (unless locked)
           if (passes) {
             e.stopPropagation();
             setDragMode(null);
             clickStartRef.current = null;
             onSelect?.();
-            onEdit();
+            if (!isLocked) onEdit();
             return;
           }
           clickStartRef.current = null;
         }}
         onDoubleClick={(e) => {
+          if (isLocked) return; // Disable edit when locked
           e.stopPropagation();
           onEdit();
         }}
@@ -625,10 +709,14 @@ export function ProjectBar({
             projectWidth={width}
             stackIndex={milestoneStacks.get(milestone.id) || 0}
             laneTop={topPosition}
+            absoluteLaneTop={laneTop}
+            isNew={newMilestoneIds?.has(milestone.id) ?? false}
+            isLocked={isLocked}
             onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
             onEdit={() => onEditMilestone(milestone.id)}
             onDelete={() => onDeleteMilestone(milestone.id)}
             onSelect={onSelectMilestone ? () => onSelectMilestone(milestone.id) : undefined}
+            onHoverChange={onHoverChange ? (hovered) => onHoverChange(hovered, milestone.id) : undefined}
           />
         ))}
       </div>

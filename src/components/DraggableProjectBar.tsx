@@ -10,7 +10,11 @@ interface DraggableProjectBarProps {
   dayWidth: number;
   stackIndex?: number;
   stackTopOffset?: number; // Calculated top position within the lane
+  laneTop?: number; // Absolute top position of the lane for dependency positioning
   isSelected?: boolean;
+  hasConflict?: boolean; // When true, show conflict warning (overlapping dates with other projects)
+  newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
+  isLocked?: boolean; // When true, disable drag and edit actions
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
   onAddMilestone: () => void;
@@ -22,6 +26,7 @@ interface DraggableProjectBarProps {
   onSelect?: () => void;
   onSelectMilestone?: (milestoneId: string) => void;
   onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
+  onHoverChange?: (hovered: boolean, milestoneId?: string) => void; // For dependency highlighting
 }
 
 function DraggableProjectBarComponent({
@@ -30,7 +35,11 @@ function DraggableProjectBarComponent({
   dayWidth,
   stackIndex = 0,
   stackTopOffset,
+  laneTop = 0,
   isSelected,
+  hasConflict = false,
+  newMilestoneIds,
+  isLocked = false,
   onUpdate,
   onDelete,
   onAddMilestone,
@@ -41,14 +50,16 @@ function DraggableProjectBarComponent({
   onCopy,
   onSelect,
   onSelectMilestone,
-  onEdgeDrag
+  onEdgeDrag,
+  onHoverChange
 }: DraggableProjectBarProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `project-${project.id}`,
     data: {
       type: 'project',
       project
-    }
+    },
+    disabled: isLocked
   });
 
   const style = {
@@ -65,8 +76,12 @@ function DraggableProjectBarComponent({
         dayWidth={dayWidth}
         stackIndex={stackIndex}
         stackTopOffset={stackTopOffset}
+        laneTop={laneTop}
         isDragging={isDragging}
         isSelected={isSelected}
+        hasConflict={hasConflict}
+        newMilestoneIds={newMilestoneIds}
+        isLocked={isLocked}
         dragListeners={listeners}
         onUpdate={onUpdate}
         onDelete={onDelete}
@@ -79,13 +94,14 @@ function DraggableProjectBarComponent({
         onSelect={onSelect}
         onSelectMilestone={onSelectMilestone}
         onEdgeDrag={onEdgeDrag}
+        onHoverChange={onHoverChange}
       />
     </div>
   );
 }
 
 // Memoize to prevent unnecessary re-renders during filtering/scrolling
-// Only re-render if project data, position, or selection state changes
+// Only re-render if project data, position, selection, or lock state changes
 export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps, nextProps) => {
   return (
     prevProps.project === nextProps.project &&
@@ -93,7 +109,10 @@ export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps
     prevProps.dayWidth === nextProps.dayWidth &&
     prevProps.stackIndex === nextProps.stackIndex &&
     prevProps.stackTopOffset === nextProps.stackTopOffset &&
-    prevProps.isSelected === nextProps.isSelected
+    prevProps.laneTop === nextProps.laneTop &&
+    prevProps.isSelected === nextProps.isSelected &&
+    prevProps.hasConflict === nextProps.hasConflict &&
+    prevProps.isLocked === nextProps.isLocked
     // Note: Callback props are excluded from comparison as they're typically stable
   );
 });

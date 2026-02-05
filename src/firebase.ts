@@ -1,4 +1,4 @@
-import type { RoadmapData, Project, Milestone, Dependency, TeamMember } from './types';
+import type { RoadmapData, Project, Milestone, Dependency, TeamMember, LeaveBlock } from './types';
 import type { FirebaseApp } from 'firebase/app';
 import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
 
@@ -82,7 +82,9 @@ export async function subscribeToRoadmap(callback: (data: RoadmapData) => void):
     callback({
       projects: data?.projects || [],
       teamMembers: data?.teamMembers || [],
-      dependencies: data?.dependencies || []
+      dependencies: data?.dependencies || [],
+      leaveBlocks: data?.leaveBlocks || [],
+      periodMarkers: data?.periodMarkers || []
     });
   });
   return unsubscribe;
@@ -167,10 +169,123 @@ export async function getRoadmap(): Promise<RoadmapData> {
   return {
     projects: data?.projects || [],
     teamMembers: data?.teamMembers || [],
-    dependencies: data?.dependencies || []
+    dependencies: data?.dependencies || [],
+    leaveBlocks: data?.leaveBlocks || [],
+    periodMarkers: data?.periodMarkers || []
   };
+}
+
+export async function updateLeaveBlockAtPath(leaveIndex: number, leaveBlock: LeaveBlock): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+  const leaveRef = ref(database!, `roadmap/leaveBlocks/${leaveIndex}`);
+  await set(leaveRef, leaveBlock);
 }
 
 export function getDatabaseInstance(): Database | null {
   return database;
+}
+
+// ============================================
+// PRESENCE SYSTEM
+// ============================================
+
+export interface PresenceUser {
+  id: string;
+  name: string;
+  color: string;
+  lastSeen: number;
+  editingProjectId?: string;
+}
+
+/**
+ * Update current user's presence.
+ * Sets up onDisconnect to automatically remove presence when connection drops.
+ */
+export async function updatePresence(sessionId: string, userData: Omit<PresenceUser, 'id' | 'lastSeen'>): Promise<void> {
+  await ensureInitialized();
+  const { ref, set, onDisconnect } = await import('firebase/database');
+
+  const presenceRef = ref(database!, `presence/${sessionId}`);
+
+  const presenceData: PresenceUser = {
+    id: sessionId,
+    ...userData,
+    lastSeen: Date.now()
+  };
+
+  // Set presence data
+  await set(presenceRef, presenceData);
+
+  // Remove presence on disconnect
+  onDisconnect(presenceRef).remove();
+}
+
+/**
+ * Update the project being edited by current user.
+ */
+export async function updateEditingStatus(sessionId: string, projectId: string | null): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+
+  const editingRef = ref(database!, `presence/${sessionId}/editingProjectId`);
+  await set(editingRef, projectId);
+}
+
+/**
+ * Remove current user's presence (on logout/close).
+ */
+export async function removePresence(sessionId: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, remove } = await import('firebase/database');
+
+  const presenceRef = ref(database!, `presence/${sessionId}`);
+  await remove(presenceRef);
+}
+
+/**
+ * Subscribe to all presence data.
+ */
+export async function subscribeToPresence(
+  callback: (users: PresenceUser[]) => void
+): Promise<Unsubscribe> {
+  await ensureInitialized();
+  const { ref, onValue } = await import('firebase/database');
+
+  const presenceRef = ref(database!, 'presence');
+
+  const unsubscribe = onValue(presenceRef, (snapshot) => {
+    const data = snapshot.val();
+    if (!data) {
+      callback([]);
+      return;
+    }
+
+    // Convert object to array and filter stale entries (> 2 minutes old)
+    const now = Date.now();
+    const staleThreshold = 2 * 60 * 1000; // 2 minutes
+
+    const users: PresenceUser[] = Object.values(data)
+      .filter((user): user is PresenceUser => {
+        if (!user || typeof user !== 'object') return false;
+        const u = user as PresenceUser;
+        return typeof u.id === 'string' && (now - u.lastSeen) < staleThreshold;
+      });
+
+    callback(users);
+  });
+
+  return unsubscribe;
+}
+
+/**
+ * Heartbeat to keep presence alive.
+ * Should be called periodically (e.g., every 30 seconds).
+ */
+export async function heartbeatPresence(sessionId: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = await import('firebase/database');
+
+  const lastSeenRef = ref(database!, `presence/${sessionId}/lastSeen`);
+  await set(lastSeenRef, Date.now());
 }

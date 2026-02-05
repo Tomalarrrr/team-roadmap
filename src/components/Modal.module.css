@@ -7,7 +7,8 @@
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  animation: overlayFadeIn 0.2s ease;
+  /* Faster fade in */
+  animation: overlayFadeIn 150ms ease;
 }
 
 @keyframes overlayFadeIn {
@@ -33,18 +34,21 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Snappier entrance with slight spring */
+  animation: modalSlideIn 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
   outline: none;
+  /* GPU acceleration */
+  transform: translateZ(0);
 }
 
 @keyframes modalSlideIn {
   from {
     opacity: 0;
-    transform: translateY(24px) scale(0.96);
+    transform: translateY(16px) scale(0.97) translateZ(0);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0) scale(1) translateZ(0);
   }
 }
 
@@ -73,7 +77,9 @@
   height: 32px;
   border-radius: 8px;
   color: var(--text-muted);
-  transition: all 0.2s ease;
+  transition: background-color 120ms ease,
+              color 120ms ease,
+              transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .closeBtn:hover {
@@ -83,7 +89,8 @@
 }
 
 .closeBtn:active {
-  transform: rotate(90deg) scale(0.9);
+  transform: rotate(90deg) scale(0.85);
+  transition-duration: 50ms;
 }
 
 .content {
@@ -112,23 +119,23 @@
   border-radius: 3px;
 }
 
-/* Staggered entrance for form fields */
+/* Staggered entrance for form fields - faster for snappier feel */
 .content > * {
-  animation: fieldFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) backwards;
+  animation: fieldFadeIn 180ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-.content > *:nth-child(1) { animation-delay: 0.05s; }
-.content > *:nth-child(2) { animation-delay: 0.08s; }
-.content > *:nth-child(3) { animation-delay: 0.11s; }
-.content > *:nth-child(4) { animation-delay: 0.14s; }
-.content > *:nth-child(5) { animation-delay: 0.17s; }
-.content > *:nth-child(6) { animation-delay: 0.2s; }
-.content > *:nth-child(7) { animation-delay: 0.23s; }
+.content > *:nth-child(1) { animation-delay: 30ms; }
+.content > *:nth-child(2) { animation-delay: 50ms; }
+.content > *:nth-child(3) { animation-delay: 70ms; }
+.content > *:nth-child(4) { animation-delay: 90ms; }
+.content > *:nth-child(5) { animation-delay: 110ms; }
+.content > *:nth-child(6) { animation-delay: 130ms; }
+.content > *:nth-child(7) { animation-delay: 150ms; }
 
 @keyframes fieldFadeIn {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;

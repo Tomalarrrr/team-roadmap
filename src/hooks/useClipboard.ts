@@ -1,7 +1,8 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Project, Milestone, ClipboardData } from '../types';
 import { addDays, differenceInDays } from 'date-fns';
 import { toISODateString } from '../utils/dateUtils';
+import { getModifierKeySymbol, hasModifierKey } from '../utils/platformUtils';
 
 interface UseClipboardOptions {
   onPasteProject: (project: Omit<Project, 'id'>) => void;
@@ -16,6 +17,11 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [selectedMilestone, setSelectedMilestone] = useState<Milestone | null>(null);
 
+  // Refs to store latest values for stable keyboard effect (prevents effect churn)
+  const clipboardRef = useRef<ClipboardData | null>(null);
+  const selectedProjectRef = useRef<Project | null>(null);
+  const selectedMilestoneRef = useRef<Milestone | null>(null);
+
   // Use callback if provided, otherwise fall back to DOM-based toast
   const toast = useCallback((message: string) => {
     if (onShowToast) {
@@ -25,17 +31,18 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
     }
   }, [onShowToast]);
 
-  // Detect platform for shortcut display
-  const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const pasteShortcut = isMac ? '⌘V' : 'Ctrl+V';
+  // Get platform-appropriate shortcut display
+  const pasteShortcut = `${getModifierKeySymbol()}V`;
 
   // Copy a project (with all its milestones)
   const copyProject = useCallback((project: Project) => {
-    setClipboard({
+    const newClipboard: ClipboardData = {
       type: 'project',
-      data: JSON.parse(JSON.stringify(project)), // Deep clone
+      data: structuredClone(project),
       copiedAt: Date.now()
-    });
+    };
+    setClipboard(newClipboard);
+    clipboardRef.current = newClipboard;
 
     // Show toast/feedback with paste guidance
     toast(`Copied "${project.title}" — press ${pasteShortcut} to paste`);
@@ -43,11 +50,13 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
 
   // Copy a milestone
   const copyMilestone = useCallback((milestone: Milestone) => {
-    setClipboard({
+    const newClipboard: ClipboardData = {
       type: 'milestone',
-      data: JSON.parse(JSON.stringify(milestone)),
+      data: structuredClone(milestone),
       copiedAt: Date.now()
-    });
+    };
+    setClipboard(newClipboard);
+    clipboardRef.current = newClipboard;
 
     toast(`Copied "${milestone.title}" — press ${pasteShortcut} to paste`);
   }, [pasteShortcut, toast]);
@@ -111,41 +120,73 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
     }
   }, [clipboard, onPasteProject, onPasteMilestone, toast]);
 
-  // Keyboard shortcuts
+  // Keep refs in sync with state (for stable keyboard effect)
+  useEffect(() => {
+    clipboardRef.current = clipboard;
+  }, [clipboard]);
+
+  useEffect(() => {
+    selectedProjectRef.current = selectedProject;
+  }, [selectedProject]);
+
+  useEffect(() => {
+    selectedMilestoneRef.current = selectedMilestone;
+  }, [selectedMilestone]);
+
+  // Refs for callbacks (updated when callbacks change)
+  const copyProjectRef = useRef(copyProject);
+  const copyMilestoneRef = useRef(copyMilestone);
+  const pasteRef = useRef(paste);
+
+  useEffect(() => {
+    copyProjectRef.current = copyProject;
+  }, [copyProject]);
+
+  useEffect(() => {
+    copyMilestoneRef.current = copyMilestone;
+  }, [copyMilestone]);
+
+  useEffect(() => {
+    pasteRef.current = paste;
+  }, [paste]);
+
+  // Keyboard shortcuts (stable effect - reads from refs to prevent churn)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Don't trigger if typing in an input
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement
-      ) {
-        return;
+      // Don't trigger if typing in an input field - use multiple detection methods
+      // to handle inputs in modals, portals, and shadow DOM
+      const target = e.target as HTMLElement;
+      const isInputField =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target.isContentEditable ||
+        target.closest('input, textarea, [contenteditable="true"]');
+
+      if (isInputField) {
+        return; // Allow native copy/paste behavior in input fields
       }
 
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const modifier = isMac ? e.metaKey : e.ctrlKey;
-
       // Copy (Ctrl+C / Cmd+C)
-      if (modifier && e.key === 'c') {
-        if (selectedProject) {
+      if (hasModifierKey(e) && e.key === 'c') {
+        if (selectedProjectRef.current) {
           e.preventDefault();
-          copyProject(selectedProject);
-        } else if (selectedMilestone) {
+          copyProjectRef.current(selectedProjectRef.current);
+        } else if (selectedMilestoneRef.current) {
           e.preventDefault();
-          copyMilestone(selectedMilestone);
+          copyMilestoneRef.current(selectedMilestoneRef.current);
         }
       }
 
       // Paste (Ctrl+V / Cmd+V)
-      if (modifier && e.key === 'v' && clipboard) {
+      if (hasModifierKey(e) && e.key === 'v' && clipboardRef.current) {
         e.preventDefault();
-        paste();
+        pasteRef.current();
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [clipboard, paste, selectedProject, selectedMilestone, copyProject, copyMilestone]);
+  }, []); // Empty deps - reads from refs
 
   // Check if clipboard has content
   const hasContent = clipboard !== null;

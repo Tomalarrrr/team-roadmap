@@ -21,6 +21,11 @@ const FLUSH_INTERVAL = 30000; // 30 seconds
 // Development mode logging
 const isDev = import.meta.env.DEV;
 
+// Track resources for cleanup (prevents memory leaks on HMR)
+let intervalId: ReturnType<typeof setInterval> | null = null;
+let visibilityHandler: (() => void) | null = null;
+let isInitialized = false;
+
 /**
  * Track an analytics event
  */
@@ -68,16 +73,53 @@ export function flush(): void {
   }
 }
 
-// Auto-flush periodically
-if (typeof window !== 'undefined') {
-  setInterval(flush, FLUSH_INTERVAL);
+/**
+ * Cleanup analytics resources (interval and event listeners).
+ * Call this before module hot-reload or app unmount.
+ */
+export function cleanupAnalytics(): void {
+  if (intervalId !== null) {
+    clearInterval(intervalId);
+    intervalId = null;
+  }
+  if (visibilityHandler !== null) {
+    window.removeEventListener('visibilitychange', visibilityHandler);
+    visibilityHandler = null;
+  }
+  window.removeEventListener('beforeunload', flush);
+  isInitialized = false;
+
+  // Flush any remaining events
+  flush();
+
+  if (isDev) {
+    console.debug('[Analytics] Cleanup complete');
+  }
+}
+
+// Auto-flush periodically (with cleanup support for HMR)
+if (typeof window !== 'undefined' && !isInitialized) {
+  // Clean up any existing resources first (handles HMR reload)
+  cleanupAnalytics();
+
+  isInitialized = true;
+  intervalId = setInterval(flush, FLUSH_INTERVAL);
 
   // Flush on page unload
   window.addEventListener('beforeunload', flush);
-  window.addEventListener('visibilitychange', () => {
+
+  visibilityHandler = () => {
     if (document.visibilityState === 'hidden') {
       flush();
     }
+  };
+  window.addEventListener('visibilitychange', visibilityHandler);
+}
+
+// Vite HMR cleanup
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    cleanupAnalytics();
   });
 }
 

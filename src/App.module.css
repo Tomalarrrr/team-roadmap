@@ -9,6 +9,43 @@
   flex: 1;
   padding: 16px;
   overflow: hidden;
+  transition: padding 200ms ease;
+}
+
+/* Fullscreen mode */
+.app.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+
+.app.fullscreen .main {
+  padding: 0;
+  height: 100vh;
+}
+
+/* Fullscreen indicator */
+.fullscreenHint {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.75);
+  color: white;
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  font-weight: 500;
+  z-index: 10001;
+  animation: hintFadeInOut 3s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes hintFadeInOut {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
 }
 
 .loading {

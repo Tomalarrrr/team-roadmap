@@ -5,11 +5,17 @@ import { getBarDimensions } from '../utils/dateUtils';
 import styles from './DependencyLine.module.css';
 
 // Helper to calculate milestone stack index (memoized externally)
-// Cache milestone stack calculations to avoid recomputation
-const milestoneStackCache = new WeakMap<Milestone[], Map<string, number>>();
+// Cache milestone stack calculations using content-based key for reliable cache hits
+const milestoneStackCache = new Map<string, Map<string, number>>();
+
+// Create a content-based cache key from milestone IDs and dates
+function getMilestoneStacksCacheKey(milestones: Milestone[]): string {
+  return milestones.map(m => `${m.id}:${m.startDate}:${m.endDate}`).sort().join('|');
+}
 
 function getMilestoneStacks(milestones: Milestone[]): Map<string, number> {
-  const cached = milestoneStackCache.get(milestones);
+  const cacheKey = getMilestoneStacksCacheKey(milestones);
+  const cached = milestoneStackCache.get(cacheKey);
   if (cached) return cached;
 
   const stacks = new Map<string, number>();
@@ -39,7 +45,13 @@ function getMilestoneStacks(milestones: Milestone[]): Map<string, number> {
     stacks.set(milestone.id, assignedStack);
   });
 
-  milestoneStackCache.set(milestones, stacks);
+  // Limit cache size to prevent memory leaks
+  if (milestoneStackCache.size > 100) {
+    const firstKey = milestoneStackCache.keys().next().value;
+    if (firstKey) milestoneStackCache.delete(firstKey);
+  }
+
+  milestoneStackCache.set(cacheKey, stacks);
   return stacks;
 }
 
@@ -56,6 +68,8 @@ interface DependencyLineProps {
   ownerToLaneIndex: Map<string, number>;
   lineIndex?: number; // For staggering connection points
   isAnyHovered?: boolean; // True if any dependency line is hovered
+  hoveredItemId?: { projectId: string; milestoneId?: string } | null; // Currently hovered project/milestone
+  isNew?: boolean; // True if this dependency was just created (for entrance animation)
   onHoverChange?: (hovered: boolean) => void;
   onRemove: () => void;
   waypoints?: Waypoint[]; // Custom control points for manual path shaping
@@ -70,25 +84,53 @@ const MILESTONE_HEIGHT = 20;
 const MILESTONE_GAP = 4;
 const PROJECT_CONTENT_HEIGHT = 28;
 
-// Waypoints are stored in a zoom-independent format:
+// Waypoints are stored in a zoom-independent and layout-independent format:
 // - x is stored as "days from timeline start" (not pixels)
-// - y is stored as absolute pixels (vertical position doesn't change with zoom)
-// This ensures waypoints maintain their relative position when zooming
+// - y is stored as offset from baseline (the straight line between endpoints)
+// This ensures waypoints shift correctly when layout changes (e.g. milestones stack)
 
-// Convert stored waypoints (days) to pixel coordinates for rendering
-function waypointsToPixels(waypoints: Waypoint[], dayWidth: number): Waypoint[] {
-  return waypoints.map(wp => ({
-    x: wp.x * dayWidth,
-    y: wp.y
-  }));
+// Calculate the baseline Y at a given X position (interpolating between endpoints)
+function getBaselineY(x: number, fromX: number, fromY: number, toX: number, toY: number): number {
+  if (Math.abs(toX - fromX) < 0.1) return (fromY + toY) / 2; // Prevent division by zero
+  const t = Math.max(0, Math.min(1, (x - fromX) / (toX - fromX)));
+  return fromY + t * (toY - fromY);
 }
 
-// Convert pixel waypoints back to storage format (days)
-function pixelsToDays(waypoints: Waypoint[], dayWidth: number): Waypoint[] {
-  return waypoints.map(wp => ({
-    x: wp.x / dayWidth,
-    y: wp.y
-  }));
+// Convert stored waypoints (days + offset) to pixel coordinates for rendering
+function waypointsToPixels(
+  waypoints: Waypoint[],
+  dayWidth: number,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): Waypoint[] {
+  return waypoints.map(wp => {
+    const xPixels = wp.x * dayWidth;
+    const baselineY = getBaselineY(xPixels, fromX, fromY, toX, toY);
+    return {
+      x: xPixels,
+      y: baselineY + wp.y // wp.y is stored as offset from baseline
+    };
+  });
+}
+
+// Convert pixel waypoints back to storage format (days + offset from baseline)
+function pixelsToDays(
+  waypoints: Waypoint[],
+  dayWidth: number,
+  fromX: number,
+  fromY: number,
+  toX: number,
+  toY: number
+): Waypoint[] {
+  return waypoints.map(wp => {
+    const baselineY = getBaselineY(wp.x, fromX, fromY, toX, toY);
+    return {
+      x: wp.x / dayWidth,
+      y: wp.y - baselineY // Store as offset from baseline
+    };
+  });
 }
 
 export function DependencyLine({
@@ -104,6 +146,8 @@ export function DependencyLine({
   ownerToLaneIndex,
   lineIndex = 0,
   isAnyHovered = false,
+  hoveredItemId = null,
+  isNew = false,
   onHoverChange,
   onRemove,
   waypoints,
@@ -198,7 +242,10 @@ export function DependencyLine({
 
     // Use custom waypoints if available (preview takes precedence during drag)
     // Convert stored waypoints from days to pixels for rendering
-    const storedWaypointsAsPixels = waypoints ? waypointsToPixels(waypoints, dayWidth) : undefined;
+    // Waypoints Y is stored as offset from baseline, so we need endpoint positions
+    const storedWaypointsAsPixels = waypoints
+      ? waypointsToPixels(waypoints, dayWidth, fromX, adjustedFromY, toX, adjustedToY)
+      : undefined;
     const activeWaypoints = previewWaypoints || storedWaypointsAsPixels;
 
     // Build path with rounded corners
@@ -467,8 +514,8 @@ export function DependencyLine({
 
     const handleMouseUp = () => {
       if (previewWaypoints && onUpdateWaypoints) {
-        // Convert pixel coordinates to days for storage
-        onUpdateWaypoints(pixelsToDays(previewWaypoints, dayWidth));
+        // Convert pixel coordinates to days for storage (y as offset from baseline)
+        onUpdateWaypoints(pixelsToDays(previewWaypoints, dayWidth, line.fromX, line.fromY, line.toX, line.toY));
       }
       setDraggingWaypointIndex(null);
       setPreviewWaypoints(null);
@@ -481,7 +528,7 @@ export function DependencyLine({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingWaypointIndex, previewWaypoints, onUpdateWaypoints, dayWidth]);
+  }, [draggingWaypointIndex, previewWaypoints, onUpdateWaypoints, dayWidth, line.fromX, line.fromY, line.toX, line.toY]);
 
   // Handle click outside to deselect
   useEffect(() => {
@@ -562,8 +609,8 @@ export function DependencyLine({
     newWaypointsPixels.splice(bestIndex, 0, { x, y });
 
     if (onUpdateWaypoints) {
-      // Convert pixel coordinates to days for storage
-      onUpdateWaypoints(pixelsToDays(newWaypointsPixels, dayWidth));
+      // Convert pixel coordinates to days for storage (y as offset from baseline)
+      onUpdateWaypoints(pixelsToDays(newWaypointsPixels, dayWidth, line.fromX, line.fromY, line.toX, line.toY));
     }
   }, [isSelected, line.controlPoints, line.fromX, line.fromY, line.toX, line.toY, onUpdateWaypoints, dayWidth]);
 
@@ -578,18 +625,32 @@ export function DependencyLine({
 
     const newWaypointsPixels = currentWaypointsPixels.filter((_, i) => i !== index);
     if (onUpdateWaypoints) {
-      // Convert pixel coordinates to days for storage
-      onUpdateWaypoints(pixelsToDays(newWaypointsPixels, dayWidth));
+      // Convert pixel coordinates to days for storage (y as offset from baseline)
+      onUpdateWaypoints(pixelsToDays(newWaypointsPixels, dayWidth, line.fromX, line.fromY, line.toX, line.toY));
     }
-  }, [line.controlPoints, onUpdateWaypoints, dayWidth]);
+  }, [line.controlPoints, line.fromX, line.fromY, line.toX, line.toY, onUpdateWaypoints, dayWidth]);
 
   // Determine if this line should be dimmed (another line is hovered, but not this one)
   const isDimmed = isAnyHovered && !isHovered;
 
+  // Check if this dependency is connected to the currently hovered project/milestone
+  const isConnectedToHoveredItem = useMemo(() => {
+    if (!hoveredItemId) return false;
+    const { projectId, milestoneId } = hoveredItemId;
+
+    // If hovering a specific milestone, only highlight dependencies connected to that milestone
+    if (milestoneId) {
+      return fromMilestoneId === milestoneId || toMilestoneId === milestoneId;
+    }
+
+    // If hovering a project (no milestone), highlight ALL dependencies connected to that project
+    return fromProject.id === projectId || toProject.id === projectId;
+  }, [hoveredItemId, fromProject.id, toProject.id, fromMilestoneId, toMilestoneId]);
+
   return (
     <g
       ref={svgRef}
-      className={`${styles.dependencyLine} ${isHovered ? styles.hovered : ''} ${isDimmed ? styles.dimmed : ''} ${isSelected ? styles.selected : ''}`}
+      className={`${styles.dependencyLine} ${isHovered ? styles.hovered : ''} ${isDimmed ? styles.dimmed : ''} ${isSelected ? styles.selected : ''} ${isNew ? styles.isNew : ''} ${isConnectedToHoveredItem ? styles.connectedHighlight : ''}`}
       style={{ pointerEvents: 'auto' }}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

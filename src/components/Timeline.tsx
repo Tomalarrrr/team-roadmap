@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo, useCallback, useState } from 'react';
+import { useRef, useEffect, useMemo, useCallback, useState, forwardRef, useImperativeHandle } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -14,13 +14,17 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable';
-import type { Project, TeamMember, Dependency } from '../types';
+import type { Project, TeamMember, Dependency, LeaveBlock as LeaveBlockType, LeaveType, LeaveCoverage, PeriodMarker as PeriodMarkerType, PeriodMarkerColor } from '../types';
 import { SortableMemberLane } from './SortableMemberLane';
 import { DraggableProjectBar } from './DraggableProjectBar';
 import { DroppableLane } from './DroppableLane';
 import { DependencyLine } from './DependencyLine';
 import { DependencyCreationOverlay } from './DependencyCreationOverlay';
 import { DependencyCreationProvider } from '../contexts/DependencyCreationContext';
+import { LeaveBlock } from './LeaveBlock';
+import { LeaveContextMenu } from './LeaveContextMenu';
+import { PeriodMarker } from './PeriodMarker';
+import { PeriodMarkerContextMenu } from './PeriodMarkerContextMenu';
 import {
   getFYStart,
   getFYEnd,
@@ -39,6 +43,42 @@ export type ZoomLevel = 'week' | 'month' | 'year';
 // dayWidth > 1.5: month view (month headers)
 const YEAR_VIEW_THRESHOLD = 1.5;
 const WEEK_VIEW_THRESHOLD = 5;
+
+// Detect overlapping projects for conflict highlighting
+// Returns a Set of project IDs that have conflicts (overlap with other projects from same owner)
+function detectProjectConflicts(projectsByOwner: Record<string, Project[]>): Set<string> {
+  const conflicts = new Set<string>();
+
+  Object.values(projectsByOwner).forEach(projects => {
+    if (projects.length < 2) return; // Need at least 2 projects to have a conflict
+
+    // Sort by start date for efficient overlap detection
+    const sorted = [...projects].sort((a, b) =>
+      new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+    );
+
+    // Check each pair of consecutive projects for overlap
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const a = sorted[i];
+        const b = sorted[j];
+
+        const aStart = new Date(a.startDate).getTime();
+        const aEnd = new Date(a.endDate).getTime();
+        const bStart = new Date(b.startDate).getTime();
+        const bEnd = new Date(b.endDate).getTime();
+
+        // Check for overlap: startA <= endB AND endA >= startB
+        if (aStart <= bEnd && aEnd >= bStart) {
+          conflicts.add(a.id);
+          conflicts.add(b.id);
+        }
+      }
+    }
+  });
+
+  return conflicts;
+}
 
 // Calculate stack indices for non-overlapping projects (optimized flight path algorithm)
 // Time complexity: O(n log n) instead of O(n²)
@@ -89,11 +129,16 @@ interface TimelineProps {
   projects: Project[];
   teamMembers: TeamMember[];
   dependencies: Dependency[];
+  leaveBlocks?: LeaveBlockType[];
   zoomLevel?: ZoomLevel; // Deprecated: use dayWidth instead
   dayWidth?: number; // Pixels per day (0.5 - 12)
   selectedProjectId?: string | null;
   filteredOwners?: string[]; // When set, only show swimlanes for these owners
-  onAddProject: (ownerName: string) => void;
+  newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
+  newDependencyIds?: Set<string>; // IDs of newly created dependencies (for entrance animation)
+  isLocked?: boolean; // When true, disable all editing actions (view mode)
+  isFullscreen?: boolean; // When true, timeline takes full viewport
+  onAddProject: (ownerName: string, suggestedStart?: string, suggestedEnd?: string) => void;
   onUpdateProject: (projectId: string, updates: Partial<Project>) => Promise<void>;
   onDeleteProject: (projectId: string) => void;
   onAddMilestone: (projectId: string) => void;
@@ -115,6 +160,25 @@ interface TimelineProps {
   ) => void;
   onRemoveDependency?: (depId: string) => void;
   onUpdateDependency?: (depId: string, updates: Partial<Dependency>) => void;
+  onAddLeaveBlock?: (data: {
+    memberId: string;
+    startDate: string;
+    endDate: string;
+    type: LeaveType;
+    coverage: LeaveCoverage;
+    label?: string;
+  }) => void;
+  onDeleteLeaveBlock?: (leaveId: string) => void;
+  periodMarkers?: PeriodMarkerType[];
+  onAddPeriodMarker?: (data: {
+    startDate: string;
+    endDate: string;
+    color: PeriodMarkerColor;
+    label?: string;
+  }) => void;
+  onDeletePeriodMarker?: (markerId: string) => void;
+  onDayWidthChange?: (newDayWidth: number) => void; // For Ctrl/Cmd + scroll zoom
+  onHoveredMemberChange?: (memberName: string | null) => void; // For N key quick create
 }
 
 const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
@@ -181,14 +245,24 @@ function calculateProjectHeight(milestones: { id: string; startDate: string; end
   return Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
 }
 
-export function Timeline({
+// Ref handle type for parent components
+export interface TimelineRef {
+  scrollToToday: () => void;
+}
+
+export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline({
   projects,
   teamMembers,
   dependencies,
+  leaveBlocks = [],
   zoomLevel,
   dayWidth: dayWidthProp,
   selectedProjectId,
   filteredOwners,
+  newMilestoneIds,
+  newDependencyIds,
+  isLocked = false,
+  isFullscreen = false,
   onAddProject,
   onUpdateProject,
   onDeleteProject,
@@ -205,9 +279,18 @@ export function Timeline({
   onSelectMilestone,
   onAddDependency,
   onRemoveDependency,
-  onUpdateDependency
-}: TimelineProps) {
+  onUpdateDependency,
+  onAddLeaveBlock,
+  onDeleteLeaveBlock,
+  periodMarkers = [],
+  onAddPeriodMarker,
+  onDeletePeriodMarker,
+  onDayWidthChange,
+  onHoveredMemberChange
+}, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const sidebarContentRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
   const hasInitialScrolledRef = useRef(false);
@@ -300,7 +383,7 @@ export function Timeline({
 
   const monthMarkers = useMemo(() => {
     if (displayMode === 'year') return [];
-    const markers: { label: string; left: number; width: number }[] = [];
+    const markers: { label: string; left: number; width: number; date: string }[] = [];
     let current = startOfMonth(timelineStart);
     // Use shorter date format when zoomed out (month view) to prevent squashing
     const dateFormat = displayMode === 'week' ? 'MMM yyyy' : "MMM ''yy";
@@ -311,7 +394,12 @@ export function Timeline({
       const daysInMonth = dateFnsDiff(nextMonth, current);
       const width = daysInMonth * dayWidth;
       if (left >= 0 && left < totalWidth) {
-        markers.push({ label: format(current, dateFormat), left, width });
+        markers.push({
+          label: format(current, dateFormat),
+          left,
+          width,
+          date: current.toISOString().split('T')[0]
+        });
       }
       current = nextMonth;
     }
@@ -381,11 +469,21 @@ export function Timeline({
   });
 
   // Use native wheel event listener with { passive: false } to allow preventDefault
+  // Handles both horizontal scrolling (header drag) and Ctrl/Cmd + scroll zoom
   useEffect(() => {
     const scrollEl = scrollRef.current;
     if (!scrollEl) return;
 
     const handleWheel = (e: WheelEvent) => {
+      // Ctrl/Cmd + scroll to zoom (like Google Maps)
+      if ((e.ctrlKey || e.metaKey) && onDayWidthChange) {
+        e.preventDefault();
+        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1; // Scroll down = zoom out, up = zoom in
+        const newDayWidth = Math.min(12, Math.max(0.5, dayWidth * zoomFactor));
+        onDayWidthChange(newDayWidth);
+        return;
+      }
+
       // Only allow horizontal scrolling via wheel when mouse is over the header
       const target = e.target as HTMLElement;
       if (!headerRef.current?.contains(target)) return;
@@ -398,7 +496,7 @@ export function Timeline({
 
     scrollEl.addEventListener('wheel', handleWheel, { passive: false });
     return () => scrollEl.removeEventListener('wheel', handleWheel);
-  }, []);
+  }, [dayWidth, onDayWidthChange]);
 
   // Click-drag panning state
   const [isPanning, setIsPanning] = useState(false);
@@ -406,6 +504,40 @@ export function Timeline({
 
   // Track which dependency is hovered for isolation effect
   const [hoveredDepId, setHoveredDepId] = useState<string | null>(null);
+
+  // Jump to today handler (for fullscreen mode and T key)
+  const scrollToToday = useCallback(() => {
+    if (!scrollRef.current) return;
+    const viewportWidth = scrollRef.current.clientWidth;
+    const oneThirdOffset = viewportWidth / 3;
+    scrollRef.current.scrollTo({
+      left: Math.max(0, todayPosition - oneThirdOffset),
+      behavior: 'smooth'
+    });
+  }, [todayPosition]);
+
+  // Expose scrollToToday to parent via ref
+  useImperativeHandle(ref, () => ({
+    scrollToToday
+  }), [scrollToToday]);
+
+  // Track which project/milestone is hovered for dependency highlighting
+  const [hoveredItemId, setHoveredItemId] = useState<{ projectId: string; milestoneId?: string } | null>(null);
+
+  // Leave context menu state
+  const [leaveContextMenu, setLeaveContextMenu] = useState<{
+    x: number;
+    y: number;
+    memberId: string;
+    date: string;
+  } | null>(null);
+
+  // Period marker context menu state
+  const [periodMarkerContextMenu, setPeriodMarkerContextMenu] = useState<{
+    x: number;
+    y: number;
+    date: string;
+  } | null>(null);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     // Only start pan if clicking within the header area
@@ -502,8 +634,90 @@ export function Timeline({
     };
   }, []);
 
+  // Sync vertical scroll from main content to sidebar using CSS transform
+  // Uses RAF for perfect frame timing + GPU-accelerated transform
+  useEffect(() => {
+    const scrollEl = scrollRef.current;
+    const sidebarContentEl = sidebarContentRef.current;
+    if (!scrollEl || !sidebarContentEl) return;
+
+    let rafId: number | null = null;
+    let lastScrollTop = 0;
+
+    const syncSidebarToMain = () => {
+      // Skip if scroll position hasn't changed
+      if (scrollEl.scrollTop === lastScrollTop) return;
+      lastScrollTop = scrollEl.scrollTop;
+
+      // Cancel any pending frame to avoid queuing multiple updates
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+
+      // Schedule transform update on next frame for perfect sync
+      rafId = requestAnimationFrame(() => {
+        sidebarContentEl.style.transform = `translate3d(0, -${lastScrollTop}px, 0)`;
+        rafId = null;
+      });
+    };
+
+    // Use passive listener for better scroll performance
+    scrollEl.addEventListener('scroll', syncSidebarToMain, { passive: true });
+
+    return () => {
+      scrollEl.removeEventListener('scroll', syncSidebarToMain);
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+    };
+  }, []);
+
+  // Handle right-click on lane to add leave
+  const handleLaneContextMenu = useCallback((
+    e: React.MouseEvent,
+    memberId: string
+  ) => {
+    if (isLocked || !onAddLeaveBlock) return;
+    e.preventDefault();
+
+    // Calculate the date from click position
+    const scrollContainer = scrollRef.current;
+    if (!scrollContainer) return;
+
+    const rect = scrollContainer.getBoundingClientRect();
+    const scrollLeft = scrollContainer.scrollLeft;
+    const clickX = e.clientX - rect.left + scrollLeft;
+    const daysFromStart = Math.floor(clickX / dayWidth);
+    const clickDate = new Date(timelineStart);
+    clickDate.setDate(clickDate.getDate() + daysFromStart);
+
+    const dateStr = clickDate.toISOString().split('T')[0];
+
+    setLeaveContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      memberId,
+      date: dateStr
+    });
+  }, [isLocked, onAddLeaveBlock, dayWidth, timelineStart]);
+
+  // Handle right-click on month header to add period marker
+  const handleHeaderContextMenu = useCallback((
+    e: React.MouseEvent,
+    markerDate: string
+  ) => {
+    if (isLocked || !onAddPeriodMarker) return;
+    e.preventDefault();
+
+    setPeriodMarkerContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      date: markerDate
+    });
+  }, [isLocked, onAddPeriodMarker]);
+
   // Group projects by owner AND calculate stacks in single pass (batched operations)
-  const { projectsByOwner, projectStacksByOwner } = useMemo(() => {
+  const { projectsByOwner, projectStacksByOwner, projectConflicts } = useMemo(() => {
     const grouped: Record<string, Project[]> = {};
     const stacksByOwner: Record<string, Map<string, number>> = {};
 
@@ -525,8 +739,25 @@ export function Timeline({
       stacksByOwner[m.name] = calculateProjectStacks(ownerProjects);
     });
 
-    return { projectsByOwner: grouped, projectStacksByOwner: stacksByOwner };
+    // Detect conflicts (overlapping projects)
+    const conflicts = detectProjectConflicts(grouped);
+
+    return { projectsByOwner: grouped, projectStacksByOwner: stacksByOwner, projectConflicts: conflicts };
   }, [projects, teamMembers]);
+
+  // Group leave blocks by member ID
+  const leaveBlocksByMember = useMemo(() => {
+    const grouped: Record<string, LeaveBlockType[]> = {};
+    teamMembers.forEach(m => {
+      grouped[m.id] = [];
+    });
+    leaveBlocks.forEach(leave => {
+      if (grouped[leave.memberId]) {
+        grouped[leave.memberId].push(leave);
+      }
+    });
+    return grouped;
+  }, [leaveBlocks, teamMembers]);
 
   // Create O(1) project lookup map (avoids O(n) .find() in dependency rendering)
   const projectsById = useMemo(() => {
@@ -648,6 +879,8 @@ export function Timeline({
           ownerToLaneIndex={ownerToLaneIndex}
           lineIndex={index}
           isAnyHovered={hoveredDepId !== null}
+          hoveredItemId={hoveredItemId}
+          isNew={newDependencyIds?.has(dep.id) ?? false}
           onHoverChange={(hovered) => setHoveredDepId(hovered ? dep.id : null)}
           onRemove={() => onRemoveDependency?.(dep.id)}
           waypoints={dep.waypoints}
@@ -655,46 +888,51 @@ export function Timeline({
         />
       );
     });
-  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, onRemoveDependency, onUpdateDependency]);
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds]);
 
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>
-    <div id="timeline-container" className={styles.container}>
-      {/* Fixed left sidebar with team members */}
-      <div className={styles.sidebar}>
+    <div id="timeline-container" className={`${styles.container} ${isFullscreen ? styles.fullscreen : ''}`}>
+      {/* Fixed left sidebar with team members - hidden in fullscreen */}
+      {!isFullscreen && (
+      <div ref={sidebarRef} className={styles.sidebar}>
         <div className={styles.sidebarHeader}>Team</div>
-        {displayedTeamMembers.length === 0 ? (
-          <div className={styles.emptyState}>
-            <div className={styles.emptyIcon}>👥</div>
-            <p className={styles.emptyTitle}>No team members yet</p>
-            <p className={styles.emptyText}>Add team members to start planning your roadmap</p>
-          </div>
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleMemberDragEnd}
-          >
-            <SortableContext
-              items={displayedTeamMembers.map(m => m.id)}
-              strategy={verticalListSortingStrategy}
+        <div ref={sidebarContentRef} className={styles.sidebarContent}>
+          {displayedTeamMembers.length === 0 ? (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyIcon}>👥</div>
+              <p className={styles.emptyTitle}>No team members yet</p>
+              <p className={styles.emptyText}>Add team members to start planning your roadmap</p>
+            </div>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleMemberDragEnd}
             >
-              {displayedTeamMembers.map((member, idx) => (
-                <SortableMemberLane
-                  key={member.id}
-                  member={member}
-                  height={laneHeights[idx]}
-                  onEdit={() => onEditTeamMember(member)}
-                  onAddProject={() => onAddProject(member.name)}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-        )}
-        <button className={styles.addMemberBtn} onClick={onAddTeamMember}>
-          + Add Team Member
-        </button>
+              <SortableContext
+                items={displayedTeamMembers.map(m => m.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {displayedTeamMembers.map((member, idx) => (
+                  <SortableMemberLane
+                    key={member.id}
+                    member={member}
+                    height={laneHeights[idx]}
+                    isLocked={isLocked}
+                    onEdit={() => onEditTeamMember(member)}
+                    onAddProject={() => onAddProject(member.name)}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+          )}
+          <button className={styles.addMemberBtn} onClick={onAddTeamMember} disabled={isLocked}>
+            + Add Team Member
+          </button>
+        </div>
       </div>
+      )}
 
       {/* Scrollable timeline */}
       <div className={styles.timelineWrapper}>
@@ -715,11 +953,12 @@ export function Timeline({
                 </div>
               ))
             ) : (
-              monthMarkers.map(({ label, left, width }, i) => (
+              monthMarkers.map(({ label, left, width, date }, i) => (
                 <div
                   key={i}
                   className={`${styles.monthHeader} ${displayMode === 'week' ? styles.weekZoom : styles.monthZoom}`}
                   style={{ left, width }}
+                  onContextMenu={(e) => handleHeaderContextMenu(e, date)}
                 >
                   <span className={styles.monthLabel}>{label}</span>
                 </div>
@@ -746,6 +985,19 @@ export function Timeline({
                 <div key={i} className={styles.gridLine} style={{ left }} />
               ))}
 
+              {/* Period markers (full-height colored bands) */}
+              {periodMarkers.map((marker) => (
+                <PeriodMarker
+                  key={marker.id}
+                  marker={marker}
+                  timelineStart={timelineStart}
+                  dayWidth={dayWidth}
+                  totalHeight={totalLanesHeight}
+                  isLocked={isLocked}
+                  onDelete={() => onDeletePeriodMarker?.(marker.id)}
+                />
+              ))}
+
               {/* Today line */}
               {todayPosition >= 0 && todayPosition <= totalWidth && (
                 <div className={styles.todayLine} style={{ left: todayPosition }}>
@@ -764,6 +1016,7 @@ export function Timeline({
               {/* Project lanes */}
               {displayedTeamMembers.map((member, idx) => {
                 const stacks = projectStacksByOwner[member.name];
+                const memberLeaves = leaveBlocksByMember[member.id] || [];
                 return (
                   <DroppableLane
                     key={member.id}
@@ -771,7 +1024,29 @@ export function Timeline({
                     memberName={member.name}
                     top={lanePositions[idx]}
                     height={laneHeights[idx]}
+                    onContextMenu={(e) => handleLaneContextMenu(e, member.id)}
+                    onHoverChange={(isHovered) => onHoveredMemberChange?.(isHovered ? member.name : null)}
+                    timelineStart={timelineStart}
+                    dayWidth={dayWidth}
+                    isLocked={isLocked}
+                    onDragCreate={(startDate, endDate) => {
+                      // Open add project modal with pre-filled dates from drag
+                      onAddProject(member.name, startDate, endDate);
+                    }}
                   >
+                    {/* Leave blocks (rendered behind projects) */}
+                    {memberLeaves.map((leave) => (
+                      <LeaveBlock
+                        key={leave.id}
+                        leave={leave}
+                        timelineStart={timelineStart}
+                        dayWidth={dayWidth}
+                        laneHeight={laneHeights[idx]}
+                        isLocked={isLocked}
+                        onDelete={() => onDeleteLeaveBlock?.(leave.id)}
+                      />
+                    ))}
+                    {/* Projects */}
                     {projectsByOwner[member.name]?.map((project) => {
                       const stackIdx = stacks?.get(project.id) ?? 0;
                       return (
@@ -782,7 +1057,11 @@ export function Timeline({
                         dayWidth={dayWidth}
                         stackIndex={stackIdx}
                         stackTopOffset={getStackTopOffset(member.name, stackIdx)}
+                        laneTop={lanePositions[idx]}
                         isSelected={project.id === selectedProjectId}
+                        hasConflict={projectConflicts.has(project.id)}
+                        newMilestoneIds={newMilestoneIds}
+                        isLocked={isLocked}
                         onUpdate={(updates) => onUpdateProject(project.id, updates)}
                         onDelete={() => onDeleteProject(project.id)}
                         onAddMilestone={() => onAddMilestone(project.id)}
@@ -797,6 +1076,9 @@ export function Timeline({
                           if (milestone) onSelectMilestone(project.id, mid, milestone);
                         } : undefined}
                         onEdgeDrag={handleEdgeDrag}
+                        onHoverChange={(hovered, milestoneId) => setHoveredItemId(
+                          hovered ? { projectId: project.id, milestoneId } : null
+                        )}
                       />
                       );
                     })}
@@ -813,7 +1095,45 @@ export function Timeline({
           </DndContext>
         </div>
       </div>
+
+      {/* Leave context menu */}
+      {leaveContextMenu && onAddLeaveBlock && (
+        <LeaveContextMenu
+          x={leaveContextMenu.x}
+          y={leaveContextMenu.y}
+          memberId={leaveContextMenu.memberId}
+          date={leaveContextMenu.date}
+          onAddLeave={onAddLeaveBlock}
+          onClose={() => setLeaveContextMenu(null)}
+        />
+      )}
+
+      {/* Period marker context menu */}
+      {periodMarkerContextMenu && onAddPeriodMarker && (
+        <PeriodMarkerContextMenu
+          x={periodMarkerContextMenu.x}
+          y={periodMarkerContextMenu.y}
+          date={periodMarkerContextMenu.date}
+          onAddMarker={onAddPeriodMarker}
+          onClose={() => setPeriodMarkerContextMenu(null)}
+        />
+      )}
+
+      {/* Jump to Today floating button - fullscreen only */}
+      {isFullscreen && (
+        <button
+          className={styles.jumpToTodayBtn}
+          onClick={scrollToToday}
+          title="Jump to today (T)"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" fill="none" />
+            <circle cx="8" cy="8" r="2" fill="currentColor" />
+          </svg>
+          Today
+        </button>
+      )}
     </div>
     </DependencyCreationProvider>
   );
-}
+});

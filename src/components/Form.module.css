@@ -77,18 +77,23 @@
   font-size: 0.95rem;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  transition: all 0.2s ease;
+  /* Snappy, responsive transitions */
+  transition: border-color 100ms ease,
+              box-shadow 150ms cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 100ms ease;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .input:hover {
   border-color: var(--border-medium);
+  background: rgba(255, 255, 255, 0.8);
 }
 
 .input:focus {
   outline: none;
   border-color: var(--accent-blue);
-  box-shadow: 0 0 0 3px var(--accent-blue-light), 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 0 0 3px var(--accent-blue-light), 0 2px 8px rgba(59, 130, 246, 0.1);
+  background: var(--bg-secondary);
 }
 
 .input::placeholder {
@@ -117,7 +122,7 @@
   font-size: 0.95rem;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  transition: all 0.2s ease;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   resize: vertical;
   min-height: 60px;
   font-family: inherit;
@@ -196,13 +201,21 @@
   border-radius: 8px;
   border: 2px solid transparent;
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  /* Snappy scale with spring effect */
+  transition: transform 100ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 120ms ease,
+              border-color 100ms ease;
   position: relative;
 }
 
 .colorSwatch:hover {
-  transform: scale(1.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  transform: scale(1.12);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
+
+.colorSwatch:active {
+  transform: scale(0.95);
+  transition-duration: 50ms;
 }
 
 .colorSwatch:focus-visible {
@@ -323,7 +336,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
 }
 
 .deleteBtn:hover {
@@ -348,7 +361,7 @@
   color: var(--text-secondary);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-light);
-  transition: all 0.2s ease;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
 }
 
 .cancelBtn:hover {
@@ -373,22 +386,56 @@
   color: white;
   background: linear-gradient(135deg, var(--accent-blue) 0%, #2563eb 100%);
   box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
-  transition: all 0.2s ease;
+  /* Snappy, tactile transitions */
+  transition: transform 80ms ease,
+              box-shadow 120ms ease;
 }
 
 .submitBtn:hover {
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
-  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(59, 130, 246, 0.4);
+  transform: translateY(-2px);
 }
 
 .submitBtn:active {
-  transform: translateY(0) scale(0.98);
+  transform: translateY(0) scale(0.97);
   box-shadow: 0 1px 2px rgba(59, 130, 246, 0.3);
+  transition-duration: 40ms;
 }
 
 .submitBtn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--accent-blue-light), 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.submitBtn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.submitBtn:disabled:hover {
+  transform: none;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+/* ========================================
+   Loading Spinner
+   ======================================== */
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 0.8s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 /* ========================================

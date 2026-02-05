@@ -20,11 +20,15 @@ interface MilestoneLineProps {
   projectLeft: number;
   projectWidth: number;
   stackIndex?: number;
-  laneTop?: number; // Top position of the lane for dependency positioning
+  laneTop?: number; // Project's top position within its lane (for milestone positioning)
+  absoluteLaneTop?: number; // Lane's absolute top position in the timeline (for dependency positioning)
+  isNew?: boolean; // True if this milestone was just created (for entrance animation)
+  isLocked?: boolean; // When true, disable drag and edit actions (view mode)
   onUpdate: (updates: Partial<Milestone>) => Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
   onSelect?: () => void;
+  onHoverChange?: (hovered: boolean) => void; // For dependency highlighting
 }
 
 const AUTO_BLUE = '#0070c0'; // Blue for completed/past milestones
@@ -33,6 +37,7 @@ type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
 const MILESTONE_HEIGHT = 20;
 const MILESTONE_GAP = 4;
+const PROJECT_CONTENT_HEIGHT = 28; // Height of the title/dates area (must match DependencyLine)
 
 // Custom comparison for React.memo to prevent unnecessary re-renders
 function areMilestonePropsEqual(prevProps: MilestoneLineProps, nextProps: MilestoneLineProps): boolean {
@@ -52,7 +57,10 @@ function areMilestonePropsEqual(prevProps: MilestoneLineProps, nextProps: Milest
         prevProps.projectLeft !== nextProps.projectLeft ||
         prevProps.projectWidth !== nextProps.projectWidth ||
         prevProps.stackIndex !== nextProps.stackIndex ||
-        prevProps.laneTop !== nextProps.laneTop) {
+        prevProps.laneTop !== nextProps.laneTop ||
+        prevProps.absoluteLaneTop !== nextProps.absoluteLaneTop ||
+        prevProps.isNew !== nextProps.isNew ||
+        prevProps.isLocked !== nextProps.isLocked) {
       return false;
     }
 
@@ -82,10 +90,14 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   projectWidth,
   stackIndex = 0,
   laneTop = 0,
+  absoluteLaneTop = 0,
+  isNew = false,
+  isLocked = false,
   onUpdate,
   onEdit,
   onDelete,
-  onSelect
+  onSelect,
+  onHoverChange
 }: MilestoneLineProps) {
   const milestoneRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<DragMode>(null);
@@ -108,20 +120,23 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   // Context menu state
   const contextMenu = useContextMenu();
 
-  // Context menu items configuration
-  const menuItems: ContextMenuItem[] = useMemo(() => [
-    {
-      id: 'edit',
-      label: 'Edit Milestone',
-      onClick: onEdit
-    },
-    {
-      id: 'delete',
-      label: 'Delete',
-      onClick: onDelete,
-      variant: 'danger' as const
-    }
-  ], [onEdit, onDelete]);
+  // Context menu items configuration - empty when locked
+  const menuItems: ContextMenuItem[] = useMemo(() => {
+    if (isLocked) return [];
+    return [
+      {
+        id: 'edit',
+        label: 'Edit Milestone',
+        onClick: onEdit
+      },
+      {
+        id: 'delete',
+        label: 'Delete',
+        onClick: onDelete,
+        variant: 'danger' as const
+      }
+    ];
+  }, [onEdit, onDelete, isLocked]);
 
   // Click-to-edit tracking (distinguish from drag)
   const clickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
@@ -203,6 +218,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
 
   // Immediate drag handler for resize handles (no click detection needed)
   const handleResizeMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
+    if (isLocked) return; // Disable resize when locked
     e.preventDefault();
     e.stopPropagation();
     if (DEBUG_DRAG) console.log('[MilestoneLine] RESIZE mouseDown:', mode);
@@ -210,7 +226,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     setDragStartX(e.clientX);
     setOriginalStartDate(milestone.startDate);
     setOriginalEndDate(milestone.endDate);
-  }, [milestone.startDate, milestone.endDate]);
+  }, [milestone.startDate, milestone.endDate, isLocked]);
 
   // Track the latest preview for committing on mouseUp
   const latestPreviewRef = useRef<{ start: string; end: string } | null>(null);
@@ -248,13 +264,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     };
 
     const handleInitialMouseUp = () => {
-      // Clean up - this was a click, not a drag
+      // Clean up listeners only - let element's onMouseUp handle click detection
       if (initialListenersRef.current) {
         document.removeEventListener('mousemove', initialListenersRef.current.move);
         document.removeEventListener('mouseup', initialListenersRef.current.up);
         initialListenersRef.current = null;
       }
-      clickStartRef.current = null;
+      // Don't clear clickStartRef here - the element's onMouseUp needs it for click detection
     };
 
     initialListenersRef.current = { move: handleInitialMouseMove, up: handleInitialMouseUp };
@@ -423,6 +439,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
 
   // Keyboard handler for accessibility
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (isLocked) return; // Disable keyboard actions when locked
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
       e.stopPropagation();
@@ -432,11 +449,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       e.stopPropagation();
       onDelete();
     }
-  }, [onEdit, onDelete]);
+  }, [onEdit, onDelete, isLocked]);
 
   // Handle starting a dependency from this milestone
+  // Position uses absolute coordinates matching DependencyLine calculation:
+  // absoluteLaneTop (lane position) + laneTop (project position within lane) + PROJECT_CONTENT_HEIGHT + 6 + milestone stack offset + center
   const handleStartDependency = useCallback(() => {
-    const milestoneTop = laneTop + stackIndex * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2 + 52; // 52 = project content height
+    const milestoneTop = absoluteLaneTop + laneTop + PROJECT_CONTENT_HEIGHT + 6 + stackIndex * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2;
     startCreation({
       projectId,
       milestoneId: milestone.id,
@@ -445,7 +464,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
         y: milestoneTop
       }
     });
-  }, [projectId, milestone.id, milestoneLeft, milestoneWidth, laneTop, stackIndex, startCreation]);
+  }, [projectId, milestone.id, milestoneLeft, milestoneWidth, absoluteLaneTop, laneTop, stackIndex, startCreation]);
 
   // Handle click when in dependency creation mode
   const handleDependencyTarget = useCallback((e: React.MouseEvent) => {
@@ -473,6 +492,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   // Tooltip handlers - show after brief delay
   const handleMouseEnter = useCallback(() => {
     if (dragMode) return;
+    onHoverChange?.(true); // Notify parent of hover for dependency highlighting
     tooltipTimeoutRef.current = setTimeout(() => {
       if (milestoneRef.current) {
         const rect = milestoneRef.current.getBoundingClientRect();
@@ -483,7 +503,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       }
       setShowTooltip(true);
     }, 400); // 400ms delay before showing
-  }, [dragMode]);
+  }, [dragMode, onHoverChange]);
 
   const handleMouseLeaveTooltip = useCallback(() => {
     if (tooltipTimeoutRef.current) {
@@ -492,7 +512,8 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     }
     setShowTooltip(false);
     setTooltipPosition(null);
-  }, []);
+    onHoverChange?.(false); // Notify parent of hover end
+  }, [onHoverChange]);
 
   // Clean up tooltip timeout on unmount
   useEffect(() => {
@@ -530,7 +551,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     <div
       ref={milestoneRef}
       data-dependency-target
-      className={`${styles.milestoneLine} ${dragMode ? styles.dragging : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''}`}
+      className={`${styles.milestoneLine} ${dragMode ? styles.dragging : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''} ${isNew ? styles.isNew : ''}`}
       style={{
         left: safeDisplayLeft,
         top: stackIndex * (MILESTONE_HEIGHT + MILESTONE_GAP),
@@ -557,26 +578,33 @@ const MilestoneLineComponent = memo(function MilestoneLine({
       }}
     >
       {/* Resize handles - use immediate drag mode (no click detection needed) */}
-      <div
-        className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`}
-        onMouseDown={(e) => handleResizeMouseDown(e, 'resize-start')}
-      />
-      <div
-        className={`${styles.resizeHandle} ${styles.resizeHandleRight}`}
-        onMouseDown={(e) => handleResizeMouseDown(e, 'resize-end')}
-      />
+      {!isLocked && (
+        <>
+          <div
+            className={`${styles.resizeHandle} ${styles.resizeHandleLeft}`}
+            onMouseDown={(e) => handleResizeMouseDown(e, 'resize-start')}
+          />
+          <div
+            className={`${styles.resizeHandle} ${styles.resizeHandleRight}`}
+            onMouseDown={(e) => handleResizeMouseDown(e, 'resize-end')}
+          />
+        </>
+      )}
 
-      {/* Dependency arrow button */}
-      <DependencyArrow
-        isVisible={showDependencyArrow}
-        isCreatingDependency={isCreatingDependency}
-        onStartDependency={handleStartDependency}
-      />
+      {/* Dependency arrow button - hidden when locked */}
+      {!isLocked && (
+        <DependencyArrow
+          isVisible={showDependencyArrow}
+          isCreatingDependency={isCreatingDependency}
+          onStartDependency={handleStartDependency}
+        />
+      )}
 
       {/* Drag area - single click opens edit */}
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
+          if (isLocked) return; // Disable drag when locked
           e.preventDefault();
           e.stopPropagation();
           clickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
@@ -596,18 +624,19 @@ const MilestoneLineComponent = memo(function MilestoneLine({
           const dx = Math.abs(e.clientX - clickStartRef.current.x);
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
-          // If minimal movement and quick click, open edit dialog and select
+          // If minimal movement and quick click, open edit dialog and select (unless locked)
           if (dx < 5 && dy < 5 && elapsed < 300) {
             e.stopPropagation();
             setDragMode(null); // Clear drag mode before opening modal
             clickStartRef.current = null;
             onSelect?.();
-            onEdit();
+            if (!isLocked) onEdit();
             return;
           }
           clickStartRef.current = null;
         }}
         onDoubleClick={(e) => {
+          if (isLocked) return; // Disable edit when locked
           e.stopPropagation();
           onEdit();
         }}

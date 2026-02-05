@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { milestoneSchema, validateForm } from '../utils/validation';
+import { STATUS_COLORS, DEFAULT_STATUS_COLOR, getStatusNameByHex } from '../utils/statusColors';
 import styles from './Form.module.css';
 
 interface MilestoneFormProps {
@@ -20,21 +21,11 @@ interface MilestoneFormProps {
     endDate: string;
     tags: string[];
     statusColor: string;
-  }) => void;
+  }) => void | Promise<void>;
   onCancel: () => void;
   onDelete?: () => void;
   isEditing?: boolean;
 }
-
-// Status-aligned colors matching SearchFilter status indicators
-const STATUS_COLORS = [
-  { hex: '#0070c0', name: 'Complete' },
-  { hex: '#04b050', name: 'On Track' },
-  { hex: '#ffc002', name: 'At Risk' },
-  { hex: '#ff0100', name: 'Off Track' },
-  { hex: '#7612c3', name: 'On Hold' },
-  { hex: '#9ca3af', name: 'To Start' },
-];
 
 export function MilestoneForm({
   initialValues,
@@ -50,16 +41,20 @@ export function MilestoneForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || projectStartDate);
   const [endDate, setEndDate] = useState(initialValues?.endDate || projectStartDate);
   const [tagsInput, setTagsInput] = useState(initialValues?.tags?.join(', ') || '');
-  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || STATUS_COLORS[0].hex);
+  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_STATUS_COLOR);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Check if milestone extends beyond project bounds
   const extendsBeforeProject = startDate && new Date(startDate) < new Date(projectStartDate);
   const extendsAfterProject = endDate && new Date(endDate) > new Date(projectEndDate);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Prevent double submission
+    if (isSaving) return;
 
     const tags = tagsInput
       .split(',')
@@ -81,7 +76,13 @@ export function MilestoneForm({
     }
 
     setErrors({});
-    onSubmit(result.data);
+    setIsSaving(true);
+
+    try {
+      await onSubmit(result.data);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -130,6 +131,7 @@ export function MilestoneForm({
             id="endDate"
             type="date"
             value={endDate}
+            min={startDate}
             onChange={(e) => {
               setEndDate(e.target.value);
               setErrors({});
@@ -184,7 +186,7 @@ export function MilestoneForm({
             style={{ backgroundColor: statusColor }}
           />
           <span className={styles.statusPreviewText}>
-            {STATUS_COLORS.find(c => c.hex === statusColor)?.name || 'Custom'}
+            {getStatusNameByHex(statusColor) || 'Custom'}
           </span>
         </div>
       </div>
@@ -214,8 +216,15 @@ export function MilestoneForm({
           <button type="button" onClick={onCancel} className={styles.cancelBtn}>
             Cancel
           </button>
-          <button type="submit" className={styles.submitBtn}>
-            {isEditing ? 'Save Changes' : 'Add Milestone'}
+          <button type="submit" className={styles.submitBtn} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <span className={styles.spinner} />
+                Saving...
+              </>
+            ) : (
+              isEditing ? 'Save Changes' : 'Add Milestone'
+            )}
           </button>
         </div>
       )}

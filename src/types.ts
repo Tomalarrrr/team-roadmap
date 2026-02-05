@@ -30,6 +30,19 @@ export interface Waypoint {
   y: number;
 }
 
+export type LeaveType = 'annual-leave' | 'training' | 'conference' | 'other';
+export type LeaveCoverage = 'quarter' | 'half' | 'full';
+
+export interface LeaveBlock {
+  id: string;
+  memberId: string;
+  startDate: string;
+  endDate: string;
+  coverage: LeaveCoverage;
+  type: LeaveType;
+  label?: string;
+}
+
 export interface Dependency {
   id: string;
   fromProjectId: string;
@@ -65,7 +78,10 @@ export type ActionType =
   | 'DELETE_MEMBER'
   | 'REORDER_MEMBERS'
   | 'ADD_DEPENDENCY'
-  | 'REMOVE_DEPENDENCY';
+  | 'REMOVE_DEPENDENCY'
+  | 'CREATE_LEAVE'
+  | 'UPDATE_LEAVE'
+  | 'DELETE_LEAVE';
 
 // Base undo action interface
 interface BaseUndoAction {
@@ -137,10 +153,22 @@ export type UndoAction =
       inverse: { action: 'restore'; data: Dependency };
     });
 
+export type PeriodMarkerColor = 'grey' | 'yellow' | 'orange' | 'red' | 'green';
+
+export interface PeriodMarker {
+  id: string;
+  startDate: string;
+  endDate: string;
+  color: PeriodMarkerColor;
+  label?: string;
+}
+
 export interface RoadmapData {
   projects: Project[];
   teamMembers: TeamMember[];
   dependencies?: Dependency[];
+  leaveBlocks?: LeaveBlock[];
+  periodMarkers?: PeriodMarker[];
 }
 
 // Clipboard types for copy/paste

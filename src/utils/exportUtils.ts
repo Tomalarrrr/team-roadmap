@@ -1,4 +1,4 @@
-import { format } from 'date-fns';
+import { format, addMonths, differenceInDays } from 'date-fns';
 import type { Project, TeamMember, Dependency } from '../types';
 import { analytics } from './analytics';
 
@@ -61,7 +61,7 @@ async function injectStylesheets(clone: HTMLElement): Promise<void> {
 }
 
 // PDF Export - uses dynamic imports to code-split heavy libraries
-// Enhanced to preserve ALL styling perfectly (FAANG L7+ quality)
+// Captures 6 months before and after today, plus all vertical content
 export async function exportTimelineToPDF() {
   const timelineElement = document.getElementById('timeline-container');
   if (!timelineElement) {
@@ -70,8 +70,17 @@ export async function exportTimelineToPDF() {
   }
 
   // Get today's date for the filename
-  const today = format(new Date(), 'yyyy-MM-dd');
-  const filename = `team-roadmap-${today}.pdf`;
+  const today = new Date();
+  const todayStr = format(today, 'yyyy-MM-dd');
+  const filename = `team-roadmap-${todayStr}.pdf`;
+
+  // Timeline constants (must match Timeline.tsx)
+  const TIMELINE_START = new Date(2025, 0, 1); // January 1, 2025
+  const SIDEBAR_WIDTH = 200; // Width of the fixed sidebar
+
+  // Calculate the 6-month window around today
+  const sixMonthsBack = addMonths(today, -6);
+  const sixMonthsForward = addMonths(today, 6);
 
   try {
     // Dynamic imports - only loaded when export is triggered
@@ -80,19 +89,85 @@ export async function exportTimelineToPDF() {
       import('jspdf')
     ]);
 
+    // Detect current dayWidth from the rendered timeline
+    // Look for the header element and calculate from its width
+    const header = timelineElement.querySelector('[class*="header"]') as HTMLElement;
+    const totalDays = differenceInDays(new Date(2030, 11, 31), TIMELINE_START);
+    const dayWidth = header ? header.scrollWidth / totalDays : 3; // Default to 3 if not found
+
+    // Calculate pixel positions for the date range
+    const daysFromStartToWindowStart = Math.max(0, differenceInDays(sixMonthsBack, TIMELINE_START));
+    const daysFromStartToWindowEnd = differenceInDays(sixMonthsForward, TIMELINE_START);
+
+    const windowStartX = daysFromStartToWindowStart * dayWidth;
+    const windowEndX = daysFromStartToWindowEnd * dayWidth;
+    const windowWidth = windowEndX - windowStartX;
+
     // Clone element and inline all computed styles to guarantee perfect rendering
     const clonedElement = inlineStyles(timelineElement);
     await injectStylesheets(clonedElement);
+
+    // CRITICAL FIX: Remove height constraints and overflow restrictions
+    // to capture the FULL content, not just the visible viewport
+    clonedElement.style.height = 'auto';
+    clonedElement.style.maxHeight = 'none';
+    clonedElement.style.overflow = 'visible';
+
+    // Fix the scrollContainer to show all content
+    const scrollContainer = clonedElement.querySelector('[class*="scrollContainer"]') as HTMLElement;
+    if (scrollContainer) {
+      scrollContainer.style.height = 'auto';
+      scrollContainer.style.maxHeight = 'none';
+      scrollContainer.style.overflow = 'visible';
+    }
+
+    // Fix the timelineWrapper
+    const timelineWrapper = clonedElement.querySelector('[class*="timelineWrapper"]') as HTMLElement;
+    if (timelineWrapper) {
+      timelineWrapper.style.height = 'auto';
+      timelineWrapper.style.maxHeight = 'none';
+      timelineWrapper.style.overflow = 'visible';
+    }
+
+    // Fix the sidebar to show all team members
+    const sidebar = clonedElement.querySelector('[class*="sidebar"]') as HTMLElement;
+    if (sidebar) {
+      sidebar.style.height = 'auto';
+      sidebar.style.maxHeight = 'none';
+      sidebar.style.overflow = 'visible';
+    }
+
+    // Fix the lanes container
+    const lanesContainer = clonedElement.querySelector('[data-lanes-container]') as HTMLElement;
+    if (lanesContainer) {
+      lanesContainer.style.minHeight = 'auto';
+    }
+
+    // Calculate full content dimensions from the original element
+    const fullWidth = timelineElement.scrollWidth;
+
+    // Get actual content height by measuring the lanes container and sidebar
+    const originalLanes = timelineElement.querySelector('[data-lanes-container]') as HTMLElement;
+    const originalSidebar = timelineElement.querySelector('[class*="sidebar"]') as HTMLElement;
+
+    // Full height = header (48px) + max(sidebar height, lanes height)
+    const headerHeight = 48;
+    const lanesHeight = originalLanes?.scrollHeight || 0;
+    const sidebarHeight = originalSidebar?.scrollHeight || 0;
+    const contentHeight = Math.max(lanesHeight, sidebarHeight);
+    const fullHeight = headerHeight + contentHeight;
 
     // Temporarily mount the styled clone for rendering
     clonedElement.style.position = 'absolute';
     clonedElement.style.left = '-9999px';
     clonedElement.style.top = '0';
+    clonedElement.style.width = `${fullWidth}px`;
+    clonedElement.style.height = `${fullHeight}px`;
     document.body.appendChild(clonedElement);
 
     try {
-      // Capture with high-fidelity settings
-      const canvas = await html2canvas(clonedElement, {
+      // First, capture the FULL timeline
+      const fullCanvas = await html2canvas(clonedElement, {
         backgroundColor: '#fafafa',
         scale: 3, // Higher scale for better quality (retina + extra)
         logging: false,
@@ -100,15 +175,13 @@ export async function exportTimelineToPDF() {
         allowTaint: false,
         foreignObjectRendering: false, // Disable to avoid style loss
         scrollX: 0,
-        scrollY: -window.scrollY,
-        windowWidth: timelineElement.scrollWidth,
-        windowHeight: timelineElement.scrollHeight,
-        // Explicitly capture all content
+        scrollY: 0,
+        windowWidth: fullWidth,
+        windowHeight: fullHeight,
         x: 0,
         y: 0,
-        width: timelineElement.scrollWidth,
-        height: timelineElement.scrollHeight,
-        // Additional quality settings
+        width: fullWidth,
+        height: fullHeight,
         imageTimeout: 15000,
         removeContainer: true
       });
@@ -116,9 +189,38 @@ export async function exportTimelineToPDF() {
       // Remove the temporary clone
       document.body.removeChild(clonedElement);
 
+      // Now crop the canvas to sidebar + 6-month window
+      const scale = 3; // Must match html2canvas scale
+      const cropX = SIDEBAR_WIDTH * scale; // Start after sidebar for timeline crop
+      const cropStartX = windowStartX * scale; // Timeline portion start
+      const cropWidth = (SIDEBAR_WIDTH + windowWidth) * scale;
+      const cropHeight = fullCanvas.height;
+
+      // Create a new canvas with the cropped dimensions
+      const croppedCanvas = document.createElement('canvas');
+      croppedCanvas.width = cropWidth;
+      croppedCanvas.height = cropHeight;
+      const ctx = croppedCanvas.getContext('2d');
+
+      if (ctx) {
+        // Draw the sidebar (from 0 to SIDEBAR_WIDTH)
+        ctx.drawImage(
+          fullCanvas,
+          0, 0, SIDEBAR_WIDTH * scale, cropHeight, // source: sidebar portion
+          0, 0, SIDEBAR_WIDTH * scale, cropHeight  // dest: start at 0
+        );
+
+        // Draw the 6-month window of the timeline (after sidebar)
+        ctx.drawImage(
+          fullCanvas,
+          cropX + cropStartX, 0, windowWidth * scale, cropHeight, // source: 6-month window
+          SIDEBAR_WIDTH * scale, 0, windowWidth * scale, cropHeight // dest: after sidebar
+        );
+      }
+
       // Calculate dimensions for PDF
-      const imgWidth = canvas.width;
-      const imgHeight = canvas.height;
+      const imgWidth = croppedCanvas.width;
+      const imgHeight = croppedCanvas.height;
 
       // Use A3 landscape for large timelines, or custom size
       const pdfWidth = imgWidth / 3; // Divide by scale factor
@@ -133,13 +235,13 @@ export async function exportTimelineToPDF() {
       });
 
       // Add the image to the PDF with maximum quality
-      const imgData = canvas.toDataURL('image/png', 1.0);
+      const imgData = croppedCanvas.toDataURL('image/png', 1.0);
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
 
       // Add metadata
       pdf.setProperties({
-        title: `Digital Roadmap Overview - ${today}`,
-        subject: 'Digital Roadmap Overview Export',
+        title: `Digital Roadmap Overview - ${todayStr}`,
+        subject: 'Digital Roadmap Overview Export (±6 months from today)',
         creator: 'Digital Roadmap Overview App',
         keywords: 'roadmap, timeline, projects'
       });

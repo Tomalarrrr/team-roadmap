@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react';
 import type { DependencySource, DependencyTarget } from '../types';
 
 interface DependencyCreationState {
@@ -37,6 +37,10 @@ export function DependencyCreationProvider({
     cursorPosition: null
   });
 
+  // Use ref to access current state in callbacks without recreating them
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   const startCreation = useCallback((source: DependencySource) => {
     setState({
       isCreating: true,
@@ -52,18 +56,20 @@ export function DependencyCreationProvider({
     }));
   }, []);
 
+  // Use stateRef to avoid recreating this callback when cursor position changes
   const completeCreation = useCallback((target: DependencyTarget) => {
-    if (state.source && onAddDependency) {
+    const currentSource = stateRef.current.source;
+    if (currentSource && onAddDependency) {
       // Prevent self-dependency
       const isSameSource =
-        state.source.projectId === target.projectId &&
-        state.source.milestoneId === target.milestoneId;
+        currentSource.projectId === target.projectId &&
+        currentSource.milestoneId === target.milestoneId;
 
       if (!isSameSource) {
         onAddDependency(
-          state.source.projectId,
+          currentSource.projectId,
           target.projectId,
-          state.source.milestoneId,
+          currentSource.milestoneId,
           target.milestoneId
         );
       }
@@ -73,7 +79,7 @@ export function DependencyCreationProvider({
       source: null,
       cursorPosition: null
     });
-  }, [state.source, onAddDependency]);
+  }, [onAddDependency]);
 
   const cancelCreation = useCallback(() => {
     setState({

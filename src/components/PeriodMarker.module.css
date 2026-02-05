@@ -1,0 +1,50 @@
+.marker {
+  position: absolute;
+  top: 0;
+  z-index: 1; /* Behind projects but above grid lines */
+  pointer-events: none;
+}
+
+.marker:hover .deleteBtn {
+  opacity: 1;
+}
+
+.deleteBtn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  color: #6b7280;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background-color 0.15s;
+  pointer-events: auto;
+}
+
+.deleteBtn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #374151;
+  background: rgba(255, 255, 255, 0.85);
+  padding: 2px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

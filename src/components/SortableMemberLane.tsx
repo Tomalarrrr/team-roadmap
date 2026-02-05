@@ -6,11 +6,12 @@ import styles from './Timeline.module.css';
 interface SortableMemberLaneProps {
   member: TeamMember;
   height: number;
+  isLocked?: boolean; // When true, disable sorting and add project
   onEdit: () => void;
   onAddProject: () => void;
 }
 
-export function SortableMemberLane({ member, height, onEdit, onAddProject }: SortableMemberLaneProps) {
+export function SortableMemberLane({ member, height, isLocked = false, onEdit, onAddProject }: SortableMemberLaneProps) {
   const {
     attributes,
     listeners,
@@ -18,7 +19,7 @@ export function SortableMemberLane({ member, height, onEdit, onAddProject }: Sor
     transform,
     transition,
     isDragging
-  } = useSortable({ id: member.id });
+  } = useSortable({ id: member.id, disabled: isLocked });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -38,21 +39,23 @@ export function SortableMemberLane({ member, height, onEdit, onAddProject }: Sor
       className={`${styles.memberLane} ${isDragging ? styles.dragging : ''}`}
     >
       <div className={styles.memberLaneContent}>
-        <div
-          className={styles.dragHandle}
-          {...attributes}
-          {...listeners}
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-            <circle cx="3" cy="2" r="1.5" />
-            <circle cx="9" cy="2" r="1.5" />
-            <circle cx="3" cy="6" r="1.5" />
-            <circle cx="9" cy="6" r="1.5" />
-            <circle cx="3" cy="10" r="1.5" />
-            <circle cx="9" cy="10" r="1.5" />
-          </svg>
-        </div>
-        <div className={styles.memberInfo} onClick={onEdit}>
+        {!isLocked && (
+          <div
+            className={styles.dragHandle}
+            {...attributes}
+            {...listeners}
+          >
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <circle cx="3" cy="2" r="1.5" />
+              <circle cx="9" cy="2" r="1.5" />
+              <circle cx="3" cy="6" r="1.5" />
+              <circle cx="9" cy="6" r="1.5" />
+              <circle cx="3" cy="10" r="1.5" />
+              <circle cx="9" cy="10" r="1.5" />
+            </svg>
+          </div>
+        )}
+        <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
           <span className={styles.memberName}>{member.name}</span>
           <span className={styles.memberTitle}>{member.jobTitle}</span>
         </div>
@@ -60,6 +63,7 @@ export function SortableMemberLane({ member, height, onEdit, onAddProject }: Sor
       <button
         className={styles.addProjectBtn}
         onClick={onAddProject}
+        disabled={isLocked}
       >
         + Add Project
       </button>
