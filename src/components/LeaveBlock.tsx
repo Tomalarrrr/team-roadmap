@@ -80,6 +80,7 @@ export function LeaveBlock({
       role="button"
       aria-label={tooltipText}
       tabIndex={isLocked ? -1 : 0}
+      data-leave-block
     >
       <span className={styles.tooltip}>{tooltipText}</span>
     </div>
