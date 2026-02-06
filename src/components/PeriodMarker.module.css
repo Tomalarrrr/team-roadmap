@@ -22,7 +22,7 @@
   opacity: 0.5;
   transition: opacity 0.15s, background-color 0.15s, color 0.15s;
   pointer-events: auto;
-  z-index: 1; /* Above marker (0) but below projects (2+) */
+  z-index: 2; /* Above hover zone (0) and marker (0), below projects (2+) */
 }
 
 .deleteBtn:hover {
@@ -80,10 +80,11 @@
   position: absolute;
   top: 0;
   left: 0;
-  right: 0;
+  right: 40px; /* Leave space for delete button */
   height: 32px;
   pointer-events: auto;
   cursor: default;
+  z-index: 0;
 }
 
 .tooltip {

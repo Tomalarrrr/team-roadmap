@@ -61,7 +61,7 @@ async function injectStylesheets(clone: HTMLElement): Promise<void> {
 }
 
 // PDF Export - uses dynamic imports to code-split heavy libraries
-// Captures 6 months before and after today, plus all vertical content
+// Captures 3 months before and 9 months after today (12-month view), plus all vertical content
 export async function exportTimelineToPDF() {
   const timelineElement = document.getElementById('timeline-container');
   if (!timelineElement) {
@@ -78,9 +78,9 @@ export async function exportTimelineToPDF() {
   const TIMELINE_START = new Date(2025, 0, 1); // January 1, 2025
   const SIDEBAR_WIDTH = 200; // Width of the fixed sidebar
 
-  // Calculate the 6-month window around today
-  const sixMonthsBack = addMonths(today, -6);
-  const sixMonthsForward = addMonths(today, 6);
+  // Calculate the 12-month window: 3 months back, 9 months forward
+  const windowStart = addMonths(today, -3);
+  const windowEnd = addMonths(today, 9);
 
   try {
     // Dynamic imports - only loaded when export is triggered
@@ -96,8 +96,8 @@ export async function exportTimelineToPDF() {
     const dayWidth = header ? header.scrollWidth / totalDays : 3; // Default to 3 if not found
 
     // Calculate pixel positions for the date range
-    const daysFromStartToWindowStart = Math.max(0, differenceInDays(sixMonthsBack, TIMELINE_START));
-    const daysFromStartToWindowEnd = differenceInDays(sixMonthsForward, TIMELINE_START);
+    const daysFromStartToWindowStart = Math.max(0, differenceInDays(windowStart, TIMELINE_START));
+    const daysFromStartToWindowEnd = differenceInDays(windowEnd, TIMELINE_START);
 
     const windowStartX = daysFromStartToWindowStart * dayWidth;
     const windowEndX = daysFromStartToWindowEnd * dayWidth;
@@ -241,7 +241,7 @@ export async function exportTimelineToPDF() {
       // Add metadata
       pdf.setProperties({
         title: `Digital Roadmap Overview - ${todayStr}`,
-        subject: 'Digital Roadmap Overview Export (±6 months from today)',
+        subject: 'Digital Roadmap Overview Export (3 months back, 9 months forward)',
         creator: 'Digital Roadmap Overview App',
         keywords: 'roadmap, timeline, projects'
       });
