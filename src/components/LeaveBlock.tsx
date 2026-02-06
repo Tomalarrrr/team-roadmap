@@ -64,6 +64,10 @@ export function LeaveBlock({
     onDelete?.();
   };
 
+  const tooltipText = leave.label
+    ? `${leave.label} (${leave.startDate} to ${leave.endDate})`
+    : `Annual Leave (${leave.startDate} to ${leave.endDate})`;
+
   return (
     <div
       className={styles.leaveBlock}
@@ -78,11 +82,11 @@ export function LeaveBlock({
       }}
       onClick={handleClick}
       onContextMenu={handleContextMenu}
-      title="Annual Leave"
       role="button"
-      aria-label={`Annual leave: ${leave.startDate} to ${leave.endDate}`}
+      aria-label={tooltipText}
       tabIndex={isLocked ? -1 : 0}
     >
+      <span className={styles.tooltip}>{tooltipText}</span>
       {!isLocked && (
         <button
           className={styles.deleteBtn}

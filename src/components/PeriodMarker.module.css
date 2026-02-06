@@ -22,7 +22,7 @@
   opacity: 0.5;
   transition: opacity 0.15s, background-color 0.15s, color 0.15s;
   pointer-events: auto;
-  z-index: 20; /* Above projects so button is always clickable */
+  z-index: 1; /* Above marker (0) but below projects (2+) */
 }
 
 .deleteBtn:hover {
@@ -45,4 +45,67 @@
   max-width: calc(100% - 40px);
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: auto;
+  cursor: default;
+}
+
+/* Tooltip that appears on label hover */
+.label::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  background: rgba(31, 41, 55, 0.95);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.label:hover::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Hover zone for markers without visible labels */
+.hoverZone {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  pointer-events: auto;
+  cursor: default;
+}
+
+.tooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 8px;
+  background: rgba(31, 41, 55, 0.95);
+  color: white;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.hoverZone:hover + .tooltip,
+.marker:hover .tooltip {
+  opacity: 1;
+  visibility: visible;
 }

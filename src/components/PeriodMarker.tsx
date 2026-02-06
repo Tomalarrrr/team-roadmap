@@ -50,6 +50,10 @@ export function PeriodMarker({
     onDelete?.();
   };
 
+  const tooltipText = marker.label
+    ? `${marker.label} (${marker.startDate} to ${marker.endDate})`
+    : `${marker.startDate} to ${marker.endDate}`;
+
   return (
     <div
       className={styles.marker}
@@ -61,9 +65,11 @@ export function PeriodMarker({
         backgroundImage: dotPattern,
         backgroundSize: '6px 6px'
       }}
-      title={marker.label || `Period marker (${marker.color})`}
       aria-label={marker.label || `${marker.color} period marker: ${marker.startDate} to ${marker.endDate}`}
     >
+      {/* Hover zone for tooltip - always present */}
+      <div className={styles.hoverZone} />
+      <div className={styles.tooltip}>{tooltipText}</div>
       {!isLocked && onDelete && (
         <button
           className={styles.deleteBtn}
@@ -76,7 +82,7 @@ export function PeriodMarker({
         </button>
       )}
       {marker.label && (
-        <span className={styles.label}>{marker.label}</span>
+        <span className={styles.label} data-tooltip={tooltipText}>{marker.label}</span>
       )}
     </div>
   );

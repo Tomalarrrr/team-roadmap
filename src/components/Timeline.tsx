@@ -658,8 +658,9 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   }, []);
 
   // Sync vertical scroll from main content to sidebar using CSS transform
-  // Uses RAF for perfect frame timing + GPU-accelerated transform
-  useEffect(() => {
+  // Uses useLayoutEffect for synchronous DOM updates before paint
+  // This prevents visual flicker when sidebar remounts after exiting fullscreen
+  useLayoutEffect(() => {
     const scrollEl = scrollRef.current;
     const sidebarContentEl = sidebarContentRef.current;
     if (!scrollEl || !sidebarContentEl) return;
@@ -667,8 +668,8 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     let rafId: number | null = null;
     let lastScrollTop = scrollEl.scrollTop;
 
-    // Apply initial scroll position immediately on mount
-    // This fixes desync when sidebar remounts after exiting fullscreen
+    // Apply initial scroll position synchronously before paint
+    // Critical for preventing desync when sidebar remounts after exiting fullscreen
     sidebarContentEl.style.transform = `translate3d(0, -${lastScrollTop}px, 0)`;
 
     const syncSidebarToMain = () => {
