@@ -13,6 +13,7 @@
 
 .leaveBlock:hover {
   opacity: 0.9;
+  z-index: 20; /* Raise above projects on hover so delete button is clickable */
 }
 
 .label {
@@ -44,6 +45,7 @@
   cursor: pointer;
   opacity: 0;
   transition: all 0.15s ease;
+  z-index: 20; /* Above projects so button is always clickable */
 }
 
 .leaveBlock:hover .deleteBtn {

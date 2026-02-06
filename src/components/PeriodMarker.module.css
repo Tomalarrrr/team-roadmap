@@ -22,6 +22,7 @@
   opacity: 0.5;
   transition: opacity 0.15s, background-color 0.15s, color 0.15s;
   pointer-events: auto;
+  z-index: 20; /* Above projects so button is always clickable */
 }
 
 .deleteBtn:hover {

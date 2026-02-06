@@ -697,7 +697,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         cancelAnimationFrame(rafId);
       }
     };
-  }, []);
+  }, [isFullscreen]); // Re-run when fullscreen changes to sync sidebar after it remounts
 
   // Handle right-click on lane to add leave
   const handleLaneContextMenu = useCallback((
