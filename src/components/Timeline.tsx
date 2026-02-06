@@ -723,9 +723,27 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   ) => {
     if (isLocked || !onAddLeaveBlock) return;
 
-    // Don't show leave menu if clicking on a period marker or leave block
-    const target = e.target as HTMLElement;
-    if (target.closest('[data-period-marker]') || target.closest('[data-leave-block]')) {
+    // Use elementsFromPoint to detect elements at any z-index (period markers render before lanes in DOM)
+    const elementsAtPoint = document.elementsFromPoint(e.clientX, e.clientY);
+    const periodMarkerEl = elementsAtPoint.find(el => el.hasAttribute('data-period-marker'));
+    const leaveBlockEl = elementsAtPoint.find(el => el.hasAttribute('data-leave-block'));
+
+    // If clicking on a period marker, show its context menu instead
+    if (periodMarkerEl) {
+      e.preventDefault();
+      const markerId = periodMarkerEl.getAttribute('data-period-marker');
+      if (markerId) {
+        setPeriodMarkerItemMenu({
+          x: e.clientX,
+          y: e.clientY,
+          markerId
+        });
+      }
+      return;
+    }
+
+    // If clicking on a leave block, let it handle its own context menu
+    if (leaveBlockEl) {
       return;
     }
 

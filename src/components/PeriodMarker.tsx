@@ -69,7 +69,7 @@ export function PeriodMarker({
       aria-label={marker.label || `${marker.color} period marker: ${marker.startDate} to ${marker.endDate}`}
     >
       {/* Hover zone for tooltip and right-click */}
-      <div className={styles.hoverZone} onContextMenu={handleContextMenu} data-period-marker />
+      <div className={styles.hoverZone} onContextMenu={handleContextMenu} data-period-marker={marker.id} />
       <div className={styles.tooltip}>{tooltipText}</div>
       {marker.label && (
         <span className={styles.label} data-tooltip={tooltipText} onContextMenu={handleContextMenu}>{marker.label}</span>
