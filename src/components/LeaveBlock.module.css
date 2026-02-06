@@ -1,7 +1,7 @@
 .leaveBlock {
   position: absolute;
   border-radius: var(--radius-sm);
-  cursor: pointer;
+  cursor: context-menu; /* Indicate right-click menu available */
   opacity: 0.7;
   transition: opacity 0.15s ease;
   z-index: 0; /* Behind projects, milestones, and dependency lines */
@@ -26,34 +26,6 @@
   text-overflow: ellipsis;
   padding: 0 8px;
   pointer-events: none;
-}
-
-.deleteBtn {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 16px;
-  height: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(255, 255, 255, 0.8);
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
-  cursor: pointer;
-  opacity: 0;
-  transition: all 0.15s ease;
-  z-index: 1; /* Above marker (0) but below projects (2+) */
-}
-
-.leaveBlock:hover .deleteBtn {
-  opacity: 1;
-}
-
-.deleteBtn:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: var(--error-red);
 }
 
 /* Tooltip that appears on hover */

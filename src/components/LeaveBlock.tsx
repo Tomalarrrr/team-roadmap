@@ -10,7 +10,7 @@ interface LeaveBlockProps {
   laneHeight: number;
   isLocked?: boolean;
   onEdit?: () => void;
-  onDelete?: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 // Purple color scheme for annual leave
@@ -23,7 +23,7 @@ export function LeaveBlock({
   laneHeight,
   isLocked = false,
   onEdit,
-  onDelete
+  onContextMenu
 }: LeaveBlockProps) {
   const { left, width, height, top } = useMemo(() => {
     const startDate = new Date(leave.startDate);
@@ -50,18 +50,13 @@ export function LeaveBlock({
     if (isLocked) return;
     e.preventDefault();
     e.stopPropagation();
+    onContextMenu?.(e);
   };
 
   const handleClick = (e: React.MouseEvent) => {
     if (isLocked) return;
     e.stopPropagation();
     onEdit?.();
-  };
-
-  const handleDelete = (e: React.MouseEvent) => {
-    if (isLocked) return;
-    e.stopPropagation();
-    onDelete?.();
   };
 
   const tooltipText = leave.label
@@ -87,17 +82,6 @@ export function LeaveBlock({
       tabIndex={isLocked ? -1 : 0}
     >
       <span className={styles.tooltip}>{tooltipText}</span>
-      {!isLocked && (
-        <button
-          className={styles.deleteBtn}
-          onClick={handleDelete}
-          title="Delete"
-        >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      )}
     </div>
   );
 }

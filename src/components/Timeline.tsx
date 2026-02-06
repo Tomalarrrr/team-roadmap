@@ -25,6 +25,7 @@ import { LeaveBlock } from './LeaveBlock';
 import { LeaveContextMenu } from './LeaveContextMenu';
 import { PeriodMarker } from './PeriodMarker';
 import { PeriodMarkerContextMenu } from './PeriodMarkerContextMenu';
+import { ItemContextMenu } from './ItemContextMenu';
 import {
   getFYStart,
   getFYEnd,
@@ -555,11 +556,26 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     date: string;
   } | null>(null);
 
-  // Period marker context menu state
+  // Period marker context menu state (for adding new markers)
   const [periodMarkerContextMenu, setPeriodMarkerContextMenu] = useState<{
     x: number;
     y: number;
     date: string;
+  } | null>(null);
+
+  // Item context menu state (for editing/deleting existing period markers)
+  const [periodMarkerItemMenu, setPeriodMarkerItemMenu] = useState<{
+    x: number;
+    y: number;
+    markerId: string;
+  } | null>(null);
+
+  // Item context menu state (for editing/deleting existing leave blocks)
+  const [leaveBlockItemMenu, setLeaveBlockItemMenu] = useState<{
+    x: number;
+    y: number;
+    leaveId: string;
+    memberId: string;
   } | null>(null);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -1066,7 +1082,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                   dayWidth={dayWidth}
                   totalHeight={totalLanesHeight}
                   isLocked={isLocked}
-                  onDelete={() => onDeletePeriodMarker?.(marker.id)}
+                  onContextMenu={(e) => setPeriodMarkerItemMenu({
+                    x: e.clientX,
+                    y: e.clientY,
+                    markerId: marker.id
+                  })}
                 />
               ))}
 
@@ -1117,7 +1137,12 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                         dayWidth={dayWidth}
                         laneHeight={laneHeights[idx]}
                         isLocked={isLocked}
-                        onDelete={() => onDeleteLeaveBlock?.(leave.id)}
+                        onContextMenu={(e) => setLeaveBlockItemMenu({
+                          x: e.clientX,
+                          y: e.clientY,
+                          leaveId: leave.id,
+                          memberId: member.id
+                        })}
                       />
                     ))}
                     {/* Projects */}
@@ -1181,7 +1206,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         />
       )}
 
-      {/* Period marker context menu */}
+      {/* Period marker context menu (for adding new markers) */}
       {periodMarkerContextMenu && onAddPeriodMarker && (
         <PeriodMarkerContextMenu
           x={periodMarkerContextMenu.x}
@@ -1189,6 +1214,32 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           date={periodMarkerContextMenu.date}
           onAddMarker={onAddPeriodMarker}
           onClose={() => setPeriodMarkerContextMenu(null)}
+        />
+      )}
+
+      {/* Period marker item context menu (edit/delete existing marker) */}
+      {periodMarkerItemMenu && (
+        <ItemContextMenu
+          x={periodMarkerItemMenu.x}
+          y={periodMarkerItemMenu.y}
+          title="Period Marker"
+          onDelete={onDeletePeriodMarker ? () => {
+            onDeletePeriodMarker(periodMarkerItemMenu.markerId);
+          } : undefined}
+          onClose={() => setPeriodMarkerItemMenu(null)}
+        />
+      )}
+
+      {/* Leave block item context menu (edit/delete existing leave) */}
+      {leaveBlockItemMenu && (
+        <ItemContextMenu
+          x={leaveBlockItemMenu.x}
+          y={leaveBlockItemMenu.y}
+          title="Annual Leave"
+          onDelete={onDeleteLeaveBlock ? () => {
+            onDeleteLeaveBlock(leaveBlockItemMenu.leaveId);
+          } : undefined}
+          onClose={() => setLeaveBlockItemMenu(null)}
         />
       )}
 

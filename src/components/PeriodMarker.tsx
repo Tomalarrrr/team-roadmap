@@ -9,7 +9,7 @@ interface PeriodMarkerProps {
   dayWidth: number;
   totalHeight: number;
   isLocked?: boolean;
-  onDelete?: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 // Background and dot colors for the pattern (matching LeaveBlock style)
@@ -27,7 +27,7 @@ export function PeriodMarker({
   dayWidth,
   totalHeight,
   isLocked = false,
-  onDelete
+  onContextMenu
 }: PeriodMarkerProps) {
   const { left, width } = useMemo(() => {
     const startDate = new Date(marker.startDate);
@@ -44,10 +44,11 @@ export function PeriodMarker({
   const colors = MARKER_COLORS[marker.color];
   const dotPattern = `radial-gradient(circle, ${colors.dot} 1px, transparent 1px)`;
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const handleContextMenu = (e: React.MouseEvent) => {
     if (isLocked) return;
+    e.preventDefault();
     e.stopPropagation();
-    onDelete?.();
+    onContextMenu?.(e);
   };
 
   const tooltipText = marker.label
@@ -67,22 +68,11 @@ export function PeriodMarker({
       }}
       aria-label={marker.label || `${marker.color} period marker: ${marker.startDate} to ${marker.endDate}`}
     >
-      {/* Hover zone for tooltip - always present */}
-      <div className={styles.hoverZone} />
+      {/* Hover zone for tooltip and right-click */}
+      <div className={styles.hoverZone} onContextMenu={handleContextMenu} />
       <div className={styles.tooltip}>{tooltipText}</div>
-      {!isLocked && onDelete && (
-        <button
-          className={styles.deleteBtn}
-          onClick={handleDelete}
-          title="Delete marker"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
-      )}
       {marker.label && (
-        <span className={styles.label} data-tooltip={tooltipText}>{marker.label}</span>
+        <span className={styles.label} data-tooltip={tooltipText} onContextMenu={handleContextMenu}>{marker.label}</span>
       )}
     </div>
   );
