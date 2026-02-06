@@ -49,13 +49,13 @@
   visibility: visible;
 }
 
-/* Hover zone for right-click context menu */
+/* Hover zone for right-click context menu - covers full marker height */
 .hoverZone {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
-  height: 32px;
+  bottom: 0;
   pointer-events: auto;
   cursor: context-menu;
   z-index: 0;
