@@ -23,6 +23,7 @@ export interface TeamMember {
   id: string;
   name: string;
   jobTitle: string;
+  nameColor?: string; // Optional custom color for name display
 }
 
 export interface Waypoint {

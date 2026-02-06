@@ -6,8 +6,9 @@ interface TeamMemberFormProps {
   initialValues?: {
     name: string;
     jobTitle: string;
+    nameColor?: string;
   };
-  onSubmit: (values: { name: string; jobTitle: string }) => void;
+  onSubmit: (values: { name: string; jobTitle: string; nameColor?: string }) => void;
   onCancel: () => void;
   onDelete?: () => void;
   isEditing?: boolean;
@@ -24,6 +25,7 @@ export function TeamMemberForm({
 }: TeamMemberFormProps) {
   const [name, setName] = useState(initialValues?.name || '');
   const [jobTitle, setJobTitle] = useState(initialValues?.jobTitle || '');
+  const [nameColor, setNameColor] = useState(initialValues?.nameColor || '');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -41,7 +43,7 @@ export function TeamMemberForm({
     }
 
     setErrors({});
-    onSubmit(result.data);
+    onSubmit({ ...result.data, nameColor: nameColor || undefined });
   };
 
   const handleDeleteClick = () => {
@@ -85,6 +87,31 @@ export function TeamMemberForm({
           placeholder="Enter job title"
         />
         {errors.jobTitle && <span className={styles.fieldError}>{errors.jobTitle}</span>}
+      </div>
+
+      <div className={styles.field}>
+        <label htmlFor="nameColor" className={styles.label}>Name Color</label>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input
+            id="nameColor"
+            type="color"
+            value={nameColor || '#1f2937'}
+            onChange={(e) => setNameColor(e.target.value)}
+            style={{ width: '40px', height: '32px', padding: '2px', cursor: 'pointer', border: '1px solid var(--border-light)', borderRadius: '4px' }}
+          />
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            {nameColor || 'Default'}
+          </span>
+          {nameColor && (
+            <button
+              type="button"
+              onClick={() => setNameColor('')}
+              style={{ fontSize: '0.75rem', color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              Reset
+            </button>
+          )}
+        </div>
       </div>
 
       {showDeleteConfirm && (

@@ -76,7 +76,7 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
           </div>
         )}
         <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
-          <span className={styles.memberName}>{member.name}</span>
+          <span className={styles.memberName} style={member.nameColor ? { color: member.nameColor } : undefined}>{member.name}</span>
           {!isCollapsed && <span className={styles.memberTitle}>{member.jobTitle}</span>}
         </div>
       </div>

@@ -665,7 +665,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     if (!scrollEl || !sidebarContentEl) return;
 
     let rafId: number | null = null;
-    let lastScrollTop = 0;
+    let lastScrollTop = scrollEl.scrollTop;
+
+    // Apply initial scroll position immediately on mount
+    // This fixes desync when sidebar remounts after exiting fullscreen
+    sidebarContentEl.style.transform = `translate3d(0, -${lastScrollTop}px, 0)`;
 
     const syncSidebarToMain = () => {
       // Skip if scroll position hasn't changed
