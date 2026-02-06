@@ -722,6 +722,13 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     memberId: string
   ) => {
     if (isLocked || !onAddLeaveBlock) return;
+
+    // Don't show leave menu if clicking on a period marker or leave block
+    const target = e.target as HTMLElement;
+    if (target.closest('[class*="marker"]') || target.closest('[class*="hoverZone"]') || target.closest('[class*="leaveBlock"]')) {
+      return;
+    }
+
     e.preventDefault();
 
     // Calculate the date from click position
