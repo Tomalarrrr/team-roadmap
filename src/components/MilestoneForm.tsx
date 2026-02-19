@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { milestoneSchema, validateForm } from '../utils/validation';
-import { STATUS_COLORS, DEFAULT_STATUS_COLOR, getStatusNameByHex } from '../utils/statusColors';
+import { STATUS_COLORS, DEFAULT_STATUS_COLOR, getStatusNameByHex, normalizeStatusColor } from '../utils/statusColors';
 import styles from './Form.module.css';
 
 interface MilestoneFormProps {
@@ -41,7 +41,7 @@ export function MilestoneForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || projectStartDate);
   const [endDate, setEndDate] = useState(initialValues?.endDate || projectStartDate);
   const [tagsInput, setTagsInput] = useState(initialValues?.tags?.join(', ') || '');
-  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_STATUS_COLOR);
+  const [statusColor, setStatusColor] = useState(normalizeStatusColor(initialValues?.statusColor || DEFAULT_STATUS_COLOR));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);

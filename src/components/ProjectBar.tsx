@@ -12,11 +12,9 @@ import {
   formatShortDate,
   isDatePast
 } from '../utils/dateUtils';
-import { getStatusNameByHex } from '../utils/statusColors';
+import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor } from '../utils/statusColors';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
-
-const AUTO_BLUE = '#0070c0'; // Blue for completed/past projects
 
 // Format duration for tooltip
 function formatDuration(startDate: string, endDate: string): string {
@@ -254,7 +252,7 @@ export function ProjectBar({
 
   // Auto-blue rule: turn blue if project end date is past
   const isPast = isDatePast(project.endDate);
-  const displayColor = isPast ? AUTO_BLUE : project.statusColor;
+  const displayColor = isPast ? AUTO_COMPLETE_COLOR : normalizeStatusColor(project.statusColor);
 
   // Status label for badge and tooltip
   const statusLabel = isPast ? 'Complete' : getStatusNameByHex(project.statusColor);

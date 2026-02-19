@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { PeriodMarkerColor } from '../types';
+import type { PeriodMarkerColor, PeriodMarker } from '../types';
 import styles from './LeaveContextMenu.module.css';
 
 interface PeriodMarkerContextMenuProps {
   x: number;
   y: number;
   date: string;
+  initialValues?: PeriodMarker; // When provided, component is in edit mode
   onAddMarker: (data: {
     startDate: string;
     endDate: string;
@@ -17,25 +18,27 @@ interface PeriodMarkerContextMenuProps {
 }
 
 const MARKER_COLORS: { color: PeriodMarkerColor; label: string; bg: string }[] = [
-  { color: 'grey', label: 'Grey', bg: '#9ca3af' },
-  { color: 'yellow', label: 'Yellow', bg: '#fbbf24' },
-  { color: 'orange', label: 'Orange', bg: '#f97316' },
-  { color: 'red', label: 'Red', bg: '#ef4444' },
-  { color: 'green', label: 'Green', bg: '#22c55e' }
+  { color: 'grey', label: 'Grey', bg: '#6E7D89' },
+  { color: 'yellow', label: 'Yellow', bg: '#A67A00' },
+  { color: 'orange', label: 'Orange', bg: '#e67635' },
+  { color: 'red', label: 'Red', bg: '#B5444A' },
+  { color: 'green', label: 'Green', bg: '#457028' }
 ];
 
 export function PeriodMarkerContextMenu({
   x,
   y,
   date,
+  initialValues,
   onAddMarker,
   onClose
 }: PeriodMarkerContextMenuProps) {
+  const isEditing = !!initialValues;
   const menuRef = useRef<HTMLDivElement>(null);
-  const [startDate, setStartDate] = useState(date);
-  const [endDate, setEndDate] = useState(date);
-  const [selectedColor, setSelectedColor] = useState<PeriodMarkerColor>('grey');
-  const [label, setLabel] = useState('');
+  const [startDate, setStartDate] = useState(initialValues?.startDate || date);
+  const [endDate, setEndDate] = useState(initialValues?.endDate || date);
+  const [selectedColor, setSelectedColor] = useState<PeriodMarkerColor>(initialValues?.color || 'grey');
+  const [label, setLabel] = useState(initialValues?.label || '');
 
   // Adjust menu position to stay within viewport
   const [position, setPosition] = useState({ x, y });
@@ -99,7 +102,7 @@ export function PeriodMarkerContextMenu({
       className={styles.menu}
       style={{ left: position.x, top: position.y }}
     >
-      <div className={styles.menuHeader}>Add Period Marker</div>
+      <div className={styles.menuHeader}>{isEditing ? 'Edit Period Marker' : 'Add Period Marker'}</div>
 
       <div className={styles.formGroup}>
         <label className={styles.label}>Color</label>
@@ -159,7 +162,7 @@ export function PeriodMarkerContextMenu({
         onClick={handleSubmit}
         disabled={!startDate || !endDate}
       >
-        Add Marker
+        {isEditing ? 'Save Changes' : 'Add Marker'}
       </button>
     </div>,
     document.body

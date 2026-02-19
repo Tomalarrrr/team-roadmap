@@ -143,6 +143,7 @@ interface TimelineProps {
     label?: string;
   }) => void;
   onDeletePeriodMarker?: (markerId: string) => void;
+  onEditPeriodMarker?: (markerId: string, updates: { startDate: string; endDate: string; color: PeriodMarkerColor; label?: string }) => void;
   onDayWidthChange?: (newDayWidth: number) => void; // For Ctrl/Cmd + scroll zoom
   onHoveredMemberChange?: (memberName: string | null) => void; // For N key quick create
   collapsedLanes?: Set<string>; // IDs of collapsed team member lanes
@@ -254,6 +255,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   periodMarkers = [],
   onAddPeriodMarker,
   onDeletePeriodMarker,
+  onEditPeriodMarker,
   onDayWidthChange,
   onHoveredMemberChange,
   collapsedLanes = new Set(),
@@ -568,6 +570,14 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     x: number;
     y: number;
     markerId: string;
+    marker: PeriodMarkerType;
+  } | null>(null);
+
+  // Edit form for period markers (opened from item context menu)
+  const [periodMarkerEditMenu, setPeriodMarkerEditMenu] = useState<{
+    x: number;
+    y: number;
+    marker: PeriodMarkerType;
   } | null>(null);
 
   // Item context menu state (for editing/deleting existing leave blocks)
@@ -732,11 +742,13 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     if (periodMarkerEl) {
       e.preventDefault();
       const markerId = periodMarkerEl.getAttribute('data-period-marker');
-      if (markerId) {
+      const marker = markerId ? periodMarkers.find(m => m.id === markerId) : undefined;
+      if (markerId && marker) {
         setPeriodMarkerItemMenu({
           x: e.clientX,
           y: e.clientY,
-          markerId
+          markerId,
+          marker
         });
       }
       return;
@@ -768,7 +780,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       memberId,
       date: dateStr
     });
-  }, [isLocked, onAddLeaveBlock, dayWidth, timelineStart]);
+  }, [isLocked, onAddLeaveBlock, dayWidth, timelineStart, periodMarkers]);
 
   // Handle right-click on month header to add period marker
   const handleHeaderContextMenu = useCallback((
@@ -1110,7 +1122,8 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                   onContextMenu={(e) => setPeriodMarkerItemMenu({
                     x: e.clientX,
                     y: e.clientY,
-                    markerId: marker.id
+                    markerId: marker.id,
+                    marker
                   })}
                 />
               ))}
@@ -1248,11 +1261,32 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         <ItemContextMenu
           x={periodMarkerItemMenu.x}
           y={periodMarkerItemMenu.y}
-          title="Period Marker"
+          title={periodMarkerItemMenu.marker.label || 'Period Marker'}
+          onEdit={onEditPeriodMarker ? () => {
+            setPeriodMarkerEditMenu({
+              x: periodMarkerItemMenu.x,
+              y: periodMarkerItemMenu.y,
+              marker: periodMarkerItemMenu.marker
+            });
+          } : undefined}
           onDelete={onDeletePeriodMarker ? () => {
             onDeletePeriodMarker(periodMarkerItemMenu.markerId);
           } : undefined}
           onClose={() => setPeriodMarkerItemMenu(null)}
+        />
+      )}
+
+      {/* Period marker edit form */}
+      {periodMarkerEditMenu && onEditPeriodMarker && (
+        <PeriodMarkerContextMenu
+          x={periodMarkerEditMenu.x}
+          y={periodMarkerEditMenu.y}
+          date={periodMarkerEditMenu.marker.startDate}
+          initialValues={periodMarkerEditMenu.marker}
+          onAddMarker={(data) => {
+            onEditPeriodMarker(periodMarkerEditMenu.marker.id, data);
+          }}
+          onClose={() => setPeriodMarkerEditMenu(null)}
         />
       )}
 
@@ -1269,19 +1303,46 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         />
       )}
 
-      {/* Jump to Today floating button - fullscreen only */}
+      {/* Fullscreen floating controls - Today button + zoom */}
       {isFullscreen && (
-        <button
-          className={styles.jumpToTodayBtn}
-          onClick={scrollToToday}
-          title="Jump to today (T)"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" fill="none" />
-            <circle cx="8" cy="8" r="2" fill="currentColor" />
-          </svg>
-          Today
-        </button>
+        <div className={styles.fullscreenControls}>
+          <button
+            className={styles.jumpToTodayBtn}
+            onClick={scrollToToday}
+            title="Jump to today (T)"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" fill="none" />
+              <circle cx="8" cy="8" r="2" fill="currentColor" />
+            </svg>
+            Today
+          </button>
+          {onDayWidthChange && (
+            <div className={styles.fullscreenZoom}>
+              <button
+                className={styles.fullscreenZoomBtn}
+                onClick={() => onDayWidthChange(Math.max(0.5, dayWidth / 1.3))}
+                title="Zoom out (⌘−)"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M3 7H11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </button>
+              <span className={styles.fullscreenZoomLabel}>
+                {displayMode === 'year' ? 'Year' : displayMode === 'week' ? 'Week' : 'Month'}
+              </span>
+              <button
+                className={styles.fullscreenZoomBtn}
+                onClick={() => onDayWidthChange(Math.min(12, dayWidth * 1.3))}
+                title="Zoom in (⌘+)"
+              >
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M7 3V11M3 7H11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                </svg>
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </div>
     </DependencyCreationProvider>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import type { Project, TeamMember } from '../types';
-import { STATUS_CONFIG } from '../utils/statusColors';
+import { STATUS_CONFIG, normalizeStatusColor } from '../utils/statusColors';
 import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
 
@@ -11,7 +11,7 @@ interface SearchFilterProps {
   onProjectSelect: (projectId: string) => void;
 }
 
-export type ProjectStatus = 'complete' | 'on-hold' | 'to-start' | 'on-track' | 'at-risk' | 'off-track';
+export type ProjectStatus = 'complete' | 'on-hold' | 'to-start' | 'on-track' | 'at-risk' | 'off-track' | 'planning' | 'review';
 
 export interface FilterState {
   search: string;
@@ -267,7 +267,7 @@ export const SearchFilter = memo(function SearchFilter({
                   >
                     <div
                       className={styles.resultColor}
-                      style={{ backgroundColor: project.statusColor }}
+                      style={{ backgroundColor: normalizeStatusColor(project.statusColor) }}
                     />
                     <div className={styles.resultInfo}>
                       <span className={styles.resultTitle}>{project.title}</span>

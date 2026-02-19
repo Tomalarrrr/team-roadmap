@@ -1,4 +1,5 @@
-import type { RoadmapData, Project, Milestone, Dependency, TeamMember, LeaveBlock } from './types';
+import type { RoadmapData, Project, Milestone, Dependency, TeamMember, LeaveBlock, PeriodMarker } from './types';
+import { firebaseSnapshotToRoadmapData, roadmapDataToFirebaseFormat, projectToFirebase, arrayToKeyedObject, isLegacyArrayFormat } from './utils/firebaseConversions';
 import type { FirebaseApp } from 'firebase/app';
 import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
 
@@ -173,24 +174,44 @@ export async function forceReconnect(): Promise<void> {
   console.info('[Firebase] Force reconnected');
 }
 
+// Auto-migration: tracks whether legacy array→keyed-object migration has been checked/completed.
+// Granular update functions await this promise to prevent writes to the wrong path format.
+let migrationChecked = false;
+let migrationPromise: Promise<void> | null = null;
+
 export async function subscribeToRoadmap(
   callback: (data: RoadmapData) => void,
   onError?: (error: Error) => void
 ): Promise<Unsubscribe> {
   await ensureInitialized();
-  const { onValue } = getDbModule();
+  const { onValue, set } = getDbModule();
 
   const unsubscribe = onValue(
     roadmapRef!,
     (snapshot) => {
       const data = snapshot.val();
-      callback({
-        projects: data?.projects || [],
-        teamMembers: data?.teamMembers || [],
-        dependencies: data?.dependencies || [],
-        leaveBlocks: data?.leaveBlocks || [],
-        periodMarkers: data?.periodMarkers || []
-      });
+      const roadmapData = firebaseSnapshotToRoadmapData(data);
+
+      // One-time auto-migration: if data is in legacy array format,
+      // rewrite it in keyed-object format before any granular updates can run.
+      if (!migrationChecked && data) {
+        migrationChecked = true;
+        if (isLegacyArrayFormat(data)) {
+          console.info('[Firebase] Legacy array format detected, migrating to keyed-object format...');
+          migrationPromise = set(roadmapRef!, roadmapDataToFirebaseFormat(roadmapData))
+            .then(() => {
+              console.info('[Firebase] Migration complete');
+              migrationPromise = null;
+            })
+            .catch((err) => {
+              console.error('[Firebase] Migration failed:', err);
+              migrationChecked = false; // Allow retry on next callback
+              migrationPromise = null;
+            });
+        }
+      }
+
+      callback(roadmapData);
     },
     (error) => {
       console.error('[Firebase] Roadmap listener error:', error);
@@ -226,49 +247,73 @@ export async function subscribeToConnectionState(callback: (connected: boolean) 
 export async function saveRoadmap(data: RoadmapData): Promise<void> {
   await ensureInitialized();
   const { set } = getDbModule();
-  await set(roadmapRef!, data);
+  await set(roadmapRef!, roadmapDataToFirebaseFormat(data));
 }
 
-// Granular update functions for concurrent editing support
-// These use Firebase's update() which merges changes instead of overwriting
+// Granular update functions for concurrent editing support.
+// These use ID-based paths so concurrent operations target stable keys.
+// Each awaits migrationPromise to ensure data is in keyed-object format before writing.
 
-export async function updateProjectAtPath(projectIndex: number, project: Project): Promise<void> {
-  await ensureInitialized();
-  const { ref, set } = getDbModule();
-  const projectRef = ref(database!, `roadmap/projects/${projectIndex}`);
-  await set(projectRef, project);
+async function awaitMigration(): Promise<void> {
+  if (migrationPromise) await migrationPromise;
 }
 
-export async function updateProjectField(projectIndex: number, field: string, value: unknown): Promise<void> {
+export async function updateProjectAtPath(projectId: string, project: Project): Promise<void> {
   await ensureInitialized();
+  await awaitMigration();
   const { ref, set } = getDbModule();
-  const fieldRef = ref(database!, `roadmap/projects/${projectIndex}/${field}`);
-  await set(fieldRef, value);
+  const projectRef = ref(database!, `roadmap/projects/${projectId}`);
+  // Convert milestones array to keyed object for Firebase storage
+  await set(projectRef, projectToFirebase(project));
+}
+
+export async function updateProjectField(projectId: string, field: string, value: unknown): Promise<void> {
+  await ensureInitialized();
+  await awaitMigration();
+  const { ref, set } = getDbModule();
+  const fieldRef = ref(database!, `roadmap/projects/${projectId}/${field}`);
+  // If writing milestones, convert array to keyed object
+  if (field === 'milestones' && Array.isArray(value)) {
+    await set(fieldRef, arrayToKeyedObject(value as Milestone[]));
+  } else {
+    await set(fieldRef, value);
+  }
 }
 
 export async function updateMilestoneAtPath(
-  projectIndex: number,
-  milestoneIndex: number,
+  projectId: string,
+  milestoneId: string,
   milestone: Milestone
 ): Promise<void> {
   await ensureInitialized();
+  await awaitMigration();
   const { ref, set } = getDbModule();
-  const milestoneRef = ref(database!, `roadmap/projects/${projectIndex}/milestones/${milestoneIndex}`);
+  const milestoneRef = ref(database!, `roadmap/projects/${projectId}/milestones/${milestoneId}`);
   await set(milestoneRef, milestone);
 }
 
-export async function updateDependencyAtPath(depIndex: number, dependency: Dependency): Promise<void> {
+export async function updateDependencyAtPath(depId: string, dependency: Dependency): Promise<void> {
   await ensureInitialized();
+  await awaitMigration();
   const { ref, set } = getDbModule();
-  const depRef = ref(database!, `roadmap/dependencies/${depIndex}`);
+  const depRef = ref(database!, `roadmap/dependencies/${depId}`);
   await set(depRef, dependency);
 }
 
-export async function updateTeamMemberAtPath(memberIndex: number, member: TeamMember): Promise<void> {
+export async function updateTeamMemberAtPath(memberId: string, member: TeamMember): Promise<void> {
   await ensureInitialized();
+  await awaitMigration();
   const { ref, set } = getDbModule();
-  const memberRef = ref(database!, `roadmap/teamMembers/${memberIndex}`);
+  const memberRef = ref(database!, `roadmap/teamMembers/${memberId}`);
   await set(memberRef, member);
+}
+
+export async function updateLeaveBlockAtPath(leaveId: string, leaveBlock: LeaveBlock): Promise<void> {
+  await ensureInitialized();
+  await awaitMigration();
+  const { ref, set } = getDbModule();
+  const leaveRef = ref(database!, `roadmap/leaveBlocks/${leaveId}`);
+  await set(leaveRef, leaveBlock);
 }
 
 // Batch update using Firebase's update() - merges multiple paths atomically
@@ -284,20 +329,7 @@ export async function getRoadmap(): Promise<RoadmapData> {
   const { get } = getDbModule();
   const snapshot = await get(roadmapRef!);
   const data = snapshot.val();
-  return {
-    projects: data?.projects || [],
-    teamMembers: data?.teamMembers || [],
-    dependencies: data?.dependencies || [],
-    leaveBlocks: data?.leaveBlocks || [],
-    periodMarkers: data?.periodMarkers || []
-  };
-}
-
-export async function updateLeaveBlockAtPath(leaveIndex: number, leaveBlock: LeaveBlock): Promise<void> {
-  await ensureInitialized();
-  const { ref, set } = getDbModule();
-  const leaveRef = ref(database!, `roadmap/leaveBlocks/${leaveIndex}`);
-  await set(leaveRef, leaveBlock);
+  return firebaseSnapshotToRoadmapData(data);
 }
 
 // ============================================

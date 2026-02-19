@@ -152,12 +152,14 @@
 }
 
 .tooltip {
-  background: var(--bg-primary);
+  background: var(--bg-secondary);
   border-radius: 10px;
   padding: 10px 14px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   border: 1px solid var(--border-light);
   z-index: 9999;
+  min-width: 140px;
+  max-width: 240px;
   white-space: nowrap;
   animation: tooltipFadeIn 0.15s ease-out;
   pointer-events: none;
@@ -178,11 +180,27 @@
   color: var(--text-primary);
   margin-bottom: 4px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tooltipDates {
   font-size: 0.75rem;
   color: var(--text-secondary);
+}
+
+.tooltipStatus {
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-top: 3px;
+  color: var(--text-muted);
+}
+
+.tooltipHint {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+  opacity: 0.7;
 }
 
 .tooltipDescription {

@@ -6,8 +6,8 @@ const dateStringSchema = z.string().regex(
   'Invalid date format. Expected YYYY-MM-DD'
 );
 
-// Hex color or named color
-const colorSchema = z.string().min(1, 'Color is required');
+// Hex color (#RRGGBB format)
+const colorSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color format');
 
 // Milestone schema
 export const milestoneSchema = z.object({
@@ -42,7 +42,9 @@ export const projectSchema = z.object({
 export const teamMemberSchema = z.object({
   id: z.string().min(1, 'Member ID is required'),
   name: z.string().min(1, 'Member name is required'),
-  jobTitle: z.string().default('')
+  jobTitle: z.string().default(''),
+  nameColor: z.string().optional(),
+  order: z.number().optional()
 });
 
 // Waypoint schema (for dependency paths)

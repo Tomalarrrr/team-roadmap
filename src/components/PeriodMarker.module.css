@@ -26,32 +26,6 @@
   line-height: 1.3;
 }
 
-/* Tooltip that appears on label hover */
-.label::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  background: rgba(31, 41, 55, 0.95);
-  color: white;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 12px;
-  font-weight: 400;
-  white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.15s, visibility 0.15s;
-  z-index: 100;
-  pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-}
-
-.label:hover::after {
-  opacity: 1;
-  visibility: visible;
-}
-
 /* Hover zone for right-click context menu - covers full marker height */
 .hoverZone {
   position: absolute;
@@ -64,26 +38,51 @@
   z-index: 1; /* Above lane background to capture right-clicks */
 }
 
+/* Rich tooltip — rendered via portal to document.body */
 .tooltip {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 8px;
-  background: rgba(31, 41, 55, 0.95);
-  color: white;
-  padding: 6px 10px;
-  border-radius: 4px;
-  font-size: 12px;
+  background: var(--bg-secondary);
+  padding: 10px 14px;
+  border-radius: 10px;
   white-space: nowrap;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.15s, visibility 0.15s;
-  z-index: 100;
+  z-index: 10000;
   pointer-events: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border: 1px solid var(--border-light);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  animation: tooltipFadeIn 0.15s ease-out;
 }
 
-.hoverZone:hover + .tooltip,
-.marker:hover .tooltip {
-  opacity: 1;
-  visibility: visible;
+@keyframes tooltipFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.tooltipLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.tooltipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.tooltipDates {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.tooltipHint {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  margin-top: 1px;
+  opacity: 0.7;
 }

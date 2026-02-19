@@ -4,6 +4,7 @@ import {
   updateEditingStatus,
   removePresence,
   subscribeToPresence,
+  subscribeToConnectionState,
   heartbeatPresence,
   HIDDEN_DISCONNECT_MS,
   type PresenceUser
@@ -210,6 +211,40 @@ export function usePresence({
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [sessionId, enabled]);
+
+  // Re-register onDisconnect when Firebase silently reconnects.
+  // Without this, a network interruption would lose the server-side onDisconnect
+  // handler, leaving zombie presence entries if the user later closes the tab.
+  useEffect(() => {
+    if (!enabled || !sessionId || !userName) return;
+
+    let mounted = true;
+    let unsubscribe: (() => void) | null = null;
+    const color = getColorForUser(sessionId);
+
+    // Track previous connection state to detect false→true transitions
+    let wasConnected = true; // Assume initially connected (initial setup handles first registration)
+
+    subscribeToConnectionState((connected) => {
+      if (!mounted) return;
+      if (connected && !wasConnected) {
+        // Connection restored — re-register full presence + onDisconnect
+        updatePresence(sessionId, { name: userName, color }).catch(console.error);
+      }
+      wasConnected = connected;
+    }).then((unsub) => {
+      if (mounted) {
+        unsubscribe = unsub;
+      } else {
+        unsub();
+      }
+    }).catch(console.error);
+
+    return () => {
+      mounted = false;
+      unsubscribe?.();
+    };
+  }, [sessionId, userName, enabled]);
 
   const setEditingProject = useCallback((projectId: string | null) => {
     if (!enabled || !sessionId) return;

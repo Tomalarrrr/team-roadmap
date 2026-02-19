@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { format, addDays } from 'date-fns';
 import { projectSchema, validateForm, milestoneSchema } from '../utils/validation';
-import { STATUS_COLORS, DEFAULT_STATUS_COLOR } from '../utils/statusColors';
+import { STATUS_COLORS, DEFAULT_STATUS_COLOR, normalizeStatusColor } from '../utils/statusColors';
 import type { Milestone, TeamMember } from '../types';
 import styles from './Form.module.css';
 
@@ -56,7 +56,7 @@ export function ProjectForm({
   const [owner, setOwner] = useState(initialValues?.owner || '');
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
-  const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_STATUS_COLOR);
+  const [statusColor, setStatusColor] = useState(normalizeStatusColor(initialValues?.statusColor || DEFAULT_STATUS_COLOR));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -70,7 +70,7 @@ export function ProjectForm({
       startDate: m.startDate,
       endDate: m.endDate,
       tags: m.tags,
-      statusColor: m.statusColor
+      statusColor: normalizeStatusColor(m.statusColor)
     })) || []
   );
   const [showMilestoneForm, setShowMilestoneForm] = useState(false);
@@ -116,7 +116,7 @@ export function ProjectForm({
     setMilestoneStartDate(m.startDate);
     setMilestoneEndDate(m.endDate);
     setMilestoneTags(m.tags.join(', '));
-    setMilestoneColor(m.statusColor);
+    setMilestoneColor(normalizeStatusColor(m.statusColor));
     setEditingMilestoneIndex(index);
     setShowMilestoneForm(true);
   };

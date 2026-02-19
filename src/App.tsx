@@ -10,6 +10,7 @@ import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCovera
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates } from './utils/dateUtils';
+import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -90,6 +91,7 @@ function App() {
     addLeaveBlock,
     deleteLeaveBlock,
     addPeriodMarker,
+    updatePeriodMarker,
     deletePeriodMarker
   } = useRoadmap();
 
@@ -293,15 +295,11 @@ function App() {
       return 'complete';
     }
 
-    // For active/future projects, determine status from color
-    const statusColor = project.statusColor.toLowerCase();
-
-    // Map colors to statuses
-    if (statusColor === '#7612c3') return 'on-hold';
-    if (statusColor === '#9ca3af') return 'to-start';
-    if (statusColor === '#04b050') return 'on-track';
-    if (statusColor === '#ffc002') return 'at-risk';
-    if (statusColor === '#ff0100') return 'off-track';
+    // For active/future projects, determine status from color (handles legacy hex values)
+    const slug = getStatusSlugByHex(project.statusColor);
+    if (slug && slug !== 'complete') {
+      return slug as ProjectStatus;
+    }
 
     // Default: if start date is in future, it's "to-start", otherwise "on-track"
     if (startDate > today) return 'to-start';
@@ -546,6 +544,23 @@ function App() {
         return;
       }
 
+      // Zoom shortcuts: Cmd+= (zoom in), Cmd+- (zoom out), Cmd+0 (reset)
+      if (hasModifierKey(e) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        setDayWidth(prev => Math.min(12, prev * 1.3));
+        return;
+      }
+      if (hasModifierKey(e) && e.key === '-') {
+        e.preventDefault();
+        setDayWidth(prev => Math.max(0.5, prev / 1.3));
+        return;
+      }
+      if (hasModifierKey(e) && e.key === '0') {
+        e.preventDefault();
+        setDayWidth(3);
+        return;
+      }
+
       // Quick create project with N when hovering a lane
       if (e.key.toLowerCase() === 'n' && !hasModifierKey(e) && hoveredMember && !isLocked) {
         e.preventDefault();
@@ -570,7 +585,7 @@ function App() {
             owner: project.owner,
             startDate: startDate.toISOString().split('T')[0],
             endDate: endDate.toISOString().split('T')[0],
-            statusColor: project.statusColor
+            statusColor: normalizeStatusColor(project.statusColor)
           });
           showToast('Project duplicated', 'success');
         }
@@ -905,6 +920,20 @@ function App() {
     }
   }, [deletePeriodMarker, showToast]);
 
+  const handleEditPeriodMarker = useCallback(async (markerId: string, updates: {
+    startDate: string;
+    endDate: string;
+    color: 'grey' | 'yellow' | 'orange' | 'red' | 'green';
+    label?: string;
+  }) => {
+    try {
+      await updatePeriodMarker(markerId, updates);
+      showToast('Marker updated', 'success');
+    } catch (error) {
+      showToast(`Failed to update marker: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+    }
+  }, [updatePeriodMarker, showToast]);
+
   const openAddMilestone = useCallback(
     (projectId: string) => {
       const project = data.projects.find((p) => p.id === projectId);
@@ -1019,6 +1048,7 @@ function App() {
           periodMarkers={data.periodMarkers || []}
           onAddPeriodMarker={handleAddPeriodMarker}
           onDeletePeriodMarker={handleDeletePeriodMarker}
+          onEditPeriodMarker={handleEditPeriodMarker}
           onDayWidthChange={setDayWidth}
           onHoveredMemberChange={setHoveredMember}
           collapsedLanes={collapsedLanes}

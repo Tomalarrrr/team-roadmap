@@ -24,6 +24,7 @@ export interface TeamMember {
   name: string;
   jobTitle: string;
   nameColor?: string; // Optional custom color for name display
+  order?: number; // Explicit ordering for drag-reorder persistence
 }
 
 export interface Waypoint {

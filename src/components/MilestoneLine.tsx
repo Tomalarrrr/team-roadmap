@@ -6,11 +6,9 @@ import { ContextMenu } from './ContextMenu';
 import { useContextMenu } from '../hooks/useContextMenu';
 import { useDependencyCreation } from '../contexts/DependencyCreationContext';
 import { getBarDimensions, isMilestonePast, formatShortDate, toISODateString } from '../utils/dateUtils';
-import { parseISO } from 'date-fns';
+import { AUTO_COMPLETE_COLOR, DEFAULT_STATUS_COLOR, normalizeStatusColor, getStatusNameByHex } from '../utils/statusColors';
+import { parseISO, differenceInDays } from 'date-fns';
 import styles from './MilestoneLine.module.css';
-
-// Debug flag - set to true to diagnose flashing issues
-const DEBUG_DRAG = false; // Turned off - excessive logging was causing performance issues
 
 interface MilestoneLineProps {
   milestone: Milestone;
@@ -30,8 +28,6 @@ interface MilestoneLineProps {
   onSelect?: () => void;
   onHoverChange?: (hovered: boolean) => void; // For dependency highlighting
 }
-
-const AUTO_BLUE = '#0070c0'; // Blue for completed/past milestones
 
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
@@ -162,15 +158,11 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   // This is more robust than timing-based clearing
   // IMPORTANT: Don't clear during active drag - let mouseUp handle completion
   useEffect(() => {
-    if (dragMode) {
-      if (DEBUG_DRAG) console.log('[MilestoneLine] Skipping preview clear - dragMode active:', dragMode);
-      return; // Prevent clearing during drag
-    }
+    if (dragMode) return; // Prevent clearing during drag
 
     if (previewDates &&
         milestone.startDate === previewDates.start &&
         milestone.endDate === previewDates.end) {
-      if (DEBUG_DRAG) console.log('[MilestoneLine] Clearing previewDates - data matched');
       setPreviewDates(null);
     }
   }, [milestone.startDate, milestone.endDate, previewDates, dragMode]);
@@ -178,19 +170,6 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   // Use preview dates during drag for smooth visual feedback
   const displayStartDate = previewDates?.start ?? milestone.startDate;
   const displayEndDate = previewDates?.end ?? milestone.endDate;
-
-  // Debug render tracking
-  if (DEBUG_DRAG && dragMode) {
-    console.log('[MilestoneLine] RENDER during drag:', {
-      milestoneId: milestone.id,
-      dragMode,
-      previewDates,
-      actualDates: { start: milestone.startDate, end: milestone.endDate },
-      displayDates: { start: displayStartDate, end: displayEndDate },
-      projectLeft,
-      projectWidth
-    });
-  }
 
   const { left: milestoneLeft, width: milestoneWidth } = getBarDimensions(
     displayStartDate,
@@ -214,14 +193,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
 
   // Auto-blue rule: turn blue if milestone end date is past
   const isPast = isMilestonePast(milestone.endDate);
-  const displayColor = isPast ? AUTO_BLUE : milestone.statusColor;
+  const displayColor = isPast ? AUTO_COMPLETE_COLOR : normalizeStatusColor(milestone.statusColor);
 
   // Immediate drag handler for resize handles (no click detection needed)
   const handleResizeMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     if (isLocked) return; // Disable resize when locked
     e.preventDefault();
     e.stopPropagation();
-    if (DEBUG_DRAG) console.log('[MilestoneLine] RESIZE mouseDown:', mode);
     setDragMode(mode);
     setDragStartX(e.clientX);
     setOriginalStartDate(milestone.startDate);
@@ -258,7 +236,6 @@ const MilestoneLineComponent = memo(function MilestoneLine({
           initialListenersRef.current = null;
         }
         clickStartRef.current = null;
-        if (DEBUG_DRAG) console.log('[MilestoneLine] Activating dragMode:', mode);
         setDragMode(mode);
       }
     };
@@ -291,8 +268,6 @@ const MilestoneLineComponent = memo(function MilestoneLine({
 
   useEffect(() => {
     if (!dragMode) return;
-
-    if (DEBUG_DRAG) console.log('[MilestoneLine] Drag effect SETUP:', { dragMode, dragStartX, originalStartDate, originalEndDate, dayWidth });
 
     const DRAG_THRESHOLD = 8; // Minimum pixels before drag activates
 
@@ -387,50 +362,33 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     };
 
     const handleMouseUp = () => {
-      if (DEBUG_DRAG) console.log('[MilestoneLine] handleMouseUp - ending drag');
       // Commit the final position to Firebase only on release
       const finalPreview = latestPreviewRef.current;
       if (finalPreview && isMountedRef.current) {
         const hasChanged = finalPreview.start !== originalStartDate || finalPreview.end !== originalEndDate;
         if (hasChanged) {
-          if (DEBUG_DRAG) console.log('[MilestoneLine] Committing changes:', finalPreview);
-          // Fire the update - let the effect clear preview when props match
           onUpdateRef.current({
             startDate: finalPreview.start,
             endDate: finalPreview.end
           }).catch(() => {
-            // If save fails, clear preview (rollback will restore old position)
-            if (isMountedRef.current) {
-              if (DEBUG_DRAG) console.log('[MilestoneLine] Save failed, clearing preview');
-              setPreviewDates(null);
-            }
+            if (isMountedRef.current) setPreviewDates(null);
           });
         } else {
-          // No change, clear preview immediately
-          if (DEBUG_DRAG) console.log('[MilestoneLine] No change, clearing preview');
           setPreviewDates(null);
         }
-      } else {
-        // No preview, clear anyway
-        if (isMountedRef.current) {
-          if (DEBUG_DRAG) console.log('[MilestoneLine] No preview to commit');
-          setPreviewDates(null);
-        }
+      } else if (isMountedRef.current) {
+        setPreviewDates(null);
       }
 
       latestPreviewRef.current = null;
-      if (isMountedRef.current) {
-        if (DEBUG_DRAG) console.log('[MilestoneLine] Setting dragMode to null');
-        setDragMode(null);
-      }
+      if (isMountedRef.current) setDragMode(null);
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
 
-    // Cleanup on unmount or when dragMode changes - ensures listeners are always removed
+    // Cleanup on unmount or when dragMode changes
     return () => {
-      if (DEBUG_DRAG) console.log('[MilestoneLine] Drag effect CLEANUP');
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
       // Cancel any pending animation frame on cleanup
@@ -500,13 +458,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     tooltipTimeoutRef.current = setTimeout(() => {
       if (milestoneRef.current) {
         const rect = milestoneRef.current.getBoundingClientRect();
-        setTooltipPosition({
-          x: rect.left + rect.width / 2,
-          y: rect.top
-        });
+        const TOOLTIP_HALF_WIDTH = 120;
+        const rawX = rect.left + rect.width / 2;
+        const clampedX = Math.max(TOOLTIP_HALF_WIDTH, Math.min(rawX, window.innerWidth - TOOLTIP_HALF_WIDTH));
+        setTooltipPosition({ x: clampedX, y: rect.top });
       }
       setShowTooltip(true);
-    }, 400); // 400ms delay before showing
+    }, 400);
   }, [dragMode, onHoverChange]);
 
   const handleMouseLeaveTooltip = useCallback(() => {
@@ -518,6 +476,14 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     setTooltipPosition(null);
     onHoverChange?.(false); // Notify parent of hover end
   }, [onHoverChange]);
+
+  // Dismiss tooltip on scroll (position becomes stale)
+  useEffect(() => {
+    if (!showTooltip) return;
+    const dismiss = () => handleMouseLeaveTooltip();
+    window.addEventListener('scroll', dismiss, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', dismiss, { capture: true });
+  }, [showTooltip, handleMouseLeaveTooltip]);
 
   // Clean up tooltip timeout on unmount
   useEffect(() => {
@@ -536,16 +502,6 @@ const MilestoneLineComponent = memo(function MilestoneLine({
     return null; // Milestone outside project bounds (only when not dragging)
   }
 
-  // Log when we would have unmounted but didn't because of drag
-  if (DEBUG_DRAG && dragMode && isOutOfBounds) {
-    console.log('[MilestoneLine] PREVENTED UNMOUNT during drag:', {
-      displayWidth,
-      displayLeft,
-      projectWidth,
-      dragMode
-    });
-  }
-
   // During drag, clamp to reasonable values to keep visible
   // Round to whole pixels to prevent subpixel rendering issues that can cause visual glitches
   const safeDisplayWidth = Math.round(dragMode ? Math.max(displayWidth, 24) : displayWidth);
@@ -560,7 +516,7 @@ const MilestoneLineComponent = memo(function MilestoneLine({
         left: safeDisplayLeft,
         top: stackIndex * (MILESTONE_HEIGHT + MILESTONE_GAP),
         width: Math.max(safeDisplayWidth, 24),
-        backgroundColor: displayColor || '#10b981'
+        backgroundColor: displayColor || DEFAULT_STATUS_COLOR
       }}
       role="button"
       tabIndex={0}
@@ -667,10 +623,30 @@ const MilestoneLineComponent = memo(function MilestoneLine({
             top: tooltipPosition.y - 8,
             transform: 'translate(-50%, -100%)'
           }}
+          role="tooltip"
         >
           <div className={styles.tooltipTitle}>{milestone.title}</div>
           <div className={styles.tooltipDates}>
-            {formatShortDate(milestone.startDate)} – {formatShortDate(milestone.endDate)}
+            {formatShortDate(milestone.startDate)} {'\u2013'} {formatShortDate(milestone.endDate)}
+            {' \u00B7 '}{(() => {
+              const days = differenceInDays(new Date(milestone.endDate), new Date(milestone.startDate)) + 1;
+              if (days < 7) return `${days} day${days === 1 ? '' : 's'}`;
+              const weeks = Math.round(days / 7);
+              if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'}`;
+              const months = Math.round(days / 30);
+              return `${months} month${months === 1 ? '' : 's'}`;
+            })()}
+          </div>
+          {(() => {
+            const label = isPast ? 'Complete' : getStatusNameByHex(milestone.statusColor);
+            return label ? (
+              <div className={styles.tooltipStatus} style={!isPast ? { color: displayColor } : undefined}>
+                {label}
+              </div>
+            ) : null;
+          })()}
+          <div className={styles.tooltipHint}>
+            {isLocked ? 'Right-click for options' : 'Click to edit \u00B7 Right-click for menu'}
           </div>
         </div>,
         document.body
