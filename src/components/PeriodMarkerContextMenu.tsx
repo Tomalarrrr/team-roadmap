@@ -79,7 +79,7 @@ export function PeriodMarkerContextMenu({
   }, [onClose]);
 
   const handleSubmit = () => {
-    if (startDate && endDate) {
+    if (startDate && endDate && endDate >= startDate) {
       onAddMarker({
         startDate,
         endDate,
@@ -154,7 +154,7 @@ export function PeriodMarkerContextMenu({
       <button
         className={styles.submitBtn}
         onClick={handleSubmit}
-        disabled={!startDate || !endDate}
+        disabled={!startDate || !endDate || endDate < startDate}
       >
         {isEditing ? 'Save Changes' : 'Add Marker'}
       </button>

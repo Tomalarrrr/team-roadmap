@@ -70,7 +70,7 @@ export function LeaveContextMenu({
   }, [onClose]);
 
   const handleSubmit = () => {
-    if (startDate && endDate) {
+    if (startDate && endDate && endDate >= startDate) {
       onAddLeave({
         memberId,
         startDate,
@@ -111,7 +111,7 @@ export function LeaveContextMenu({
       <button
         className={styles.submitBtn}
         onClick={handleSubmit}
-        disabled={!startDate || !endDate}
+        disabled={!startDate || !endDate || endDate < startDate}
       >
         Add Leave
       </button>

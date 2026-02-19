@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import styles from './Modal.module.css';
 
 interface ModalProps {
@@ -16,6 +16,7 @@ const EXIT_ANIMATION_MS = 150;
 export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
   // Animation state machine: hidden → visible ↔ exiting → hidden
   // Uses getDerivedStateFromProps pattern for synchronous transitions,
   // and effect only for the timer callback (avoids synchronous setState in effect).
@@ -129,10 +130,10 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="modal-title"
+        aria-labelledby={titleId}
       >
         <div className={styles.header}>
-          <h2 id="modal-title" className={styles.title}>{title}</h2>
+          <h2 id={titleId} className={styles.title}>{title}</h2>
           <button
             className={styles.closeBtn}
             onClick={onClose}

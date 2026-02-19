@@ -1,5 +1,5 @@
 import type { RoadmapData, Project, Milestone, Dependency, TeamMember, LeaveBlock } from './types';
-import { firebaseSnapshotToRoadmapData, roadmapDataToFirebaseFormat, projectToFirebase, arrayToKeyedObject, isLegacyArrayFormat } from './utils/firebaseConversions';
+import { firebaseSnapshotToRoadmapData, roadmapDataToFirebaseFormat, projectToFirebase, isLegacyArrayFormat } from './utils/firebaseConversions';
 import type { FirebaseApp } from 'firebase/app';
 import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
 
@@ -265,19 +265,6 @@ export async function updateProjectAtPath(projectId: string, project: Project): 
   const projectRef = ref(database!, `roadmap/projects/${projectId}`);
   // Convert milestones array to keyed object for Firebase storage
   await set(projectRef, projectToFirebase(project));
-}
-
-export async function updateProjectField(projectId: string, field: string, value: unknown): Promise<void> {
-  await ensureInitialized();
-  await awaitMigration();
-  const { ref, set } = getDbModule();
-  const fieldRef = ref(database!, `roadmap/projects/${projectId}/${field}`);
-  // If writing milestones, convert array to keyed object
-  if (field === 'milestones' && Array.isArray(value)) {
-    await set(fieldRef, arrayToKeyedObject(value as Milestone[]));
-  } else {
-    await set(fieldRef, value);
-  }
 }
 
 export async function updateMilestoneAtPath(

@@ -1,5 +1,9 @@
 // Service Worker for instant loading on repeat visits
-const CACHE_NAME = 'roadmap-v1';
+// CACHE_VERSION is updated at build time or on deploy to bust stale caches.
+// Vite hashes JS/CSS assets, but index.html is not hashed — bumping this
+// version ensures the shell HTML is refreshed after each deployment.
+const CACHE_VERSION = '__BUILD_TIME__';
+const CACHE_NAME = `roadmap-${CACHE_VERSION}`;
 
 // Assets to cache immediately on install
 const PRECACHE_ASSETS = [
@@ -14,7 +18,7 @@ self.addEventListener('install', (event) => {
       return cache.addAll(PRECACHE_ASSETS);
     })
   );
-  // Activate immediately
+  // Activate immediately — don't wait for existing clients to close
   self.skipWaiting();
 });
 
@@ -31,7 +35,7 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: stale-while-revalidate for speed
+// Fetch: network-first for navigation (HTML), stale-while-revalidate for assets
 self.addEventListener('fetch', (event) => {
   const { request } = event;
 
@@ -45,6 +49,23 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // Navigation requests (HTML pages): network-first so new deploys load immediately
+  if (request.mode === 'navigate') {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          const cache = caches.open(CACHE_NAME).then((c) => {
+            c.put(request, networkResponse.clone());
+            return networkResponse;
+          });
+          return cache;
+        })
+        .catch(() => caches.match(request))
+    );
+    return;
+  }
+
+  // Other assets: stale-while-revalidate
   event.respondWith(
     caches.open(CACHE_NAME).then(async (cache) => {
       const cachedResponse = await cache.match(request);
@@ -58,7 +79,7 @@ self.addEventListener('fetch', (event) => {
         return networkResponse;
       }).catch(() => cachedResponse); // Fallback to cache on network error
 
-      // Return cached immediately, update in background (stale-while-revalidate)
+      // Return cached immediately, update in background
       return cachedResponse || fetchPromise;
     })
   );

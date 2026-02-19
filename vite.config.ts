@@ -1,9 +1,27 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync, writeFileSync } from 'fs'
+import { resolve } from 'path'
+
+// Stamp the service worker with a build-time version so old caches are busted on deploy
+function swVersionPlugin() {
+  return {
+    name: 'sw-version',
+    writeBundle() {
+      const swPath = resolve('dist', 'sw.js')
+      try {
+        const content = readFileSync(swPath, 'utf-8')
+        writeFileSync(swPath, content.replace('__BUILD_TIME__', Date.now().toString()))
+      } catch {
+        // sw.js may not exist in dist if public folder is empty
+      }
+    }
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), swVersionPlugin()],
   server: {
     // Prevent connection resets during development
     hmr: {
