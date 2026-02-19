@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import styles from './Modal.module.css';
 
 interface ModalProps {
@@ -11,9 +11,45 @@ interface ModalProps {
 // Selector for focusable elements
 const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
 
+const EXIT_ANIMATION_MS = 150;
+
 export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const closingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Exit animation state
+  const [shouldRender, setShouldRender] = useState(isOpen);
+  const [isClosing, setIsClosing] = useState(false);
+
+  useEffect(() => {
+    if (isOpen) {
+      // Opening: render immediately, cancel any pending close
+      if (closingTimeoutRef.current) {
+        clearTimeout(closingTimeoutRef.current);
+        closingTimeoutRef.current = null;
+      }
+      setIsClosing(false);
+      setShouldRender(true);
+    } else if (shouldRender) {
+      // Closing: start exit animation, then unmount
+      setIsClosing(true);
+      closingTimeoutRef.current = setTimeout(() => {
+        setShouldRender(false);
+        setIsClosing(false);
+        closingTimeoutRef.current = null;
+      }, EXIT_ANIMATION_MS);
+    }
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (closingTimeoutRef.current) {
+        clearTimeout(closingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Handle tab key for focus trap
   const handleTabKey = useCallback((e: KeyboardEvent) => {
@@ -86,11 +122,11 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
     e.stopPropagation();
   }, []);
 
-  if (!isOpen) return null;
+  if (!shouldRender) return null;
 
   return (
     <div
-      className={styles.overlay}
+      className={`${styles.overlay} ${isClosing ? styles.exiting : ''}`}
       onClick={onClose}
       onMouseDown={handleMouseEvent}
       onMouseMove={handleMouseEvent}
@@ -98,7 +134,7 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
     >
       <div
         ref={modalRef}
-        className={styles.modal}
+        className={`${styles.modal} ${isClosing ? styles.exiting : ''}`}
         onClick={(e) => e.stopPropagation()}
         tabIndex={-1}
         role="dialog"

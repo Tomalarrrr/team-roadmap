@@ -32,7 +32,7 @@ interface ProjectFormProps {
     endDate: string;
     statusColor: string;
     milestones?: MilestoneData[];
-  }) => void;
+  }) => void | Promise<void>;
   onCancel: () => void;
   onDelete?: () => void;
   isEditing?: boolean;
@@ -58,6 +58,7 @@ export function ProjectForm({
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(initialValues?.statusColor || DEFAULT_STATUS_COLOR);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Milestone management state
@@ -163,8 +164,10 @@ export function ProjectForm({
     resetMilestoneForm();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isSaving) return;
 
     const result = validateForm(projectSchema, {
       title: title.trim(),
@@ -180,11 +183,17 @@ export function ProjectForm({
     }
 
     setErrors({});
-    onSubmit({ ...result.data, milestones });
+    setIsSaving(true);
+
+    try {
+      await onSubmit({ ...result.data, milestones });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
-    <form onSubmit={handleSubmit} className={styles.form}>
+    <form onSubmit={handleSubmit} className={`${styles.form} ${isSaving ? styles.formSaving : ''}`}>
       <div className={styles.field}>
         <label htmlFor="title" className={styles.label}>Project Title</label>
         <input
@@ -491,8 +500,15 @@ export function ProjectForm({
           <button type="button" onClick={onCancel} className={styles.cancelBtn}>
             Cancel
           </button>
-          <button type="submit" className={styles.submitBtn}>
-            {isEditing ? 'Save Changes' : 'Create Project'}
+          <button type="submit" className={styles.submitBtn} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <span className={styles.spinner} />
+                Saving...
+              </>
+            ) : (
+              isEditing ? 'Save Changes' : 'Create Project'
+            )}
           </button>
         </div>
       )}

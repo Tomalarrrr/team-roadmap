@@ -5,6 +5,7 @@ import {
   removePresence,
   subscribeToPresence,
   heartbeatPresence,
+  HIDDEN_DISCONNECT_MS,
   type PresenceUser
 } from '../firebase';
 
@@ -144,14 +145,43 @@ export function usePresence({
     };
   }, [sessionId, userName, enabled]);
 
-  // Handle page visibility changes
+  // Handle page visibility changes - pause heartbeats when hidden, resume when visible.
+  // On return from extended hidden period, re-register full presence because
+  // goOffline() triggers server-side onDisconnect which deletes our presence entry.
+  const hiddenAtRef = useRef<number | null>(null);
+
   useEffect(() => {
     if (!enabled || !sessionId) return;
 
+    const color = getColorForUser(sessionId);
+
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        // Update heartbeat when tab becomes visible
-        heartbeatPresence(sessionId).catch(console.error);
+        const wasHiddenFor = hiddenAtRef.current ? Date.now() - hiddenAtRef.current : 0;
+        hiddenAtRef.current = null;
+
+        if (wasHiddenFor >= HIDDEN_DISCONNECT_MS) {
+          // After extended hidden period, onDisconnect may have deleted our presence.
+          // Re-register full presence (not just heartbeat) to restore name, color, etc.
+          updatePresence(sessionId, { name: userName, color }).catch(console.error);
+        } else {
+          // Short hide — just heartbeat to update lastSeen
+          heartbeatPresence(sessionId).catch(console.error);
+        }
+
+        // Restart heartbeat interval if it was cleared
+        if (!heartbeatRef.current) {
+          heartbeatRef.current = setInterval(() => {
+            heartbeatPresence(sessionId).catch(console.error);
+          }, 30000);
+        }
+      } else {
+        hiddenAtRef.current = Date.now();
+        // Tab hidden - stop heartbeat interval to reduce unnecessary writes
+        if (heartbeatRef.current) {
+          clearInterval(heartbeatRef.current);
+          heartbeatRef.current = null;
+        }
       }
     };
 
@@ -160,7 +190,7 @@ export function usePresence({
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [sessionId, enabled]);
+  }, [sessionId, userName, enabled]);
 
   // Handle page unload
   useEffect(() => {

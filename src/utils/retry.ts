@@ -18,6 +18,11 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
+      // Don't retry non-retryable errors (permission denied, invalid data, etc.)
+      if (!isRetryableError(lastError)) {
+        throw lastError;
+      }
+
       if (attempt === maxRetries) {
         throw lastError;
       }
@@ -36,14 +41,24 @@ export async function withRetry<T>(
   throw lastError!;
 }
 
-// Check if error is retryable (network errors, timeouts, etc.)
+// Check if error is retryable.
+// Default is to RETRY unless we know the error is permanent (fail-open strategy).
 export function isRetryableError(error: Error): boolean {
   const message = error.message.toLowerCase();
-  return (
-    message.includes('network') ||
-    message.includes('timeout') ||
-    message.includes('unavailable') ||
-    message.includes('failed to fetch') ||
-    message.includes('connection')
-  );
+
+  // Non-retryable: errors that won't resolve by retrying
+  if (
+    message.includes('permission_denied') ||
+    message.includes('permission denied') ||
+    message.includes('unauthorized') ||
+    message.includes('unauthenticated') ||
+    message.includes('invalid_argument') ||
+    message.includes('invalid argument') ||
+    message.includes('already exists')
+  ) {
+    return false;
+  }
+
+  // Default: retry unknown errors (safer than failing immediately)
+  return true;
 }

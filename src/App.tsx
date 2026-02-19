@@ -612,28 +612,40 @@ function App() {
   // Team member handlers
   const handleAddMember = useCallback(
     async (values: { name: string; jobTitle: string }) => {
-      await addTeamMember(values);
-      closeModal();
+      try {
+        await addTeamMember(values);
+        closeModal();
+      } catch (error) {
+        showToast(`Failed to add member: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      }
     },
-    [addTeamMember, closeModal]
+    [addTeamMember, closeModal, showToast]
   );
 
   const handleEditMember = useCallback(
     async (values: { name: string; jobTitle: string }) => {
       if (modal?.type === 'edit-member') {
-        await updateTeamMember(modal.member.id, values);
-        closeModal();
+        try {
+          await updateTeamMember(modal.member.id, values);
+          closeModal();
+        } catch (error) {
+          showToast(`Failed to update member: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+        }
       }
     },
-    [modal, updateTeamMember, closeModal]
+    [modal, updateTeamMember, closeModal, showToast]
   );
 
   const handleDeleteMember = useCallback(async () => {
     if (modal?.type === 'edit-member') {
-      await deleteTeamMember(modal.member.id);
-      closeModal();
+      try {
+        await deleteTeamMember(modal.member.id);
+        closeModal();
+      } catch (error) {
+        showToast(`Failed to delete member: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      }
     }
-  }, [modal, deleteTeamMember, closeModal]);
+  }, [modal, deleteTeamMember, closeModal, showToast]);
 
   // Project handlers with undo support
   const handleAddProject = useCallback(
@@ -666,42 +678,46 @@ function App() {
   const handleEditProject = useCallback(
     async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Array<{ id?: string } & Omit<Milestone, 'id'>> }) => {
       if (modal?.type === 'edit-project') {
-        const beforeState = modal.project;
-        const { milestones: updatedMilestones, ...projectData } = values;
-        await updateProject(modal.project.id, projectData);
+        try {
+          const beforeState = modal.project;
+          const { milestones: updatedMilestones, ...projectData } = values;
+          await updateProject(modal.project.id, projectData);
 
-        // Handle milestone updates if provided
-        if (updatedMilestones) {
-          const existingMilestones = modal.project.milestones || [];
-          const existingIds = new Set(existingMilestones.map(m => m.id));
-          const updatedIds = new Set(updatedMilestones.filter(m => m.id).map(m => m.id));
+          // Handle milestone updates if provided
+          if (updatedMilestones) {
+            const existingMilestones = modal.project.milestones || [];
+            const existingIds = new Set(existingMilestones.map(m => m.id));
+            const updatedIds = new Set(updatedMilestones.filter(m => m.id).map(m => m.id));
 
-          // Delete removed milestones
-          for (const existing of existingMilestones) {
-            if (!updatedIds.has(existing.id)) {
-              await deleteMilestone(modal.project.id, existing.id);
+            // Delete removed milestones
+            for (const existing of existingMilestones) {
+              if (!updatedIds.has(existing.id)) {
+                await deleteMilestone(modal.project.id, existing.id);
+              }
+            }
+
+            // Update existing and add new milestones
+            for (const milestone of updatedMilestones) {
+              if (milestone.id && existingIds.has(milestone.id)) {
+                // Update existing
+                const { id, ...milestoneData } = milestone;
+                await updateMilestone(modal.project.id, id, milestoneData);
+              } else if (!milestone.id) {
+                // Add new
+                const { id: _id, ...milestoneData } = milestone;
+                await addMilestone(modal.project.id, milestoneData);
+              }
             }
           }
 
-          // Update existing and add new milestones
-          for (const milestone of updatedMilestones) {
-            if (milestone.id && existingIds.has(milestone.id)) {
-              // Update existing
-              const { id, ...milestoneData } = milestone;
-              await updateMilestone(modal.project.id, id, milestoneData);
-            } else if (!milestone.id) {
-              // Add new
-              const { id: _id, ...milestoneData } = milestone;
-              await addMilestone(modal.project.id, milestoneData);
-            }
-          }
+          recordAction('UPDATE_PROJECT', values, createInverse('UPDATE_PROJECT', beforeState, values));
+          closeModal();
+        } catch (error) {
+          showToast(`Failed to update project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
         }
-
-        recordAction('UPDATE_PROJECT', values, createInverse('UPDATE_PROJECT', beforeState, values));
-        closeModal();
       }
     },
-    [modal, updateProject, updateMilestone, addMilestone, deleteMilestone, closeModal, recordAction]
+    [modal, updateProject, updateMilestone, addMilestone, deleteMilestone, closeModal, recordAction, showToast]
   );
 
   const handleDeleteProject = useCallback(
@@ -711,45 +727,59 @@ function App() {
         if (project) {
           recordAction('DELETE_PROJECT', project, createInverse('DELETE_PROJECT', project, null));
           await deleteProject(projectId);
-          showToast('Project deleted', 'success');
+          // Capture the deleted project for a targeted restore, rather than
+          // calling generic handleUndo which undoes the *most recent* action
+          // (which might not be this delete if the user acted in between).
+          const deletedProject = { ...project };
+          showToast('Project deleted', {
+            type: 'success',
+            action: {
+              label: 'Undo',
+              onClick: () => { addProject(deletedProject); }
+            }
+          });
         }
       } catch (error) {
         showToast(`Failed to delete project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
       }
     },
-    [data.projects, deleteProject, recordAction, showToast]
+    [data.projects, deleteProject, recordAction, showToast, addProject]
   );
 
   // Milestone handlers
   const handleAddMilestone = useCallback(
     async (values: Omit<Milestone, 'id'>) => {
       if (modal?.type === 'add-milestone') {
-        const project = modal.project;
+        try {
+          const project = modal.project;
 
-        // Check if milestone extends beyond project bounds
-        const milestoneStart = new Date(values.startDate);
-        const milestoneEnd = new Date(values.endDate);
-        const projectStart = new Date(project.startDate);
-        const projectEnd = new Date(project.endDate);
+          // Check if milestone extends beyond project bounds
+          const milestoneStart = new Date(values.startDate);
+          const milestoneEnd = new Date(values.endDate);
+          const projectStart = new Date(project.startDate);
+          const projectEnd = new Date(project.endDate);
 
-        const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
+          const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
 
-        // Add the milestone
-        await addMilestone(modal.projectId, values);
+          // Add the milestone
+          await addMilestone(modal.projectId, values);
 
-        // Auto-expand project bounds if milestone extends beyond
-        if (needsExpansion) {
-          const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
-          const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
+          // Auto-expand project bounds if milestone extends beyond
+          if (needsExpansion) {
+            const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
+            const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
 
-          await updateProject(modal.projectId, {
-            startDate: newStartDate,
-            endDate: newEndDate
-          });
-          showToast('Project dates expanded to fit milestone', 'info');
+            await updateProject(modal.projectId, {
+              startDate: newStartDate,
+              endDate: newEndDate
+            });
+            showToast('Project dates expanded to fit milestone', 'info');
+          }
+
+          closeModal();
+        } catch (error) {
+          showToast(`Failed to add milestone: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
         }
-
-        closeModal();
       }
     },
     [modal, addMilestone, updateProject, closeModal, showToast]
@@ -758,32 +788,36 @@ function App() {
   const handleEditMilestone = useCallback(
     async (values: Omit<Milestone, 'id'>) => {
       if (modal?.type === 'edit-milestone') {
-        const project = modal.project;
+        try {
+          const project = modal.project;
 
-        // Check if milestone extends beyond project bounds
-        const milestoneStart = new Date(values.startDate);
-        const milestoneEnd = new Date(values.endDate);
-        const projectStart = new Date(project.startDate);
-        const projectEnd = new Date(project.endDate);
+          // Check if milestone extends beyond project bounds
+          const milestoneStart = new Date(values.startDate);
+          const milestoneEnd = new Date(values.endDate);
+          const projectStart = new Date(project.startDate);
+          const projectEnd = new Date(project.endDate);
 
-        const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
+          const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
 
-        // Update the milestone
-        await updateMilestone(modal.projectId, modal.milestone.id, values);
+          // Update the milestone
+          await updateMilestone(modal.projectId, modal.milestone.id, values);
 
-        // Auto-expand project bounds if milestone extends beyond
-        if (needsExpansion) {
-          const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
-          const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
+          // Auto-expand project bounds if milestone extends beyond
+          if (needsExpansion) {
+            const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
+            const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
 
-          await updateProject(modal.projectId, {
-            startDate: newStartDate,
-            endDate: newEndDate
-          });
-          showToast('Project dates expanded to fit milestone', 'info');
+            await updateProject(modal.projectId, {
+              startDate: newStartDate,
+              endDate: newEndDate
+            });
+            showToast('Project dates expanded to fit milestone', 'info');
+          }
+
+          closeModal();
+        } catch (error) {
+          showToast(`Failed to update milestone: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
         }
-
-        closeModal();
       }
     },
     [modal, updateMilestone, updateProject, closeModal, showToast]

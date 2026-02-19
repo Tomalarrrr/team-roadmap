@@ -86,7 +86,7 @@ export function MilestoneForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className={styles.form}>
+    <form onSubmit={handleSubmit} className={`${styles.form} ${isSaving ? styles.formSaving : ''}`}>
       <div className={styles.field}>
         <label htmlFor="title" className={styles.label}>Milestone Title</label>
         <input

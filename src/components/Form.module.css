@@ -4,6 +4,20 @@
   gap: 20px;
 }
 
+/* Dim and disable all fields while saving (action buttons remain interactive) */
+.form.formSaving .field,
+.form.formSaving .row,
+.form.formSaving .milestonesSection,
+.form.formSaving .colorPicker,
+.form.formSaving .statusPreview,
+.form.formSaving .newRowBtn,
+.form.formSaving .addMilestoneBtn,
+.form.formSaving .checkboxField {
+  pointer-events: none;
+  opacity: 0.5;
+  transition: opacity 150ms ease;
+}
+
 /* Form sections for visual grouping */
 .section {
   display: flex;

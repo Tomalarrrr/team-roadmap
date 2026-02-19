@@ -14,6 +14,7 @@ interface DraggableProjectBarProps {
   isSelected?: boolean;
   newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
   isLocked?: boolean; // When true, disable drag and edit actions
+  isFullscreen?: boolean; // When true, hide milestones for clean view
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
   onAddMilestone: () => void;
@@ -38,6 +39,7 @@ function DraggableProjectBarComponent({
   isSelected,
   newMilestoneIds,
   isLocked = false,
+  isFullscreen = false,
   onUpdate,
   onDelete,
   onAddMilestone,
@@ -79,6 +81,7 @@ function DraggableProjectBarComponent({
         isSelected={isSelected}
         newMilestoneIds={newMilestoneIds}
         isLocked={isLocked}
+        isFullscreen={isFullscreen}
         dragListeners={listeners}
         onUpdate={onUpdate}
         onDelete={onDelete}
@@ -108,7 +111,8 @@ export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps
     prevProps.stackTopOffset === nextProps.stackTopOffset &&
     prevProps.laneTop === nextProps.laneTop &&
     prevProps.isSelected === nextProps.isSelected &&
-    prevProps.isLocked === nextProps.isLocked
+    prevProps.isLocked === nextProps.isLocked &&
+    prevProps.isFullscreen === nextProps.isFullscreen
     // Note: Callback props are excluded from comparison as they're typically stable
   );
 });

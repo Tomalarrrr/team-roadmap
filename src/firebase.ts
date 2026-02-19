@@ -44,25 +44,41 @@ let database: Database | null = null;
 let roadmapRef: DatabaseReference | null = null;
 let initPromise: Promise<void> | null = null;
 
+// Cached firebase/database module — avoids repeated `await import()` microtask overhead
+// on every function call after initialization.
+let dbModule: typeof import('firebase/database') | null = null;
+
 // Dynamically import and initialize Firebase (deferred)
 async function initializeFirebase(): Promise<void> {
-  if (app && database && roadmapRef) return;
+  if (app && database && roadmapRef && dbModule) return;
 
   try {
-    const [{ initializeApp }, { getDatabase, ref }] = await Promise.all([
+    const [firebaseApp, firebaseDb] = await Promise.all([
       import('firebase/app'),
       import('firebase/database')
     ]);
 
-    app = initializeApp(firebaseConfig);
-    database = getDatabase(app);
-    roadmapRef = ref(database, 'roadmap');
+    dbModule = firebaseDb;
+    // Use existing app if a previous partial init created it but something else failed
+    app = firebaseApp.getApps().length
+      ? firebaseApp.getApp()
+      : firebaseApp.initializeApp(firebaseConfig);
+    database = firebaseDb.getDatabase(app);
+    roadmapRef = firebaseDb.ref(database, 'roadmap');
   } catch (error) {
+    // Allow re-initialization on failure
+    initPromise = null;
     throw new Error(
       `Failed to initialize Firebase: ${error instanceof Error ? error.message : 'Unknown error'}. ` +
       'Please check your Firebase configuration and network connection.'
     );
   }
+}
+
+// Get the cached database module (only valid after initialization)
+function getDbModule() {
+  if (!dbModule) throw new Error('Firebase not initialized');
+  return dbModule;
 }
 
 // Ensure Firebase is initialized before use
@@ -73,41 +89,143 @@ function ensureInitialized(): Promise<void> {
   return initPromise;
 }
 
-export async function subscribeToRoadmap(callback: (data: RoadmapData) => void): Promise<Unsubscribe> {
-  await ensureInitialized();
-  const { onValue } = await import('firebase/database');
+// ============================================
+// CONNECTION LIFECYCLE MANAGEMENT
+// ============================================
 
-  const unsubscribe = onValue(roadmapRef!, (snapshot) => {
-    const data = snapshot.val();
-    callback({
-      projects: data?.projects || [],
-      teamMembers: data?.teamMembers || [],
-      dependencies: data?.dependencies || [],
-      leaveBlocks: data?.leaveBlocks || [],
-      periodMarkers: data?.periodMarkers || []
-    });
-  });
+let visibilityHandler: (() => void) | null = null;
+// Disconnect after 2 minutes of being hidden to prevent zombie WebSockets.
+// Exported so usePresence can align its re-registration threshold.
+export const HIDDEN_DISCONNECT_MS = 2 * 60 * 1000;
+let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
+// Track whether we actually completed a goOffline call
+let didGoOffline = false;
+
+/**
+ * Manage Firebase connection based on tab visibility.
+ * Disconnects after extended hidden periods to prevent zombie WebSockets,
+ * and reconnects immediately when the tab becomes visible again.
+ */
+export function setupConnectionLifecycle(): () => void {
+  if (visibilityHandler) return () => {}; // Already set up
+
+  visibilityHandler = () => {
+    if (document.visibilityState === 'hidden') {
+      // Schedule disconnect after extended hidden period
+      hiddenTimer = setTimeout(() => {
+        if (!database || !dbModule) return;
+        // Check we're still hidden (user may have returned while timer was pending)
+        if (document.visibilityState !== 'hidden') return;
+        dbModule.goOffline(database);
+        didGoOffline = true;
+        console.info('[Firebase] Went offline after extended hidden period');
+      }, HIDDEN_DISCONNECT_MS);
+    } else {
+      // Tab became visible - cancel pending disconnect
+      if (hiddenTimer) {
+        clearTimeout(hiddenTimer);
+        hiddenTimer = null;
+      }
+
+      // Only reconnect if we actually disconnected
+      if (didGoOffline && database && dbModule) {
+        didGoOffline = false;
+        dbModule.goOnline(database);
+        console.info('[Firebase] Reconnected after tab became visible');
+      }
+    }
+  };
+
+  document.addEventListener('visibilitychange', visibilityHandler);
+
+  // Also handle beforeunload to clean up
+  const unloadHandler = () => {
+    if (hiddenTimer) {
+      clearTimeout(hiddenTimer);
+    }
+  };
+  window.addEventListener('beforeunload', unloadHandler);
+
+  return () => {
+    if (visibilityHandler) {
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      visibilityHandler = null;
+    }
+    window.removeEventListener('beforeunload', unloadHandler);
+    if (hiddenTimer) {
+      clearTimeout(hiddenTimer);
+      hiddenTimer = null;
+    }
+    didGoOffline = false;
+  };
+}
+
+/**
+ * Force reconnect the Firebase database connection.
+ * Useful for recovering from stale WebSocket states.
+ */
+export async function forceReconnect(): Promise<void> {
+  if (!database || !dbModule) return;
+  dbModule.goOffline(database);
+  // Small delay to ensure clean disconnect before reconnecting
+  await new Promise(resolve => setTimeout(resolve, 100));
+  dbModule.goOnline(database);
+  console.info('[Firebase] Force reconnected');
+}
+
+export async function subscribeToRoadmap(
+  callback: (data: RoadmapData) => void,
+  onError?: (error: Error) => void
+): Promise<Unsubscribe> {
+  await ensureInitialized();
+  const { onValue } = getDbModule();
+
+  const unsubscribe = onValue(
+    roadmapRef!,
+    (snapshot) => {
+      const data = snapshot.val();
+      callback({
+        projects: data?.projects || [],
+        teamMembers: data?.teamMembers || [],
+        dependencies: data?.dependencies || [],
+        leaveBlocks: data?.leaveBlocks || [],
+        periodMarkers: data?.periodMarkers || []
+      });
+    },
+    (error) => {
+      console.error('[Firebase] Roadmap listener error:', error);
+      onError?.(error);
+    }
+  );
   return unsubscribe;
 }
 
 export async function subscribeToConnectionState(callback: (connected: boolean) => void): Promise<Unsubscribe> {
   await ensureInitialized();
-  const { onValue, ref } = await import('firebase/database');
+  const { onValue, ref } = getDbModule();
 
   // Firebase's special .info/connected location tracks connection state
   const connectedRef = ref(database!, '.info/connected');
 
-  const unsubscribe = onValue(connectedRef, (snapshot) => {
-    const connected = snapshot.val() === true;
-    callback(connected);
-  });
+  const unsubscribe = onValue(
+    connectedRef,
+    (snapshot) => {
+      const connected = snapshot.val() === true;
+      callback(connected);
+    },
+    (error) => {
+      console.error('[Firebase] Connection state listener error:', error);
+      // Assume disconnected on listener error
+      callback(false);
+    }
+  );
 
   return unsubscribe;
 }
 
 export async function saveRoadmap(data: RoadmapData): Promise<void> {
   await ensureInitialized();
-  const { set } = await import('firebase/database');
+  const { set } = getDbModule();
   await set(roadmapRef!, data);
 }
 
@@ -116,14 +234,14 @@ export async function saveRoadmap(data: RoadmapData): Promise<void> {
 
 export async function updateProjectAtPath(projectIndex: number, project: Project): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
   const projectRef = ref(database!, `roadmap/projects/${projectIndex}`);
   await set(projectRef, project);
 }
 
 export async function updateProjectField(projectIndex: number, field: string, value: unknown): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
   const fieldRef = ref(database!, `roadmap/projects/${projectIndex}/${field}`);
   await set(fieldRef, value);
 }
@@ -134,21 +252,21 @@ export async function updateMilestoneAtPath(
   milestone: Milestone
 ): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
   const milestoneRef = ref(database!, `roadmap/projects/${projectIndex}/milestones/${milestoneIndex}`);
   await set(milestoneRef, milestone);
 }
 
 export async function updateDependencyAtPath(depIndex: number, dependency: Dependency): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
   const depRef = ref(database!, `roadmap/dependencies/${depIndex}`);
   await set(depRef, dependency);
 }
 
 export async function updateTeamMemberAtPath(memberIndex: number, member: TeamMember): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
   const memberRef = ref(database!, `roadmap/teamMembers/${memberIndex}`);
   await set(memberRef, member);
 }
@@ -156,14 +274,14 @@ export async function updateTeamMemberAtPath(memberIndex: number, member: TeamMe
 // Batch update using Firebase's update() - merges multiple paths atomically
 export async function batchUpdate(updates: Record<string, unknown>): Promise<void> {
   await ensureInitialized();
-  const { ref, update } = await import('firebase/database');
+  const { ref, update } = getDbModule();
   const rootRef = ref(database!, 'roadmap');
   await update(rootRef, updates);
 }
 
 export async function getRoadmap(): Promise<RoadmapData> {
   await ensureInitialized();
-  const { get } = await import('firebase/database');
+  const { get } = getDbModule();
   const snapshot = await get(roadmapRef!);
   const data = snapshot.val();
   return {
@@ -177,13 +295,9 @@ export async function getRoadmap(): Promise<RoadmapData> {
 
 export async function updateLeaveBlockAtPath(leaveIndex: number, leaveBlock: LeaveBlock): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
   const leaveRef = ref(database!, `roadmap/leaveBlocks/${leaveIndex}`);
   await set(leaveRef, leaveBlock);
-}
-
-export function getDatabaseInstance(): Database | null {
-  return database;
 }
 
 // ============================================
@@ -204,7 +318,7 @@ export interface PresenceUser {
  */
 export async function updatePresence(sessionId: string, userData: Omit<PresenceUser, 'id' | 'lastSeen'>): Promise<void> {
   await ensureInitialized();
-  const { ref, set, onDisconnect } = await import('firebase/database');
+  const { ref, set, onDisconnect } = getDbModule();
 
   const presenceRef = ref(database!, `presence/${sessionId}`);
 
@@ -226,7 +340,7 @@ export async function updatePresence(sessionId: string, userData: Omit<PresenceU
  */
 export async function updateEditingStatus(sessionId: string, projectId: string | null): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
 
   const editingRef = ref(database!, `presence/${sessionId}/editingProjectId`);
   await set(editingRef, projectId);
@@ -237,7 +351,7 @@ export async function updateEditingStatus(sessionId: string, projectId: string |
  */
 export async function removePresence(sessionId: string): Promise<void> {
   await ensureInitialized();
-  const { ref, remove } = await import('firebase/database');
+  const { ref, remove } = getDbModule();
 
   const presenceRef = ref(database!, `presence/${sessionId}`);
   await remove(presenceRef);
@@ -250,30 +364,38 @@ export async function subscribeToPresence(
   callback: (users: PresenceUser[]) => void
 ): Promise<Unsubscribe> {
   await ensureInitialized();
-  const { ref, onValue } = await import('firebase/database');
+  const { ref, onValue } = getDbModule();
 
   const presenceRef = ref(database!, 'presence');
 
-  const unsubscribe = onValue(presenceRef, (snapshot) => {
-    const data = snapshot.val();
-    if (!data) {
+  const unsubscribe = onValue(
+    presenceRef,
+    (snapshot) => {
+      const data = snapshot.val();
+      if (!data) {
+        callback([]);
+        return;
+      }
+
+      // Convert object to array and filter stale entries (> 2 minutes old)
+      const now = Date.now();
+      const staleThreshold = 2 * 60 * 1000; // 2 minutes
+
+      const users: PresenceUser[] = Object.values(data)
+        .filter((user): user is PresenceUser => {
+          if (!user || typeof user !== 'object') return false;
+          const u = user as PresenceUser;
+          return typeof u.id === 'string' && (now - u.lastSeen) < staleThreshold;
+        });
+
+      callback(users);
+    },
+    (error) => {
+      console.error('[Firebase] Presence listener error:', error);
+      // Return empty on error so UI doesn't break
       callback([]);
-      return;
     }
-
-    // Convert object to array and filter stale entries (> 2 minutes old)
-    const now = Date.now();
-    const staleThreshold = 2 * 60 * 1000; // 2 minutes
-
-    const users: PresenceUser[] = Object.values(data)
-      .filter((user): user is PresenceUser => {
-        if (!user || typeof user !== 'object') return false;
-        const u = user as PresenceUser;
-        return typeof u.id === 'string' && (now - u.lastSeen) < staleThreshold;
-      });
-
-    callback(users);
-  });
+  );
 
   return unsubscribe;
 }
@@ -284,7 +406,7 @@ export async function subscribeToPresence(
  */
 export async function heartbeatPresence(sessionId: string): Promise<void> {
   await ensureInitialized();
-  const { ref, set } = await import('firebase/database');
+  const { ref, set } = getDbModule();
 
   const lastSeenRef = ref(database!, `presence/${sessionId}/lastSeen`);
   await set(lastSeenRef, Date.now());

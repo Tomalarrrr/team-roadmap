@@ -7,7 +7,9 @@ import {
   updateMilestoneAtPath,
   updateDependencyAtPath,
   updateTeamMemberAtPath,
-  updateLeaveBlockAtPath
+  updateLeaveBlockAtPath,
+  setupConnectionLifecycle,
+  forceReconnect
 } from '../firebase';
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -108,67 +110,131 @@ export function useRoadmap() {
   // Debounce connection state to prevent rapid state flapping
   const connectionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastConnectionStateRef = useRef<boolean>(true);
+  // Track last successful data receive for stale connection detection
+  const lastDataReceivedRef = useRef<number>(Date.now());
+  const staleCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Track subscription for re-subscribe on error
+  const resubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track whether error recovery is in progress to avoid competing with stale check
+  const isRecoveringRef = useRef(false);
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
     let unsubscribeConnection: (() => void) | null = null;
     let mounted = true;
+    let resubscribeAttempts = 0;
+    const MAX_RESUBSCRIBE_ATTEMPTS = 5;
 
-    // Initialize Firebase asynchronously (deferred loading)
-    subscribeToRoadmap((newData) => {
-      if (!mounted) return;
+    // Set up visibility-based connection management
+    const cleanupLifecycle = setupConnectionLifecycle();
 
-      // If we have a pending local update, merge instead of discarding
-      // This prevents losing concurrent user edits
-      if (isLocalUpdateRef.current) {
-        isLocalUpdateRef.current = false;
-        // Apply Firebase update but preserve any pending changes
-        // This ensures we don't lose external edits during optimistic updates
-        const normalized = normalizeData(newData);
-        // Update data ref to have latest Firebase state
-        dataRef.current = normalized;
-        setData(normalized);
-        setLoading(false);
-        return;
-      }
+    // Subscribe to roadmap data with error recovery.
+    // subscriptionId tracks the current attempt — if a stale promise resolves
+    // after a newer attempt started, its unsub is cleaned up immediately.
+    let currentSubscriptionId = 0;
 
-      setData(normalizeData(newData));
-      setLoading(false);
-    }).then((unsub) => {
-      if (mounted) {
-        unsubscribe = unsub;
-      } else {
-        unsub(); // Component unmounted, clean up immediately
-      }
-    }).catch((error) => {
-      // Handle subscription failures gracefully
-      if (mounted) {
+    const setupRoadmapSubscription = () => {
+      const myId = ++currentSubscriptionId;
+      isRecoveringRef.current = true;
+
+      subscribeToRoadmap(
+        (newData) => {
+          if (!mounted) return;
+          lastDataReceivedRef.current = Date.now();
+          resubscribeAttempts = 0; // Reset on successful data
+          isRecoveringRef.current = false;
+
+          // If we have a pending local update, merge instead of discarding
+          if (isLocalUpdateRef.current) {
+            isLocalUpdateRef.current = false;
+            const normalized = normalizeData(newData);
+            dataRef.current = normalized;
+            setData(normalized);
+            setLoading(false);
+            return;
+          }
+
+          setData(normalizeData(newData));
+          setLoading(false);
+        },
+        (error) => {
+          // Listener error - attempt to resubscribe with backoff
+          if (!mounted) return;
+          console.error('[useRoadmap] Listener error, will attempt resubscribe:', error);
+          isRecoveringRef.current = true;
+
+          // Clean up old subscription
+          unsubscribe?.();
+          unsubscribe = null;
+
+          if (resubscribeAttempts < MAX_RESUBSCRIBE_ATTEMPTS) {
+            resubscribeAttempts++;
+            const delay = Math.min(1000 * Math.pow(2, resubscribeAttempts - 1), 30000);
+            console.info(`[useRoadmap] Resubscribing in ${delay}ms (attempt ${resubscribeAttempts}/${MAX_RESUBSCRIBE_ATTEMPTS})`);
+
+            resubscribeTimeoutRef.current = setTimeout(() => {
+              if (mounted) setupRoadmapSubscription();
+            }, delay);
+          } else {
+            isRecoveringRef.current = false;
+            setSaveError('Connection lost. Please refresh the page.');
+          }
+        }
+      ).then((unsub) => {
+        if (!mounted) {
+          unsub();
+        } else if (myId !== currentSubscriptionId) {
+          // A newer subscription attempt started — this one is stale, clean it up
+          unsub();
+        } else {
+          unsubscribe = unsub;
+          isRecoveringRef.current = false;
+        }
+      }).catch((error) => {
+        // Only handle if this is still the active subscription attempt
+        if (!mounted || myId !== currentSubscriptionId) return;
+
         console.error('[useRoadmap] Failed to subscribe to roadmap:', error);
-        setSaveError('Connection failed. Please refresh the page.');
-        setLoading(false);
-      }
-    });
+        // Retry the initial subscription with backoff
+        if (resubscribeAttempts < MAX_RESUBSCRIBE_ATTEMPTS) {
+          resubscribeAttempts++;
+          const delay = Math.min(1000 * Math.pow(2, resubscribeAttempts - 1), 30000);
+          resubscribeTimeoutRef.current = setTimeout(() => {
+            if (mounted) setupRoadmapSubscription();
+          }, delay);
+        } else {
+          isRecoveringRef.current = false;
+          setSaveError('Connection failed. Please refresh the page.');
+          setLoading(false);
+        }
+      });
+    };
+
+    setupRoadmapSubscription();
 
     // Monitor connection state with debouncing to prevent flapping
     subscribeToConnectionState((connected) => {
       if (!mounted) return;
 
-      // Debounce connection state changes to prevent rapid re-renders
-      // during network instability
       if (connectionDebounceRef.current) {
         clearTimeout(connectionDebounceRef.current);
       }
 
       connectionDebounceRef.current = setTimeout(() => {
-        // Only update if state actually changed
         if (lastConnectionStateRef.current !== connected) {
+          const wasOffline = !lastConnectionStateRef.current;
           lastConnectionStateRef.current = connected;
           setIsOnline(connected);
+
           if (!connected) {
-            console.warn('Firebase connection lost. Changes will be saved when reconnected.');
+            console.warn('[Firebase] Connection lost. Changes will be saved when reconnected.');
+          } else if (wasOffline) {
+            // Coming back online - reset data timestamp to avoid false stale detection
+            lastDataReceivedRef.current = Date.now();
+            console.info('[Firebase] Connection restored.');
           }
         }
-      }, 500); // 500ms debounce prevents flapping cascade
+      }, 500);
     }).then((unsub) => {
       if (mounted) {
         unsubscribeConnection = unsub;
@@ -176,16 +242,46 @@ export function useRoadmap() {
         unsub();
       }
     }).catch((error) => {
-      // Connection monitoring is non-critical, just log
       console.warn('[useRoadmap] Failed to monitor connection state:', error);
     });
+
+    // Stale connection detection: if we think we're online but haven't received
+    // data in 5 minutes, force reconnect to recover from zombie WebSockets.
+    // Uses a cooldown (not a one-shot) so it retries if the first reconnect
+    // doesn't restore data flow, but doesn't spam reconnects.
+    const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+    const STALE_RECONNECT_COOLDOWN_MS = 2 * 60 * 1000; // 2 min between retries
+    let lastStaleReconnectTime = 0;
+    staleCheckIntervalRef.current = setInterval(() => {
+      if (!mounted) return;
+      const now = Date.now();
+      const timeSinceData = now - lastDataReceivedRef.current;
+
+      // No action needed if we've received data recently
+      if (timeSinceData < STALE_THRESHOLD_MS) return;
+
+      // Skip if: error recovery is running, we know we're offline, or cooldown active
+      if (isRecoveringRef.current || !lastConnectionStateRef.current) return;
+      if (now - lastStaleReconnectTime < STALE_RECONNECT_COOLDOWN_MS) return;
+
+      lastStaleReconnectTime = now;
+      console.warn(`[Firebase] No data received in ${Math.round(timeSinceData / 1000)}s while "connected". Force reconnecting...`);
+      forceReconnect().catch(console.error);
+    }, 60000); // Check every minute
 
     return () => {
       mounted = false;
       unsubscribe?.();
       unsubscribeConnection?.();
+      cleanupLifecycle();
       if (connectionDebounceRef.current) {
         clearTimeout(connectionDebounceRef.current);
+      }
+      if (resubscribeTimeoutRef.current) {
+        clearTimeout(resubscribeTimeoutRef.current);
+      }
+      if (staleCheckIntervalRef.current) {
+        clearInterval(staleCheckIntervalRef.current);
       }
     };
   }, []);

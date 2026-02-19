@@ -139,3 +139,34 @@
     transform: translateY(0);
   }
 }
+
+/* Exit animations */
+.overlay.exiting {
+  animation: overlayFadeOut 150ms ease forwards;
+}
+
+@keyframes overlayFadeOut {
+  from {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
+  to {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+.modal.exiting {
+  animation: modalSlideOut 150ms var(--ease-in-out, cubic-bezier(0.4, 0, 0.2, 1)) forwards;
+}
+
+@keyframes modalSlideOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1) translateZ(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97) translateZ(0);
+  }
+}

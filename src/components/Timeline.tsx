@@ -870,7 +870,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         // Find all projects in this stack row and get their max height
         const projectsInRow = ownerProjects.filter(p => stacks?.get(p.id) === row);
         const maxHeightInRow = projectsInRow.reduce((max, p) => {
-          const height = calculateProjectHeight(p.milestones);
+          const height = isFullscreen ? BASE_PROJECT_HEIGHT : calculateProjectHeight(p.milestones);
           return Math.max(max, height);
         }, BASE_PROJECT_HEIGHT);
         rowHeights.push(maxHeightInRow);
@@ -887,7 +887,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     });
 
     return { laneHeights: heights, laneStackHeights: stackHeights };
-  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes]);
+  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes, isFullscreen]);
 
   // Calculate cumulative lane positions
   const lanePositions = useMemo(() => {
@@ -959,8 +959,8 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           key={dep.id}
           fromProject={fromProject}
           toProject={toProject}
-          fromMilestoneId={dep.fromMilestoneId}
-          toMilestoneId={dep.toMilestoneId}
+          fromMilestoneId={isFullscreen ? undefined : dep.fromMilestoneId}
+          toMilestoneId={isFullscreen ? undefined : dep.toMilestoneId}
           timelineStart={timelineStart}
           dayWidth={dayWidth}
           projectStacks={globalProjectStacks}
@@ -978,7 +978,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         />
       );
     });
-  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds, ownerNameToMemberId, collapsedLanes]);
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds, ownerNameToMemberId, collapsedLanes, isFullscreen]);
 
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>
@@ -1185,6 +1185,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                         isSelected={project.id === selectedProjectId}
                         newMilestoneIds={newMilestoneIds}
                         isLocked={isLocked}
+                        isFullscreen={isFullscreen}
                         onUpdate={(updates) => onUpdateProject(project.id, updates)}
                         onDelete={() => onDeleteProject(project.id)}
                         onAddMilestone={() => onAddMilestone(project.id)}

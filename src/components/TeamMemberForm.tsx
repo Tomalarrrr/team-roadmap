@@ -8,7 +8,7 @@ interface TeamMemberFormProps {
     jobTitle: string;
     nameColor?: string;
   };
-  onSubmit: (values: { name: string; jobTitle: string; nameColor?: string }) => void;
+  onSubmit: (values: { name: string; jobTitle: string; nameColor?: string }) => void | Promise<void>;
   onCancel: () => void;
   onDelete?: () => void;
   isEditing?: boolean;
@@ -27,10 +27,13 @@ export function TeamMemberForm({
   const [jobTitle, setJobTitle] = useState(initialValues?.jobTitle || '');
   const [nameColor, setNameColor] = useState(initialValues?.nameColor || '');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isSaving) return;
 
     const result = validateForm(teamMemberSchema, {
       name: name.trim(),
@@ -43,7 +46,13 @@ export function TeamMemberForm({
     }
 
     setErrors({});
-    onSubmit({ ...result.data, nameColor: nameColor || undefined });
+    setIsSaving(true);
+
+    try {
+      await onSubmit({ ...result.data, nameColor: nameColor || undefined });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteClick = () => {
@@ -55,7 +64,7 @@ export function TeamMemberForm({
   };
 
   return (
-    <form onSubmit={handleSubmit} className={styles.form}>
+    <form onSubmit={handleSubmit} className={`${styles.form} ${isSaving ? styles.formSaving : ''}`}>
       <div className={styles.field}>
         <label htmlFor="name" className={styles.label}>Name</label>
         <input
@@ -139,8 +148,15 @@ export function TeamMemberForm({
           <button type="button" onClick={onCancel} className={styles.cancelBtn}>
             Cancel
           </button>
-          <button type="submit" className={styles.submitBtn}>
-            {isEditing ? 'Save' : 'Add Member'}
+          <button type="submit" className={styles.submitBtn} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <span className={styles.spinner} />
+                Saving...
+              </>
+            ) : (
+              isEditing ? 'Save' : 'Add Member'
+            )}
           </button>
         </div>
       )}

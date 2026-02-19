@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import type { Project, Milestone, ContextMenuItem } from '../types';
 import { MilestoneLine } from './MilestoneLine';
 import { DependencyArrow } from './DependencyArrow';
@@ -11,6 +12,7 @@ import {
   formatShortDate,
   isDatePast
 } from '../utils/dateUtils';
+import { getStatusNameByHex } from '../utils/statusColors';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
 
@@ -80,6 +82,7 @@ interface ProjectBarProps {
   isSelected?: boolean;
   newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
   isLocked?: boolean; // When true, disable drag and edit actions (view mode)
+  isFullscreen?: boolean; // When true, hide milestones for clean view
   dragListeners?: React.DOMAttributes<HTMLDivElement>;
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
@@ -112,6 +115,7 @@ export function ProjectBar({
   isSelected,
   newMilestoneIds,
   isLocked = false,
+  isFullscreen = false,
   dragListeners, // Used for cross-lane dragging (reassign owner)
   onUpdate,
   onDelete,
@@ -135,6 +139,11 @@ export function ProjectBar({
   // Preview dates for smooth visual feedback during drag (separate from actual data)
   const [previewDates, setPreviewDates] = useState<{ start: string; end: string } | null>(null);
   const [showDependencyArrow, setShowDependencyArrow] = useState(false);
+
+  // Rich hover tooltip state
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ x: number; y: number } | null>(null);
+  const tooltipTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Context menu state
   const contextMenu = useContextMenu();
@@ -246,6 +255,13 @@ export function ProjectBar({
   // Auto-blue rule: turn blue if project end date is past
   const isPast = isDatePast(project.endDate);
   const displayColor = isPast ? AUTO_BLUE : project.statusColor;
+
+  // Status label for badge and tooltip
+  const statusLabel = isPast ? 'Complete' : getStatusNameByHex(project.statusColor);
+  // Show badge when bar is wide enough to read, but hide when projectContentEnd appears (width > 400)
+  // to avoid overlapping the right-aligned title/dates
+  const showStatusBadge = !dragMode && !externalDragging && width > 120 && width <= 400 && statusLabel;
+  const milestoneCount = project.milestones?.length || 0;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     if (isLocked) return; // Disable drag when locked
@@ -481,7 +497,7 @@ export function ProjectBar({
   // Calculate dynamic project bar height
   const milestoneRows = maxMilestoneStack + 1;
   const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
-  const projectBarHeight = Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
+  const projectBarHeight = isFullscreen ? BASE_PROJECT_HEIGHT : Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
 
   // Use stackTopOffset if provided (dynamic heights), otherwise fall back to fixed calculation
   // The fallback is a safety net - Timeline should always provide stackTopOffset
@@ -549,6 +565,85 @@ export function ProjectBar({
     setShowDependencyArrow(distanceFromEnd <= 40 && distanceFromEnd >= 0);
   }, [isCreatingDependency, dragMode]);
 
+  // Rich hover tooltip handlers (following MilestoneLine pattern)
+  const handleMouseEnterTooltip = useCallback(() => {
+    if (dragMode || externalDragging) return;
+    tooltipTimeoutRef.current = setTimeout(() => {
+      if (barRef.current && !contextMenu.isOpen) {
+        const rect = barRef.current.getBoundingClientRect();
+        // Clamp horizontal position to keep tooltip within viewport
+        // Tooltip is ~280px max-width, centered => need ~140px clearance on each side
+        const TOOLTIP_HALF_WIDTH = 140;
+        const rawX = rect.left + rect.width / 2;
+        const clampedX = Math.max(TOOLTIP_HALF_WIDTH, Math.min(rawX, window.innerWidth - TOOLTIP_HALF_WIDTH));
+        setTooltipPosition({
+          x: clampedX,
+          y: rect.top
+        });
+        setShowTooltip(true);
+      }
+    }, 400);
+  }, [dragMode, externalDragging, contextMenu.isOpen]);
+
+  const handleMouseLeaveTooltip = useCallback(() => {
+    if (tooltipTimeoutRef.current) {
+      clearTimeout(tooltipTimeoutRef.current);
+      tooltipTimeoutRef.current = null;
+    }
+    setShowTooltip(false);
+    setTooltipPosition(null);
+  }, []);
+
+  // Hide tooltip when drag starts or context menu opens
+  useEffect(() => {
+    if (dragMode || contextMenu.isOpen) {
+      handleMouseLeaveTooltip();
+    }
+  }, [dragMode, contextMenu.isOpen, handleMouseLeaveTooltip]);
+
+  // Dismiss tooltip on scroll (position becomes stale)
+  useEffect(() => {
+    if (!showTooltip) return;
+    const dismiss = () => handleMouseLeaveTooltip();
+    window.addEventListener('scroll', dismiss, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', dismiss, { capture: true });
+  }, [showTooltip, handleMouseLeaveTooltip]);
+
+  // Cleanup tooltip timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (tooltipTimeoutRef.current) {
+        clearTimeout(tooltipTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Floating drag tooltip - position and text
+  // Note: getBoundingClientRect() during render reads the previous frame's position,
+  // causing a ~1 frame (16ms) lag. This is imperceptible during smooth drag, and
+  // using useLayoutEffect to fix it would double renders during drag (bad tradeoff).
+  const dragTooltipPosition = useMemo(() => {
+    if (!dragMode || !previewDates || !barRef.current) return null;
+    const rect = barRef.current.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top,
+      flipBelow: rect.top < 50 // Flip below if near top of viewport
+    };
+  }, [dragMode, previewDates]);
+
+  const dragTooltipText = useMemo(() => {
+    if (!previewDates || !dragMode) return '';
+    const start = formatShortDate(previewDates.start);
+    const end = formatShortDate(previewDates.end);
+    const duration = formatDuration(previewDates.start, previewDates.end);
+
+    if (dragMode === 'move') return `${start} \u2013 ${end}  \u00B7  ${duration}`;
+    if (dragMode === 'resize-start') return `Start: ${start}`;
+    if (dragMode === 'resize-end') return `End: ${end}`;
+    return '';
+  }, [previewDates, dragMode]);
+
   // Determine class names based on state
   const isTargetable = isCreatingDependency && !isSource;
 
@@ -567,7 +662,7 @@ export function ProjectBar({
       role="button"
       tabIndex={0}
       aria-label={`Project: ${project.title}, ${formatShortDate(project.startDate)} to ${formatShortDate(project.endDate)}${isPast ? ', Complete' : ''}`}
-      title={`${project.title} · ${formatDuration(project.startDate, project.endDate)}`}
+      aria-describedby={showTooltip ? `tooltip-${project.id}` : undefined}
       onKeyDown={handleKeyDown}
       onClick={isTargetable ? handleDependencyTarget : undefined}
       onContextMenu={(e) => {
@@ -577,6 +672,7 @@ export function ProjectBar({
       }}
       onMouseEnter={() => {
         onHoverChange?.(true);
+        handleMouseEnterTooltip();
       }}
       onMouseMove={(e) => {
         // Track proximity to end for showing dependency arrow
@@ -585,6 +681,7 @@ export function ProjectBar({
       onMouseLeave={() => {
         if (!dragMode) setShowDependencyArrow(false); // Skip during drag
         onHoverChange?.(false);
+        handleMouseLeaveTooltip();
       }}
     >
       {/* Cross-lane drag handle (reassign owner) */}
@@ -628,6 +725,13 @@ export function ProjectBar({
           isCreatingDependency={isCreatingDependency}
           onStartDependency={handleStartDependency}
         />
+      )}
+
+      {/* Status badge */}
+      {showStatusBadge && (
+        <span className={styles.statusBadge} aria-label={`Status: ${statusLabel}`}>
+          {statusLabel}
+        </span>
       )}
 
       {/* Drag area - single click opens edit */}
@@ -696,32 +800,34 @@ export function ProjectBar({
       </div>
 
       {/* Milestones as lines within the project bar - OUTSIDE dragArea to prevent interference */}
-      <div
-        className={styles.milestonesContainer}
-        style={{ height: (maxMilestoneStack + 1) * 24 }}
-      >
-        {(project.milestones || []).map((milestone) => (
-          <MilestoneLine
-            key={milestone.id}
-            milestone={milestone}
-            projectId={project.id}
-            timelineStart={timelineStart}
-            dayWidth={dayWidth}
-            projectLeft={left}
-            projectWidth={width}
-            stackIndex={milestoneStacks.get(milestone.id) || 0}
-            laneTop={topPosition}
-            absoluteLaneTop={laneTop}
-            isNew={newMilestoneIds?.has(milestone.id) ?? false}
-            isLocked={isLocked}
-            onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
-            onEdit={() => onEditMilestone(milestone.id)}
-            onDelete={() => onDeleteMilestone(milestone.id)}
-            onSelect={onSelectMilestone ? () => onSelectMilestone(milestone.id) : undefined}
-            onHoverChange={onHoverChange ? (hovered) => onHoverChange(hovered, milestone.id) : undefined}
-          />
-        ))}
-      </div>
+      {!isFullscreen && (
+        <div
+          className={styles.milestonesContainer}
+          style={{ height: (maxMilestoneStack + 1) * 24 }}
+        >
+          {(project.milestones || []).map((milestone) => (
+            <MilestoneLine
+              key={milestone.id}
+              milestone={milestone}
+              projectId={project.id}
+              timelineStart={timelineStart}
+              dayWidth={dayWidth}
+              projectLeft={left}
+              projectWidth={width}
+              stackIndex={milestoneStacks.get(milestone.id) || 0}
+              laneTop={topPosition}
+              absoluteLaneTop={laneTop}
+              isNew={newMilestoneIds?.has(milestone.id) ?? false}
+              isLocked={isLocked}
+              onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
+              onEdit={() => onEditMilestone(milestone.id)}
+              onDelete={() => onDeleteMilestone(milestone.id)}
+              onSelect={onSelectMilestone ? () => onSelectMilestone(milestone.id) : undefined}
+              onHoverChange={onHoverChange ? (hovered) => onHoverChange(hovered, milestone.id) : undefined}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Context menu */}
       <ContextMenu
@@ -731,6 +837,61 @@ export function ProjectBar({
         onClose={contextMenu.close}
         isOpeningRef={contextMenu.isOpeningRef}
       />
+
+      {/* Rich hover tooltip - rendered via portal to escape overflow:hidden */}
+      {showTooltip && !dragMode && !externalDragging && tooltipPosition && createPortal(
+        <div
+          id={`tooltip-${project.id}`}
+          className={styles.tooltip}
+          style={{
+            position: 'fixed',
+            left: tooltipPosition.x,
+            top: tooltipPosition.y - 8,
+            transform: 'translate(-50%, -100%)'
+          }}
+          role="tooltip"
+        >
+          <div className={styles.tooltipTitle}>{project.title}</div>
+          <div className={styles.tooltipDates}>
+            {formatShortDate(project.startDate)} {'\u2013'} {formatShortDate(project.endDate)}
+            {' \u00B7 '}{formatDuration(project.startDate, project.endDate)}
+          </div>
+          {milestoneCount > 0 && (
+            <div className={styles.tooltipMilestones}>
+              {milestoneCount} milestone{milestoneCount !== 1 ? 's' : ''}
+            </div>
+          )}
+          {statusLabel && (
+            <div className={styles.pastBadge} style={!isPast ? { color: displayColor } : undefined}>
+              {statusLabel}
+            </div>
+          )}
+          <div className={styles.tooltipHint}>
+            {isLocked ? 'Right-click for options' : 'Click to edit \u00B7 Right-click for menu'}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Floating drag tooltip - shows dates during drag/resize */}
+      {dragMode && previewDates && dragTooltipPosition && createPortal(
+        <div
+          className={styles.dragTooltip}
+          style={{
+            position: 'fixed',
+            left: dragTooltipPosition.x,
+            top: dragTooltipPosition.flipBelow
+              ? (dragTooltipPosition.y + projectBarHeight + 8)
+              : (dragTooltipPosition.y - 8),
+            transform: dragTooltipPosition.flipBelow
+              ? 'translateX(-50%)'
+              : 'translate(-50%, -100%)'
+          }}
+        >
+          {dragTooltipText}
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
