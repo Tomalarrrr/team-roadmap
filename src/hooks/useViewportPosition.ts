@@ -12,9 +12,17 @@ export function useViewportPosition(
   const { position, isOpen } = options;
   const [computedPosition, setComputedPosition] = useState<{ x: number; y: number } | null>(null);
 
+  // Reset computed position when input position changes (prevents stale flash on reopen)
+  const [prevPosition, setPrevPosition] = useState(position);
+  if (position !== prevPosition) {
+    setPrevPosition(position);
+    if (computedPosition !== null) {
+      setComputedPosition(null);
+    }
+  }
+
   useEffect(() => {
     if (!isOpen || !position || !menuRef.current) {
-      setComputedPosition(null);
       return;
     }
 
@@ -53,7 +61,10 @@ export function useViewportPosition(
 
     observer.observe(menuRef.current);
     return () => observer.disconnect();
-  }, [isOpen, position]);
+  }, [isOpen, position, menuRef]);
+
+  // Return null when closed — bypasses any stale computedPosition
+  if (!isOpen) return null;
 
   return computedPosition;
 }

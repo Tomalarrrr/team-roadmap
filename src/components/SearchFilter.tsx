@@ -71,8 +71,6 @@ export const SearchFilter = memo(function SearchFilter({
 }: SearchFilterProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
-  const [searchResults, setSearchResults] = useState<Project[]>([]);
-  const [totalResultCount, setTotalResultCount] = useState(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAllTags, setShowAllTags] = useState(false);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
@@ -120,14 +118,10 @@ export const SearchFilter = memo(function SearchFilter({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Search projects
-  useEffect(() => {
+  // Compute search results as derived state (no effect needed)
+  const { searchResults, totalResultCount } = useMemo(() => {
     if (!filters.search.trim()) {
-      // Show recent projects when search is empty
-      setSearchResults(recentProjects);
-      setTotalResultCount(recentProjects.length);
-      setSelectedIndex(0);
-      return;
+      return { searchResults: recentProjects, totalResultCount: recentProjects.length };
     }
 
     const query = filters.search.toLowerCase();
@@ -141,10 +135,15 @@ export const SearchFilter = memo(function SearchFilter({
       return matchesTitle || matchesOwner || matchesMilestone;
     });
 
-    setTotalResultCount(results.length);
-    setSearchResults(results.slice(0, 8));
-    setSelectedIndex(0);
+    return { searchResults: results.slice(0, 8), totalResultCount: results.length };
   }, [filters.search, projects, recentProjects]);
+
+  // Reset selection when search changes (getDerivedStateFromProps pattern)
+  const [prevSearch, setPrevSearch] = useState(filters.search);
+  if (prevSearch !== filters.search) {
+    setPrevSearch(filters.search);
+    setSelectedIndex(0);
+  }
 
   // Handle selecting a project (saves to recent)
   const handleSelectProject = useCallback((projectId: string) => {

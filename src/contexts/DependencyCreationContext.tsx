@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect, type ReactNode } from 'react';
 import type { DependencySource, DependencyTarget } from '../types';
 
 interface DependencyCreationState {
@@ -39,7 +39,7 @@ export function DependencyCreationProvider({
 
   // Use ref to access current state in callbacks without recreating them
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useEffect(() => { stateRef.current = state; });
 
   const startCreation = useCallback((source: DependencySource) => {
     setState({
@@ -104,6 +104,7 @@ export function DependencyCreationProvider({
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- Provider + hook pair is standard pattern
 export function useDependencyCreation() {
   const context = useContext(DependencyCreationContext);
   if (!context) {

@@ -1,6 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import type { Project, Milestone, ContextMenuItem } from '../types';
+import type { Project, ContextMenuItem } from '../types';
 import { MilestoneLine } from './MilestoneLine';
 import { DependencyArrow } from './DependencyArrow';
 import { ContextMenu } from './ContextMenu';
@@ -10,7 +10,8 @@ import {
   getBarDimensions,
   toISODateString,
   formatShortDate,
-  isDatePast
+  isDatePast,
+  calculateStacks
 } from '../utils/dateUtils';
 import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor } from '../utils/statusColors';
 import { parseISO, differenceInDays } from 'date-fns';
@@ -26,48 +27,6 @@ function formatDuration(startDate: string, endDate: string): string {
   return `${months} month${months === 1 ? '' : 's'}`;
 }
 
-// Calculate stack indices for overlapping milestones
-// Optimized O(n log n) algorithm using interval scheduling
-function calculateMilestoneStacks(milestones: Milestone[]): Map<string, number> {
-  const stacks = new Map<string, number>();
-  if (!milestones || milestones.length === 0) return stacks;
-
-  // Sort milestones by start date (O(n log n))
-  const sorted = [...milestones].sort((a, b) =>
-    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-  );
-
-  // Track the end time for each stack to avoid O(n) lookups
-  // Each index represents a stack, value is the end timestamp of the last milestone in that stack
-  const stackEndTimes: number[] = [];
-
-  sorted.forEach((milestone) => {
-    const startTime = new Date(milestone.startDate).getTime();
-    const endTime = new Date(milestone.endDate).getTime();
-
-    // Find the first stack where this milestone can fit
-    // (where the previous milestone in that stack has ended)
-    let assignedStack = -1;
-    for (let i = 0; i < stackEndTimes.length; i++) {
-      if (stackEndTimes[i] < startTime) {
-        // This stack is available (no overlap)
-        assignedStack = i;
-        stackEndTimes[i] = endTime; // Update the stack's end time
-        break;
-      }
-    }
-
-    // If no available stack found, create a new one
-    if (assignedStack === -1) {
-      assignedStack = stackEndTimes.length;
-      stackEndTimes.push(endTime);
-    }
-
-    stacks.set(milestone.id, assignedStack);
-  });
-
-  return stacks;
-}
 
 interface ProjectBarProps {
   project: Project;
@@ -202,26 +161,21 @@ export function ProjectBar({
   // (they're often inline functions that change every render)
   const onUpdateRef = useRef(onUpdate);
   const onEdgeDragRef = useRef(onEdgeDrag);
-  onUpdateRef.current = onUpdate;
-  onEdgeDragRef.current = onEdgeDrag;
+  useEffect(() => { onUpdateRef.current = onUpdate; });
+  useEffect(() => { onEdgeDragRef.current = onEdgeDrag; });
 
   // Store dayWidth in ref to prevent effect re-runs during drag
   const dayWidthRef = useRef(dayWidth);
-  dayWidthRef.current = dayWidth;
+  useEffect(() => { dayWidthRef.current = dayWidth; });
 
-  // Clear preview when actual data matches what we saved
-  // This is more robust than timing-based clearing because React's batching
-  // means the parent might not have re-rendered yet when mouseUp handler completes
-  // IMPORTANT: Don't clear during active drag - let mouseUp handle completion
-  useEffect(() => {
-    if (dragMode) return; // Prevent clearing during drag
-
-    if (previewDates &&
-        project.startDate === previewDates.start &&
-        project.endDate === previewDates.end) {
-      setPreviewDates(null);
-    }
-  }, [project.startDate, project.endDate, previewDates, dragMode]);
+  // Clear preview when actual data matches what we saved (derived state during render).
+  // When the server confirms our optimistic update, actual dates match preview → clear it.
+  // IMPORTANT: Don't clear during active drag — let mouseUp handle completion.
+  if (!dragMode && previewDates &&
+      project.startDate === previewDates.start &&
+      project.endDate === previewDates.end) {
+    setPreviewDates(null);
+  }
 
   // Calculate effective dates including milestone extensions
   // Use preview dates during drag for smooth visual feedback
@@ -482,7 +436,7 @@ export function ProjectBar({
 
   // Calculate milestone stacking
   const milestoneStacks = useMemo(
-    () => calculateMilestoneStacks(project.milestones || []),
+    () => calculateStacks(project.milestones || []),
     [project.milestones]
   );
 
@@ -621,8 +575,9 @@ export function ProjectBar({
   // causing a ~1 frame (16ms) lag. This is imperceptible during smooth drag, and
   // using useLayoutEffect to fix it would double renders during drag (bad tradeoff).
   const dragTooltipPosition = useMemo(() => {
+    // eslint-disable-next-line react-hooks/refs -- Intentional DOM ref read for drag tooltip positioning
     if (!dragMode || !previewDates || !barRef.current) return null;
-    const rect = barRef.current.getBoundingClientRect();
+    const rect = barRef.current.getBoundingClientRect(); // eslint-disable-line react-hooks/refs -- See above
     return {
       x: rect.left + rect.width / 2,
       y: rect.top,

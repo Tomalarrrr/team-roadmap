@@ -9,7 +9,7 @@ interface OfflineBannerProps {
 
 export function OfflineBanner({ isOnline, isSyncing }: OfflineBannerProps) {
   const [pendingCount, setPendingCount] = useState(0);
-  const [isVisible, setIsVisible] = useState(false);
+  const [cooldown, setCooldown] = useState(false);
 
   // Subscribe to queue changes to show pending operation count
   useEffect(() => {
@@ -20,17 +20,29 @@ export function OfflineBanner({ isOnline, isSyncing }: OfflineBannerProps) {
     return unsubscribe;
   }, []);
 
-  // Show banner when offline or has pending changes
-  useEffect(() => {
-    if (!isOnline || pendingCount > 0) {
-      setIsVisible(true);
-    } else if (isOnline && pendingCount === 0) {
-      // Delay hiding to show "synced" message briefly
-      const timeout = setTimeout(() => setIsVisible(false), 2000);
-      return () => clearTimeout(timeout);
-    }
-  }, [isOnline, pendingCount]);
+  // Derive visibility: show when offline, has pending, or in cooldown after sync
+  const needsDisplay = !isOnline || pendingCount > 0;
 
+  // Detect transition from "needs display" → "doesn't need display" to start cooldown
+  // Uses getDerivedStateFromProps pattern (setState during render)
+  const [prevNeedsDisplay, setPrevNeedsDisplay] = useState(needsDisplay);
+  if (needsDisplay !== prevNeedsDisplay) {
+    setPrevNeedsDisplay(needsDisplay);
+    if (!needsDisplay) {
+      setCooldown(true); // Show "synced" message briefly
+    } else {
+      setCooldown(false);
+    }
+  }
+
+  // Clear cooldown after 2s — setState only in timeout callback
+  useEffect(() => {
+    if (!cooldown) return;
+    const timeout = setTimeout(() => setCooldown(false), 2000);
+    return () => clearTimeout(timeout);
+  }, [cooldown]);
+
+  const isVisible = needsDisplay || cooldown;
   if (!isVisible) return null;
 
   const getBannerContent = () => {

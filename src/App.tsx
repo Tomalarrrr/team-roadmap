@@ -9,7 +9,7 @@ import { Modal } from './components/Modal';
 import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage } from './types';
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
-import { getSuggestedProjectDates } from './utils/dateUtils';
+import { getSuggestedProjectDates, parseLocalDate, toDateString } from './utils/dateUtils';
 import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -217,7 +217,14 @@ function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFullscreenHint, setShowFullscreenHint] = useState(false);
+  const fullscreenHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoveredMember, setHoveredMember] = useState<string | null>(null);
+
+  // Ref to avoid re-registering keyboard handler on every Firebase snapshot
+  const projectsRef = useRef(data.projects);
+  useEffect(() => {
+    projectsRef.current = data.projects;
+  }, [data.projects]);
 
   // View mode lock - persisted in localStorage (defaults to locked for new users)
   const [isLocked, setIsLocked] = useState(() => {
@@ -241,6 +248,15 @@ function App() {
       }
       return newValue;
     });
+  }, []);
+
+  // Cleanup fullscreen hint timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (fullscreenHintTimeoutRef.current) {
+        clearTimeout(fullscreenHintTimeoutRef.current);
+      }
+    };
   }, []);
 
   // Show save errors as toasts
@@ -287,8 +303,8 @@ function App() {
   // Determine the display status of a project based on its dates and color
   const getProjectDisplayStatus = useCallback((project: Project): ProjectStatus => {
     const today = new Date();
-    const endDate = new Date(project.endDate);
-    const startDate = new Date(project.startDate);
+    const endDate = parseLocalDate(project.endDate);
+    const startDate = parseLocalDate(project.startDate);
 
     // Past projects are always "complete" (auto-blue)
     if (endDate < today) {
@@ -395,6 +411,7 @@ function App() {
   useEffect(() => {
     if (loading || hasHandledDeepLink.current || data.projects.length === 0) return;
 
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       const hash = window.location.hash;
       if (hash.startsWith('#project=')) {
@@ -403,12 +420,15 @@ function App() {
         if (project) {
           hasHandledDeepLink.current = true;
           // Use setTimeout to ensure Timeline is rendered
-          setTimeout(() => handleProjectSelect(projectId), 100);
+          timer = setTimeout(() => handleProjectSelect(projectId), 100);
         }
       }
     } catch {
       // Ignore URL parsing errors
     }
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
   }, [loading, data.projects, handleProjectSelect]);
 
   // Handle undo
@@ -440,6 +460,16 @@ function App() {
       case 'DELETE_PROJECT':
         if (inverseObj.action === 'restore' && isProject(inverseObj.data)) {
           addProject(inverseObj.data);
+          // Restore dependencies that were cleaned up with the project
+          const deps = (inverse as { dependencies?: Dependency[] }).dependencies;
+          if (deps && deps.length > 0) {
+            for (const dep of deps) {
+              addDependency(
+                dep.fromProjectId, dep.toProjectId,
+                dep.fromMilestoneId, dep.toMilestoneId, dep.type
+              ).catch(() => { /* target may have been deleted */ });
+            }
+          }
         } else if (inverseObj.action === 'restore') {
           console.warn('Undo DELETE_PROJECT failed: data is not a valid Project');
         }
@@ -453,7 +483,7 @@ function App() {
         break;
       // Add more cases as needed
     }
-  }, [undo, deleteProject, addProject, updateProject]);
+  }, [undo, deleteProject, addProject, updateProject, addDependency]);
 
   // Handle redo
   const handleRedo = useCallback(() => {
@@ -497,9 +527,19 @@ function App() {
         e.preventDefault();
         setIsFullscreen(prev => {
           const newValue = !prev;
+          // Clear any pending hint timeout from a previous toggle
+          if (fullscreenHintTimeoutRef.current) {
+            clearTimeout(fullscreenHintTimeoutRef.current);
+            fullscreenHintTimeoutRef.current = null;
+          }
           if (newValue) {
             setShowFullscreenHint(true);
-            setTimeout(() => setShowFullscreenHint(false), 3000);
+            fullscreenHintTimeoutRef.current = setTimeout(() => {
+              setShowFullscreenHint(false);
+              fullscreenHintTimeoutRef.current = null;
+            }, 3000);
+          } else {
+            setShowFullscreenHint(false);
           }
           return newValue;
         });
@@ -564,7 +604,7 @@ function App() {
       // Quick create project with N when hovering a lane
       if (e.key.toLowerCase() === 'n' && !hasModifierKey(e) && hoveredMember && !isLocked) {
         e.preventDefault();
-        const ownerProjects = data.projects.filter(p => p.owner === hoveredMember);
+        const ownerProjects = projectsRef.current.filter(p => p.owner === hoveredMember);
         const { suggestedStart, suggestedEnd } = getSuggestedProjectDates(ownerProjects);
         setModal({ type: 'add-project', ownerName: hoveredMember, suggestedStart, suggestedEnd });
         return;
@@ -573,21 +613,24 @@ function App() {
       // Duplicate selected project with Cmd+D
       if (hasModifierKey(e) && e.key.toLowerCase() === 'd' && selectedProjectId && !isLocked) {
         e.preventDefault();
-        const project = data.projects.find(p => p.id === selectedProjectId);
+        const project = projectsRef.current.find(p => p.id === selectedProjectId);
         if (project) {
           // Duplicate with 1 week offset
-          const startDate = new Date(project.startDate);
-          const endDate = new Date(project.endDate);
+          const startDate = parseLocalDate(project.startDate);
+          const endDate = parseLocalDate(project.endDate);
           startDate.setDate(startDate.getDate() + 7);
           endDate.setDate(endDate.getDate() + 7);
           addProject({
             title: `${project.title} (copy)`,
             owner: project.owner,
-            startDate: startDate.toISOString().split('T')[0],
-            endDate: endDate.toISOString().split('T')[0],
+            startDate: toDateString(startDate),
+            endDate: toDateString(endDate),
             statusColor: normalizeStatusColor(project.statusColor)
+          }).then(() => {
+            showToast('Project duplicated', 'success');
+          }).catch(() => {
+            // Error feedback handled by useRoadmap's setSaveError
           });
-          showToast('Project duplicated', 'success');
         }
         return;
       }
@@ -595,16 +638,16 @@ function App() {
       // [ and ] to shift selected project dates by 1 week
       if ((e.key === '[' || e.key === ']') && selectedProjectId && !isLocked) {
         e.preventDefault();
-        const project = data.projects.find(p => p.id === selectedProjectId);
+        const project = projectsRef.current.find(p => p.id === selectedProjectId);
         if (project) {
           const shift = e.key === ']' ? 7 : -7;
-          const startDate = new Date(project.startDate);
-          const endDate = new Date(project.endDate);
+          const startDate = parseLocalDate(project.startDate);
+          const endDate = parseLocalDate(project.endDate);
           startDate.setDate(startDate.getDate() + shift);
           endDate.setDate(endDate.getDate() + shift);
           updateProject(project.id, {
-            startDate: startDate.toISOString().split('T')[0],
-            endDate: endDate.toISOString().split('T')[0]
+            startDate: toDateString(startDate),
+            endDate: toDateString(endDate)
           });
         }
         return;
@@ -622,7 +665,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, data.projects, selectedProjectId, addProject, updateProject, showToast]);
+  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, selectedProjectId, addProject, updateProject, showToast]);
 
   // Team member handlers
   const handleAddMember = useCallback(
@@ -719,7 +762,7 @@ function App() {
                 await updateMilestone(modal.project.id, id, milestoneData);
               } else if (!milestone.id) {
                 // Add new
-                const { id: _id, ...milestoneData } = milestone;
+                const { id: _newId, ...milestoneData } = milestone; // eslint-disable-line @typescript-eslint/no-unused-vars -- Stripping auto-generated id before save
                 await addMilestone(modal.project.id, milestoneData);
               }
             }
@@ -740,7 +783,11 @@ function App() {
       try {
         const project = data.projects.find(p => p.id === projectId);
         if (project) {
-          recordAction('DELETE_PROJECT', project, createInverse('DELETE_PROJECT', project, null));
+          // Capture dependencies that will be cleaned up by deleteProject
+          const affectedDeps = (data.dependencies || []).filter(
+            d => d.fromProjectId === projectId || d.toProjectId === projectId
+          );
+          recordAction('DELETE_PROJECT', project, { action: 'restore', data: project, dependencies: affectedDeps });
           await deleteProject(projectId);
           // Capture the deleted project for a targeted restore, rather than
           // calling generic handleUndo which undoes the *most recent* action
@@ -750,7 +797,23 @@ function App() {
             type: 'success',
             action: {
               label: 'Undo',
-              onClick: () => { addProject(deletedProject); }
+              onClick: async () => {
+                await addProject(deletedProject);
+                // Restore dependencies that were cleaned up
+                for (const dep of affectedDeps) {
+                  try {
+                    await addDependency(
+                      dep.fromProjectId,
+                      dep.toProjectId,
+                      dep.fromMilestoneId,
+                      dep.toMilestoneId,
+                      dep.type
+                    );
+                  } catch {
+                    // Dependency restore may fail if target was also deleted
+                  }
+                }
+              }
             }
           });
         }
@@ -758,7 +821,7 @@ function App() {
         showToast(`Failed to delete project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
       }
     },
-    [data.projects, deleteProject, recordAction, showToast, addProject]
+    [data.projects, data.dependencies, deleteProject, recordAction, showToast, addProject, addDependency]
   );
 
   // Milestone handlers

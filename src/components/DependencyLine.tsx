@@ -236,6 +236,8 @@ export const DependencyLine = memo(function DependencyLine({
   const [isSelected, setIsSelected] = useState(false);
   const [draggingWaypointIndex, setDraggingWaypointIndex] = useState<number | null>(null);
   const [previewWaypoints, setPreviewWaypoints] = useState<Waypoint[] | null>(null);
+  const previewWaypointsRef = useRef<Waypoint[] | null>(null);
+  useEffect(() => { previewWaypointsRef.current = previewWaypoints; }, [previewWaypoints]);
   const svgRef = useRef<SVGGElement>(null);
 
   // Memoize milestone stacks to avoid recalculation
@@ -486,10 +488,12 @@ export const DependencyLine = memo(function DependencyLine({
     fromProject.owner,
     fromProject.startDate,
     fromProject.endDate,
+    fromProject.milestones,
     toProject.id,
     toProject.owner,
     toProject.startDate,
     toProject.endDate,
+    toProject.milestones,
     fromMilestoneId,
     toMilestoneId,
     timelineStart,
@@ -582,9 +586,12 @@ export const DependencyLine = memo(function DependencyLine({
     };
 
     const handleMouseUp = () => {
-      if (previewWaypoints && onUpdateWaypoints) {
+      // Read from ref to avoid including previewWaypoints in deps
+      // (which would re-register listeners on every mouse move frame)
+      const currentPreview = previewWaypointsRef.current;
+      if (currentPreview && onUpdateWaypoints) {
         // Convert pixel coordinates to days for storage (y as offset from baseline)
-        onUpdateWaypoints(pixelsToDays(previewWaypoints, dayWidth, line.fromX, line.fromY, line.toX, line.toY));
+        onUpdateWaypoints(pixelsToDays(currentPreview, dayWidth, line.fromX, line.fromY, line.toX, line.toY));
       }
       setDraggingWaypointIndex(null);
       setPreviewWaypoints(null);
@@ -597,7 +604,7 @@ export const DependencyLine = memo(function DependencyLine({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingWaypointIndex, previewWaypoints, onUpdateWaypoints, dayWidth, line.fromX, line.fromY, line.toX, line.toY]);
+  }, [draggingWaypointIndex, onUpdateWaypoints, dayWidth, line.fromX, line.fromY, line.toX, line.toY]);
 
   // Handle click outside to deselect
   useEffect(() => {

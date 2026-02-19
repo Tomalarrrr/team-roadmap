@@ -31,7 +31,8 @@ import {
   getFYEnd,
   getVisibleFYs,
   getTodayPosition,
-  getBarDimensions
+  getBarDimensions,
+  calculateStacks
 } from '../utils/dateUtils';
 import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from 'date-fns';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
@@ -167,40 +168,10 @@ const LANE_BOTTOM_BUFFER = 8; // Extra buffer at bottom to prevent spillover
 const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
 const COLLAPSED_LANE_HEIGHT = 40; // Height for collapsed lanes
 
-// Calculate milestone stacks for a single project (replicates ProjectBar logic)
-function calculateMilestoneStacks(milestones: { id: string; startDate: string; endDate: string }[]): Map<string, number> {
-  const stacks = new Map<string, number>();
-  if (!milestones || milestones.length === 0) return stacks;
-
-  const sorted = [...milestones].sort((a, b) =>
-    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-  );
-
-  const stackEndTimes: number[] = [];
-
-  sorted.forEach((milestone) => {
-    const startTime = new Date(milestone.startDate).getTime();
-    const endTime = new Date(milestone.endDate).getTime();
-
-    let assignedStack = -1;
-    for (let i = 0; i < stackEndTimes.length; i++) {
-      if (stackEndTimes[i] < startTime) {
-        assignedStack = i;
-        stackEndTimes[i] = endTime;
-        break;
-      }
-    }
-
-    if (assignedStack === -1) {
-      assignedStack = stackEndTimes.length;
-      stackEndTimes.push(endTime);
-    }
-
-    stacks.set(milestone.id, assignedStack);
-  });
-
-  return stacks;
-}
+// Stable empty defaults to avoid creating new references on each render
+const EMPTY_SET = new Set<string>();
+const EMPTY_LEAVE_BLOCKS: LeaveBlockType[] = [];
+const EMPTY_PERIOD_MARKERS: PeriodMarkerType[] = [];
 
 // Calculate project bar height based on its milestones
 function calculateProjectHeight(milestones: { id: string; startDate: string; endDate: string }[] | undefined): number {
@@ -208,7 +179,7 @@ function calculateProjectHeight(milestones: { id: string; startDate: string; end
     return BASE_PROJECT_HEIGHT;
   }
 
-  const milestoneStacks = calculateMilestoneStacks(milestones);
+  const milestoneStacks = calculateStacks(milestones);
   const maxStack = milestoneStacks.size > 0 ? Math.max(...milestoneStacks.values()) : -1;
   const milestoneRows = maxStack + 1;
   const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
@@ -224,7 +195,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   projects,
   teamMembers,
   dependencies,
-  leaveBlocks = [],
+  leaveBlocks = EMPTY_LEAVE_BLOCKS,
   zoomLevel,
   dayWidth: dayWidthProp,
   selectedProjectId,
@@ -252,13 +223,13 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   onUpdateDependency,
   onAddLeaveBlock,
   onDeleteLeaveBlock,
-  periodMarkers = [],
+  periodMarkers = EMPTY_PERIOD_MARKERS,
   onAddPeriodMarker,
   onDeletePeriodMarker,
   onEditPeriodMarker,
   onDayWidthChange,
   onHoveredMemberChange,
-  collapsedLanes = new Set(),
+  collapsedLanes = EMPTY_SET,
   onToggleLaneCollapse
 }, ref) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -374,7 +345,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           label: format(current, dateFormat),
           left,
           width,
-          date: current.toISOString().split('T')[0]
+          date: format(current, 'yyyy-MM-dd')
         });
       }
       current = nextMonth;
@@ -772,7 +743,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     const clickDate = new Date(timelineStart);
     clickDate.setDate(clickDate.getDate() + daysFromStart);
 
-    const dateStr = clickDate.toISOString().split('T')[0];
+    const dateStr = format(clickDate, 'yyyy-MM-dd');
 
     setLeaveContextMenu({
       x: e.clientX,
@@ -1135,13 +1106,15 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                 </div>
               )}
 
-              {/* Dependencies SVG layer */}
+              {/* Dependencies SVG layer - hidden in fullscreen mode */}
+              {!isFullscreen && (
               <svg
                 className={styles.dependenciesLayer}
                 style={{ width: totalWidth, height: totalLanesHeight }}
               >
                 {dependencyElements}
               </svg>
+              )}
 
               {/* Project lanes */}
               {displayedTeamMembers.map((member, idx) => {

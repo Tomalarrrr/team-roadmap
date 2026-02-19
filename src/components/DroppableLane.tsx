@@ -1,5 +1,6 @@
 import { useDroppable } from '@dnd-kit/core';
 import { type ReactNode, useState, useCallback, useRef } from 'react';
+import { toDateString } from '../utils/dateUtils';
 import styles from './Timeline.module.css';
 
 interface DroppableLaneProps {
@@ -54,11 +55,6 @@ export function DroppableLane({
     date.setDate(date.getDate() + days);
     return date;
   }, [timelineStart, dayWidth]);
-
-  // Format date to ISO string
-  const toISODateString = (date: Date): string => {
-    return date.toISOString().split('T')[0];
-  };
 
   // Handle mouse down - Shift+click to start drag-to-create
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -138,7 +134,7 @@ export function DroppableLane({
     dragStartRef.current = null;
 
     // Trigger create callback
-    onDragCreate(toISODateString(startDate), toISODateString(finalEndDate));
+    onDragCreate(toDateString(startDate), toDateString(finalEndDate));
   }, [isDragging, onDragCreate, dayWidth, xToDate]);
 
   // Handle mouse leave - cancel drag
@@ -170,7 +166,7 @@ export function DroppableLane({
     const endDate = new Date(startDate);
     endDate.setDate(endDate.getDate() + 13);
 
-    onDragCreate(toISODateString(startDate), toISODateString(endDate));
+    onDragCreate(toDateString(startDate), toDateString(endDate));
   }, [isLocked, timelineStart, dayWidth, onDragCreate, xToDate]);
 
   // Combine refs

@@ -148,24 +148,20 @@ const MilestoneLineComponent = memo(function MilestoneLine({
 
   // Store callback in ref to avoid effect re-running when it changes
   const onUpdateRef = useRef(onUpdate);
-  onUpdateRef.current = onUpdate;
+  useEffect(() => { onUpdateRef.current = onUpdate; });
 
   // Store dayWidth in ref to prevent effect re-runs during drag
   const dayWidthRef = useRef(dayWidth);
-  dayWidthRef.current = dayWidth;
+  useEffect(() => { dayWidthRef.current = dayWidth; });
 
-  // Clear preview when actual data matches what we saved
-  // This is more robust than timing-based clearing
-  // IMPORTANT: Don't clear during active drag - let mouseUp handle completion
-  useEffect(() => {
-    if (dragMode) return; // Prevent clearing during drag
-
-    if (previewDates &&
-        milestone.startDate === previewDates.start &&
-        milestone.endDate === previewDates.end) {
-      setPreviewDates(null);
-    }
-  }, [milestone.startDate, milestone.endDate, previewDates, dragMode]);
+  // Clear preview when actual data matches what we saved (derived state during render).
+  // When the server confirms our optimistic update, actual dates match preview → clear it.
+  // IMPORTANT: Don't clear during active drag — let mouseUp handle completion.
+  if (!dragMode && previewDates &&
+      milestone.startDate === previewDates.start &&
+      milestone.endDate === previewDates.end) {
+    setPreviewDates(null);
+  }
 
   // Use preview dates during drag for smooth visual feedback
   const displayStartDate = previewDates?.start ?? milestone.startDate;
@@ -194,6 +190,18 @@ const MilestoneLineComponent = memo(function MilestoneLine({
   // Auto-blue rule: turn blue if milestone end date is past
   const isPast = isMilestonePast(milestone.endDate);
   const displayColor = isPast ? AUTO_COMPLETE_COLOR : normalizeStatusColor(milestone.statusColor);
+
+  // Pre-compute tooltip values to avoid inline IIFEs in JSX
+  const tooltipDuration = useMemo(() => {
+    const days = differenceInDays(new Date(milestone.endDate), new Date(milestone.startDate)) + 1;
+    if (days < 7) return `${days} day${days === 1 ? '' : 's'}`;
+    const weeks = Math.round(days / 7);
+    if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'}`;
+    const months = Math.round(days / 30);
+    return `${months} month${months === 1 ? '' : 's'}`;
+  }, [milestone.startDate, milestone.endDate]);
+
+  const tooltipStatusLabel = isPast ? 'Complete' : getStatusNameByHex(milestone.statusColor);
 
   // Immediate drag handler for resize handles (no click detection needed)
   const handleResizeMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
@@ -628,23 +636,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
           <div className={styles.tooltipTitle}>{milestone.title}</div>
           <div className={styles.tooltipDates}>
             {formatShortDate(milestone.startDate)} {'\u2013'} {formatShortDate(milestone.endDate)}
-            {' \u00B7 '}{(() => {
-              const days = differenceInDays(new Date(milestone.endDate), new Date(milestone.startDate)) + 1;
-              if (days < 7) return `${days} day${days === 1 ? '' : 's'}`;
-              const weeks = Math.round(days / 7);
-              if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'}`;
-              const months = Math.round(days / 30);
-              return `${months} month${months === 1 ? '' : 's'}`;
-            })()}
+            {' \u00B7 '}{tooltipDuration}
           </div>
-          {(() => {
-            const label = isPast ? 'Complete' : getStatusNameByHex(milestone.statusColor);
-            return label ? (
-              <div className={styles.tooltipStatus} style={!isPast ? { color: displayColor } : undefined}>
-                {label}
-              </div>
-            ) : null;
-          })()}
+          {tooltipStatusLabel && (
+            <div className={styles.tooltipStatus} style={!isPast ? { color: displayColor } : undefined}>
+              {tooltipStatusLabel}
+            </div>
+          )}
           <div className={styles.tooltipHint}>
             {isLocked ? 'Right-click for options' : 'Click to edit \u00B7 Right-click for menu'}
           </div>

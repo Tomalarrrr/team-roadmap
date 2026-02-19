@@ -41,6 +41,14 @@ export function useConflictDetection(): ConflictDetectionResult {
 
   // Track if we're the one making changes (to ignore our own updates)
   const isLocalOperationRef = useRef(false);
+  const resetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timeout on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
+    };
+  }, []);
 
   const markLocalChange = useCallback(() => {
     isLocalOperationRef.current = true;
@@ -50,9 +58,11 @@ export function useConflictDetection(): ConflictDetectionResult {
       lastLocalChangeTime: Date.now()
     }));
 
-    // Reset the flag after a short delay
-    setTimeout(() => {
+    // Clear any existing timeout before setting a new one
+    if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
+    resetTimeoutRef.current = setTimeout(() => {
       isLocalOperationRef.current = false;
+      resetTimeoutRef.current = null;
     }, 500);
   }, []);
 
@@ -124,18 +134,22 @@ export function useDataVersion(data: RoadmapData): {
   hasChanged: boolean;
 } {
   const currentHash = hashData(data);
-  const previousHashRef = useRef<string | null>(null);
+  const [tracked, setTracked] = useState<{ hash: string; previousHash: string | null }>({
+    hash: currentHash,
+    previousHash: null
+  });
 
-  const hasChanged = previousHashRef.current !== null && previousHashRef.current !== currentHash;
-
-  // Update previous hash on next render
-  useEffect(() => {
-    previousHashRef.current = currentHash;
-  }, [currentHash]);
+  // Derived state during render (React getDerivedStateFromProps pattern):
+  // When hash changes, shift current → previous and store new hash
+  let previousHash = tracked.previousHash;
+  if (tracked.hash !== currentHash) {
+    previousHash = tracked.hash;
+    setTracked({ hash: currentHash, previousHash });
+  }
 
   return {
     currentHash,
-    previousHash: previousHashRef.current,
-    hasChanged
+    previousHash,
+    hasChanged: previousHash !== null && previousHash !== currentHash
   };
 }

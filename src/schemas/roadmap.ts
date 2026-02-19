@@ -43,7 +43,7 @@ export const teamMemberSchema = z.object({
   id: z.string().min(1, 'Member ID is required'),
   name: z.string().min(1, 'Member name is required'),
   jobTitle: z.string().default(''),
-  nameColor: z.string().optional(),
+  nameColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color format').optional(),
   order: z.number().optional()
 });
 

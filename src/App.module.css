@@ -7,7 +7,7 @@
 
 .main {
   flex: 1;
-  padding: 16px;
+  padding: 8px 16px;
   overflow: hidden;
   transition: padding 200ms ease;
 }

@@ -75,6 +75,15 @@
   background: var(--bg-tertiary);
 }
 
+.menuItemDanger {
+  composes: menuItem;
+  color: var(--error-red);
+}
+
+.menuItemDanger:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
 .menuItem.selected {
   background: var(--accent-blue-light);
   color: var(--accent-blue);

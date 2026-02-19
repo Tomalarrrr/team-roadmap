@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { LeaveBlock as LeaveBlockType } from '../types';
 import { differenceInDays } from 'date-fns';
+import { parseLocalDate } from '../utils/dateUtils';
 import styles from './LeaveBlock.module.css';
 
 interface LeaveBlockProps {
@@ -26,8 +27,8 @@ export function LeaveBlock({
   onContextMenu
 }: LeaveBlockProps) {
   const { left, width, height, top } = useMemo(() => {
-    const startDate = new Date(leave.startDate);
-    const endDate = new Date(leave.endDate);
+    const startDate = parseLocalDate(leave.startDate);
+    const endDate = parseLocalDate(leave.endDate);
     const daysFromStart = differenceInDays(startDate, timelineStart);
     const duration = differenceInDays(endDate, startDate) + 1;
 
@@ -59,6 +60,14 @@ export function LeaveBlock({
     onEdit?.();
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (isLocked) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onEdit?.();
+    }
+  };
+
   const tooltipText = leave.label
     ? `${leave.label} (${leave.startDate} to ${leave.endDate})`
     : `Annual Leave (${leave.startDate} to ${leave.endDate})`;
@@ -76,6 +85,7 @@ export function LeaveBlock({
         backgroundSize: '6px 6px'
       }}
       onClick={handleClick}
+      onKeyDown={handleKeyDown}
       onContextMenu={handleContextMenu}
       role="button"
       aria-label={tooltipText}

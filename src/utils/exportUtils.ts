@@ -286,14 +286,24 @@ function exportToJSON(projects: Project[], teamMembers: TeamMember[], dependenci
   analytics.exportJSON();
 }
 
-// Escape a value for CSV (handle quotes and special characters)
+// Characters that trigger formula interpretation in spreadsheet applications.
+// Prefixing with a single-quote neutralises them (OWASP CSV Injection).
+const CSV_FORMULA_CHARS = new Set(['=', '+', '-', '@', '\t', '\r']);
+
+// Escape a value for CSV (handle quotes, special characters, and formula injection)
 function escapeCSV(value: string | number): string {
   if (typeof value === 'number') return String(value);
-  // If value contains quotes, commas, or newlines, wrap in quotes and escape internal quotes
-  if (value.includes('"') || value.includes(',') || value.includes('\n')) {
-    return `"${value.replace(/"/g, '""')}"`;
+  let safe = value;
+  // Neutralise formula injection: prefix with single-quote so spreadsheets
+  // treat the cell as a literal text value.
+  if (safe.length > 0 && CSV_FORMULA_CHARS.has(safe[0])) {
+    safe = `'${safe}`;
   }
-  return value;
+  // If value contains quotes, commas, or newlines, wrap in quotes and escape internal quotes
+  if (safe.includes('"') || safe.includes(',') || safe.includes('\n')) {
+    return `"${safe.replace(/"/g, '""')}"`;
+  }
+  return safe;
 }
 
 // CSV Export - exports projects as CSV

@@ -112,7 +112,8 @@ export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps
     prevProps.laneTop === nextProps.laneTop &&
     prevProps.isSelected === nextProps.isSelected &&
     prevProps.isLocked === nextProps.isLocked &&
-    prevProps.isFullscreen === nextProps.isFullscreen
+    prevProps.isFullscreen === nextProps.isFullscreen &&
+    prevProps.newMilestoneIds === nextProps.newMilestoneIds
     // Note: Callback props are excluded from comparison as they're typically stable
   );
 });

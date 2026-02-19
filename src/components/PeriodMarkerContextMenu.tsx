@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { PeriodMarkerColor, PeriodMarker } from '../types';
 import styles from './LeaveContextMenu.module.css';
@@ -40,27 +40,21 @@ export function PeriodMarkerContextMenu({
   const [selectedColor, setSelectedColor] = useState<PeriodMarkerColor>(initialValues?.color || 'grey');
   const [label, setLabel] = useState(initialValues?.label || '');
 
-  // Adjust menu position to stay within viewport
-  const [position, setPosition] = useState({ x, y });
-
-  useEffect(() => {
-    if (menuRef.current) {
-      const rect = menuRef.current.getBoundingClientRect();
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-
-      let adjustedX = x;
-      let adjustedY = y;
-
-      if (x + rect.width > viewportWidth) {
-        adjustedX = viewportWidth - rect.width - 10;
-      }
-      if (y + rect.height > viewportHeight) {
-        adjustedY = viewportHeight - rect.height - 10;
-      }
-
-      setPosition({ x: adjustedX, y: adjustedY });
+  // Adjust menu position to stay within viewport via direct DOM mutation.
+  // useLayoutEffect runs before paint, preventing position flash.
+  useLayoutEffect(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    let adjustedX = x;
+    let adjustedY = y;
+    if (x + rect.width > window.innerWidth) {
+      adjustedX = window.innerWidth - rect.width - 10;
     }
+    if (y + rect.height > window.innerHeight) {
+      adjustedY = window.innerHeight - rect.height - 10;
+    }
+    menuRef.current.style.left = `${adjustedX}px`;
+    menuRef.current.style.top = `${adjustedY}px`;
   }, [x, y]);
 
   useEffect(() => {
@@ -100,7 +94,7 @@ export function PeriodMarkerContextMenu({
     <div
       ref={menuRef}
       className={styles.menu}
-      style={{ left: position.x, top: position.y }}
+      style={{ left: x, top: y }}
     >
       <div className={styles.menuHeader}>{isEditing ? 'Edit Period Marker' : 'Add Period Marker'}</div>
 

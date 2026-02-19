@@ -73,6 +73,26 @@ export function timelinePositionToDate(
   return addDays(timelineStart, days);
 }
 
+// Parse a YYYY-MM-DD string as local midnight.
+// `new Date('2025-06-15')` is parsed as UTC midnight per ECMAScript spec,
+// which becomes the PREVIOUS day in UTC- timezones. This helper ensures
+// the Date represents midnight LOCAL time, so getDate/setDate arithmetic
+// and toDateString() all stay in the same timezone.
+export function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+// Timezone-safe YYYY-MM-DD string from a local Date.
+// Unlike Date.toISOString().split('T')[0] which converts to UTC first
+// (and can shift the date ±1 day), this uses local year/month/day.
+export function toDateString(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 export function formatDate(date: Date | string): string {
   const d = typeof date === 'string' ? getCachedDate(date) : date;
   return format(d, 'dd MMM yyyy');
@@ -165,4 +185,46 @@ export function getSuggestedProjectDates(
   const suggestedEnd = toISODateString(addDays(earliestEndDate, 1 + defaultDuration));
 
   return { suggestedStart, suggestedEnd, hasExisting: true };
+}
+
+// Calculate stack indices for overlapping date-range items (milestones, projects)
+// Optimized O(n log n) interval scheduling algorithm
+export function calculateStacks<T extends { id: string; startDate: string; endDate: string }>(
+  items: T[]
+): Map<string, number> {
+  const stacks = new Map<string, number>();
+  if (!items || items.length === 0) return stacks;
+
+  // Sort by start date (O(n log n))
+  const sorted = [...items].sort((a, b) =>
+    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
+  );
+
+  // Track the end time of the last item in each stack
+  const stackEndTimes: number[] = [];
+
+  sorted.forEach((item) => {
+    const startTime = new Date(item.startDate).getTime();
+    const endTime = new Date(item.endDate).getTime();
+
+    // Find the first available stack (no overlap)
+    let assignedStack = -1;
+    for (let i = 0; i < stackEndTimes.length; i++) {
+      if (stackEndTimes[i] < startTime) {
+        assignedStack = i;
+        stackEndTimes[i] = endTime;
+        break;
+      }
+    }
+
+    // No available stack — create a new one
+    if (assignedStack === -1) {
+      assignedStack = stackEndTimes.length;
+      stackEndTimes.push(endTime);
+    }
+
+    stacks.set(item.id, assignedStack);
+  });
+
+  return stacks;
 }

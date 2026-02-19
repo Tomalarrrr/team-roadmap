@@ -44,8 +44,8 @@ export const Toolbar = memo(function Toolbar({
   canRedo,
   onUndo,
   onRedo,
-  hasClipboard: _hasClipboard,
-  onPaste: _onPaste,
+  hasClipboard: _hasClipboard, // eslint-disable-line @typescript-eslint/no-unused-vars -- Reserved for future paste button
+  onPaste: _onPaste, // eslint-disable-line @typescript-eslint/no-unused-vars -- Reserved for future paste button
   dayWidth,
   onDayWidthChange,
   isSaving,
@@ -64,6 +64,7 @@ export const Toolbar = memo(function Toolbar({
   return (
     <div className={styles.toolbar}>
       <div className={styles.left}>
+        <img src="/Airedale.png" alt="Airedale NHS Foundation Trust" className={styles.logo} />
         <h1 className={styles.title}>Digital Roadmap Overview</h1>
       </div>
 

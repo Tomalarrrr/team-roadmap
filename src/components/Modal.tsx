@@ -16,40 +16,30 @@ const EXIT_ANIMATION_MS = 150;
 export function Modal({ isOpen, onClose, title, children }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
-  const closingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Animation state machine: hidden → visible ↔ exiting → hidden
+  // Uses getDerivedStateFromProps pattern for synchronous transitions,
+  // and effect only for the timer callback (avoids synchronous setState in effect).
+  const [phase, setPhase] = useState<'hidden' | 'visible' | 'exiting'>(
+    isOpen ? 'visible' : 'hidden'
+  );
 
-  // Exit animation state
-  const [shouldRender, setShouldRender] = useState(isOpen);
-  const [isClosing, setIsClosing] = useState(false);
+  // Synchronous derived state: opening transitions
+  if (isOpen && phase !== 'visible') {
+    setPhase('visible');
+  }
+  if (!isOpen && phase === 'visible') {
+    setPhase('exiting');
+  }
 
+  // Exit animation timer — setState only in timeout callback (not synchronous in effect)
   useEffect(() => {
-    if (isOpen) {
-      // Opening: render immediately, cancel any pending close
-      if (closingTimeoutRef.current) {
-        clearTimeout(closingTimeoutRef.current);
-        closingTimeoutRef.current = null;
-      }
-      setIsClosing(false);
-      setShouldRender(true);
-    } else if (shouldRender) {
-      // Closing: start exit animation, then unmount
-      setIsClosing(true);
-      closingTimeoutRef.current = setTimeout(() => {
-        setShouldRender(false);
-        setIsClosing(false);
-        closingTimeoutRef.current = null;
-      }, EXIT_ANIMATION_MS);
-    }
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (phase !== 'exiting') return;
+    const timer = setTimeout(() => setPhase('hidden'), EXIT_ANIMATION_MS);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (closingTimeoutRef.current) {
-        clearTimeout(closingTimeoutRef.current);
-      }
-    };
-  }, []);
+  const isClosing = phase === 'exiting';
+  const shouldRender = phase !== 'hidden';
 
   // Handle tab key for focus trap
   const handleTabKey = useCallback((e: KeyboardEvent) => {

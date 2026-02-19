@@ -103,6 +103,20 @@ export function useRoadmap() {
   const dataRef = useRef<RoadmapData>(data);
   dataRef.current = data;
 
+  // Counter-based save tracking: prevents isSaving from flashing false between
+  // concurrent saves. Increment on save start, decrement on save end.
+  const savingCountRef = useRef(0);
+  const startSaving = useCallback(() => {
+    savingCountRef.current++;
+    setIsSaving(true);
+  }, []);
+  const finishSaving = useCallback(() => {
+    savingCountRef.current = Math.max(0, savingCountRef.current - 1);
+    if (savingCountRef.current === 0) {
+      setIsSaving(false);
+    }
+  }, []);
+
   // Track pending optimistic updates for rollback
   const pendingUpdateRef = useRef<RoadmapData | null>(null);
   const isLocalUpdateRef = useRef(false);
@@ -117,6 +131,8 @@ export function useRoadmap() {
   const resubscribeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Track whether error recovery is in progress to avoid competing with stale check
   const isRecoveringRef = useRef(false);
+  // Track animation cleanup timeouts for proper cleanup on unmount
+  const animationTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   useEffect(() => {
     let unsubscribe: (() => void) | null = null;
@@ -124,6 +140,8 @@ export function useRoadmap() {
     let mounted = true;
     let resubscribeAttempts = 0;
     const MAX_RESUBSCRIBE_ATTEMPTS = 5;
+    // Capture ref value at effect start for cleanup (avoids stale ref warning)
+    const animationTimeouts = animationTimeoutsRef.current;
 
     // Set up visibility-based connection management
     const cleanupLifecycle = setupConnectionLifecycle();
@@ -283,6 +301,9 @@ export function useRoadmap() {
       if (staleCheckIntervalRef.current) {
         clearInterval(staleCheckIntervalRef.current);
       }
+      // Clean up animation timeouts (uses value captured at effect start)
+      animationTimeouts.forEach(t => clearTimeout(t));
+      animationTimeouts.clear();
     };
   }, []);
 
@@ -301,7 +322,7 @@ export function useRoadmap() {
     dataRef.current = sanitizedData;
     setData(sanitizedData);
     setSaveError(null);
-    setIsSaving(true);
+    startSaving();
 
     try {
       await saveWithRetry(sanitizedData);
@@ -316,9 +337,9 @@ export function useRoadmap() {
       setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
-  }, []);
+  }, [startSaving, finishSaving]);
 
   const clearError = useCallback(() => setSaveError(null), []);
 
@@ -344,7 +365,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, teamMembers: newMembers };
     setData(dataRef.current);
-    setIsSaving(true);
+    startSaving();
 
     try {
       // Granular Firebase update - only updates this specific team member by ID
@@ -358,21 +379,39 @@ export function useRoadmap() {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
-  }, []);
+  }, [startSaving, finishSaving]);
 
   const deleteTeamMember = useCallback(async (memberId: string) => {
     const currentData = dataRef.current;
     const member = currentData.teamMembers.find(m => m.id === memberId);
     if (!member) return;
 
-    // Also delete their projects
+    // Collect IDs of projects being deleted (for dependency cleanup)
+    const deletedProjectIds = new Set(
+      currentData.projects.filter(p => p.owner === member.name).map(p => p.id)
+    );
     const newProjects = currentData.projects.filter(p => p.owner !== member.name);
     const newMembers = currentData.teamMembers.filter(m => m.id !== memberId);
-    await optimisticSave({ ...currentData, projects: newProjects, teamMembers: newMembers });
+    // Clean up orphaned dependencies that reference the deleted projects
+    const newDependencies = (currentData.dependencies || []).filter(
+      d => !deletedProjectIds.has(d.fromProjectId) && !deletedProjectIds.has(d.toProjectId)
+    );
+    // Clean up orphaned leave blocks for this member
+    const newLeaveBlocks = (currentData.leaveBlocks || []).filter(
+      l => l.memberId !== memberId
+    );
+    await optimisticSave({
+      ...currentData,
+      projects: newProjects,
+      teamMembers: newMembers,
+      dependencies: newDependencies,
+      leaveBlocks: newLeaveBlocks
+    });
     analytics.memberDeleted(memberId);
   }, [optimisticSave]);
 
@@ -418,7 +457,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
-    setIsSaving(true);
+    startSaving();
 
     try {
       // Granular Firebase update - only updates this specific project by ID
@@ -432,16 +471,21 @@ export function useRoadmap() {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
-  }, []);
+  }, [startSaving, finishSaving]);
 
   const deleteProject = useCallback(async (projectId: string) => {
     const currentData = dataRef.current;
     const newProjects = currentData.projects.filter(p => p.id !== projectId);
-    await optimisticSave({ ...currentData, projects: newProjects });
+    // Clean up orphaned dependencies that reference this project
+    const newDependencies = (currentData.dependencies || []).filter(
+      d => d.fromProjectId !== projectId && d.toProjectId !== projectId
+    );
+    await optimisticSave({ ...currentData, projects: newProjects, dependencies: newDependencies });
     analytics.projectDeleted(projectId);
   }, [optimisticSave]);
 
@@ -461,13 +505,15 @@ export function useRoadmap() {
     // Track new milestone for entrance animation
     setNewMilestoneIds(prev => new Set(prev).add(newMilestone.id));
     // Clear after animation duration
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      animationTimeoutsRef.current.delete(timer);
       setNewMilestoneIds(prev => {
         const next = new Set(prev);
         next.delete(newMilestone.id);
         return next;
       });
     }, 500);
+    animationTimeoutsRef.current.add(timer);
 
     return newMilestone;
   }, [optimisticSave]);
@@ -496,7 +542,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
-    setIsSaving(true);
+    startSaving();
 
     try {
       // Granular Firebase update - only updates this specific milestone by ID
@@ -510,11 +556,12 @@ export function useRoadmap() {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
-  }, []);
+  }, [startSaving, finishSaving]);
 
   const deleteMilestone = useCallback(async (projectId: string, milestoneId: string) => {
     const currentData = dataRef.current;
@@ -525,7 +572,11 @@ export function useRoadmap() {
       }
       return p;
     });
-    await optimisticSave({ ...currentData, projects: newProjects });
+    // Clean up orphaned dependencies that reference this milestone
+    const newDependencies = (currentData.dependencies || []).filter(
+      d => d.fromMilestoneId !== milestoneId && d.toMilestoneId !== milestoneId
+    );
+    await optimisticSave({ ...currentData, projects: newProjects, dependencies: newDependencies });
     analytics.milestoneDeleted(milestoneId);
   }, [optimisticSave]);
 
@@ -565,13 +616,15 @@ export function useRoadmap() {
     // Track new dependency for entrance animation
     setNewDependencyIds(prev => new Set(prev).add(newDependency.id));
     // Clear after animation duration
-    setTimeout(() => {
+    const depTimer = setTimeout(() => {
+      animationTimeoutsRef.current.delete(depTimer);
       setNewDependencyIds(prev => {
         const next = new Set(prev);
         next.delete(newDependency.id);
         return next;
       });
     }, 600);
+    animationTimeoutsRef.current.add(depTimer);
 
     return newDependency;
   }, [optimisticSave]);
@@ -595,7 +648,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, dependencies: newDependencies };
     setData(dataRef.current);
-    setIsSaving(true);
+    startSaving();
 
     try {
       // Granular Firebase update - only updates this specific dependency by ID
@@ -608,11 +661,12 @@ export function useRoadmap() {
       // Rollback on failure
       dataRef.current = currentData;
       setData(currentData);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
-  }, []);
+  }, [startSaving, finishSaving]);
 
   // Leave block operations
   const addLeaveBlock = useCallback(async (leaveBlock: Omit<LeaveBlock, 'id'>) => {
@@ -636,7 +690,7 @@ export function useRoadmap() {
     isLocalUpdateRef.current = true;
     dataRef.current = { ...currentData, leaveBlocks: newLeaveBlocks };
     setData(dataRef.current);
-    setIsSaving(true);
+    startSaving();
 
     try {
       // Granular Firebase update - only updates this specific leave block by ID
@@ -648,11 +702,12 @@ export function useRoadmap() {
     } catch (error) {
       dataRef.current = currentData;
       setData(currentData);
+      setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     } finally {
-      setIsSaving(false);
+      finishSaving();
     }
-  }, []);
+  }, [startSaving, finishSaving]);
 
   const deleteLeaveBlock = useCallback(async (leaveId: string) => {
     const currentData = dataRef.current;
