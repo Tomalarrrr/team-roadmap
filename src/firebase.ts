@@ -1,4 +1,4 @@
-import type { RoadmapData, Project, Milestone, Dependency, TeamMember, LeaveBlock, PeriodMarker } from './types';
+import type { RoadmapData, Project, Milestone, Dependency, TeamMember, LeaveBlock } from './types';
 import { firebaseSnapshotToRoadmapData, roadmapDataToFirebaseFormat, projectToFirebase, arrayToKeyedObject, isLegacyArrayFormat } from './utils/firebaseConversions';
 import type { FirebaseApp } from 'firebase/app';
 import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
