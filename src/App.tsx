@@ -227,45 +227,22 @@ function App() {
     projectsRef.current = data.projects;
   }, [data.projects]);
 
-  // View mode lock - persisted in localStorage (defaults to locked for new users)
-  const [isLocked, setIsLocked] = useState(() => {
-    try {
-      const stored = localStorage.getItem('roadmap-view-lock');
-      // Default to locked (true) if no preference saved yet
-      return stored === null ? true : stored === 'true';
-    } catch {
-      return true; // Default to locked on error
-    }
-  });
-
-  // Vault unlock overlay state
+  // View mode lock — always starts locked; unlock is session-only (resets on tab close)
+  const [isLocked, setIsLocked] = useState(true);
   const [showVaultUnlock, setShowVaultUnlock] = useState(false);
 
   // Toggle lock — unlocking requires vault PIN entry
   const handleToggleLock = useCallback(() => {
     if (isLocked) {
-      // Show vault unlock overlay instead of immediate toggle
       setShowVaultUnlock(true);
     } else {
-      // Locking is immediate — no PIN needed
       setIsLocked(true);
-      try {
-        localStorage.setItem('roadmap-view-lock', 'true');
-      } catch {
-        // Ignore localStorage errors
-      }
     }
   }, [isLocked]);
 
-  // Vault callbacks
   const handleVaultUnlocked = useCallback(() => {
     setShowVaultUnlock(false);
     setIsLocked(false);
-    try {
-      localStorage.setItem('roadmap-view-lock', 'false');
-    } catch {
-      // Ignore localStorage errors
-    }
   }, []);
 
   const handleVaultCancel = useCallback(() => {
