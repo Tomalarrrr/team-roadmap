@@ -15,6 +15,7 @@ import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
 import { OfflineBanner } from './components/OfflineBanner';
 import { usePresence } from './hooks/usePresence';
+import { VaultUnlock } from './components/VaultUnlock';
 import styles from './App.module.css';
 
 // Lazy load form components (not needed until user clicks)
@@ -237,17 +238,38 @@ function App() {
     }
   });
 
-  // Persist lock state to localStorage
+  // Vault unlock overlay state
+  const [showVaultUnlock, setShowVaultUnlock] = useState(false);
+
+  // Toggle lock — unlocking requires vault PIN entry
   const handleToggleLock = useCallback(() => {
-    setIsLocked(prev => {
-      const newValue = !prev;
+    if (isLocked) {
+      // Show vault unlock overlay instead of immediate toggle
+      setShowVaultUnlock(true);
+    } else {
+      // Locking is immediate — no PIN needed
+      setIsLocked(true);
       try {
-        localStorage.setItem('roadmap-view-lock', String(newValue));
+        localStorage.setItem('roadmap-view-lock', 'true');
       } catch {
         // Ignore localStorage errors
       }
-      return newValue;
-    });
+    }
+  }, [isLocked]);
+
+  // Vault callbacks
+  const handleVaultUnlocked = useCallback(() => {
+    setShowVaultUnlock(false);
+    setIsLocked(false);
+    try {
+      localStorage.setItem('roadmap-view-lock', 'false');
+    } catch {
+      // Ignore localStorage errors
+    }
+  }, []);
+
+  const handleVaultCancel = useCallback(() => {
+    setShowVaultUnlock(false);
   }, []);
 
   // Cleanup fullscreen hint timeout on unmount
@@ -1234,6 +1256,13 @@ function App() {
       <Suspense fallback={null}>
         <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </Suspense>
+
+      {/* Vault Unlock Overlay */}
+      <VaultUnlock
+        isOpen={showVaultUnlock}
+        onUnlocked={handleVaultUnlocked}
+        onCancel={handleVaultCancel}
+      />
     </div>
   );
 }
