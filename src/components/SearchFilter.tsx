@@ -1,8 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo, lazy, Suspense } from 'react';
+import { createPortal } from 'react-dom';
 import type { Project, TeamMember } from '../types';
 import { STATUS_CONFIG, normalizeStatusColor } from '../utils/statusColors';
 import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
+
+const ConnectFourGame = lazy(() => import('./ConnectFourGame').then(m => ({ default: m.ConnectFourGame })));
 
 interface SearchFilterProps {
   projects: Project[];
@@ -74,6 +77,7 @@ export const SearchFilter = memo(function SearchFilter({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAllTags, setShowAllTags] = useState(false);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
+  const [showConnectFour, setShowConnectFour] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -117,6 +121,15 @@ export const SearchFilter = memo(function SearchFilter({
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
+
+  // Easter egg: Connect Four
+  useEffect(() => {
+    if (filters.search.trim().toLowerCase() === 'connect four') {
+      setShowConnectFour(true);
+      setFilters(f => ({ ...f, search: '' }));
+      setIsOpen(false);
+    }
+  }, [filters.search]);
 
   // Compute search results as derived state (no effect needed)
   const { searchResults, totalResultCount } = useMemo(() => {
@@ -376,6 +389,12 @@ export const SearchFilter = memo(function SearchFilter({
             </div>
           </div>
         </div>
+      )}
+      {showConnectFour && createPortal(
+        <Suspense fallback={null}>
+          <ConnectFourGame onClose={() => setShowConnectFour(false)} isSearchOpen={isOpen} />
+        </Suspense>,
+        document.body
       )}
     </>
   );
