@@ -91,6 +91,7 @@ const COLOR_HEX: Record<LudoColor, string> = {
 const CELL_PCT = 100 / 15;
 const TOKEN_SIZE_PCT = CELL_PCT * 0.7;
 const TOKEN_PAD_PCT = (CELL_PCT - TOKEN_SIZE_PCT) / 2;
+const STEP_MS = 120;
 
 // --- Pure game logic ---
 
@@ -329,7 +330,7 @@ function computeMovePath(
     const path: [number, number][] = [];
     let cur = parseInt(from.split('-')[1]);
     const target = parseInt(to.split('-')[1]);
-    while (cur !== target) {
+    while (cur !== target && path.length < TRACK_SIZE) {
       cur = (cur % TRACK_SIZE) + 1;
       path.push(TRACK_COORDS[cur]);
     }
@@ -340,7 +341,7 @@ function computeMovePath(
     const path: [number, number][] = [];
     let cur = parseInt(from.split('-')[1]);
     const entry = ENTRY_CELLS[color];
-    while (cur !== entry) {
+    while (cur !== entry && path.length < TRACK_SIZE) {
       cur = (cur % TRACK_SIZE) + 1;
       path.push(TRACK_COORDS[cur]);
     }
@@ -463,7 +464,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
   const tokenAnimTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const capturedTokens = useRef<{ index: number; coords: [number, number]; color: LudoColor; ts: number }[]>([]);
-  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const captureShowTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Intro animation state
@@ -471,8 +471,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const introPhaseRef = useRef<'idle' | 'running' | 'done'>('idle');
   const introTokenPositions = useRef<Map<LudoColor, [number, number]>>(new Map());
   const introTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const [introTrigger, setIntroTrigger] = useState(0);
   const [, setRenderTick] = useState(0);
-  const STEP_MS = 120;
 
   const gameCodeRef = useRef(gameCode);
   gameCodeRef.current = gameCode;
@@ -502,7 +502,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       clearTimeout(rollTimeoutRef.current);
       clearTimeout(movedTimeoutRef.current);
       clearTimeout(autoMoveRef.current);
-      clearTimeout(captureTimerRef.current);
       for (const timer of captureShowTimers.current) clearTimeout(timer);
       for (const timer of introTimersRef.current) clearTimeout(timer);
       for (const timer of tokenAnimTimers.current.values()) {
@@ -567,7 +566,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isSearchOpen) onClose();
-      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing') {
+      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing' && introPhaseRef.current !== 'running') {
         e.preventDefault();
         handleRollDiceRef.current();
       }
@@ -586,6 +585,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
     subscribeToGame(gameCode, (state: LudoGameState | null) => {
       if (cancelled || !state) return;
+      setError(null); // Clear any connection errors on successful state update
 
       const parsedTokens = deserializeTokens(state.tokens);
 
@@ -638,11 +638,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             const showTimer = setTimeout(() => {
               capturedTokens.current.push(captureData);
               setRenderTick(n => n + 1);
-              clearTimeout(captureTimerRef.current);
-              captureTimerRef.current = setTimeout(() => {
+              // Each capture independently cleans itself up after 500ms
+              const cleanupTimer = setTimeout(() => {
                 capturedTokens.current = capturedTokens.current.filter(t => t !== captureData);
                 setRenderTick(n => n + 1);
               }, 500);
+              captureShowTimers.current.push(cleanupTimer);
             }, capturerDelay);
             captureShowTimers.current.push(showTimer);
           }
@@ -701,8 +702,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       } else {
         unsubscribe = unsub;
       }
-    }).catch(() => {
-      // Silently handle subscription errors (e.g. network failure)
+    }).catch((err) => {
+      console.error('[Ludo] Subscription failed:', err);
+      setError('Connection lost. Please rejoin.');
     });
 
     return () => {
@@ -1043,7 +1045,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }, totalDuration);
       introTimersRef.current.push(doneTimer);
     }
-  }, [gamePhase]);
+
+    return () => {
+      for (const timer of introTimersRef.current) clearTimeout(timer);
+      introTimersRef.current = [];
+    };
+  }, [gamePhase, introTrigger]);
 
   // --- Lobby handlers ---
 
@@ -1117,6 +1124,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       moveInFlightRef.current = false;
       setIntroPhase('idle');
       introPhaseRef.current = 'idle';
+      setIntroTrigger(n => n + 1);
       for (const timer of introTimersRef.current) clearTimeout(timer);
       introTimersRef.current = [];
       introTokenPositions.current.clear();
@@ -1133,7 +1141,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     clearTimeout(movedTimeoutRef.current);
     clearTimeout(hintTimeoutRef.current);
     clearTimeout(autoMoveRef.current);
-    clearTimeout(captureTimerRef.current);
     for (const timer of captureShowTimers.current) clearTimeout(timer);
     captureShowTimers.current = [];
     for (const timer of introTimersRef.current) clearTimeout(timer);
@@ -1197,7 +1204,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // --- Derived values ---
 
   const isMyTurn = myColor === currentTurn;
-  const diceCanRoll = isMyTurn && turnPhase === 'roll' && !isRolling && !winner;
+  const diceCanRoll = isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running';
   const showRollReminder = diceCanRoll && timeLeft <= TURN_SECONDS - 5;
 
   const statusMessage = isSpectating
@@ -1570,7 +1577,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                     diceCanRoll ? styles.diceActive : '',
                   ].filter(Boolean).join(' ')}
                   onClick={handleRollDice}
-                  disabled={!isMyTurn || turnPhase !== 'roll' || isRolling || !!winner}
+                  disabled={!isMyTurn || turnPhase !== 'roll' || isRolling || !!winner || introPhase === 'running'}
                   aria-label="Roll dice"
                 >
                   {isRolling ? (
@@ -1611,6 +1618,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   );
                 })}
               </div>
+
+              {/* Connection error */}
+              {error && <div className={styles.errorText}>{error}</div>}
 
               {/* Spacer */}
               <div className={styles.sideSpacer} />
