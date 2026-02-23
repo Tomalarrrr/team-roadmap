@@ -323,6 +323,55 @@ function getTokenOffset(tokens: TokenPosition[], tokenIndex: number): [number, n
   return offsets[myIdx % offsets.length];
 }
 
+// --- Path computation for cell-by-cell animation ---
+
+function computeMovePath(
+  from: TokenPosition,
+  to: TokenPosition,
+  color: LudoColor
+): [number, number][] {
+  if (from === 'base' || from === 'final-6') return [];
+  if (to === 'base') return [];
+
+  if (from.startsWith('track-') && to.startsWith('track-')) {
+    const path: [number, number][] = [];
+    let cur = parseInt(from.split('-')[1]);
+    const target = parseInt(to.split('-')[1]);
+    while (cur !== target) {
+      cur = (cur % TRACK_SIZE) + 1;
+      path.push(TRACK_COORDS[cur]);
+    }
+    return path;
+  }
+
+  if (from.startsWith('track-') && to.startsWith('final-')) {
+    const path: [number, number][] = [];
+    let cur = parseInt(from.split('-')[1]);
+    const entry = ENTRY_CELLS[color];
+    while (cur !== entry) {
+      cur = (cur % TRACK_SIZE) + 1;
+      path.push(TRACK_COORDS[cur]);
+    }
+    const finalTarget = parseInt(to.split('-')[1]);
+    for (let i = 1; i <= finalTarget; i++) {
+      path.push(FINAL_COORDS[color][i - 1]);
+    }
+    return path;
+  }
+
+  if (from.startsWith('final-') && to.startsWith('final-')) {
+    const path: [number, number][] = [];
+    const fromN = parseInt(from.split('-')[1]);
+    const toN = parseInt(to.split('-')[1]);
+    for (let i = fromN + 1; i <= toN; i++) {
+      path.push(FINAL_COORDS[color][i - 1]);
+    }
+    return path;
+  }
+
+  return [];
+}
+
 // --- Dice face component ---
 
 const TOKEN_STYLE: Record<LudoColor, string> = {
@@ -416,6 +465,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const movedTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const diceAnimKeyRef = useRef(0);
+  const autoMoveRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  // Cell-by-cell animation state
+  const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
+  const tokenAnimTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const [, setRenderTick] = useState(0);
+  const STEP_MS = 120;
 
   const gameCodeRef = useRef(gameCode);
   gameCodeRef.current = gameCode;
@@ -444,6 +500,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       clearTimeout(hintTimeoutRef.current);
       clearTimeout(rollTimeoutRef.current);
       clearTimeout(movedTimeoutRef.current);
+      clearTimeout(autoMoveRef.current);
+      for (const timer of tokenAnimTimers.current.values()) {
+        clearTimeout(timer);
+      }
     };
   }, []);
 
@@ -455,14 +515,47 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     hintTimeoutRef.current = setTimeout(() => setStatusHint(null), 2000);
   }, []);
 
+  // --- Cell-by-cell token animation ---
+
+  const startTokenAnimation = useCallback((tokenIdx: number, waypoints: [number, number][]) => {
+    const existing = tokenAnimTimers.current.get(tokenIdx);
+    if (existing) clearTimeout(existing);
+
+    if (waypoints.length === 0) return;
+
+    let step = 0;
+    const advance = () => {
+      if (step >= waypoints.length) {
+        tokenAnimPos.current.delete(tokenIdx);
+        tokenAnimTimers.current.delete(tokenIdx);
+        setRenderTick(n => n + 1);
+        return;
+      }
+      tokenAnimPos.current.set(tokenIdx, waypoints[step]);
+      step++;
+      setRenderTick(n => n + 1);
+      tokenAnimTimers.current.set(tokenIdx, setTimeout(advance, STEP_MS));
+    };
+
+    advance();
+  }, []);
+
   // --- Dice rolling animation (rapid face cycling) ---
 
   useEffect(() => {
     if (!isRolling) return;
-    const interval = setInterval(() => {
+    let frame = 0;
+    let timeout: ReturnType<typeof setTimeout>;
+    const step = () => {
       setRollingFace(Math.floor(Math.random() * 6) + 1);
-    }, 80);
-    return () => clearInterval(interval);
+      frame++;
+      const delay = 60 + frame * 10;
+      if (delay < 250) {
+        timeout = setTimeout(step, delay);
+      }
+    };
+    timeout = setTimeout(step, 60);
+    return () => clearTimeout(timeout);
   }, [isRolling]);
 
   // --- Keyboard shortcuts ---
@@ -495,6 +588,19 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       // Reset moveInFlight on any state change (token or turn change)
       if (state.tokens !== prevTokensRef.current || state.turnStartedAt !== turnStartedAtRef.current) {
         moveInFlightRef.current = false;
+      }
+
+      // Detect token moves and start cell-by-cell animations
+      if (state.tokens !== prevTokensRef.current) {
+        const oldTokens = deserializeTokens(prevTokensRef.current);
+        for (let i = 0; i < TOTAL_TOKENS; i++) {
+          if (oldTokens[i] !== parsedTokens[i]) {
+            const path = computeMovePath(oldTokens[i], parsedTokens[i], getTokenColor(i));
+            if (path.length > 1) {
+              startTokenAnimation(i, path);
+            }
+          }
+        }
       }
       prevTokensRef.current = state.tokens;
 
@@ -704,9 +810,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         return;
       }
 
-      // Single valid move: auto-select
+      // Single valid move: auto-select with brief delay so player sees the roll
       if (moves.length === 1) {
-        await executeMove(moves[0].tokenIndex, moves[0].newPosition, roll);
+        const m = moves[0];
+        autoMoveRef.current = setTimeout(() => {
+          executeMove(m.tokenIndex, m.newPosition, roll);
+        }, 400);
         return;
       }
 
@@ -740,6 +849,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const move = moves.find(m => m.tokenIndex === tokenIndex);
     if (!move) return;
 
+    clearTimeout(autoMoveRef.current);
     moveInFlightRef.current = true;
     executeMove(move.tokenIndex, move.newPosition, dice);
   }, [executeMove]);
@@ -912,6 +1022,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     clearTimeout(rollTimeoutRef.current);
     clearTimeout(movedTimeoutRef.current);
     clearTimeout(hintTimeoutRef.current);
+    clearTimeout(autoMoveRef.current);
+    for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
+    tokenAnimTimers.current.clear();
+    tokenAnimPos.current.clear();
     setGamePhase('lobby');
     setGameCode(null);
     setMyColor(null);
@@ -1009,16 +1123,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
   function renderToken(idx: number) {
     const pos = tokens[idx];
-    if (pos === 'base' || pos === 'final-6') return null;
+    const animCoords = tokenAnimPos.current.get(idx);
+
+    // Keep rendering during animation even if token reached final-6
+    if ((pos === 'base' || pos === 'final-6') && !animCoords) return null;
 
     const color = getTokenColor(idx);
     const localIdx = idx % TOKENS_PER_PLAYER;
-    const isClickable = validMoves.has(idx) && isMyTurn && turnPhase === 'move';
-    const isArriving = lastMovedToken === idx;
-    const coords = getTokenCoords(pos, idx);
+    const isStepping = !!animCoords;
+    const isClickable = validMoves.has(idx) && isMyTurn && turnPhase === 'move' && !isStepping;
+    const isArriving = lastMovedToken === idx && !isStepping;
+
+    const coords = animCoords || getTokenCoords(pos, idx);
     if (!coords) return null;
 
-    const [dx, dy] = getTokenOffset(tokens, idx);
+    const [dx, dy] = isStepping ? [0, 0] : getTokenOffset(tokens, idx);
 
     return (
       <div
@@ -1028,6 +1147,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           TOKEN_STYLE[color],
           isClickable ? styles.tokenClickable : '',
           isArriving ? styles.tokenArriving : '',
+          isStepping ? styles.tokenStepping : '',
         ].filter(Boolean).join(' ')}
         style={{
           left: `${(coords[1] - 1) * CELL_PCT + TOKEN_PAD_PCT + dx}%`,

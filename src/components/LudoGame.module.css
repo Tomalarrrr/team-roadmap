@@ -293,9 +293,9 @@
 .startBlue.safeZone::after { color: rgba(255, 255, 255, 0.4); }
 
 /* Entry arrows — subtle colored triangles pointing toward home corridor */
-.entryRed::after { content: '\25C0'; position: absolute; color: #ea4330; font-size: 0.5em; pointer-events: none; opacity: 0.35; }
+.entryRed::after { content: '\25B6'; position: absolute; color: #ea4330; font-size: 0.5em; pointer-events: none; opacity: 0.35; }
 .entryGreen::after { content: '\25BC'; position: absolute; color: #34a853; font-size: 0.5em; pointer-events: none; opacity: 0.35; }
-.entryYellow::after { content: '\25B6'; position: absolute; color: #fbbc05; font-size: 0.5em; pointer-events: none; opacity: 0.35; }
+.entryYellow::after { content: '\25C0'; position: absolute; color: #fbbc05; font-size: 0.5em; pointer-events: none; opacity: 0.35; }
 .entryBlue::after { content: '\25B2'; position: absolute; color: #4285f4; font-size: 0.5em; pointer-events: none; opacity: 0.35; }
 
 /* Home corridors */
@@ -390,6 +390,11 @@
 
 .tokenArriving {
   animation: tokenHop 300ms ease;
+}
+
+.tokenStepping {
+  transition: left 100ms cubic-bezier(0.25, 1.0, 0.5, 1.0),
+              top 100ms cubic-bezier(0.25, 1.0, 0.5, 1.0) !important;
 }
 
 @keyframes tokenHop {
