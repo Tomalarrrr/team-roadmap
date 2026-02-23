@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   createGame,
   joinGame,
+  spectateGame,
   subscribeToGame,
   makeMove,
   resetGame,
@@ -11,6 +12,7 @@ import styles from './ConnectFourGame.module.css';
 
 const ROWS = 6;
 const COLS = 8;
+const TURN_SECONDS = 30;
 
 type Color = 'red' | 'yellow';
 type Cell = Color | null;
@@ -103,17 +105,22 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [myColor, setMyColor] = useState<Color | null>(null);
+  const [isSpectating, setIsSpectating] = useState(false);
   const [opponentName, setOpponentName] = useState<string | null>(null);
+  const [redName, setRedName] = useState<string | null>(null);
+  const [yellowName, setYellowName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   // Game state (driven by Firebase subscription)
   const [board, setBoard] = useState<Board>(createEmptyBoard);
   const [currentPlayer, setCurrentPlayer] = useState<Color>('red');
+  const [startingColor, setStartingColor] = useState<Color>('red');
   const [winner, setWinner] = useState<Color | 'draw' | null>(null);
   const [winningCells, setWinningCells] = useState<[number, number][]>([]);
   const [droppingCell, setDroppingCell] = useState<{ row: number; col: number } | null>(null);
   const [showBurst, setShowBurst] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(TURN_SECONDS);
 
   // Drag state
   const [position, setPosition] = useState(() => ({
@@ -126,6 +133,16 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   const prevBoardRef = useRef<string>('.'.repeat(48));
   // Prevent double-moves during Firebase round-trip
   const moveInFlightRef = useRef(false);
+  // Refs for timer effect (avoids stale closures + unnecessary effect restarts)
+  const turnStartedAtRef = useRef<number>(Date.now());
+  const boardRef = useRef<Board>(board);
+  boardRef.current = board;
+  const myColorRef = useRef(myColor);
+  myColorRef.current = myColor;
+  const currentPlayerRef = useRef(currentPlayer);
+  currentPlayerRef.current = currentPlayer;
+  const winnerRef = useRef(winner);
+  winnerRef.current = winner;
 
   // Escape key to close
   useEffect(() => {
@@ -165,6 +182,8 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       // Update game state from Firebase
       setBoard(deserializeBoard(state.board));
       setCurrentPlayer(state.currentTurn as Color);
+      if (state.startingColor) setStartingColor(state.startingColor as Color);
+      if (state.turnStartedAt) turnStartedAtRef.current = state.turnStartedAt;
 
       if (state.winner) {
         setWinner(state.winner as Color | 'draw');
@@ -176,12 +195,18 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
         setShowBurst(false);
       }
 
+      // Track player names
+      setRedName(state.players.red.name);
+      if (state.players.yellow) setYellowName(state.players.yellow.name);
+
       // Check if opponent joined (transition from waiting → playing)
       if (state.players.yellow) {
         setGamePhase(prev => prev === 'waiting' ? 'playing' : prev);
-        const otherColor = myColor === 'red' ? 'yellow' : 'red';
-        const opponent = state.players[otherColor];
-        if (opponent) setOpponentName(opponent.name);
+        if (!isSpectating) {
+          const otherColor = myColor === 'red' ? 'yellow' : 'red';
+          const opponent = state.players[otherColor];
+          if (opponent) setOpponentName(opponent.name);
+        }
       }
     }).then(unsub => {
       if (cancelled) {
@@ -195,7 +220,7 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       cancelled = true;
       unsubscribe?.();
     };
-  }, [gameCode, myColor]);
+  }, [gameCode, myColor, isSpectating]);
 
   // --- Handlers ---
 
@@ -224,10 +249,10 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     setIsLoading(true);
     setError(null);
     try {
-      await joinGame(code, sessionId, userName);
+      const { assignedColor, state } = await joinGame(code, sessionId, userName);
       setGameCode(code);
-      setMyColor('yellow');
-      setGamePhase('playing');
+      setMyColor(assignedColor);
+      setGamePhase(state.players.yellow ? 'playing' : 'waiting');
       prevBoardRef.current = '.'.repeat(48);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Game not found');
@@ -235,6 +260,28 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       setIsLoading(false);
     }
   }, [joinCode, sessionId, userName]);
+
+  const handleSpectateGame = useCallback(async () => {
+    const code = joinCode.trim().toUpperCase();
+    if (code.length !== 4) {
+      setError('Enter a 4-character game code');
+      return;
+    }
+    setIsLoading(true);
+    setError(null);
+    try {
+      await spectateGame(code);
+      setGameCode(code);
+      setMyColor(null);
+      setIsSpectating(true);
+      setGamePhase('playing');
+      prevBoardRef.current = '.'.repeat(48);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Game not found');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [joinCode]);
 
   const dropPiece = useCallback((col: number) => {
     if (!gameCode || !myColor) return;
@@ -272,21 +319,60 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     });
   }, [gameCode, myColor, board, currentPlayer, winner]);
 
+  // Ref for dropPiece so timer effect can call it without stale closures
+  const dropPieceRef = useRef(dropPiece);
+  dropPieceRef.current = dropPiece;
+
+  // Turn timer — counts down and auto-places a random piece when time expires
+  useEffect(() => {
+    if (gamePhase !== 'playing') return;
+
+    const tick = () => {
+      if (winnerRef.current) {
+        setTimeLeft(TURN_SECONDS);
+        return;
+      }
+
+      const elapsed = Math.floor((Date.now() - turnStartedAtRef.current) / 1000);
+      const remaining = Math.max(0, TURN_SECONDS - elapsed);
+      setTimeLeft(remaining);
+
+      // Auto-move: only the current player's client enforces the timer
+      if (remaining <= 0 && myColorRef.current === currentPlayerRef.current && !moveInFlightRef.current) {
+        const currentBoard = boardRef.current;
+        const validCols: number[] = [];
+        for (let c = 0; c < COLS; c++) {
+          if (!currentBoard[0][c]) validCols.push(c);
+        }
+        if (validCols.length > 0) {
+          const randomCol = validCols[Math.floor(Math.random() * validCols.length)];
+          dropPieceRef.current(randomCol);
+        }
+      }
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [gamePhase]);
+
   const handleNewGame = useCallback(async () => {
     if (!gameCode) return;
     try {
       moveInFlightRef.current = false;
-      await resetGame(gameCode);
+      const nextStarter: Color = startingColor === 'red' ? 'yellow' : 'red';
+      await resetGame(gameCode, nextStarter);
       prevBoardRef.current = '.'.repeat(48);
     } catch {
       // Silent failure for easter egg
     }
-  }, [gameCode]);
+  }, [gameCode, startingColor]);
 
   const handleBackToLobby = useCallback(() => {
     setGamePhase('lobby');
     setGameCode(null);
     setMyColor(null);
+    setIsSpectating(false);
     setOpponentName(null);
     setError(null);
     setBoard(createEmptyBoard());
@@ -330,13 +416,19 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   const isWinningCell = (row: number, col: number) =>
     winningCells.some(([r, c]) => r === row && c === col);
 
-  const statusMessage = winner === 'draw'
-    ? 'DRAW!'
-    : winner
-      ? winner === myColor ? 'You win!' : `${opponentName} wins!`
-      : isMyTurn
-        ? 'Your turn'
-        : `${opponentName || 'Opponent'}'s turn`;
+  const statusMessage = isSpectating
+    ? winner === 'draw'
+      ? 'DRAW!'
+      : winner
+        ? `${winner === 'red' ? redName || 'Red' : yellowName || 'Yellow'} wins!`
+        : `${currentPlayer === 'red' ? redName || 'Red' : yellowName || 'Yellow'}'s turn`
+    : winner === 'draw'
+      ? 'DRAW!'
+      : winner
+        ? winner === myColor ? 'You win!' : `${opponentName} wins!`
+        : isMyTurn
+          ? 'Your turn'
+          : `${opponentName || 'Opponent'}'s turn`;
 
   // --- Render ---
 
@@ -354,6 +446,9 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 400 }}>
               #{gameCode}
             </span>
+          )}
+          {isSpectating && gamePhase === 'playing' && (
+            <span className={styles.spectateBadge}>Spectating</span>
           )}
         </span>
         <button
@@ -395,7 +490,14 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
                 onClick={handleJoinGame}
                 disabled={isLoading}
               >
-                {isLoading ? 'Joining...' : 'Join Game'}
+                {isLoading ? 'Joining...' : 'Join'}
+              </button>
+              <button
+                className={styles.spectateBtn}
+                onClick={handleSpectateGame}
+                disabled={isLoading}
+              >
+                Spectate
               </button>
             </div>
             {error && <div className={styles.errorText}>{error}</div>}
@@ -431,12 +533,21 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
                   <>
                     <span className={`${styles.statusDot} ${styles[currentPlayer]}`} />
                     <span>{statusMessage}</span>
+                    <span className={`${styles.timer} ${timeLeft <= 10 ? styles.timerUrgent : ''}`}>
+                      {timeLeft}s
+                    </span>
                   </>
                 )}
               </div>
-              <button className={styles.resetBtn} onClick={handleNewGame}>
-                New Game
-              </button>
+              {isSpectating ? (
+                <button className={styles.resetBtn} onClick={handleBackToLobby}>
+                  Leave
+                </button>
+              ) : (
+                <button className={styles.resetBtn} onClick={handleNewGame}>
+                  New Game
+                </button>
+              )}
             </div>
 
             {/* Board wrapper */}

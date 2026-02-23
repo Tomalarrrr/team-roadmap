@@ -11,6 +11,8 @@ export interface ConnectFourGameState {
   currentTurn: 'red' | 'yellow';
   winner: string | null;
   winningCells: string | null;
+  startingColor: 'red' | 'yellow';
+  turnStartedAt: number;
   players: {
     red: ConnectFourPlayer;
     yellow?: ConnectFourPlayer | null;
@@ -45,6 +47,8 @@ export async function createGame(sessionId: string, userName: string): Promise<s
         currentTurn: 'red',
         winner: null,
         winningCells: null,
+        startingColor: 'red',
+        turnStartedAt: Date.now(),
         players: {
           red: { sessionId, name: userName },
         },
@@ -62,9 +66,9 @@ export async function joinGame(
   code: string,
   sessionId: string,
   userName: string
-): Promise<ConnectFourGameState> {
+): Promise<{ state: ConnectFourGameState; assignedColor: 'red' | 'yellow' }> {
   await ensureInitialized();
-  const { ref, get, set } = getDbModule();
+  const { ref, get, update } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `connectFour/${code}`);
@@ -76,14 +80,43 @@ export async function joinGame(
 
   const state = snapshot.val() as ConnectFourGameState;
 
+  // Check if this session is already in the game (reconnection)
+  if (state.players.red.sessionId === sessionId) {
+    return { state, assignedColor: 'red' };
+  }
+  if (state.players.yellow && state.players.yellow.sessionId === sessionId) {
+    return { state, assignedColor: 'yellow' };
+  }
+
   if (state.players.yellow) {
     throw new Error('Game is full');
   }
 
-  const yellowRef = ref(db, `connectFour/${code}/players/yellow`);
-  await set(yellowRef, { sessionId, name: userName });
+  // Set yellow player and start the turn timer atomically
+  await update(gameRef, {
+    'players/yellow': { sessionId, name: userName },
+    turnStartedAt: Date.now(),
+  });
 
-  return { ...state, players: { ...state.players, yellow: { sessionId, name: userName } } };
+  return {
+    state: { ...state, players: { ...state.players, yellow: { sessionId, name: userName } } },
+    assignedColor: 'yellow',
+  };
+}
+
+export async function spectateGame(code: string): Promise<ConnectFourGameState> {
+  await ensureInitialized();
+  const { ref, get } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `connectFour/${code}`);
+  const snapshot = await get(gameRef);
+
+  if (!snapshot.exists()) {
+    throw new Error('Game not found');
+  }
+
+  return snapshot.val() as ConnectFourGameState;
 }
 
 export async function subscribeToGame(
@@ -126,10 +159,10 @@ export async function makeMove(
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `connectFour/${code}`);
-  await update(gameRef, { board, currentTurn, winner, winningCells });
+  await update(gameRef, { board, currentTurn, winner, winningCells, turnStartedAt: Date.now() });
 }
 
-export async function resetGame(code: string): Promise<void> {
+export async function resetGame(code: string, nextStarter: 'red' | 'yellow'): Promise<void> {
   await ensureInitialized();
   const { ref, update } = getDbModule();
   const db = getFirebaseDatabase();
@@ -137,8 +170,10 @@ export async function resetGame(code: string): Promise<void> {
   const gameRef = ref(db, `connectFour/${code}`);
   await update(gameRef, {
     board: '.'.repeat(48),
-    currentTurn: 'red',
+    currentTurn: nextStarter,
+    startingColor: nextStarter,
     winner: null,
     winningCells: null,
+    turnStartedAt: Date.now(),
   });
 }

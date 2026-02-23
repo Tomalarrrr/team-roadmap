@@ -6,6 +6,7 @@ import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
 
 const ConnectFourGame = lazy(() => import('./ConnectFourGame').then(m => ({ default: m.ConnectFourGame })));
+const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
 
 interface SearchFilterProps {
   projects: Project[];
@@ -78,6 +79,7 @@ export const SearchFilter = memo(function SearchFilter({
   const [showAllTags, setShowAllTags] = useState(false);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
   const [showConnectFour, setShowConnectFour] = useState(false);
+  const [showLudo, setShowLudo] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -126,6 +128,11 @@ export const SearchFilter = memo(function SearchFilter({
   useEffect(() => {
     if (filters.search.trim().toLowerCase() === 'connect four') {
       setShowConnectFour(true);
+      setFilters(f => ({ ...f, search: '' }));
+      setIsOpen(false);
+    }
+    if (filters.search.trim().toLowerCase() === 'ludo') {
+      setShowLudo(true);
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
     }
@@ -393,6 +400,12 @@ export const SearchFilter = memo(function SearchFilter({
       {showConnectFour && createPortal(
         <Suspense fallback={null}>
           <ConnectFourGame onClose={() => setShowConnectFour(false)} isSearchOpen={isOpen} />
+        </Suspense>,
+        document.body
+      )}
+      {showLudo && createPortal(
+        <Suspense fallback={null}>
+          <LudoGame onClose={() => setShowLudo(false)} isSearchOpen={isOpen} />
         </Suspense>,
         document.body
       )}
