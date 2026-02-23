@@ -87,6 +87,11 @@ const COLOR_HEX: Record<LudoColor, string> = {
   red: '#ea4330', green: '#34a853', yellow: '#fbbc05', blue: '#4285f4',
 };
 
+// Absolute-positioning constants (percentages of board size)
+const CELL_PCT = 100 / 15;
+const TOKEN_SIZE_PCT = CELL_PCT * 0.7;
+const TOKEN_PAD_PCT = (CELL_PCT - TOKEN_SIZE_PCT) / 2;
+
 // --- Pure game logic ---
 
 function getTokenColor(index: number): LudoColor {
@@ -168,7 +173,7 @@ function getValidMoves(
     const newPos = calculateNewPosition(current, diceValue, color);
     if (newPos === null) continue;
 
-    if (newPos !== 'base') {
+    if (newPos !== 'base' && newPos !== 'final-6') {
       const ownOnTarget = indices.some(i => i !== idx && tokens[i] === newPos);
       if (ownOnTarget) continue;
     }
@@ -185,16 +190,13 @@ function applyMove(
   newPosition: TokenPosition
 ): { newTokens: TokenPosition[]; captured: boolean; reachedHome: boolean } {
   const result = [...tokens] as TokenPosition[];
-  const wasInBase = tokens[tokenIndex] === 'base';
   result[tokenIndex] = newPosition;
   let captured = false;
   const reachedHome = newPosition === 'final-6';
 
   if (newPosition.startsWith('track-')) {
     const trackNum = parseInt(newPosition.split('-')[1]);
-    // Deploying from base always captures (even on safe zone start squares).
-    // Normal movement respects safe zones.
-    if (!SAFE_ZONES.has(trackNum) || wasInBase) {
+    if (!SAFE_ZONES.has(trackNum)) {
       const moverColor = getTokenColor(tokenIndex);
       for (let i = 0; i < TOTAL_TOKENS; i++) {
         if (i === tokenIndex) continue;
@@ -300,25 +302,25 @@ function getTokenCoords(pos: TokenPosition, tokenIndex: number): [number, number
   return null;
 }
 
-function getTokenOffset(tokens: TokenPosition[], tokenIndex: number): React.CSSProperties {
+function getTokenOffset(tokens: TokenPosition[], tokenIndex: number): [number, number] {
   const pos = tokens[tokenIndex];
-  if (pos === 'base' || pos === 'final-6') return {};
+  if (pos === 'base' || pos === 'final-6') return [0, 0];
 
   const sameCell: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] === pos) sameCell.push(i);
   }
-  if (sameCell.length <= 1) return {};
+  if (sameCell.length <= 1) return [0, 0];
 
   const myIdx = sameCell.indexOf(tokenIndex);
-  const offsets = [
-    { top: '-15%', left: '-15%' },
-    { top: '-15%', left: '15%' },
-    { top: '15%', left: '-15%' },
-    { top: '15%', left: '15%' },
+  const shift = CELL_PCT * 0.15;
+  const offsets: [number, number][] = [
+    [-shift, -shift],
+    [shift, -shift],
+    [-shift, shift],
+    [shift, shift],
   ];
-  const offset = offsets[myIdx % offsets.length];
-  return { transform: `translate(${offset.left}, ${offset.top})` };
+  return offsets[myIdx % offsets.length];
 }
 
 // --- Dice face component ---
@@ -1040,7 +1042,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const coords = getTokenCoords(pos, idx);
     if (!coords) return null;
 
-    const offsetStyle = getTokenOffset(tokens, idx);
+    const [dx, dy] = getTokenOffset(tokens, idx);
 
     return (
       <div
@@ -1052,9 +1054,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           isArriving ? styles.tokenArriving : '',
         ].filter(Boolean).join(' ')}
         style={{
-          gridRow: coords[0],
-          gridColumn: coords[1],
-          ...offsetStyle,
+          left: `${(coords[1] - 1) * CELL_PCT + TOKEN_PAD_PCT + dx}%`,
+          top: `${(coords[0] - 1) * CELL_PCT + TOKEN_PAD_PCT + dy}%`,
         }}
         onClick={() => isClickable && handleMoveToken(idx)}
         role="button"
