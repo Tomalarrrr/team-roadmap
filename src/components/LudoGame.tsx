@@ -440,9 +440,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const isRollingRef = useRef(false);
   const turnStartedAtRef = useRef<number>(Date.now());
   const prevTokensRef = useRef('bas'.repeat(16));
-  const hintTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
-  const rollTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
-  const movedTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const hintTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const movedTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const diceAnimKeyRef = useRef(0);
 
   const gameCodeRef = useRef(gameCode);
