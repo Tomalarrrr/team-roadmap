@@ -160,10 +160,7 @@ function getValidMoves(
     if (current === 'base') {
       if (diceValue === 6) {
         const startPos: TokenPosition = `track-${START_POSITIONS[color]}`;
-        const ownOnStart = indices.some(i => i !== idx && tokens[i] === startPos);
-        if (!ownOnStart) {
-          moves.push({ tokenIndex: idx, newPosition: startPos });
-        }
+        moves.push({ tokenIndex: idx, newPosition: startPos });
       }
       continue;
     }
@@ -172,11 +169,6 @@ function getValidMoves(
 
     const newPos = calculateNewPosition(current, diceValue, color);
     if (newPos === null) continue;
-
-    if (newPos !== 'base' && newPos !== 'final-6') {
-      const ownOnTarget = indices.some(i => i !== idx && tokens[i] === newPos);
-      if (ownOnTarget) continue;
-    }
 
     moves.push({ tokenIndex: idx, newPosition: newPos });
   }
@@ -451,7 +443,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
   // Drag state
   const [position, setPosition] = useState(() => ({
-    x: Math.max(0, (window.innerWidth - 560) / 2),
+    x: Math.max(0, (window.innerWidth - 800) / 2),
     y: Math.max(0, (window.innerHeight - 600) / 2),
   }));
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
@@ -472,6 +464,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const tokenAnimTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const capturedTokens = useRef<{ index: number; coords: [number, number]; color: LudoColor; ts: number }[]>([]);
   const captureTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const captureShowTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Intro animation state
+  const [introPhase, setIntroPhase] = useState<'idle' | 'running' | 'done'>('idle');
+  const introPhaseRef = useRef<'idle' | 'running' | 'done'>('idle');
+  const introTokenPositions = useRef<Map<LudoColor, [number, number]>>(new Map());
+  const introTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [, setRenderTick] = useState(0);
   const STEP_MS = 120;
 
@@ -504,6 +503,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       clearTimeout(movedTimeoutRef.current);
       clearTimeout(autoMoveRef.current);
       clearTimeout(captureTimerRef.current);
+      for (const timer of captureShowTimers.current) clearTimeout(timer);
+      for (const timer of introTimersRef.current) clearTimeout(timer);
       for (const timer of tokenAnimTimers.current.values()) {
         clearTimeout(timer);
       }
@@ -596,32 +597,55 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       // Detect token moves and start cell-by-cell animations + capture effects
       if (state.tokens !== prevTokensRef.current) {
         const oldTokens = deserializeTokens(prevTokensRef.current);
-        let hasCaptured = false;
+
+        // Track animation paths for capturers (to compute capture delay)
+        const animPaths = new Map<number, [number, number][]>();
+
+        // Pass 1: Start animations for movers (skip captured tokens)
         for (let i = 0; i < TOTAL_TOKENS; i++) {
           if (oldTokens[i] !== parsedTokens[i]) {
-            // Detect captures: token went from track/final to base
-            if (parsedTokens[i] === 'base' && oldTokens[i] !== 'base') {
-              const coords = getTokenCoords(oldTokens[i], i);
-              if (coords) {
-                capturedTokens.current.push({
-                  index: i, coords, color: getTokenColor(i), ts: Date.now(),
-                });
-                hasCaptured = true;
-              }
-            }
+            if (parsedTokens[i] === 'base' && oldTokens[i] !== 'base') continue; // capture — handled in pass 2
             const path = computeMovePath(oldTokens[i], parsedTokens[i], getTokenColor(i));
             if (path.length > 1) {
+              animPaths.set(i, path);
               startTokenAnimation(i, path);
             }
           }
         }
-        if (hasCaptured) {
-          setRenderTick(n => n + 1);
-          clearTimeout(captureTimerRef.current);
-          captureTimerRef.current = setTimeout(() => {
-            capturedTokens.current = [];
-            setRenderTick(n => n + 1);
-          }, 500);
+
+        // Pass 2: Schedule capture ghosts with delay until the capturer arrives
+        for (const timer of captureShowTimers.current) clearTimeout(timer);
+        captureShowTimers.current = [];
+
+        for (let i = 0; i < TOTAL_TOKENS; i++) {
+          if (oldTokens[i] === parsedTokens[i]) continue;
+          if (!(parsedTokens[i] === 'base' && oldTokens[i] !== 'base')) continue;
+
+          // Find the capturer: the token whose NEW position matches this token's OLD position
+          let capturerDelay = 0;
+          for (let j = 0; j < TOTAL_TOKENS; j++) {
+            if (j === i) continue;
+            if (parsedTokens[j] === oldTokens[i] && oldTokens[j] !== parsedTokens[j]) {
+              const path = animPaths.get(j);
+              if (path) capturerDelay = (path.length - 1) * STEP_MS;
+              break;
+            }
+          }
+
+          const coords = getTokenCoords(oldTokens[i], i);
+          if (coords) {
+            const captureData = { index: i, coords, color: getTokenColor(i), ts: Date.now() + capturerDelay };
+            const showTimer = setTimeout(() => {
+              capturedTokens.current.push(captureData);
+              setRenderTick(n => n + 1);
+              clearTimeout(captureTimerRef.current);
+              captureTimerRef.current = setTimeout(() => {
+                capturedTokens.current = capturedTokens.current.filter(t => t !== captureData);
+                setRenderTick(n => n + 1);
+              }, 500);
+            }, capturerDelay);
+            captureShowTimers.current.push(showTimer);
+          }
         }
       }
       prevTokensRef.current = state.tokens;
@@ -756,6 +780,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const gc = gameCodeRef.current;
     const mc = myColorRef.current;
     if (!gc || !mc) return;
+    if (introPhaseRef.current === 'running') return;
     if (currentTurnRef.current !== mc || turnPhaseRef.current !== 'roll') return;
     if (winnerRef.current || isRollingRef.current || moveInFlightRef.current) return;
 
@@ -893,7 +918,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (gamePhase !== 'playing') return;
 
     const tick = () => {
-      if (winnerRef.current) {
+      if (winnerRef.current || introPhaseRef.current === 'running') {
         setTimeLeft(TURN_SECONDS);
         return;
       }
@@ -960,6 +985,64 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
+  }, [gamePhase]);
+
+  // --- Intro animation (tokens race around board on game start) ---
+
+  useEffect(() => {
+    if (gamePhase !== 'playing') return;
+    if (introPhaseRef.current !== 'idle') return;
+
+    // Skip intro if game is already in progress (reconnection / spectating midway)
+    if (prevTokensRef.current !== 'bas'.repeat(16)) {
+      setIntroPhase('done');
+      introPhaseRef.current = 'done';
+      return;
+    }
+
+    setIntroPhase('running');
+    introPhaseRef.current = 'running';
+
+    const INTRO_STEP_MS = 50;
+    const STAGGER_MS = 150;
+    const activeColors = TURN_ORDER.slice(0, activePlayerCountRef.current);
+    let completedColors = 0;
+
+    for (let ci = 0; ci < activeColors.length; ci++) {
+      const color = activeColors[ci];
+      const startPos = START_POSITIONS[color];
+
+      // Build full lap path: 52 cells starting from this color's start position
+      const path: [number, number][] = [];
+      for (let step = 0; step < TRACK_SIZE; step++) {
+        const cellNum = ((startPos - 1 + step) % TRACK_SIZE) + 1;
+        path.push(TRACK_COORDS[cellNum]);
+      }
+
+      const staggerDelay = ci * STAGGER_MS;
+
+      // Animate through the track
+      for (let step = 0; step < path.length; step++) {
+        const timer = setTimeout(() => {
+          introTokenPositions.current.set(color, path[step]);
+          setRenderTick(n => n + 1);
+        }, staggerDelay + step * INTRO_STEP_MS);
+        introTimersRef.current.push(timer);
+      }
+
+      // After completing the lap, remove the ghost token
+      const totalDuration = staggerDelay + path.length * INTRO_STEP_MS;
+      const doneTimer = setTimeout(() => {
+        introTokenPositions.current.delete(color);
+        completedColors++;
+        setRenderTick(n => n + 1);
+        if (completedColors === activeColors.length) {
+          setIntroPhase('done');
+          introPhaseRef.current = 'done';
+        }
+      }, totalDuration);
+      introTimersRef.current.push(doneTimer);
+    }
   }, [gamePhase]);
 
   // --- Lobby handlers ---
@@ -1032,6 +1115,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (!gc) return;
     try {
       moveInFlightRef.current = false;
+      setIntroPhase('idle');
+      introPhaseRef.current = 'idle';
+      for (const timer of introTimersRef.current) clearTimeout(timer);
+      introTimersRef.current = [];
+      introTokenPositions.current.clear();
       await resetGame(gc, activePlayerCountRef.current);
       prevTokensRef.current = 'bas'.repeat(16);
     } catch {
@@ -1046,6 +1134,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     clearTimeout(hintTimeoutRef.current);
     clearTimeout(autoMoveRef.current);
     clearTimeout(captureTimerRef.current);
+    for (const timer of captureShowTimers.current) clearTimeout(timer);
+    captureShowTimers.current = [];
+    for (const timer of introTimersRef.current) clearTimeout(timer);
+    introTimersRef.current = [];
+    introTokenPositions.current.clear();
+    setIntroPhase('idle');
+    introPhaseRef.current = 'idle';
     for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
     tokenAnimTimers.current.clear();
     tokenAnimPos.current.clear();
@@ -1353,11 +1448,104 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
         {/* === PLAYING === */}
         {gamePhase === 'playing' && (
-          <>
-            {/* Status */}
-            <div className={styles.status}>
+          <div className={styles.playingLayout}>
+            {/* Board column */}
+            <div className={styles.boardColumn}>
+              <div className={styles.boardWrapper}>
+                <div className={styles.board}>
+                  {/* Base quadrants */}
+                  {TURN_ORDER.map(color => renderBaseQuadrant(color))}
+
+                  {/* Center home */}
+                  <div className={styles.home}>
+                    {TURN_ORDER.map(color => renderHomeCount(color))}
+                  </div>
+
+                  {/* Home corridors */}
+                  <div className={`${styles.redFinal} ${activePlayerCount < 1 ? styles.corridorInactive : ''}`}>
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <div key={`rf-${n}`} className={styles.finalInnerCell} />
+                    ))}
+                    <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
+                  </div>
+                  <div className={`${styles.greenFinal} ${activePlayerCount < 2 ? styles.corridorInactive : ''}`}>
+                    {[1, 2, 3, 4, 5].map(n => (
+                      <div key={`gf-${n}`} className={styles.finalInnerCell} />
+                    ))}
+                    <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
+                  </div>
+                  <div className={`${styles.yellowFinal} ${activePlayerCount < 3 ? styles.corridorInactive : ''}`}>
+                    <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
+                    {[5, 4, 3, 2, 1].map(n => (
+                      <div key={`yf-${n}`} className={styles.finalInnerCell} />
+                    ))}
+                  </div>
+                  <div className={`${styles.blueFinal} ${activePlayerCount < 4 ? styles.corridorInactive : ''}`}>
+                    <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
+                    {[5, 4, 3, 2, 1].map(n => (
+                      <div key={`bf-${n}`} className={styles.finalInnerCell} />
+                    ))}
+                  </div>
+
+                  {/* Track cells */}
+                  {Array.from({ length: TRACK_SIZE }, (_, i) => renderTrackCell(i + 1))}
+
+                  {/* Tokens on track and final corridor */}
+                  {Array.from({ length: TOTAL_TOKENS }, (_, i) => renderToken(i))}
+
+                  {/* Captured token ghosts (fade-out at last position) */}
+                  {capturedTokens.current.map(ct => (
+                    <div
+                      key={`cap-${ct.index}-${ct.ts}`}
+                      className={`${styles.token} ${TOKEN_STYLE[ct.color]} ${styles.tokenCaptured}`}
+                      style={{
+                        left: `${(ct.coords[1] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+                        top: `${(ct.coords[0] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+                      }}
+                    />
+                  ))}
+
+                  {/* Intro animation ghost tokens */}
+                  {introPhase === 'running' && TURN_ORDER.map(color => {
+                    const pos = introTokenPositions.current.get(color);
+                    if (!pos) return null;
+                    return (
+                      <div
+                        key={`intro-${color}`}
+                        className={`${styles.token} ${TOKEN_STYLE[color]} ${styles.introToken}`}
+                        style={{
+                          left: `${(pos[1] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+                          top: `${(pos[0] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+                        }}
+                      />
+                    );
+                  })}
+
+                  {/* Winner burst */}
+                  {winner && (
+                    <div
+                      className={[
+                        styles.burst,
+                        winner === 'red' ? styles.burstRed
+                          : winner === 'green' ? styles.burstGreen
+                          : winner === 'yellow' ? styles.burstYellow
+                          : styles.burstBlue,
+                        showBurst ? styles.burstActive : '',
+                      ].filter(Boolean).join(' ')}
+                      style={{ gridRow: '1 / -1', gridColumn: '1 / -1' }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Side panel */}
+            <div className={styles.sidePanel}>
+              {/* Turn indicator */}
               <div className={styles.turnIndicator}>
-                {winner ? (
+                {introPhase === 'running' ? (
+                  <span className={styles.introMessage}>Get ready...</span>
+                ) : winner ? (
                   <span className={styles.winText}>
                     <span className={`${styles.statusDot} ${styles[winner]}`} />
                     {' '}{statusMessage} 🎉
@@ -1372,13 +1560,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   </>
                 )}
               </div>
-              <div className={styles.diceArea}>
-                {statusHint && (
-                  <span className={styles.statusHint}>{statusHint}</span>
-                )}
-                {showRollReminder && (
-                  <span className={styles.rollReminder}>Roll!</span>
-                )}
+
+              {/* Dice */}
+              <div className={styles.sideDice}>
                 <button
                   className={[
                     styles.dice,
@@ -1399,134 +1583,71 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                     <span style={{ fontSize: '1.2rem', fontWeight: 700 }}>🎲</span>
                   )}
                 </button>
-              </div>
-            </div>
-
-            {/* Player bar */}
-            <div className={styles.playerBar}>
-              {TURN_ORDER.slice(0, activePlayerCount).map(color => {
-                const isFinished = finishOrder.includes(color);
-                return (
-                  <div
-                    key={color}
-                    className={[
-                      styles.playerChip,
-                      currentTurn === color && !winner ? styles.playerChipActive : '',
-                      isFinished ? styles.playerChipFinished : '',
-                    ].filter(Boolean).join(' ')}
-                  >
-                    <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
-                    {playerNames[color] || COLOR_LABELS[color]}
-                    {color === myColor && <span className={styles.youBadge}>you</span>}
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Board */}
-            <div className={styles.boardWrapper}>
-              <div className={styles.board}>
-                {/* Base quadrants */}
-                {TURN_ORDER.map(color => renderBaseQuadrant(color))}
-
-                {/* Center home */}
-                <div className={styles.home}>
-                  {TURN_ORDER.map(color => renderHomeCount(color))}
-                </div>
-
-                {/* Home corridors */}
-                <div className={`${styles.redFinal} ${activePlayerCount < 1 ? styles.corridorInactive : ''}`}>
-                  {[1, 2, 3, 4, 5].map(n => (
-                    <div key={`rf-${n}`} className={styles.finalInnerCell} />
-                  ))}
-                  <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
-                </div>
-                <div className={`${styles.greenFinal} ${activePlayerCount < 2 ? styles.corridorInactive : ''}`}>
-                  {[1, 2, 3, 4, 5].map(n => (
-                    <div key={`gf-${n}`} className={styles.finalInnerCell} />
-                  ))}
-                  <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
-                </div>
-                <div className={`${styles.yellowFinal} ${activePlayerCount < 3 ? styles.corridorInactive : ''}`}>
-                  <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
-                  {[5, 4, 3, 2, 1].map(n => (
-                    <div key={`yf-${n}`} className={styles.finalInnerCell} />
-                  ))}
-                </div>
-                <div className={`${styles.blueFinal} ${activePlayerCount < 4 ? styles.corridorInactive : ''}`}>
-                  <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
-                  {[5, 4, 3, 2, 1].map(n => (
-                    <div key={`bf-${n}`} className={styles.finalInnerCell} />
-                  ))}
-                </div>
-
-                {/* Track cells */}
-                {Array.from({ length: TRACK_SIZE }, (_, i) => renderTrackCell(i + 1))}
-
-                {/* Tokens on track and final corridor */}
-                {Array.from({ length: TOTAL_TOKENS }, (_, i) => renderToken(i))}
-
-                {/* Captured token ghosts (fade-out at last position) */}
-                {capturedTokens.current.map(ct => (
-                  <div
-                    key={`cap-${ct.index}-${ct.ts}`}
-                    className={`${styles.token} ${TOKEN_STYLE[ct.color]} ${styles.tokenCaptured}`}
-                    style={{
-                      left: `${(ct.coords[1] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
-                      top: `${(ct.coords[0] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
-                    }}
-                  />
-                ))}
-
-                {/* Winner burst */}
-                {winner && (
-                  <div
-                    className={[
-                      styles.burst,
-                      winner === 'red' ? styles.burstRed
-                        : winner === 'green' ? styles.burstGreen
-                        : winner === 'yellow' ? styles.burstYellow
-                        : styles.burstBlue,
-                      showBurst ? styles.burstActive : '',
-                    ].filter(Boolean).join(' ')}
-                    style={{ gridRow: '1 / -1', gridColumn: '1 / -1' }}
-                  />
+                {statusHint && (
+                  <span className={styles.statusHint}>{statusHint}</span>
+                )}
+                {showRollReminder && (
+                  <span className={styles.rollReminder}>Roll!</span>
                 )}
               </div>
+
+              {/* Player bar */}
+              <div className={`${styles.playerBar} ${styles.playerBarVertical}`}>
+                {TURN_ORDER.slice(0, activePlayerCount).map(color => {
+                  const isFinished = finishOrder.includes(color);
+                  return (
+                    <div
+                      key={color}
+                      className={[
+                        styles.playerChip,
+                        currentTurn === color && !winner ? styles.playerChipActive : '',
+                        isFinished ? styles.playerChipFinished : '',
+                      ].filter(Boolean).join(' ')}
+                    >
+                      <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
+                      {playerNames[color] || COLOR_LABELS[color]}
+                      {color === myColor && <span className={styles.youBadge}>you</span>}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Spacer */}
+              <div className={styles.sideSpacer} />
+
+              {/* Finish order */}
+              {finishOrder.length > 0 && (
+                <div className={styles.finishOrder}>
+                  Finished:&nbsp;
+                  {finishOrder.map((c, i) => (
+                    <span key={c}>
+                      {i > 0 && ', '}
+                      <span className={styles.finishDot} style={{ background: COLOR_HEX[c] }} />
+                      {playerNames[c] || COLOR_LABELS[c]}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {/* Controls */}
+              {isSpectating ? (
+                <div className={styles.controls}>
+                  <button className={styles.resetBtn} onClick={handleBackToLobby}>
+                    Leave
+                  </button>
+                </div>
+              ) : winner ? (
+                <div className={styles.controls}>
+                  <button className={styles.resetBtn} onClick={handleNewGame}>
+                    New Game
+                  </button>
+                  <button className={styles.resetBtn} onClick={handleBackToLobby}>
+                    Leave
+                  </button>
+                </div>
+              ) : null}
             </div>
-
-            {/* Controls */}
-            {isSpectating ? (
-              <div className={styles.controls}>
-                <button className={styles.resetBtn} onClick={handleBackToLobby}>
-                  Leave
-                </button>
-              </div>
-            ) : winner ? (
-              <div className={styles.controls}>
-                <button className={styles.resetBtn} onClick={handleNewGame}>
-                  New Game
-                </button>
-                <button className={styles.resetBtn} onClick={handleBackToLobby}>
-                  Leave
-                </button>
-              </div>
-            ) : null}
-
-            {/* Finish order */}
-            {finishOrder.length > 0 && (
-              <div className={styles.finishOrder}>
-                Finished:&nbsp;
-                {finishOrder.map((c, i) => (
-                  <span key={c}>
-                    {i > 0 && ', '}
-                    <span className={styles.finishDot} style={{ background: COLOR_HEX[c] }} />
-                    {playerNames[c] || COLOR_LABELS[c]}
-                  </span>
-                ))}
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
     </div>

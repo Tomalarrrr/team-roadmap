@@ -1,8 +1,8 @@
 /* Popup container */
 .popup {
   position: fixed;
-  width: 560px;
-  min-width: 420px;
+  width: 800px;
+  min-width: 680px;
   min-height: 520px;
   z-index: 11000;
   background: var(--bg-secondary);
@@ -84,6 +84,44 @@
   overflow: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border-medium) transparent;
+}
+
+/* Side panel layout (playing phase) */
+.playingLayout {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+.boardColumn {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidePanel {
+  width: 190px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.sideDice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.playerBarVertical {
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sideSpacer {
+  flex: 1;
 }
 
 /* Status line */
@@ -814,17 +852,14 @@
 .controls {
   display: flex;
   gap: 8px;
-  justify-content: center;
-  margin-top: 4px;
+  flex-wrap: wrap;
 }
 
 .finishOrder {
   font-size: 0.7rem;
   color: var(--text-muted);
-  text-align: center;
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 4px;
   flex-wrap: wrap;
 }
@@ -894,6 +929,25 @@
   100% { transform: scale(1); }
 }
 
+/* Intro animation */
+.introToken {
+  transition: left 50ms linear, top 50ms linear !important;
+  opacity: 0.8;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.introMessage {
+  font-weight: 600;
+  color: var(--text-secondary);
+  animation: introPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes introPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .popup,
@@ -901,13 +955,15 @@
   .tokenClickable,
   .tokenArriving,
   .tokenCaptured,
+  .introToken,
   .diceRolling,
   .diceResult,
   .winText,
   .burst,
   .waitingText,
   .timerUrgent,
-  .statusHint {
+  .statusHint,
+  .introMessage {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
