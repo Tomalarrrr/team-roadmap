@@ -77,17 +77,23 @@ async function initializeFirebase(): Promise<void> {
 }
 
 // Get the cached database module (only valid after initialization)
-function getDbModule() {
+export function getDbModule() {
   if (!dbModule) throw new Error('Firebase not initialized');
   return dbModule;
 }
 
 // Ensure Firebase is initialized before use
-function ensureInitialized(): Promise<void> {
+export function ensureInitialized(): Promise<void> {
   if (!initPromise) {
     initPromise = initializeFirebase();
   }
   return initPromise;
+}
+
+// Get the initialized database instance (only valid after initialization)
+export function getFirebaseDatabase() {
+  if (!database) throw new Error('Firebase not initialized');
+  return database;
 }
 
 // ============================================

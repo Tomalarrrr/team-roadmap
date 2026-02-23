@@ -337,13 +337,147 @@
   }
 }
 
+/* Lobby */
+.lobby {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 32px 16px;
+}
+
+.lobbyDivider {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.createBtn {
+  padding: 12px 32px;
+  background: #7ba7bc;
+  color: white;
+  border: none;
+  border-radius: var(--radius-full);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.createBtn:hover {
+  background: #6a96ab;
+}
+
+.createBtn:active {
+  transform: scale(0.95);
+}
+
+.createBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.joinSection {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.codeInput {
+  width: 100px;
+  padding: 8px 12px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color 150ms ease;
+}
+
+.codeInput:focus {
+  border-color: #7ba7bc;
+}
+
+.codeInput::placeholder {
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  font-size: 0.7rem;
+}
+
+.joinBtn {
+  padding: 8px 20px;
+  background: none;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-full);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.joinBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.joinBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Waiting screen */
+.gameCodeDisplay {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  padding: 12px 24px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-light);
+  user-select: all;
+}
+
+.waitingText {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.shareHint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.errorText {
+  font-size: 0.8rem;
+  color: #e4002b;
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   .popup,
   .dropping,
   .winning,
   .winText,
-  .burst {
+  .burst,
+  .waitingText {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
