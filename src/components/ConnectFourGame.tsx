@@ -124,6 +124,8 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
 
   // Track previous board string for drop animation detection
   const prevBoardRef = useRef<string>('.'.repeat(48));
+  // Prevent double-moves during Firebase round-trip
+  const moveInFlightRef = useRef(false);
 
   // Escape key to close
   useEffect(() => {
@@ -139,9 +141,10 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     if (!gameCode) return;
 
     let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
 
     subscribeToGame(gameCode, (state: ConnectFourGameState | null) => {
-      if (!state) return;
+      if (cancelled || !state) return;
 
       // Detect newly placed piece for drop animation
       if (state.board !== prevBoardRef.current) {
@@ -155,6 +158,8 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
           }
         }
         prevBoardRef.current = state.board;
+        // Board changed — allow next move
+        moveInFlightRef.current = false;
       }
 
       // Update game state from Firebase
@@ -179,10 +184,17 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
         if (opponent) setOpponentName(opponent.name);
       }
     }).then(unsub => {
-      unsubscribe = unsub;
+      if (cancelled) {
+        unsub(); // Effect already cleaned up — unsubscribe immediately
+      } else {
+        unsubscribe = unsub;
+      }
     });
 
-    return () => { unsubscribe?.(); };
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, [gameCode, myColor]);
 
   // --- Handlers ---
@@ -226,7 +238,7 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
 
   const dropPiece = useCallback((col: number) => {
     if (!gameCode || !myColor) return;
-    if (winner || droppingCell) return;
+    if (winner || moveInFlightRef.current) return;
     if (myColor !== currentPlayer) return;
 
     let targetRow = -1;
@@ -237,6 +249,9 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       }
     }
     if (targetRow === -1) return;
+
+    // Lock moves until Firebase round-trip completes
+    moveInFlightRef.current = true;
 
     const newBoard = board.map(row => [...row]);
     newBoard[targetRow][col] = currentPlayer;
@@ -251,12 +266,16 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       newWinner ? currentPlayer : nextTurn,
       newWinner,
       winCells ? serializeWinningCells(winCells) : null
-    );
-  }, [gameCode, myColor, board, currentPlayer, winner, droppingCell]);
+    ).catch(() => {
+      // Unlock on failure so the player can retry
+      moveInFlightRef.current = false;
+    });
+  }, [gameCode, myColor, board, currentPlayer, winner]);
 
   const handleNewGame = useCallback(async () => {
     if (!gameCode) return;
     try {
+      moveInFlightRef.current = false;
       await resetGame(gameCode);
       prevBoardRef.current = '.'.repeat(48);
     } catch {
@@ -276,6 +295,7 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     setWinningCells([]);
     setShowBurst(false);
     prevBoardRef.current = '.'.repeat(48);
+    moveInFlightRef.current = false;
   }, []);
 
   // Drag handlers
