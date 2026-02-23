@@ -332,59 +332,29 @@ const TOKEN_STYLE: Record<LudoColor, string> = {
   blue: styles.tokenBlue,
 };
 
-const PIP_STYLE: Record<LudoColor, string> = {
-  red: styles.pipRed,
-  green: styles.pipGreen,
-  yellow: styles.pipYellow,
-  blue: styles.pipBlue,
+// Standard dice pip positions on a 3×3 grid [row, col]
+const DICE_PIPS: Record<number, [number, number][]> = {
+  1: [[2, 2]],
+  2: [[1, 3], [3, 1]],
+  3: [[1, 3], [2, 2], [3, 1]],
+  4: [[1, 1], [1, 3], [3, 1], [3, 3]],
+  5: [[1, 1], [1, 3], [2, 2], [3, 1], [3, 3]],
+  6: [[1, 1], [2, 1], [3, 1], [1, 3], [2, 3], [3, 3]],
 };
 
-function DiceFace({ value, pipClass }: { value: number; pipClass: string }) {
-  const pip = <span className={`${styles.pip} ${pipClass}`} />;
-
-  switch (value) {
-    case 1:
-      return <div className={`${styles.diceFace} ${styles.face1}`}>{pip}</div>;
-    case 2:
-      return (
-        <div className={`${styles.diceFace} ${styles.face2}`}>
-          {pip}
-          <span className={`${styles.pip} ${pipClass} ${styles.face2Pip2}`} />
-        </div>
-      );
-    case 3:
-      return (
-        <div className={`${styles.diceFace} ${styles.face3}`}>
-          {pip}
-          <span className={`${styles.pip} ${pipClass} ${styles.face3Pip2}`} />
-          <span className={`${styles.pip} ${pipClass} ${styles.face3Pip3}`} />
-        </div>
-      );
-    case 4:
-      return (
-        <div className={`${styles.diceFace} ${styles.face4}`}>
-          <div className={styles.faceCol}>{pip}{pip}</div>
-          <div className={styles.faceCol}>{pip}{pip}</div>
-        </div>
-      );
-    case 5:
-      return (
-        <div className={`${styles.diceFace} ${styles.face5}`}>
-          <div className={styles.faceCol}>{pip}{pip}</div>
-          <div className={`${styles.faceCol} ${styles.face5ColCenter}`}>{pip}</div>
-          <div className={styles.faceCol}>{pip}{pip}</div>
-        </div>
-      );
-    case 6:
-      return (
-        <div className={`${styles.diceFace} ${styles.face6}`}>
-          <div className={styles.faceCol}>{pip}{pip}{pip}</div>
-          <div className={styles.faceCol}>{pip}{pip}{pip}</div>
-        </div>
-      );
-    default:
-      return <div className={`${styles.diceFace} ${styles.face1}`}>?</div>;
-  }
+function DiceFace({ value }: { value: number }) {
+  const pips = DICE_PIPS[value] || DICE_PIPS[1];
+  return (
+    <div className={styles.diceFace}>
+      {pips.map(([r, c], i) => (
+        <span
+          key={i}
+          className={styles.pip}
+          style={{ gridRow: r, gridColumn: c }}
+        />
+      ))}
+    </div>
+  );
 }
 
 // --- Component ---
@@ -495,15 +465,19 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     return () => clearInterval(interval);
   }, [isRolling]);
 
-  // --- Escape key ---
+  // --- Keyboard shortcuts ---
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isSearchOpen) onClose();
+      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing') {
+        e.preventDefault();
+        handleRollDiceRef.current();
+      }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, isSearchOpen]);
+  }, [onClose, isSearchOpen, gamePhase]);
 
   // --- Firebase subscription ---
 
@@ -749,7 +723,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         turnStartedAt: Date.now(),
       };
       try { await makeMove(gc, update); } catch { moveInFlightRef.current = false; }
-    }, 400);
+    }, 600);
   }, [executeMove, showHint]);
 
   const handleMoveToken = useCallback((tokenIndex: number) => {
@@ -990,6 +964,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // --- Derived values ---
 
   const isMyTurn = myColor === currentTurn;
+  const diceCanRoll = isMyTurn && turnPhase === 'roll' && !isRolling && !winner;
+  const showRollReminder = diceCanRoll && timeLeft <= TURN_SECONDS - 5;
 
   const statusMessage = isSpectating
     ? winner
@@ -998,7 +974,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     : winner
       ? (winner === myColor ? 'You win!' : `${playerNames[winner] || COLOR_LABELS[winner]} wins!`)
       : isMyTurn
-        ? (turnPhase === 'roll' ? 'Your turn — Roll!' : 'Choose a token')
+        ? (turnPhase === 'roll' ? 'Your turn — Roll!' : `Rolled ${diceValue} — Pick a token`)
         : `${playerNames[currentTurn] || COLOR_LABELS[currentTurn]}'s turn`;
 
   // --- Render helpers ---
@@ -1060,9 +1036,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         onClick={() => isClickable && handleMoveToken(idx)}
         role="button"
         aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1}`}
-      >
-        {localIdx + 1}
-      </div>
+      />
     );
   }
 
@@ -1094,9 +1068,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 onClick={() => isClickable && handleMoveToken(idx)}
                 role="button"
                 aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1} (in base)`}
-              >
-                {localIdx + 1}
-              </div>
+              />
             );
           })}
         </div>
@@ -1259,17 +1231,24 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 {statusHint && (
                   <span className={styles.statusHint}>{statusHint}</span>
                 )}
+                {showRollReminder && (
+                  <span className={styles.rollReminder}>Roll!</span>
+                )}
                 <button
-                  className={`${styles.dice} ${isRolling ? styles.diceRolling : ''}`}
+                  className={[
+                    styles.dice,
+                    isRolling ? styles.diceRolling : '',
+                    diceCanRoll ? styles.diceActive : '',
+                  ].filter(Boolean).join(' ')}
                   onClick={handleRollDice}
                   disabled={!isMyTurn || turnPhase !== 'roll' || isRolling || !!winner}
                   aria-label="Roll dice"
                 >
                   {isRolling ? (
-                    <DiceFace value={rollingFace} pipClass={PIP_STYLE[currentTurn]} />
+                    <DiceFace value={rollingFace} />
                   ) : diceValue ? (
                     <span key={diceAnimKeyRef.current} className={styles.diceResult}>
-                      <DiceFace value={diceValue} pipClass={PIP_STYLE[currentTurn]} />
+                      <DiceFace value={diceValue} />
                     </span>
                   ) : (
                     <span style={{ fontSize: '1.2rem', fontWeight: 700 }}>🎲</span>
