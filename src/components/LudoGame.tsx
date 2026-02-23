@@ -89,9 +89,13 @@ const COLOR_HEX: Record<LudoColor, string> = {
 
 // Absolute-positioning constants (percentages of board size)
 const CELL_PCT = 100 / 15;
-const TOKEN_SIZE_PCT = CELL_PCT * 0.7;
-const TOKEN_PAD_PCT = (CELL_PCT - TOKEN_SIZE_PCT) / 2;
+const TOKEN_PAD_PCT = CELL_PCT * 0.15;
 const STEP_MS = 120;
+const BACKUP_GRACE = 15;
+
+// Pre-allocated index arrays (avoid Array.from in render)
+const TRACK_INDICES = Array.from({ length: TRACK_SIZE }, (_, i) => i + 1);
+const TOKEN_INDICES = Array.from({ length: TOTAL_TOKENS }, (_, i) => i);
 
 // --- Pure game logic ---
 
@@ -323,8 +327,16 @@ function computeMovePath(
   to: TokenPosition,
   color: LudoColor
 ): [number, number][] {
-  if (from === 'base' || from === 'final-6') return [];
+  if (from === 'final-6') return [];
   if (to === 'base') return [];
+
+  // Base → start cell: animate from base position to start cell
+  if (from === 'base' && to.startsWith('track-')) {
+    const trackNum = parseInt(to.split('-')[1]);
+    // tokenIndex not available here — caller provides base coords when needed
+    return [TRACK_COORDS[trackNum]];
+  }
+  if (from === 'base') return [];
 
   if (from.startsWith('track-') && to.startsWith('track-')) {
     const path: [number, number][] = [];
@@ -447,7 +459,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     x: Math.max(0, (window.innerWidth - 800) / 2),
     y: Math.max(0, (window.innerHeight - 600) / 2),
   }));
+  const positionRef = useRef(position);
+  positionRef.current = position;
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
+  const dragCleanupRef = useRef<(() => void) | null>(null);
 
   // --- Refs for timer/callback safety (avoids stale closures) ---
   const moveInFlightRef = useRef(false);
@@ -458,6 +473,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const movedTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const diceAnimKeyRef = useRef(0);
+  const rolledThisTurnRef = useRef(false);
   const autoMoveRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Cell-by-cell animation state
@@ -465,6 +481,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const tokenAnimTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const capturedTokens = useRef<{ index: number; coords: [number, number]; color: LudoColor; ts: number }[]>([]);
   const captureShowTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+
+  // Game effects (deploy sparkle, home celebration)
+  const gameEffects = useRef<{ type: 'deploy' | 'home'; color: LudoColor; coords?: [number, number]; ts: number }[]>([]);
+  const effectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Intro animation state
   const [introPhase, setIntroPhase] = useState<'idle' | 'running' | 'done'>('idle');
@@ -495,7 +515,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const winnerRef = useRef(winner);
   winnerRef.current = winner;
 
-  // --- Cleanup all timeouts on unmount ---
+  // --- Cleanup all timeouts + listeners on unmount ---
   useEffect(() => {
     return () => {
       clearTimeout(hintTimeoutRef.current);
@@ -504,9 +524,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       clearTimeout(autoMoveRef.current);
       for (const timer of captureShowTimers.current) clearTimeout(timer);
       for (const timer of introTimersRef.current) clearTimeout(timer);
+      for (const timer of effectTimers.current) clearTimeout(timer);
       for (const timer of tokenAnimTimers.current.values()) {
         clearTimeout(timer);
       }
+      dragCleanupRef.current?.();
     };
   }, []);
 
@@ -606,10 +628,54 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           if (oldTokens[i] !== parsedTokens[i]) {
             if (parsedTokens[i] === 'base' && oldTokens[i] !== 'base') continue; // capture — handled in pass 2
             const path = computeMovePath(oldTokens[i], parsedTokens[i], getTokenColor(i));
+            // For base→track deployment, prepend base coords so the token
+            // visually starts at the base and slides smoothly to the start cell
+            if (oldTokens[i] === 'base' && path.length > 0) {
+              const baseCoords = getTokenCoords('base', i);
+              if (baseCoords) path.unshift(baseCoords);
+            }
             if (path.length > 1) {
               animPaths.set(i, path);
               startTokenAnimation(i, path);
             }
+          }
+        }
+
+        // Game effects: deploy sparkle + home celebration
+        for (const timer of effectTimers.current) clearTimeout(timer);
+        effectTimers.current = [];
+        for (let i = 0; i < TOTAL_TOKENS; i++) {
+          if (oldTokens[i] === parsedTokens[i]) continue;
+          const color = getTokenColor(i);
+          // Deploy: base → track (sparkle at departure point)
+          if (oldTokens[i] === 'base' && parsedTokens[i].startsWith('track-')) {
+            const baseCoords = getTokenCoords('base', i);
+            if (baseCoords) {
+              const effect = { type: 'deploy' as const, color, coords: baseCoords, ts: Date.now() };
+              gameEffects.current.push(effect);
+              setRenderTick(n => n + 1);
+              const timer = setTimeout(() => {
+                gameEffects.current = gameEffects.current.filter(e => e !== effect);
+                setRenderTick(n => n + 1);
+              }, 600);
+              effectTimers.current.push(timer);
+            }
+          }
+          // Home arrival: final-N → final-6 (star burst at home center)
+          if (parsedTokens[i] === 'final-6' && oldTokens[i].startsWith('final-')) {
+            const path = animPaths.get(i);
+            const delay = path ? (path.length - 1) * STEP_MS : 0;
+            const effect = { type: 'home' as const, color, ts: Date.now() + delay };
+            const showTimer = setTimeout(() => {
+              gameEffects.current.push(effect);
+              setRenderTick(n => n + 1);
+              const cleanupTimer = setTimeout(() => {
+                gameEffects.current = gameEffects.current.filter(e => e !== effect);
+                setRenderTick(n => n + 1);
+              }, 800);
+              effectTimers.current.push(cleanupTimer);
+            }, delay);
+            effectTimers.current.push(showTimer);
           }
         }
 
@@ -650,6 +716,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         }
       }
       prevTokensRef.current = state.tokens;
+
+      // Reset dice display when a new roll phase arrives (avoids showing stale value)
+      if (state.turnPhase === 'roll' && !isRollingRef.current) {
+        rolledThisTurnRef.current = false;
+      }
 
       setTokens(parsedTokens);
       setCurrentTurn(state.currentTurn);
@@ -797,6 +868,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       isRollingRef.current = false;
       setDiceValue(roll);
       diceAnimKeyRef.current += 1;
+      rolledThisTurnRef.current = true;
 
       const currentTokens = tokensRef.current;
       const curColor = currentTurnRef.current;
@@ -914,8 +986,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // Backup: any other client force-skips at -15s (45s total) to prevent
   // permanent stalls when the active player disconnects.
 
-  const BACKUP_GRACE = 15;
-
   useEffect(() => {
     if (gamePhase !== 'playing') return;
 
@@ -1005,8 +1075,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setIntroPhase('running');
     introPhaseRef.current = 'running';
 
-    const INTRO_STEP_MS = 50;
-    const STAGGER_MS = 150;
+    const INTRO_STEP_MS = 65;
+    const STAGGER_MS = 250;
     const activeColors = TURN_ORDER.slice(0, activePlayerCountRef.current);
     let completedColors = 0;
 
@@ -1041,6 +1111,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (completedColors === activeColors.length) {
           setIntroPhase('done');
           introPhaseRef.current = 'done';
+          // Reset turn timer so the first player gets a full 30 seconds
+          turnStartedAtRef.current = Date.now();
         }
       }, totalDuration);
       introTimersRef.current.push(doneTimer);
@@ -1083,8 +1155,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setGameCode(code);
       setMyColor(assignedColor);
       setActivePlayerCount(state.playerCount);
-      prevTokensRef.current = 'bas'.repeat(16);
       const joinedCount = Object.values(state.players).filter(Boolean).length;
+      const gameInProgress = state.startedAt && state.tokens !== 'bas'.repeat(16);
+      if (gameInProgress) {
+        prevTokensRef.current = state.tokens;
+        setIntroPhase('done');
+        introPhaseRef.current = 'done';
+      } else {
+        prevTokensRef.current = 'bas'.repeat(16);
+      }
       setGamePhase(joinedCount >= state.playerCount ? 'playing' : 'waiting');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Game not found');
@@ -1108,7 +1187,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setIsSpectating(true);
       setPlayerCount(state.playerCount);
       setActivePlayerCount(state.playerCount);
-      prevTokensRef.current = 'bas'.repeat(16);
+      const gameInProgress = state.startedAt && state.tokens !== 'bas'.repeat(16);
+      if (gameInProgress) {
+        prevTokensRef.current = state.tokens;
+        setIntroPhase('done');
+        introPhaseRef.current = 'done';
+      } else {
+        prevTokensRef.current = 'bas'.repeat(16);
+      }
       setGamePhase(state.startedAt ? 'playing' : 'waiting');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Game not found');
@@ -1122,14 +1208,25 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (!gc) return;
     try {
       moveInFlightRef.current = false;
+      // Set prevTokens BEFORE resetGame so the intro effect sees fresh state
+      prevTokensRef.current = 'bas'.repeat(16);
       setIntroPhase('idle');
       introPhaseRef.current = 'idle';
       setIntroTrigger(n => n + 1);
+      // Clear all animation state from previous game
       for (const timer of introTimersRef.current) clearTimeout(timer);
       introTimersRef.current = [];
       introTokenPositions.current.clear();
+      for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
+      tokenAnimTimers.current.clear();
+      tokenAnimPos.current.clear();
+      for (const timer of captureShowTimers.current) clearTimeout(timer);
+      captureShowTimers.current = [];
+      for (const timer of effectTimers.current) clearTimeout(timer);
+      effectTimers.current = [];
+      capturedTokens.current = [];
+      gameEffects.current = [];
       await resetGame(gc, activePlayerCountRef.current);
-      prevTokensRef.current = 'bas'.repeat(16);
     } catch {
       // Silent failure for easter egg
     }
@@ -1145,6 +1242,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     captureShowTimers.current = [];
     for (const timer of introTimersRef.current) clearTimeout(timer);
     introTimersRef.current = [];
+    for (const timer of effectTimers.current) clearTimeout(timer);
+    effectTimers.current = [];
     introTokenPositions.current.clear();
     setIntroPhase('idle');
     introPhaseRef.current = 'idle';
@@ -1152,6 +1251,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     tokenAnimTimers.current.clear();
     tokenAnimPos.current.clear();
     capturedTokens.current = [];
+    gameEffects.current = [];
     setGamePhase('lobby');
     setGameCode(null);
     setMyColor(null);
@@ -1172,6 +1272,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     prevTokensRef.current = 'bas'.repeat(16);
     moveInFlightRef.current = false;
     isRollingRef.current = false;
+    rolledThisTurnRef.current = false;
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = null;
   }, []);
 
   // --- Drag ---
@@ -1179,11 +1282,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest(`.${styles.closeBtn}`)) return;
     e.preventDefault();
+    dragCleanupRef.current?.();
     dragStartRef.current = {
       mouseX: e.clientX,
       mouseY: e.clientY,
-      posX: position.x,
-      posY: position.y,
+      posX: positionRef.current.x,
+      posY: positionRef.current.y,
     };
     const handleMouseMove = (ev: MouseEvent) => {
       const dx = ev.clientX - dragStartRef.current.mouseX;
@@ -1196,10 +1300,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const handleMouseUp = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      dragCleanupRef.current = null;
     };
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-  }, [position]);
+    dragCleanupRef.current = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   // --- Derived values ---
 
@@ -1259,6 +1368,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const isStepping = !!animCoords;
     const isClickable = validMoves.has(idx) && isMyTurn && turnPhase === 'move' && !isStepping;
     const isArriving = lastMovedToken === idx && !isStepping;
+    const inCorridor = pos.startsWith('final-') && pos !== 'final-6';
 
     const coords = animCoords || getTokenCoords(pos, idx);
     if (!coords) return null;
@@ -1274,6 +1384,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           isClickable ? styles.tokenClickable : '',
           isArriving ? styles.tokenArriving : '',
           isStepping ? styles.tokenStepping : '',
+          inCorridor && !isStepping ? styles.tokenInCorridor : '',
         ].filter(Boolean).join(' ')}
         style={{
           left: `${(coords[1] - 1) * CELL_PCT + TOKEN_PAD_PCT + dx}%`,
@@ -1295,7 +1406,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const isActive = TURN_ORDER.indexOf(color) < activePlayerCount;
 
     return (
-      <div key={`base-${color}`} className={`${styles.base} ${baseClass} ${!isActive ? styles.baseInactive : ''}`}>
+      <div key={`base-${color}`} className={`${styles.base} ${baseClass} ${!isActive ? styles.baseInactive : ''} ${isActive && currentTurn === color && !winner && introPhase !== 'running' ? styles.baseActiveTurn : ''}`}>
         <div className={styles.baseInner}>
           {isActive && indices.map(idx => {
             const pos = tokens[idx];
@@ -1471,34 +1582,42 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   {/* Home corridors */}
                   <div className={`${styles.redFinal} ${activePlayerCount < 1 ? styles.corridorInactive : ''}`}>
                     {[1, 2, 3, 4, 5].map(n => (
-                      <div key={`rf-${n}`} className={styles.finalInnerCell} />
+                      <div key={`rf-${n}`} className={styles.finalInnerCell}>
+                        <span className={styles.corridorNum}>{n}</span>
+                      </div>
                     ))}
                     <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                   </div>
                   <div className={`${styles.greenFinal} ${activePlayerCount < 2 ? styles.corridorInactive : ''}`}>
                     {[1, 2, 3, 4, 5].map(n => (
-                      <div key={`gf-${n}`} className={styles.finalInnerCell} />
+                      <div key={`gf-${n}`} className={styles.finalInnerCell}>
+                        <span className={styles.corridorNum}>{n}</span>
+                      </div>
                     ))}
                     <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                   </div>
                   <div className={`${styles.yellowFinal} ${activePlayerCount < 3 ? styles.corridorInactive : ''}`}>
                     <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                     {[5, 4, 3, 2, 1].map(n => (
-                      <div key={`yf-${n}`} className={styles.finalInnerCell} />
+                      <div key={`yf-${n}`} className={styles.finalInnerCell}>
+                        <span className={styles.corridorNum}>{n}</span>
+                      </div>
                     ))}
                   </div>
                   <div className={`${styles.blueFinal} ${activePlayerCount < 4 ? styles.corridorInactive : ''}`}>
                     <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                     {[5, 4, 3, 2, 1].map(n => (
-                      <div key={`bf-${n}`} className={styles.finalInnerCell} />
+                      <div key={`bf-${n}`} className={styles.finalInnerCell}>
+                        <span className={styles.corridorNum}>{n}</span>
+                      </div>
                     ))}
                   </div>
 
                   {/* Track cells */}
-                  {Array.from({ length: TRACK_SIZE }, (_, i) => renderTrackCell(i + 1))}
+                  {TRACK_INDICES.map(n => renderTrackCell(n))}
 
                   {/* Tokens on track and final corridor */}
-                  {Array.from({ length: TOTAL_TOKENS }, (_, i) => renderToken(i))}
+                  {TOKEN_INDICES.map(i => renderToken(i))}
 
                   {/* Captured token ghosts (fade-out at last position) */}
                   {capturedTokens.current.map(ct => (
@@ -1511,6 +1630,33 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                       }}
                     />
                   ))}
+
+                  {/* Game effects (deploy sparkle, home celebration) */}
+                  {gameEffects.current.map(ef => {
+                    if (ef.type === 'deploy' && ef.coords) {
+                      return (
+                        <div
+                          key={`deploy-${ef.ts}`}
+                          className={styles.deployBurst}
+                          style={{
+                            left: `${(ef.coords[1] - 1) * CELL_PCT}%`,
+                            top: `${(ef.coords[0] - 1) * CELL_PCT}%`,
+                            color: COLOR_HEX[ef.color],
+                          }}
+                        />
+                      );
+                    }
+                    if (ef.type === 'home') {
+                      return (
+                        <div
+                          key={`home-${ef.ts}`}
+                          className={styles.homeCelebration}
+                          style={{ color: COLOR_HEX[ef.color] }}
+                        />
+                      );
+                    }
+                    return null;
+                  })}
 
                   {/* Intro animation ghost tokens */}
                   {introPhase === 'running' && TURN_ORDER.map(color => {
@@ -1582,7 +1728,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 >
                   {isRolling ? (
                     <DiceFace value={rollingFace} />
-                  ) : diceValue ? (
+                  ) : diceValue && (turnPhase === 'move' || rolledThisTurnRef.current) ? (
                     <span key={diceAnimKeyRef.current} className={styles.diceResult}>
                       <DiceFace value={diceValue} />
                     </span>

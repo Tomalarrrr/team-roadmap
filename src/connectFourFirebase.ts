@@ -80,7 +80,7 @@ export async function joinGame(
 
   const state = snapshot.val() as ConnectFourGameState;
 
-  // Check if this session is already in the game (reconnection)
+  // Check if this session is already in the game (reconnection by sessionId)
   if (state.players.red.sessionId === sessionId) {
     return { state, assignedColor: 'red' };
   }
@@ -88,7 +88,16 @@ export async function joinGame(
     return { state, assignedColor: 'yellow' };
   }
 
+  // If game is full, allow reconnection by name (handles tab close → new sessionId)
   if (state.players.yellow) {
+    if (state.players.yellow.name === userName) {
+      await update(gameRef, { 'players/yellow/sessionId': sessionId });
+      return { state: { ...state, players: { ...state.players, yellow: { sessionId, name: userName } } }, assignedColor: 'yellow' };
+    }
+    if (state.players.red.name === userName) {
+      await update(gameRef, { 'players/red/sessionId': sessionId });
+      return { state: { ...state, players: { ...state.players, red: { sessionId, name: userName } } }, assignedColor: 'red' };
+    }
     throw new Error('Game is full');
   }
 

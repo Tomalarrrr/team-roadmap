@@ -152,11 +152,21 @@ export async function joinGame(
 
   const state = snapshot.val() as LudoGameState;
 
-  // Check if this session is already in the game
+  // Check if this session is already in the game (reconnection by sessionId)
   for (const color of ['red', ...JOIN_ORDER] as LudoColor[]) {
     const player = state.players[color];
     if (player && player.sessionId === sessionId) {
       return { state, assignedColor: color };
+    }
+  }
+
+  // Check for reconnection by name (handles tab close → new sessionId)
+  for (const color of ['red', ...JOIN_ORDER] as LudoColor[]) {
+    const player = state.players[color];
+    if (player && player.name === userName) {
+      const playerRef = ref(db, `ludo/${code}/players/${color}/sessionId`);
+      await set(playerRef, sessionId);
+      return { state: { ...state, players: { ...state.players, [color]: { sessionId, name: userName } } }, assignedColor: color as LudoColor };
     }
   }
 

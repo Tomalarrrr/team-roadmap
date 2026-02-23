@@ -127,12 +127,17 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     x: Math.max(0, (window.innerWidth - 420) / 2),
     y: Math.max(0, (window.innerHeight - 520) / 2),
   }));
+  const positionRef = useRef(position);
+  positionRef.current = position;
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
+  const dragCleanupRef = useRef<(() => void) | null>(null);
 
   // Track previous board string for drop animation detection
   const prevBoardRef = useRef<string>('.'.repeat(48));
   // Prevent double-moves during Firebase round-trip
   const moveInFlightRef = useRef(false);
+  // Track dropping animation timer for cleanup
+  const droppingTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Refs for timer effect (avoids stale closures + unnecessary effect restarts)
   const turnStartedAtRef = useRef<number>(Date.now());
   const boardRef = useRef<Board>(board);
@@ -153,6 +158,14 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose, isSearchOpen]);
 
+  // Cleanup timers + listeners on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(droppingTimeoutRef.current);
+      dragCleanupRef.current?.();
+    };
+  }, []);
+
   // Firebase subscription
   useEffect(() => {
     if (!gameCode) return;
@@ -170,7 +183,8 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
             const row = Math.floor(i / COLS);
             const col = i % COLS;
             setDroppingCell({ row, col });
-            setTimeout(() => setDroppingCell(null), 350);
+            clearTimeout(droppingTimeoutRef.current);
+            droppingTimeoutRef.current = setTimeout(() => setDroppingCell(null), 350);
             break;
           }
         }
@@ -382,21 +396,25 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     setShowBurst(false);
     prevBoardRef.current = '.'.repeat(48);
     moveInFlightRef.current = false;
+    clearTimeout(droppingTimeoutRef.current);
+    dragCleanupRef.current?.();
+    dragCleanupRef.current = null;
   }, []);
 
   // Drag handlers
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest(`.${styles.closeBtn}`)) return;
     e.preventDefault();
+    dragCleanupRef.current?.();
     dragStartRef.current = {
       mouseX: e.clientX,
       mouseY: e.clientY,
-      posX: position.x,
-      posY: position.y,
+      posX: positionRef.current.x,
+      posY: positionRef.current.y,
     };
-    const handleMouseMove = (e: MouseEvent) => {
-      const dx = e.clientX - dragStartRef.current.mouseX;
-      const dy = e.clientY - dragStartRef.current.mouseY;
+    const handleMouseMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - dragStartRef.current.mouseX;
+      const dy = ev.clientY - dragStartRef.current.mouseY;
       setPosition({
         x: dragStartRef.current.posX + dx,
         y: Math.max(0, dragStartRef.current.posY + dy),
@@ -405,10 +423,15 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     const handleMouseUp = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      dragCleanupRef.current = null;
     };
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
-  }, [position]);
+    dragCleanupRef.current = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   // --- Derived values ---
 
