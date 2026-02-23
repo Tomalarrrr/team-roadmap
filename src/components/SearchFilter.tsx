@@ -13,6 +13,7 @@ interface SearchFilterProps {
   teamMembers: TeamMember[];
   onFilterChange: (filters: FilterState) => void;
   onProjectSelect: (projectId: string) => void;
+  isLocked?: boolean;
 }
 
 export type ProjectStatus = 'complete' | 'on-hold' | 'to-start' | 'on-track' | 'at-risk' | 'off-track' | 'planning' | 'review';
@@ -71,7 +72,8 @@ export const SearchFilter = memo(function SearchFilter({
   projects,
   teamMembers,
   onFilterChange,
-  onProjectSelect
+  onProjectSelect,
+  isLocked = true
 }: SearchFilterProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
@@ -124,8 +126,9 @@ export const SearchFilter = memo(function SearchFilter({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Easter egg: Connect Four
+  // Easter egg: Connect Four & Ludo (only when site is unlocked)
   useEffect(() => {
+    if (isLocked) return;
     if (filters.search.trim().toLowerCase() === 'connect four') {
       setShowConnectFour(true);
       setFilters(f => ({ ...f, search: '' }));
@@ -136,7 +139,7 @@ export const SearchFilter = memo(function SearchFilter({
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
     }
-  }, [filters.search]);
+  }, [filters.search, isLocked]);
 
   // Compute search results as derived state (no effect needed)
   const { searchResults, totalResultCount } = useMemo(() => {

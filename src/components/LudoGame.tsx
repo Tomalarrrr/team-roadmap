@@ -470,6 +470,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // Cell-by-cell animation state
   const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
   const tokenAnimTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const capturedTokens = useRef<{ index: number; coords: [number, number]; color: LudoColor; ts: number }[]>([]);
+  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [, setRenderTick] = useState(0);
   const STEP_MS = 120;
 
@@ -501,6 +503,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       clearTimeout(rollTimeoutRef.current);
       clearTimeout(movedTimeoutRef.current);
       clearTimeout(autoMoveRef.current);
+      clearTimeout(captureTimerRef.current);
       for (const timer of tokenAnimTimers.current.values()) {
         clearTimeout(timer);
       }
@@ -590,16 +593,35 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         moveInFlightRef.current = false;
       }
 
-      // Detect token moves and start cell-by-cell animations
+      // Detect token moves and start cell-by-cell animations + capture effects
       if (state.tokens !== prevTokensRef.current) {
         const oldTokens = deserializeTokens(prevTokensRef.current);
+        let hasCaptured = false;
         for (let i = 0; i < TOTAL_TOKENS; i++) {
           if (oldTokens[i] !== parsedTokens[i]) {
+            // Detect captures: token went from track/final to base
+            if (parsedTokens[i] === 'base' && oldTokens[i] !== 'base') {
+              const coords = getTokenCoords(oldTokens[i], i);
+              if (coords) {
+                capturedTokens.current.push({
+                  index: i, coords, color: getTokenColor(i), ts: Date.now(),
+                });
+                hasCaptured = true;
+              }
+            }
             const path = computeMovePath(oldTokens[i], parsedTokens[i], getTokenColor(i));
             if (path.length > 1) {
               startTokenAnimation(i, path);
             }
           }
+        }
+        if (hasCaptured) {
+          setRenderTick(n => n + 1);
+          clearTimeout(captureTimerRef.current);
+          captureTimerRef.current = setTimeout(() => {
+            capturedTokens.current = [];
+            setRenderTick(n => n + 1);
+          }, 500);
         }
       }
       prevTokensRef.current = state.tokens;
@@ -1023,9 +1045,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     clearTimeout(movedTimeoutRef.current);
     clearTimeout(hintTimeoutRef.current);
     clearTimeout(autoMoveRef.current);
+    clearTimeout(captureTimerRef.current);
     for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
     tokenAnimTimers.current.clear();
     tokenAnimPos.current.clear();
+    capturedTokens.current = [];
     setGamePhase('lobby');
     setGameCode(null);
     setMyColor(null);
@@ -1166,11 +1190,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       : color === 'yellow' ? styles.baseYellow
       : styles.baseBlue;
     const indices = getColorTokenIndices(color);
+    const isActive = TURN_ORDER.indexOf(color) < activePlayerCount;
 
     return (
-      <div key={`base-${color}`} className={`${styles.base} ${baseClass}`}>
+      <div key={`base-${color}`} className={`${styles.base} ${baseClass} ${!isActive ? styles.baseInactive : ''}`}>
         <div className={styles.baseInner}>
-          {indices.map(idx => {
+          {isActive && indices.map(idx => {
             const pos = tokens[idx];
             if (pos !== 'base') {
               return <div key={`empty-${idx}`} className={styles.baseSlotEmpty} />;
@@ -1410,25 +1435,25 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 </div>
 
                 {/* Home corridors */}
-                <div className={styles.redFinal}>
+                <div className={`${styles.redFinal} ${activePlayerCount < 1 ? styles.corridorInactive : ''}`}>
                   {[1, 2, 3, 4, 5].map(n => (
                     <div key={`rf-${n}`} className={styles.finalInnerCell} />
                   ))}
                   <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                 </div>
-                <div className={styles.greenFinal}>
+                <div className={`${styles.greenFinal} ${activePlayerCount < 2 ? styles.corridorInactive : ''}`}>
                   {[1, 2, 3, 4, 5].map(n => (
                     <div key={`gf-${n}`} className={styles.finalInnerCell} />
                   ))}
                   <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                 </div>
-                <div className={styles.yellowFinal}>
+                <div className={`${styles.yellowFinal} ${activePlayerCount < 3 ? styles.corridorInactive : ''}`}>
                   <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                   {[5, 4, 3, 2, 1].map(n => (
                     <div key={`yf-${n}`} className={styles.finalInnerCell} />
                   ))}
                 </div>
-                <div className={styles.blueFinal}>
+                <div className={`${styles.blueFinal} ${activePlayerCount < 4 ? styles.corridorInactive : ''}`}>
                   <div className={`${styles.finalInnerCell} ${styles.finalInnerTransparent}`} />
                   {[5, 4, 3, 2, 1].map(n => (
                     <div key={`bf-${n}`} className={styles.finalInnerCell} />
@@ -1440,6 +1465,18 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
                 {/* Tokens on track and final corridor */}
                 {Array.from({ length: TOTAL_TOKENS }, (_, i) => renderToken(i))}
+
+                {/* Captured token ghosts (fade-out at last position) */}
+                {capturedTokens.current.map(ct => (
+                  <div
+                    key={`cap-${ct.index}-${ct.ts}`}
+                    className={`${styles.token} ${TOKEN_STYLE[ct.color]} ${styles.tokenCaptured}`}
+                    style={{
+                      left: `${(ct.coords[1] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+                      top: `${(ct.coords[0] - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+                    }}
+                  />
+                ))}
 
                 {/* Winner burst */}
                 {winner && (

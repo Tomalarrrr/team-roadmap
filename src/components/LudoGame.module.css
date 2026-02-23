@@ -193,6 +193,10 @@
 .baseYellow { grid-row: 10 / 16; grid-column: 10 / 16; background: #fbbc05; }
 .baseBlue { grid-row: 10 / 16; grid-column: 1 / 7; background: #4285f4; }
 
+.baseInactive {
+  opacity: 0.3;
+}
+
 .baseInner {
   position: absolute;
   top: 10%;
@@ -333,6 +337,10 @@
   grid-template-rows: repeat(6, 1fr);
   background: #4285f4;
   z-index: 1;
+}
+
+.corridorInactive {
+  opacity: 0.3;
 }
 
 .finalInnerCell {

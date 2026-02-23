@@ -74,6 +74,7 @@ export const Toolbar = memo(function Toolbar({
           teamMembers={teamMembers}
           onFilterChange={onFilterChange}
           onProjectSelect={onProjectSelect}
+          isLocked={isLocked}
         />
       </div>
 
