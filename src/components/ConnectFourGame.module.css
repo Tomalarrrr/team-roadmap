@@ -93,7 +93,7 @@
 
 /* Status line */
 .status {
-  font-size: 0.9rem;
+  font-size: 1rem;
   font-weight: 600;
   color: var(--text-secondary);
   display: flex;
