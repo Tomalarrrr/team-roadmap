@@ -30,7 +30,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 5px 12px;
   background: linear-gradient(to bottom, var(--bg-secondary), var(--bg-tertiary));
   border-bottom: 1px solid var(--border-light);
   cursor: grab;
