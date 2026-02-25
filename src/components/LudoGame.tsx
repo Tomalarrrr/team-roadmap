@@ -478,6 +478,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
   // Cell-by-cell animation state
   const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
+  const tokenAnimParity = useRef<Map<number, number>>(new Map());
   const tokenAnimTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const capturedTokens = useRef<{ index: number; coords: [number, number]; color: LudoColor; ts: number }[]>([]);
   const captureShowTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -558,6 +559,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const advance = () => {
       if (step >= waypoints.length) {
         tokenAnimPos.current.delete(tokenIdx);
+        tokenAnimParity.current.delete(tokenIdx);
         tokenAnimTimers.current.delete(tokenIdx);
         setRenderTick(n => n + 1);
         return;
@@ -566,12 +568,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       const now = performance.now();
       if (step > 0 && now - lastStepTime < STEP_MS * 0.3) {
         tokenAnimPos.current.delete(tokenIdx);
+        tokenAnimParity.current.delete(tokenIdx);
         tokenAnimTimers.current.delete(tokenIdx);
         setRenderTick(n => n + 1);
         return;
       }
       lastStepTime = now;
       tokenAnimPos.current.set(tokenIdx, waypoints[step]);
+      tokenAnimParity.current.set(tokenIdx, step % 2);
       step++;
       setRenderTick(n => n + 1);
       tokenAnimTimers.current.set(tokenIdx, setTimeout(advance, STEP_MS));
@@ -1265,6 +1269,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
       tokenAnimTimers.current.clear();
       tokenAnimPos.current.clear();
+      tokenAnimParity.current.clear();
       for (const timer of captureShowTimers.current) clearTimeout(timer);
       captureShowTimers.current = [];
       for (const timer of effectTimers.current) clearTimeout(timer);
@@ -1415,6 +1420,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const color = getTokenColor(idx);
     const localIdx = idx % TOKENS_PER_PLAYER;
     const isStepping = !!animCoords;
+    const stepParity = tokenAnimParity.current.get(idx) ?? 0;
     const isClickable = validMoves.has(idx) && isMyTurn && turnPhase === 'move' && !isStepping;
     const isArriving = lastMovedToken === idx && !isStepping;
     const inCorridor = pos.startsWith('final-') && pos !== 'final-6';
@@ -1432,7 +1438,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           TOKEN_STYLE[color],
           isClickable ? styles.tokenClickable : '',
           isArriving ? styles.tokenArriving : '',
-          isStepping ? styles.tokenStepping : '',
+          isStepping ? (stepParity ? styles.tokenSteppingB : styles.tokenSteppingA) : '',
           inCorridor && !isStepping ? styles.tokenInCorridor : '',
         ].filter(Boolean).join(' ')}
         style={{

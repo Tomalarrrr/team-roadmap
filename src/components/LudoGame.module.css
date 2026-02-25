@@ -536,24 +536,51 @@
 }
 
 .tokenArriving {
-  animation: tokenHop 350ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: tokenHop 400ms ease;
 }
 
-.tokenStepping {
-  transition: left 140ms ease,
-              top 140ms ease !important;
-  animation: stepHop 160ms ease-in-out infinite;
+/* Two alternating classes so each step restarts the hop animation in sync */
+.tokenSteppingA,
+.tokenSteppingB {
+  transition: left 140ms ease-out,
+              top 140ms ease-out !important;
 }
 
-@keyframes stepHop {
-  0%, 100% { transform: translateY(0) scale(1); }
-  35% { transform: translateY(-15%) scale(1.06); }
+.tokenSteppingA {
+  animation: stepHopA 160ms ease forwards;
+}
+
+.tokenSteppingB {
+  animation: stepHopB 160ms ease forwards;
+}
+
+/* Physics-inspired hop: lift → hang → drop → squash → settle */
+@keyframes stepHopA {
+  0%   { transform: translateY(0) scale(1, 1); }
+  28%  { transform: translateY(-20%) scale(0.96, 1.06); }
+  45%  { transform: translateY(-22%) scale(0.97, 1.05); }
+  75%  { transform: translateY(-4%) scale(1.01, 0.99); }
+  88%  { transform: translateY(2%) scale(1.04, 0.96); }
+  100% { transform: translateY(0) scale(1, 1); }
+}
+
+@keyframes stepHopB {
+  0%   { transform: translateY(0) scale(1, 1); }
+  28%  { transform: translateY(-20%) scale(0.96, 1.06); }
+  45%  { transform: translateY(-22%) scale(0.97, 1.05); }
+  75%  { transform: translateY(-4%) scale(1.01, 0.99); }
+  88%  { transform: translateY(2%) scale(1.04, 0.96); }
+  100% { transform: translateY(0) scale(1, 1); }
 }
 
 @keyframes tokenHop {
-  0% { transform: translateY(0) scale(1); }
-  40% { transform: translateY(-25%) scale(1.1); }
-  100% { transform: translateY(0) scale(1); }
+  0%   { transform: translateY(0) scale(1, 1); }
+  25%  { transform: translateY(-30%) scale(0.94, 1.1); }
+  40%  { transform: translateY(-32%) scale(0.95, 1.08); }
+  65%  { transform: translateY(-3%) scale(1.02, 0.98); }
+  78%  { transform: translateY(3%) scale(1.06, 0.94); }
+  90%  { transform: translateY(-1%) scale(0.99, 1.01); }
+  100% { transform: translateY(0) scale(1, 1); }
 }
 
 .tokenCaptured {
@@ -1197,7 +1224,8 @@
   .token,
   .tokenClickable,
   .tokenArriving,
-  .tokenStepping,
+  .tokenSteppingA,
+  .tokenSteppingB,
   .tokenCaptured,
   .introToken,
   .diceRolling,
