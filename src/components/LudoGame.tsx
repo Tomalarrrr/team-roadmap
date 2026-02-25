@@ -90,7 +90,7 @@ const COLOR_HEX: Record<LudoColor, string> = {
 // Absolute-positioning constants (percentages of board size)
 const CELL_PCT = 100 / 15;
 const TOKEN_PAD_PCT = CELL_PCT * 0.15;
-const STEP_MS = 120;
+const STEP_MS = 160;
 const BACKUP_GRACE = 15;
 
 // Pre-allocated index arrays (avoid Array.from in render)
@@ -554,6 +554,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (waypoints.length === 0) return;
 
     let step = 0;
+    let lastStepTime = performance.now();
     const advance = () => {
       if (step >= waypoints.length) {
         tokenAnimPos.current.delete(tokenIdx);
@@ -561,6 +562,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         setRenderTick(n => n + 1);
         return;
       }
+      // If steps are firing too rapidly (tab was backgrounded), skip to end
+      const now = performance.now();
+      if (step > 0 && now - lastStepTime < STEP_MS * 0.3) {
+        tokenAnimPos.current.delete(tokenIdx);
+        tokenAnimTimers.current.delete(tokenIdx);
+        setRenderTick(n => n + 1);
+        return;
+      }
+      lastStepTime = now;
       tokenAnimPos.current.set(tokenIdx, waypoints[step]);
       step++;
       setRenderTick(n => n + 1);
@@ -1110,7 +1120,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setIntroPhase('running');
     introPhaseRef.current = 'running';
 
-    const INTRO_STEP_MS = 65;
+    const INTRO_STEP_MS = 80;
     const STAGGER_MS = 250;
     const activeColors = TURN_ORDER.slice(0, activePlayerCountRef.current);
     let completedColors = 0;
