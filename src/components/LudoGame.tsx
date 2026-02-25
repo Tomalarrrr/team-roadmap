@@ -90,7 +90,7 @@ const COLOR_HEX: Record<LudoColor, string> = {
 // Absolute-positioning constants (percentages of board size)
 const CELL_PCT = 100 / 15;
 const TOKEN_PAD_PCT = CELL_PCT * 0.15;
-const STEP_MS = 160;
+const STEP_MS = 200;
 const BACKUP_GRACE = 15;
 
 // Pre-allocated index arrays (avoid Array.from in render)
@@ -593,12 +593,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const step = () => {
       setRollingFace(Math.floor(Math.random() * 6) + 1);
       frame++;
-      const delay = 60 + frame * 10;
-      if (delay < 250) {
+      const delay = 80 + frame * 15;
+      if (delay < 300) {
         timeout = setTimeout(step, delay);
       }
     };
-    timeout = setTimeout(step, 60);
+    timeout = setTimeout(step, 80);
     return () => clearTimeout(timeout);
   }, [isRolling]);
 
@@ -985,7 +985,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         const m = moves[0];
         autoMoveRef.current = setTimeout(() => {
           executeMove(m.tokenIndex, m.newPosition, roll);
-        }, 400);
+        }, 600);
         return;
       }
 
@@ -1002,7 +1002,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         turnStartedAt: Date.now(),
       };
       try { await makeMove(gc, update); } catch { moveInFlightRef.current = false; }
-    }, 600);
+    }, 800);
   }, [executeMove, showHint]);
 
   const handleMoveToken = useCallback((tokenIndex: number) => {
@@ -1124,7 +1124,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setIntroPhase('running');
     introPhaseRef.current = 'running';
 
-    const INTRO_STEP_MS = 80;
+    const INTRO_STEP_MS = 90;
     const STAGGER_MS = 250;
     const activeColors = TURN_ORDER.slice(0, activePlayerCountRef.current);
     let completedColors = 0;
