@@ -486,6 +486,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const gameEffects = useRef<{ type: 'deploy' | 'home'; color: LudoColor; coords?: [number, number]; ts: number }[]>([]);
   const effectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
+  // Stats tracking (dice roll distribution + captures)
+  const [gameStats, setGameStats] = useState<Partial<Record<LudoColor, { rolls: number[]; captures: number }>>>({});
+  const statsInitRef = useRef(false);
+  const prevTurnPhaseRef = useRef<TurnPhase>('roll');
+
   // Intro animation state
   const [introPhase, setIntroPhase] = useState<'idle' | 'running' | 'done'>('idle');
   const introPhaseRef = useRef<'idle' | 'running' | 'done'>('idle');
@@ -694,6 +699,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (parsedTokens[j] === oldTokens[i] && oldTokens[j] !== parsedTokens[j]) {
               const path = animPaths.get(j);
               if (path) capturerDelay = (path.length - 1) * STEP_MS;
+              // Track capture in stats
+              const capturerColor = getTokenColor(j);
+              setGameStats(prev => {
+                const entry = prev[capturerColor] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
+                return { ...prev, [capturerColor]: { ...entry, captures: entry.captures + 1 } };
+              });
               break;
             }
           }
@@ -716,6 +727,26 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         }
       }
       prevTokensRef.current = state.tokens;
+
+      // Track dice rolls for stats table
+      if (!statsInitRef.current) {
+        statsInitRef.current = true;
+      } else if (
+        state.diceValue !== null &&
+        prevTurnPhaseRef.current === 'roll' &&
+        (state.turnPhase === 'move' || state.turnStartedAt !== turnStartedAtRef.current)
+      ) {
+        const roller = state.currentTurn !== currentTurnRef.current
+          ? currentTurnRef.current
+          : state.currentTurn;
+        setGameStats(prev => {
+          const entry = prev[roller] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
+          const newRolls = [...entry.rolls];
+          newRolls[state.diceValue! - 1]++;
+          return { ...prev, [roller]: { ...entry, rolls: newRolls } };
+        });
+      }
+      prevTurnPhaseRef.current = state.turnPhase;
 
       // Reset dice display when a new roll phase arrives (avoids showing stale value)
       if (state.turnPhase === 'roll' && !isRollingRef.current) {
@@ -1230,6 +1261,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       effectTimers.current = [];
       capturedTokens.current = [];
       gameEffects.current = [];
+      setGameStats({});
+      statsInitRef.current = false;
       await resetGame(gc, activePlayerCountRef.current);
     } catch {
       // Silent failure for easter egg
@@ -1256,6 +1289,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     tokenAnimPos.current.clear();
     capturedTokens.current = [];
     gameEffects.current = [];
+    setGameStats({});
+    statsInitRef.current = false;
     setGamePhase('lobby');
     setGameCode(null);
     setMyColor(null);
@@ -1771,6 +1806,38 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   );
                 })}
               </div>
+
+              {/* Stats table */}
+              {gamePhase === 'playing' && (
+                <div className={styles.statsTable}>
+                  <div className={styles.statsLabel}>Dice Rolls</div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th></th>
+                        {[1, 2, 3, 4, 5, 6].map(n => <th key={n}>{n}</th>)}
+                        <th title="Captures">{'\u2694'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {TURN_ORDER.slice(0, activePlayerCount).map(color => {
+                        const s = gameStats[color] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
+                        return (
+                          <tr key={color}>
+                            <td>
+                              <span className={styles.statsColorDot} style={{ background: COLOR_HEX[color] }} />
+                            </td>
+                            {s.rolls.map((count, i) => (
+                              <td key={i} className={count > 0 ? styles.statsNonZero : undefined}>{count}</td>
+                            ))}
+                            <td className={s.captures > 0 ? styles.statsCapture : undefined}>{s.captures}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               {/* Connection error */}
               {error && <div className={styles.errorText}>{error}</div>}
