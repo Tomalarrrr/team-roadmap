@@ -947,6 +947,13 @@
   font-weight: 600;
 }
 
+.playerChipMe {
+  font-weight: 600;
+  color: var(--text-primary);
+  border-left: 3px solid currentColor;
+  padding-left: 8px;
+}
+
 .playerChipFinished {
   opacity: 0.35;
   text-decoration: line-through;

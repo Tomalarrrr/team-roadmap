@@ -1748,18 +1748,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               <div className={`${styles.playerBar} ${styles.playerBarVertical}`}>
                 {TURN_ORDER.slice(0, activePlayerCount).map(color => {
                   const isFinished = finishOrder.includes(color);
+                  const isMe = color === myColor;
                   return (
                     <div
                       key={color}
                       className={[
                         styles.playerChip,
                         currentTurn === color && !winner ? styles.playerChipActive : '',
+                        isMe ? styles.playerChipMe : '',
                         isFinished ? styles.playerChipFinished : '',
                       ].filter(Boolean).join(' ')}
+                      style={isMe ? { color: COLOR_HEX[color] } : undefined}
                     >
                       <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
                       {playerNames[color] || COLOR_LABELS[color]}
-                      {color === myColor && <span className={styles.youBadge}>you</span>}
+                      {isMe && <span className={styles.youBadge}>you</span>}
                     </div>
                   );
                 })}
