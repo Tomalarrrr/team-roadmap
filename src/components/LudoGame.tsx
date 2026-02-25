@@ -861,7 +861,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     isRollingRef.current = true;
     setIsRolling(true);
 
-    const roll = Math.floor(Math.random() * 6) + 1;
+    // Kickstart: if all 4 tokens are still in base, re-roll once on non-6
+    // Boosts P(6) from ~17% to ~31% to get the game moving
+    const allInBase = getColorTokenIndices(mc).every(i => tokensRef.current[i] === 'base');
+    let roll = Math.floor(Math.random() * 6) + 1;
+    if (allInBase && roll !== 6) roll = Math.floor(Math.random() * 6) + 1;
 
     rollTimeoutRef.current = setTimeout(async () => {
       setIsRolling(false);
