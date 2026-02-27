@@ -1136,7 +1136,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const { assignedSlot } = await joinGame(joinCode, sessionId, userName);
+      const { assignedSlot } = await joinGame(joinCode, sessionId, userName, serverOffsetRef.current);
       setGameCode(joinCode);
       setMySlot(assignedSlot);
       setGamePhase('waiting');
@@ -1170,7 +1170,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
 
-      await resetGame(gameCode, activePlayerCount);
+      await resetGame(gameCode, activePlayerCount, serverOffsetRef.current);
 
       // Only clear local state after Firebase write succeeds
       tokenAnimPos.current.clear();

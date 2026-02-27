@@ -89,7 +89,8 @@ export async function createGame(
 export async function joinGame(
   code: string,
   sessionId: string,
-  userName: string
+  userName: string,
+  serverOffset = 0,
 ): Promise<{ state: SnakesGameState; assignedSlot: number }> {
   await ensureInitialized();
   const { ref, get, set, runTransaction } = getDbModule();
@@ -146,8 +147,9 @@ export async function joinGame(
     // Start the game if all players have now joined
     const joinedCount = Object.values(updated.players).filter(Boolean).length;
     if (joinedCount >= current.playerCount && !current.startedAt) {
-      updated.startedAt = Date.now();
-      updated.turnStartedAt = Date.now();
+      const serverNow = Date.now() + serverOffset;
+      updated.startedAt = serverNow;
+      updated.turnStartedAt = serverNow;
       updated.currentTurn = Math.floor(Math.random() * current.playerCount);
     }
     return updated;
@@ -225,7 +227,7 @@ export async function makeMove(
   return result.committed;
 }
 
-export async function resetGame(code: string, playerCount: number): Promise<void> {
+export async function resetGame(code: string, playerCount: number, serverOffset = 0): Promise<void> {
   await ensureInitialized();
   const { ref, update } = getDbModule();
   const db = getFirebaseDatabase();
@@ -239,8 +241,8 @@ export async function resetGame(code: string, playerCount: number): Promise<void
     diceValue: null,
     consecutiveSixes: 0,
     winner: null,
-    startedAt: Date.now(),
-    turnStartedAt: Date.now(),
+    startedAt: Date.now() + serverOffset,
+    turnStartedAt: Date.now() + serverOffset,
     moveLog: '',
   });
 }
