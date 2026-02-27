@@ -1227,6 +1227,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     setIsRolling(false);
     isRollingRef.current = false;
     moveInFlightRef.current = false;
+    lastAutoRollTurnStartRef.current = 0;
     prevPositionsRef.current = '';
     lastMovedPlayerRef.current = null;
     // Clear all animation timers (hop, slide, entrance, reactions) to prevent orphan callbacks
@@ -1499,7 +1500,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 </div>
                 {snakeLadderSVG}
                 {/* Interactive hover hit targets — thick invisible strokes over each snake/ladder */}
-                <svg className={styles.svgOverlay} viewBox="0 0 100 100" preserveAspectRatio="none"
+                <svg className={styles.svgOverlay} viewBox="0 0 150 100" preserveAspectRatio="none"
                   style={{ zIndex: 6, pointerEvents: 'none' }}>
                   {Object.entries(SNAKES).map(([from, to]) => {
                     const [x1, y1] = cellCenter(Number(from));
