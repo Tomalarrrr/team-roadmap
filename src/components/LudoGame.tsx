@@ -606,6 +606,38 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     return () => clearTimeout(timeout);
   }, [isRolling]);
 
+  // Auto-join from URL parameter (?ludo=CODE)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('ludo');
+    if (code && code.length === 4 && gamePhase === 'lobby') {
+      setJoinCode(code.toUpperCase());
+      setTimeout(() => {
+        joinGame(code.toUpperCase(), sessionId, userName)
+          .then(({ assignedColor, state }) => {
+            setGameCode(code.toUpperCase());
+            setMyColor(assignedColor);
+            setActivePlayerCount(state.playerCount);
+            const joinedCount = Object.values(state.players).filter(Boolean).length;
+            const gameInProgress = state.startedAt && state.tokens !== 'bas'.repeat(16);
+            if (gameInProgress) {
+              prevTokensRef.current = state.tokens;
+              setIntroPhase('done');
+              introPhaseRef.current = 'done';
+            } else {
+              prevTokensRef.current = 'bas'.repeat(16);
+            }
+            setGamePhase(joinedCount >= state.playerCount ? 'playing' : 'waiting');
+            const url = new URL(window.location.href);
+            url.searchParams.delete('ludo');
+            window.history.replaceState({}, '', url.toString());
+          })
+          .catch(() => setError('Failed to join game from link'));
+      }, 100);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // --- Keyboard shortcuts ---
 
   useEffect(() => {
@@ -1621,6 +1653,19 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               {gameCode}
             </div>
             <div className={styles.shareHint}>Tap code to copy — share with your opponents</div>
+            {gameCode && (
+              <button
+                className={styles.spectateBtn}
+                style={{ marginTop: 4 }}
+                onClick={() => {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('ludo', gameCode);
+                  navigator.clipboard.writeText(url.toString()).then(() => showHint('Link copied!'));
+                }}
+              >
+                Copy Link
+              </button>
+            )}
             <div className={styles.playerList}>
               {TURN_ORDER.slice(0, playerCount).map(color => (
                 <div

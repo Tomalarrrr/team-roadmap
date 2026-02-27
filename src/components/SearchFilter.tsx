@@ -128,6 +128,14 @@ export const SearchFilter = memo(function SearchFilter({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
+  // Auto-open games from shareable URL parameters (bypass lock for external players)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('snakes')) setShowSnakes(true);
+    if (params.get('c4')) setShowConnectFour(true);
+    if (params.get('ludo')) setShowLudo(true);
+  }, []);
+
   // Easter egg: Connect Four, Ludo & Snakes (only when site is unlocked)
   useEffect(() => {
     if (isLocked) return;

@@ -149,6 +149,29 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   const winnerRef = useRef(winner);
   winnerRef.current = winner;
 
+  // Auto-join from URL parameter (?c4=CODE)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('c4');
+    if (code && code.length === 4 && gamePhase === 'lobby') {
+      setJoinCode(code.toUpperCase());
+      setTimeout(() => {
+        joinGame(code.toUpperCase(), sessionId, userName)
+          .then(({ assignedColor, state }) => {
+            setGameCode(code.toUpperCase());
+            setMyColor(assignedColor);
+            setGamePhase(state.players.yellow ? 'playing' : 'waiting');
+            prevBoardRef.current = '.'.repeat(48);
+            const url = new URL(window.location.href);
+            url.searchParams.delete('c4');
+            window.history.replaceState({}, '', url.toString());
+          })
+          .catch(() => setError('Failed to join game from link'));
+      }, 100);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Escape key to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -533,6 +556,19 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
             <div className={styles.waitingText}>Waiting for opponent...</div>
             <div className={styles.gameCodeDisplay}>{gameCode}</div>
             <div className={styles.shareHint}>Share this code with your opponent</div>
+            {gameCode && (
+              <button
+                className={styles.spectateBtn}
+                style={{ marginTop: 4 }}
+                onClick={() => {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('c4', gameCode);
+                  navigator.clipboard.writeText(url.toString());
+                }}
+              >
+                Copy Link
+              </button>
+            )}
             <button className={styles.resetBtn} onClick={handleBackToLobby} style={{ marginTop: 8 }}>
               Back
             </button>
