@@ -1,8 +1,8 @@
 /* Popup container */
 .popup {
   position: fixed;
-  width: 720px;
-  min-width: 580px;
+  width: 880px;
+  min-width: 680px;
   min-height: 520px;
   z-index: 11000;
   background: var(--bg-secondary);
@@ -273,14 +273,14 @@
   position: relative;
   width: 100%;
   max-height: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 3 / 2;
 }
 
 .board {
   display: grid;
-  grid-template-columns: repeat(10, 1fr);
+  grid-template-columns: repeat(15, 1fr);
   grid-template-rows: repeat(10, 1fr);
-  aspect-ratio: 1;
+  aspect-ratio: 3 / 2;
   border-radius: 8px;
   border: 3px solid #8d6e3f;
   background: linear-gradient(145deg, #fefcf3 0%, #f8f3e6 50%, #f2ecda 100%);
@@ -312,7 +312,7 @@
 }
 
 .cellNumber {
-  font-size: 0.5rem;
+  font-size: 0.4rem;
   font-weight: 700;
   color: rgba(100, 80, 50, 0.3);
   line-height: 1;
@@ -349,8 +349,8 @@
 /* --- Tokens --- */
 .token {
   position: absolute;
-  width: calc(100% / 10 * 0.45);
-  height: calc(100% / 10 * 0.45);
+  width: calc(100% / 15 * 0.5);
+  height: calc(100% / 10 * 0.5);
   border-radius: 50%;
   z-index: 10;
   cursor: default;

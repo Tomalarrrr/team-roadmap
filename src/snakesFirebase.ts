@@ -237,3 +237,45 @@ export async function resetGame(code: string, playerCount: number): Promise<void
     moveLog: '',
   });
 }
+
+// --- Emoji Reactions ---
+
+export async function sendReaction(
+  code: string,
+  player: number,
+  emoji: string,
+): Promise<void> {
+  await ensureInitialized();
+  const { ref, push, set } = getDbModule();
+  const db = getFirebaseDatabase();
+  const reactionsRef = ref(db, `snakes/${code}/reactions`);
+  const newRef = push(reactionsRef);
+  await set(newRef, { player, emoji, ts: Date.now() });
+}
+
+export async function subscribeToReactions(
+  code: string,
+  callback: (reaction: { player: number; emoji: string; ts: number; key: string }) => void,
+): Promise<Unsubscribe> {
+  await ensureInitialized();
+  const { ref, onChildAdded, query, orderByChild, startAt } = getDbModule();
+  const db = getFirebaseDatabase();
+  const reactionsRef = ref(db, `snakes/${code}/reactions`);
+  const q = query(reactionsRef, orderByChild('ts'), startAt(Date.now()));
+  const unsubscribe = onChildAdded(q, (snapshot: { val: () => { player: number; emoji: string; ts: number } | null; key: string | null }) => {
+    const val = snapshot.val();
+    if (val) callback({ ...val, key: snapshot.key! });
+  });
+  return unsubscribe;
+}
+
+export async function cleanupOldReactions(code: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, get, remove, query, orderByChild, endAt } = getDbModule();
+  const db = getFirebaseDatabase();
+  const reactionsRef = ref(db, `snakes/${code}/reactions`);
+  const cutoff = Date.now() - 10000;
+  const q = query(reactionsRef, orderByChild('ts'), endAt(cutoff));
+  const snapshot = await get(q);
+  snapshot.forEach((child: { ref: unknown }) => { remove(child.ref as ReturnType<typeof ref>); });
+}

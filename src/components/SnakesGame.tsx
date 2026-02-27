@@ -6,6 +6,9 @@ import {
   subscribeToGame,
   makeMove,
   resetGame,
+  sendReaction,
+  subscribeToReactions,
+  cleanupOldReactions,
   type SnakesGameState,
   type SnakesMoveUpdate,
 } from '../snakesFirebase';
@@ -16,6 +19,7 @@ import {
   getNextTurn,
   checkWinner,
   computeHopPath,
+  computeGameStats,
   serializePositions,
   deserializePositions,
   serializeMoveLog,
@@ -23,6 +27,9 @@ import {
   getTokenOffset,
   SNAKES,
   LADDERS,
+  BOARD_COLS,
+  BOARD_ROWS,
+  BOARD_SIZE,
   PLAYER_COLORS,
   COLOR_HEX,
   COLOR_LABELS,
@@ -38,8 +45,9 @@ const BACKUP_GRACE = 10;
 const STEP_MS = 280;
 const SLIDE_MS = 900;
 const MAX_LOG_ENTRIES = 20;
-const CELL_PCT = 10; // 100% / 10 cells
-const TOKEN_SIZE_PCT = CELL_PCT * 0.45;
+const COL_PCT = 100 / BOARD_COLS;  // ~6.667% per column
+const ROW_PCT = 100 / BOARD_ROWS;  // 10% per row
+const TOKEN_SIZE_PCT = COL_PCT * 0.5;
 
 const TOKEN_STYLE: Record<PlayerColor, string> = {
   red: styles.tokenRed,
@@ -62,7 +70,7 @@ const DICE_PIPS: Record<number, [number, number][]> = {
 };
 
 // Pre-computed board cell indices
-const BOARD_CELLS = Array.from({ length: 100 }, (_, i) => i + 1);
+const BOARD_CELLS = Array.from({ length: BOARD_SIZE }, (_, i) => i + 1);
 
 // --- DiceFace ---
 
@@ -81,7 +89,7 @@ function DiceFace({ value }: { value: number }) {
 
 function cellCenter(cell: number): [number, number] {
   const [row, col] = cellToGrid(cell);
-  return [col * 10 + 5, row * 10 + 5]; // x, y in percentage
+  return [col * COL_PCT + COL_PCT / 2, row * ROW_PCT + ROW_PCT / 2]; // x, y in percentage
 }
 
 // Ladder color palettes for variety
@@ -298,6 +306,95 @@ function renderSnakeSVG(from: number, to: number, index: number) {
   );
 }
 
+// --- Confetti ---
+
+interface ConfettiParticle {
+  x: number; y: number;
+  vx: number; vy: number;
+  rotation: number; rotationSpeed: number;
+  color: string;
+  w: number; h: number;
+  gravity: number;
+  opacity: number;
+}
+
+function launchConfetti(
+  canvas: HTMLCanvasElement,
+  winnerColor: string,
+  animRef: React.MutableRefObject<number | null>,
+) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = rect.width;
+  const H = rect.height;
+  const cx = W / 2;
+  const cy = H / 2;
+
+  const colors = [winnerColor, '#FFD700', '#FF6B6B', '#4ECDC4', '#A855F7', '#fff'];
+  const particles: ConfettiParticle[] = [];
+  for (let i = 0; i < 65; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 2 + Math.random() * 6;
+    particles.push({
+      x: cx, y: cy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 3,
+      rotation: Math.random() * 360,
+      rotationSpeed: (Math.random() - 0.5) * 12,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      w: 4 + Math.random() * 6,
+      h: 3 + Math.random() * 4,
+      gravity: 0.08 + Math.random() * 0.04,
+      opacity: 1,
+    });
+  }
+
+  const startTime = performance.now();
+  const DURATION = 3000;
+
+  function animate(now: number) {
+    const elapsed = now - startTime;
+    if (elapsed > DURATION) {
+      ctx!.clearRect(0, 0, W, H);
+      animRef.current = null;
+      return;
+    }
+
+    ctx!.clearRect(0, 0, W, H);
+    const fadeStart = DURATION * 0.6;
+    const globalAlpha = elapsed > fadeStart ? 1 - (elapsed - fadeStart) / (DURATION - fadeStart) : 1;
+
+    for (const p of particles) {
+      p.vy += p.gravity;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx *= 0.99;
+      p.rotation += p.rotationSpeed;
+      p.opacity = globalAlpha;
+
+      ctx!.save();
+      ctx!.translate(p.x, p.y);
+      ctx!.rotate((p.rotation * Math.PI) / 180);
+      ctx!.globalAlpha = p.opacity;
+      ctx!.fillStyle = p.color;
+      ctx!.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx!.restore();
+    }
+
+    animRef.current = requestAnimationFrame(animate);
+  }
+
+  animRef.current = requestAnimationFrame(animate);
+}
+
 // --- Component ---
 
 interface SnakesGameProps {
@@ -338,10 +435,16 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [timeLeft, setTimeLeft] = useState(TURN_SECONDS);
   const [hasRolledThisTurn, setHasRolledThisTurn] = useState(false);
   const [, setRenderTick] = useState(0);
+  const [turnTransitioning, setTurnTransitioning] = useState(false);
+  const [turnNudge, setTurnNudge] = useState(false);
+  const [winTally, setWinTally] = useState<Record<number, number>>({});
+  const [gameNumber, setGameNumber] = useState(1);
+  const [hoveredCell, setHoveredCell] = useState<number | null>(null);
+  const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; player: number }>>([]);
 
   // Drag state
   const [position, setPosition] = useState(() => ({
-    x: Math.max(0, (window.innerWidth - 720) / 2),
+    x: Math.max(0, (window.innerWidth - 880) / 2),
     y: Math.max(0, (window.innerHeight - 600) / 2),
   }));
   const positionRef = useRef(position);
@@ -367,6 +470,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const lastMovedPlayerRef = useRef<number | null>(null);
   const tokenEnteredBoard = useRef<Set<number>>(new Set());
   const isInitialLoadRef = useRef(true);
+  const confettiCanvasRef = useRef<HTMLCanvasElement>(null);
+  const confettiAnimRef = useRef<number | null>(null);
+  const lastReactionTimeRef = useRef(0);
+  const turnTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const turnNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Mirrored refs for closure safety
   const gameCodeRef = useRef(gameCode);
@@ -397,8 +505,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       clearTimeout(hintTimeoutRef.current);
       clearTimeout(rollTimeoutRef.current);
       clearTimeout(gameOverTimerRef.current);
+      clearTimeout(turnTransitionTimeoutRef.current);
+      clearTimeout(turnNudgeTimeoutRef.current);
       for (const t of slideTimerRefs.current.values()) clearTimeout(t);
       for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
+      if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
       dragCleanupRef.current?.();
     };
   }, []);
@@ -610,7 +721,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
             // Check if a snake or ladder was involved
             const isSnakeOrLadder = SNAKES[hopTarget] === parsed[i] || LADDERS[hopTarget] === parsed[i];
 
-            if (isSnakeOrLadder && hopTarget >= 1 && hopTarget <= 100) {
+            if (isSnakeOrLadder && hopTarget >= 1 && hopTarget <= BOARD_SIZE) {
               // Hop to the snake head / ladder bottom first, then slide
               const hopPath = computeHopPath(oldPositions[i], hopTarget);
               startTokenAnimation(i, hopPath, () => {
@@ -656,6 +767,18 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setPositions(parsed);
       if (state.currentTurn !== currentTurnRef.current) {
         setHasRolledThisTurn(false);
+        // Turn transition animation
+        if (!isInitialLoadRef.current) {
+          setTurnTransitioning(true);
+          clearTimeout(turnTransitionTimeoutRef.current);
+          turnTransitionTimeoutRef.current = setTimeout(() => setTurnTransitioning(false), 500);
+          // Your-turn nudge
+          if (state.currentTurn === mySlotRef.current && !state.winner) {
+            setTurnNudge(true);
+            clearTimeout(turnNudgeTimeoutRef.current);
+            turnNudgeTimeoutRef.current = setTimeout(() => setTurnNudge(false), 1000);
+          }
+        }
       }
       setCurrentTurn(state.currentTurn);
       setDiceValue(state.diceValue);
@@ -664,17 +787,32 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setActivePlayerCount(state.playerCount);
       setMoveLog(deserializeMoveLog(state.moveLog || ''));
 
-      // Winner burst + game-over overlay
+      // Winner burst + game-over overlay + confetti + tally
       if (state.winner !== null && winnerRef.current === null) {
+        // Increment win tally
+        setWinTally(prev => ({
+          ...prev,
+          [state.winner!]: (prev[state.winner!] || 0) + 1,
+        }));
         if (isInitialLoadRef.current) {
           // Reconnecting to a finished game: show overlay immediately, no celebration
           setShowGameOver(true);
         } else {
-          // Live win: burst animation + delayed overlay reveal
+          // Live win: burst animation + confetti + delayed overlay reveal
           setShowBurst(true);
           setTimeout(() => setShowBurst(false), 1000);
           clearTimeout(gameOverTimerRef.current);
           gameOverTimerRef.current = setTimeout(() => setShowGameOver(true), 1200);
+          // Launch confetti
+          requestAnimationFrame(() => {
+            if (confettiCanvasRef.current && state.winner !== null) {
+              launchConfetti(
+                confettiCanvasRef.current,
+                COLOR_HEX[PLAYER_COLORS[state.winner]],
+                confettiAnimRef,
+              );
+            }
+          });
         }
       }
       if (state.winner === null) {
@@ -700,6 +838,33 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       unsubscribe?.();
     };
   }, [gameCode, startTokenAnimation]);
+
+  // --- Emoji reactions subscription ---
+
+  useEffect(() => {
+    if (!gameCode || gamePhase !== 'playing') return;
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+
+    subscribeToReactions(gameCode, (reaction) => {
+      if (cancelled) return;
+      const id = `${reaction.key}-${reaction.ts}`;
+      setFloatingReactions(prev => [...prev, { id, emoji: reaction.emoji, player: reaction.player }]);
+      setTimeout(() => {
+        setFloatingReactions(prev => prev.filter(r => r.id !== id));
+      }, 2500);
+    }).then(unsub => {
+      if (cancelled) unsub(); else unsubscribe = unsub;
+    });
+
+    const cleanup = setInterval(() => cleanupOldReactions(gameCode), 15000);
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+      clearInterval(cleanup);
+    };
+  }, [gameCode, gamePhase]);
 
   // --- Turn timer ---
 
@@ -818,6 +983,8 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       prevPositionsRef.current = '';
       isInitialLoadRef.current = false;
       setHasRolledThisTurn(false);
+      setGameNumber(n => n + 1);
+      if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
 
       await resetGame(gameCode, activePlayerCount);
     } catch (err) {
@@ -844,6 +1011,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     prevPositionsRef.current = '';
     lastMovedPlayerRef.current = null;
     tokenEnteredBoard.current.clear();
+    setWinTally({});
+    setGameNumber(1);
+    setFloatingReactions([]);
+    if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
   }, []);
 
   // --- Drag ---
@@ -889,7 +1060,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     const isEven = (gridRow + gridCol) % 2 === 0;
     const isSnakeHead = SNAKES[cellNum] !== undefined;
     const isLadderBottom = LADDERS[cellNum] !== undefined;
-    const isWinCell = cellNum === 100;
+    const isWinCell = cellNum === BOARD_SIZE;
+    const isHoverSource = hoveredCell === cellNum;
+    const isHoverDest = hoveredCell !== null && (SNAKES[hoveredCell] === cellNum || LADDERS[hoveredCell] === cellNum);
+    const isDimmed = hoveredCell !== null && !isHoverSource && !isHoverDest;
 
     return (
       <div
@@ -900,11 +1074,23 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
           isSnakeHead ? styles.cellSnakeHead : '',
           isLadderBottom ? styles.cellLadderBottom : '',
           isWinCell ? styles.cellWin : '',
+          isHoverSource ? styles.cellHighlightSource : '',
+          isHoverDest ? styles.cellHighlightDest : '',
+          isDimmed ? styles.cellDimmed : '',
         ].filter(Boolean).join(' ')}
         style={{ gridRow: gridRow + 1, gridColumn: gridCol + 1 }}
         aria-label={`Cell ${cellNum}`}
+        onMouseEnter={() => {
+          if (isSnakeHead || isLadderBottom) setHoveredCell(cellNum);
+        }}
+        onMouseLeave={() => setHoveredCell(null)}
       >
         <span className={styles.cellNumber}>{cellNum}</span>
+        {isHoverSource && (
+          <span className={styles.cellTooltip}>
+            {cellNum} &rarr; {SNAKES[cellNum] ?? LADDERS[cellNum]}
+          </span>
+        )}
       </div>
     );
   }
@@ -927,8 +1113,8 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
 
     if (animCoords) {
       // During hop animation
-      left = animCoords[1] * CELL_PCT + CELL_PCT / 2;
-      top = animCoords[0] * CELL_PCT + CELL_PCT / 2;
+      left = animCoords[1] * COL_PCT + COL_PCT / 2;
+      top = animCoords[0] * ROW_PCT + ROW_PCT / 2;
     } else if (pos > 0) {
       const [pctLeft, pctTop] = cellToPercent(pos);
       const [dx, dy] = getTokenOffset(positions, playerIdx);
@@ -964,7 +1150,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   // --- Render ---
 
   return (
-    <div className={styles.popup} style={{ left: position.x, top: position.y }}>
+    <div className={`${styles.popup} ${turnNudge ? styles.popupNudge : ''}`} style={{ left: position.x, top: position.y }}>
       {/* Title bar */}
       <div className={styles.titleBar} onMouseDown={handleDragStart}>
         <span className={styles.titleText}>
@@ -1097,6 +1283,22 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                   {BOARD_CELLS.map(renderCell)}
                 </div>
                 {snakeLadderSVG}
+                {/* Hover highlight SVG */}
+                {hoveredCell !== null && (() => {
+                  const dest = SNAKES[hoveredCell] ?? LADDERS[hoveredCell];
+                  if (dest === undefined) return null;
+                  const [sx, sy] = cellCenter(hoveredCell);
+                  const [dx2, dy2] = cellCenter(dest);
+                  const isSnakeH = SNAKES[hoveredCell] !== undefined;
+                  const hc = isSnakeH ? '#e4002b' : '#34a853';
+                  return (
+                    <svg className={styles.svgOverlay} viewBox="0 0 100 100" preserveAspectRatio="none" style={{ zIndex: 6 }}>
+                      <line x1={sx} y1={sy} x2={dx2} y2={dy2} stroke={hc} strokeWidth="1.2" strokeDasharray="2 1.5" opacity="0.6" />
+                      <circle cx={sx} cy={sy} r="3" fill={hc} opacity="0.25" />
+                      <circle cx={dx2} cy={dy2} r="3" fill={hc} opacity="0.25" />
+                    </svg>
+                  );
+                })()}
                 {/* Tokens */}
                 {Array.from({ length: activePlayerCount }, (_, i) => renderToken(i))}
                 {/* Winner burst */}
@@ -1108,6 +1310,12 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                     }}
                   />
                 )}
+                <canvas ref={confettiCanvasRef} className={styles.confettiCanvas} />
+                {floatingReactions.map(r => (
+                  <div key={r.id} className={styles.floatingReaction} style={{ left: `${20 + Math.random() * 60}%` }}>
+                    {r.emoji}
+                  </div>
+                ))}
               </div>
             </div>
 
@@ -1116,7 +1324,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
               {/* Turn indicator */}
               <div className={styles.turnIndicator}>
                 <span
-                  className={styles.statusDot}
+                  className={`${styles.statusDot} ${turnTransitioning ? styles.statusDotTransition : ''}`}
                   style={{ background: COLOR_HEX[PLAYER_COLORS[currentTurn]] }}
                 />
                 {winner !== null ? (
@@ -1183,6 +1391,28 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 )}
               </div>
 
+              {/* Emoji reactions */}
+              {!isSpectating && winner === null && (
+                <div className={styles.reactionBar}>
+                  {['\u{1F602}', '\u{1F389}', '\u{1F631}', '\u{1F44F}', '\u{1F40D}'].map(emoji => (
+                    <button
+                      key={emoji}
+                      className={styles.reactionBtn}
+                      onClick={() => {
+                        const now = Date.now();
+                        if (now - lastReactionTimeRef.current < 2000) return;
+                        lastReactionTimeRef.current = now;
+                        if (gameCode && mySlot !== null) {
+                          sendReaction(gameCode, mySlot, emoji);
+                        }
+                      }}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Player list */}
               <div className={`${styles.playerBar} ${styles.playerBarVertical}`}>
                 {Array.from({ length: activePlayerCount }, (_, i) => {
@@ -1207,6 +1437,9 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                       <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
                       <span>{name}</span>
                       {isMe && <span className={styles.youBadge}>(you)</span>}
+                      {(winTally[i] || 0) > 0 && (
+                        <span className={styles.winBadge}>{'\u{1F3C6}'}{winTally[i]}</span>
+                      )}
                       <span style={{ marginLeft: 'auto', fontSize: '0.6rem', opacity: 0.5 }}>
                         {positions[i] > 0 ? positions[i] : '-'}
                       </span>
@@ -1249,13 +1482,53 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
             {showGameOver && winner !== null && (
               <div className={styles.gameOverOverlay}>
                 <div className={styles.gameOverCard}>
-                  <div className={styles.gameOverTrophy}>🏆</div>
+                  <div className={styles.gameOverTrophy}>{'\u{1F3C6}'}</div>
                   <div className={styles.gameOverTitle}>
                     <span className={styles.gameOverDot} style={{ background: COLOR_HEX[PLAYER_COLORS[winner]] }} />
                     {winner === mySlot
                       ? 'You win!'
                       : `${playerNames[winner] || COLOR_LABELS[PLAYER_COLORS[winner]]} wins!`}
                   </div>
+                  {/* Rematch series */}
+                  {Object.values(winTally).some(v => v > 0) && (
+                    <div className={styles.gameOverSeries}>
+                      Game {gameNumber} &middot;{' '}
+                      {Object.entries(winTally)
+                        .sort(([, a], [, b]) => b - a)
+                        .map(([idx, wins]) => `${playerNames[Number(idx)] || COLOR_LABELS[PLAYER_COLORS[Number(idx)]]} ${wins}`)
+                        .join(' \u2013 ')}
+                    </div>
+                  )}
+                  {/* Post-game stats */}
+                  {moveLog.length > 0 && (() => {
+                    const stats = computeGameStats(moveLog, activePlayerCount);
+                    return (
+                      <div className={styles.statsGrid}>
+                        {stats.map((s, i) => {
+                          if (s.totalMoves === 0) return null;
+                          const color = PLAYER_COLORS[i];
+                          const name = playerNames[i] || COLOR_LABELS[color];
+                          return (
+                            <div key={i} className={styles.statCard}>
+                              <div className={styles.statCardHeader}>
+                                <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
+                                <span>{name}</span>
+                              </div>
+                              <div className={styles.statRow}><span>Moves</span><span>{s.totalMoves}</span></div>
+                              <div className={styles.statRow}><span>Snakes</span><span className={styles.moveLogSnake}>{s.snakesHit}</span></div>
+                              <div className={styles.statRow}><span>Ladders</span><span className={styles.moveLogLadder}>{s.laddersClimbed}</span></div>
+                              {s.biggestSnakeFall > 0 && (
+                                <div className={styles.statRow}><span>Worst snake</span><span>-{s.biggestSnakeFall}</span></div>
+                              )}
+                              {s.biggestLadderGain > 0 && (
+                                <div className={styles.statRow}><span>Best ladder</span><span>+{s.biggestLadderGain}</span></div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                   {!isSpectating && (
                     <div className={styles.gameOverButtons}>
                       <button className={styles.playAgainBtn} onClick={handleNewGame}>

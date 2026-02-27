@@ -12,77 +12,88 @@ import {
   getTokenOffset,
   SNAKES,
   LADDERS,
+  BOARD_COLS,
+  BOARD_ROWS,
+  BOARD_SIZE,
 } from '../snakesLogic';
 
-describe('cellToGrid', () => {
+describe('cellToGrid (15×10 board)', () => {
   it('cell 1 is bottom-left', () => {
     expect(cellToGrid(1)).toEqual([9, 0]);
   });
 
-  it('cell 10 is bottom-right', () => {
-    expect(cellToGrid(10)).toEqual([9, 9]);
+  it('cell 15 is bottom-right (15 columns)', () => {
+    expect(cellToGrid(15)).toEqual([9, 14]);
   });
 
-  it('cell 11 is second row right (serpentine)', () => {
-    expect(cellToGrid(11)).toEqual([8, 9]);
+  it('cell 16 is second row right (serpentine)', () => {
+    expect(cellToGrid(16)).toEqual([8, 14]);
   });
 
-  it('cell 20 is second row left', () => {
-    expect(cellToGrid(20)).toEqual([8, 0]);
+  it('cell 30 is second row left', () => {
+    expect(cellToGrid(30)).toEqual([8, 0]);
   });
 
-  it('cell 21 is third row left', () => {
-    expect(cellToGrid(21)).toEqual([7, 0]);
+  it('cell 31 is third row left', () => {
+    expect(cellToGrid(31)).toEqual([7, 0]);
   });
 
-  it('cell 100 is top-left', () => {
-    expect(cellToGrid(100)).toEqual([0, 0]);
+  it('cell 150 is top-left (final cell)', () => {
+    expect(cellToGrid(150)).toEqual([0, 0]);
   });
 
-  it('cell 91 is top-right (serpentine)', () => {
-    expect(cellToGrid(91)).toEqual([0, 9]);
+  it('cell 136 is top-right (serpentine, last row starts right)', () => {
+    // Row 10 (top): cells 136-150, serpentine R→L, so cell 136 = col 14
+    expect(cellToGrid(136)).toEqual([0, 14]);
   });
 
-  it('cell 50 is fifth row right (L→R row ends at right)', () => {
-    expect(cellToGrid(50)).toEqual([5, 9]);
+  it('cell 75 is fifth row right (L→R row ends at right)', () => {
+    // Row 5 (0-indexed from bottom): cells 61-75, L→R
+    expect(cellToGrid(75)).toEqual([5, 14]);
+  });
+
+  it('board constants are correct', () => {
+    expect(BOARD_COLS).toBe(15);
+    expect(BOARD_ROWS).toBe(10);
+    expect(BOARD_SIZE).toBe(150);
   });
 });
 
 describe('resolveMove', () => {
   it('moves forward normally', () => {
-    expect(resolveMove(5, 3)).toEqual({ newPos: 8, landed: null, finalPos: 8 });
+    expect(resolveMove(3, 3)).toEqual({ newPos: 6, landed: null, finalPos: 6 });
   });
 
-  it('enters from off-board', () => {
-    expect(resolveMove(0, 4)).toEqual({ newPos: 4, landed: 'ladder', finalPos: 14 });
-  });
-
-  it('enters board and hits ladder on cell 1', () => {
-    expect(resolveMove(0, 1)).toEqual({ newPos: 1, landed: 'ladder', finalPos: 38 });
+  it('enters from off-board and hits ladder on cell 2', () => {
+    expect(resolveMove(0, 2)).toEqual({ newPos: 2, landed: 'ladder', finalPos: 26 });
   });
 
   it('hits a snake', () => {
-    expect(resolveMove(12, 4)).toEqual({ newPos: 16, landed: 'snake', finalPos: 6 });
+    expect(resolveMove(10, 4)).toEqual({ newPos: 14, landed: 'snake', finalPos: 3 });
   });
 
   it('hits a ladder', () => {
-    expect(resolveMove(7, 2)).toEqual({ newPos: 9, landed: 'ladder', finalPos: 31 });
+    expect(resolveMove(6, 2)).toEqual({ newPos: 8, landed: 'ladder', finalPos: 34 });
   });
 
   it('stays put on overshoot (exact finish required)', () => {
-    expect(resolveMove(98, 4)).toEqual({ newPos: 98, landed: null, finalPos: 98 });
+    expect(resolveMove(147, 4)).toEqual({ newPos: 147, landed: null, finalPos: 147 });
   });
 
-  it('wins on exact 100', () => {
-    expect(resolveMove(96, 4)).toEqual({ newPos: 100, landed: null, finalPos: 100 });
+  it('overshoot past 150 stays put', () => {
+    expect(resolveMove(149, 3)).toEqual({ newPos: 149, landed: null, finalPos: 149 });
   });
 
-  it('stays at 99 with dice > 1', () => {
-    expect(resolveMove(99, 2)).toEqual({ newPos: 99, landed: null, finalPos: 99 });
+  it('wins on exact 150', () => {
+    expect(resolveMove(146, 4)).toEqual({ newPos: 150, landed: null, finalPos: 150 });
   });
 
-  it('wins from 99 with dice 1', () => {
-    expect(resolveMove(99, 1)).toEqual({ newPos: 100, landed: null, finalPos: 100 });
+  it('stays at 149 with dice > 1', () => {
+    expect(resolveMove(149, 2)).toEqual({ newPos: 149, landed: null, finalPos: 149 });
+  });
+
+  it('wins from 149 with dice 1', () => {
+    expect(resolveMove(149, 1)).toEqual({ newPos: 150, landed: null, finalPos: 150 });
   });
 
   it('all snakes lead downward', () => {
@@ -94,6 +105,27 @@ describe('resolveMove', () => {
   it('all ladders lead upward', () => {
     for (const [bottom, top] of Object.entries(LADDERS)) {
       expect(Number(top)).toBeGreaterThan(Number(bottom));
+    }
+  });
+
+  it('no snake head is also a ladder bottom', () => {
+    for (const head of Object.keys(SNAKES)) {
+      expect(LADDERS[Number(head)]).toBeUndefined();
+    }
+  });
+
+  it('all snake/ladder positions are within board bounds', () => {
+    for (const [head, tail] of Object.entries(SNAKES)) {
+      expect(Number(head)).toBeGreaterThanOrEqual(1);
+      expect(Number(head)).toBeLessThanOrEqual(BOARD_SIZE);
+      expect(Number(tail)).toBeGreaterThanOrEqual(1);
+      expect(Number(tail)).toBeLessThanOrEqual(BOARD_SIZE);
+    }
+    for (const [bottom, top] of Object.entries(LADDERS)) {
+      expect(Number(bottom)).toBeGreaterThanOrEqual(1);
+      expect(Number(bottom)).toBeLessThanOrEqual(BOARD_SIZE);
+      expect(Number(top)).toBeGreaterThanOrEqual(1);
+      expect(Number(top)).toBeLessThanOrEqual(BOARD_SIZE);
     }
   });
 });
@@ -130,11 +162,11 @@ describe('checkWinner', () => {
   });
 
   it('returns winner index', () => {
-    expect(checkWinner([0, 100, 23, 88])).toBe(1);
+    expect(checkWinner([0, 150, 23, 88])).toBe(1);
   });
 
   it('returns first winner if somehow multiple', () => {
-    expect(checkWinner([100, 100, 0])).toBe(0);
+    expect(checkWinner([150, 150, 0])).toBe(0);
   });
 });
 
@@ -148,7 +180,7 @@ describe('computeHopPath', () => {
   });
 
   it('returns empty for no movement', () => {
-    expect(computeHopPath(98, 98)).toEqual([]);
+    expect(computeHopPath(148, 148)).toEqual([]);
   });
 
   it('returns just destination when entering from off-board', () => {
@@ -158,9 +190,9 @@ describe('computeHopPath', () => {
 
 describe('serialization', () => {
   it('round-trips positions', () => {
-    const positions = [0, 5, 23, 100, 42, 7, 88];
+    const positions = [0, 5, 23, 150, 42, 7, 88];
     const serialized = serializePositions(positions);
-    expect(serialized).toBe('000005023100042007088');
+    expect(serialized).toBe('000005023150042007088');
     expect(deserializePositions(serialized, 7)).toEqual(positions);
   });
 
@@ -176,8 +208,8 @@ describe('moveLog serialization', () => {
   it('round-trips entries', () => {
     const entries = [
       { player: 0, dice: 3, from: 5, to: 8, mechanism: null as null },
-      { player: 1, dice: 4, from: 12, to: 6, mechanism: 'snake' as const },
-      { player: 2, dice: 2, from: 7, to: 31, mechanism: 'ladder' as const },
+      { player: 1, dice: 4, from: 10, to: 3, mechanism: 'snake' as const },
+      { player: 2, dice: 2, from: 6, to: 34, mechanism: 'ladder' as const },
     ];
     const serialized = serializeMoveLog(entries);
     const deserialized = deserializeMoveLog(serialized);

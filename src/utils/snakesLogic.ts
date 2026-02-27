@@ -1,14 +1,21 @@
 // --- Snakes & Ladders: Pure Game Logic ---
 
-// Classic snake/ladder map — easy to swap for any variant
+// Board dimensions
+export const BOARD_COLS = 15;
+export const BOARD_ROWS = 10;
+export const BOARD_SIZE = BOARD_COLS * BOARD_ROWS; // 150
+
+// Snake/ladder map for 15×10 board — brutal placement
 export const SNAKES: Record<number, number> = {
-  16: 6, 34: 1, 47: 26, 49: 11, 62: 19,
-  74: 26, 82: 43, 87: 24, 93: 37, 95: 52, 97: 58, 99: 41,
+  14: 3, 22: 7, 38: 12, 47: 18, 56: 31,
+  69: 24, 88: 51, 97: 44, 105: 63,
+  126: 89, 134: 77, 142: 98, 148: 101,
 };
 
 export const LADDERS: Record<number, number> = {
-  1: 38, 4: 14, 9: 31, 21: 42, 28: 84,
-  36: 44, 51: 67, 71: 91, 80: 100,
+  2: 26, 8: 34, 17: 53, 29: 64, 41: 76,
+  52: 85, 66: 93, 78: 112, 91: 121, 103: 130,
+  115: 140, 127: 145,
 };
 
 export type PlayerColor = 'red' | 'green' | 'blue' | 'yellow' | 'purple' | 'orange' | 'teal';
@@ -34,21 +41,22 @@ export const COLOR_LABELS: Record<PlayerColor, string> = {
 
 // --- Serpentine coordinate mapping ---
 
-// Cell number (1-100) → [gridRow, gridCol] (0-indexed, row 0 = top of rendered board)
+// Cell number (1-150) → [gridRow, gridCol] (0-indexed, row 0 = top of rendered board)
 export function cellToGrid(cell: number): [number, number] {
   const zeroCell = cell - 1;
-  const rowFromBottom = Math.floor(zeroCell / 10);
-  const colInRow = zeroCell % 10;
-  const gridRow = 9 - rowFromBottom;
-  const gridCol = rowFromBottom % 2 === 0 ? colInRow : 9 - colInRow;
+  const rowFromBottom = Math.floor(zeroCell / BOARD_COLS);
+  const colInRow = zeroCell % BOARD_COLS;
+  const gridRow = (BOARD_ROWS - 1) - rowFromBottom;
+  const gridCol = rowFromBottom % 2 === 0 ? colInRow : (BOARD_COLS - 1) - colInRow;
   return [gridRow, gridCol];
 }
 
 // Grid position → center point as percentages of board size (for token positioning)
 export function gridToPercent(gridRow: number, gridCol: number): [number, number] {
-  const cellPct = 10; // 100% / 10 cells
-  const left = gridCol * cellPct + cellPct / 2;
-  const top = gridRow * cellPct + cellPct / 2;
+  const colPct = 100 / BOARD_COLS;
+  const rowPct = 100 / BOARD_ROWS;
+  const left = gridCol * colPct + colPct / 2;
+  const top = gridRow * rowPct + rowPct / 2;
   return [left, top];
 }
 
@@ -76,8 +84,8 @@ export function resolveMove(currentPos: number, diceValue: number): MoveResult {
     newPos = currentPos + diceValue;
   }
 
-  // Exact finish: must land exactly on 100
-  if (newPos > 100) {
+  // Exact finish: must land exactly on final cell
+  if (newPos > BOARD_SIZE) {
     return { newPos: currentPos, landed: null, finalPos: currentPos };
   }
 
@@ -121,7 +129,7 @@ export function getNextTurn(
 }
 
 export function checkWinner(positions: number[]): number | null {
-  const idx = positions.findIndex(p => p === 100);
+  const idx = positions.findIndex(p => p === BOARD_SIZE);
   return idx >= 0 ? idx : null;
 }
 
@@ -188,6 +196,49 @@ export function deserializeMoveLog(str: string): MoveLogEntry[] {
   });
 }
 
+// --- Post-game stats ---
+
+export interface PlayerStats {
+  totalMoves: number;
+  snakesHit: number;
+  laddersClimbed: number;
+  biggestSnakeFall: number;
+  biggestLadderGain: number;
+}
+
+export function computeGameStats(
+  log: MoveLogEntry[],
+  playerCount: number,
+): PlayerStats[] {
+  const stats: PlayerStats[] = Array.from({ length: playerCount }, () => ({
+    totalMoves: 0,
+    snakesHit: 0,
+    laddersClimbed: 0,
+    biggestSnakeFall: 0,
+    biggestLadderGain: 0,
+  }));
+
+  for (const entry of log) {
+    const s = stats[entry.player];
+    if (!s) continue;
+    s.totalMoves++;
+    if (entry.mechanism === 'snake') {
+      s.snakesHit++;
+      const snakeHead = entry.from === 0 ? entry.dice : entry.from + entry.dice;
+      const fall = snakeHead - entry.to;
+      if (fall > s.biggestSnakeFall) s.biggestSnakeFall = fall;
+    }
+    if (entry.mechanism === 'ladder') {
+      s.laddersClimbed++;
+      const ladderBase = entry.from === 0 ? entry.dice : entry.from + entry.dice;
+      const gain = entry.to - ladderBase;
+      if (gain > s.biggestLadderGain) s.biggestLadderGain = gain;
+    }
+  }
+
+  return stats;
+}
+
 // --- Token stacking offsets ---
 
 export function getTokenOffset(
@@ -204,7 +255,7 @@ export function getTokenOffset(
   if (sameCell.length <= 1) return [0, 0];
 
   const myIdx = sameCell.indexOf(playerIndex);
-  const shift = 1.2; // percentage offset
+  const shift = 0.8; // percentage offset (smaller for narrower cells)
   const offsets: [number, number][] = [
     [-shift, -shift], [shift, -shift], [-shift, shift], [shift, shift],
     [0, -shift], [0, shift], [-shift, 0],
