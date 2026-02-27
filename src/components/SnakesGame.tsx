@@ -33,8 +33,8 @@ import styles from './SnakesGame.module.css';
 
 // --- Constants ---
 
-const TURN_SECONDS = 30;
-const BACKUP_GRACE = 15;
+const TURN_SECONDS = 10;
+const BACKUP_GRACE = 10;
 const STEP_MS = 280;
 const SLIDE_MS = 900;
 const MAX_LOG_ENTRIES = 20;
@@ -802,7 +802,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
 
-      // Clear ALL animation state so dice becomes rollable
+      // Clear ALL animation + rolling state so dice becomes rollable
       tokenAnimPos.current.clear();
       tokenAnimParity.current.clear();
       for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
@@ -813,6 +813,8 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       lastMovedPlayerRef.current = null;
       tokenEnteredBoard.current.clear();
       moveInFlightRef.current = false;
+      isRollingRef.current = false;
+      setIsRolling(false);
       prevPositionsRef.current = '';
       isInitialLoadRef.current = false;
       setHasRolledThisTurn(false);
@@ -836,6 +838,9 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     clearTimeout(gameOverTimerRef.current);
     setMoveLog([]);
     setHasRolledThisTurn(false);
+    setIsRolling(false);
+    isRollingRef.current = false;
+    moveInFlightRef.current = false;
     prevPositionsRef.current = '';
     lastMovedPlayerRef.current = null;
     tokenEnteredBoard.current.clear();
@@ -1119,16 +1124,30 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                     {playerNames[winner] || COLOR_LABELS[PLAYER_COLORS[winner]]} wins!
                   </span>
                 ) : (
-                  <>
-                    <span>
-                      {isMyTurn ? 'Your turn' : `${playerNames[currentTurn] || COLOR_LABELS[PLAYER_COLORS[currentTurn]]}'s turn`}
-                    </span>
-                    <span className={`${styles.timer} ${timeLeft <= 10 ? styles.timerUrgent : ''}`}>
-                      {timeLeft > 0 ? `${timeLeft}s` : 'Time!'}
-                    </span>
-                  </>
+                  <span>
+                    {isMyTurn ? 'Your turn' : `${playerNames[currentTurn] || COLOR_LABELS[PLAYER_COLORS[currentTurn]]}'s turn`}
+                  </span>
                 )}
               </div>
+
+              {/* Countdown timer */}
+              {winner === null && (
+                <div className={styles.countdown}>
+                  <svg className={styles.countdownRing} viewBox="0 0 48 48">
+                    <circle className={styles.countdownTrack} cx="24" cy="24" r="20" />
+                    <circle
+                      className={`${styles.countdownProgress} ${timeLeft <= 5 ? styles.countdownProgressUrgent : ''}`}
+                      cx="24" cy="24" r="20"
+                      strokeDasharray={2 * Math.PI * 20}
+                      strokeDashoffset={2 * Math.PI * 20 * (1 - Math.max(timeLeft, 0) / TURN_SECONDS)}
+                      transform="rotate(-90 24 24)"
+                    />
+                  </svg>
+                  <span className={`${styles.countdownNumber} ${timeLeft <= 5 ? styles.countdownNumberUrgent : ''}`}>
+                    {Math.max(timeLeft, 0)}
+                  </span>
+                </div>
+              )}
 
               {statusHint && gamePhase === 'playing' && (
                 <div className={styles.statusHint}>{statusHint}</div>
