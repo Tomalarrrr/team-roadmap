@@ -110,7 +110,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [hasRolledThisTurn, setHasRolledThisTurn] = useState(false);
   const [, setRenderTick] = useState(0);
   const [turnTransitioning, setTurnTransitioning] = useState(false);
-  const [turnNudge, setTurnNudge] = useState(false);
   const [winTally, setWinTally] = useState<Record<number, number>>({});
   const [gameNumber, setGameNumber] = useState(1);
   const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; player: number; left: number }>>([]);
@@ -167,7 +166,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const confettiAnimRef = useRef<number | null>(null);
   const lastReactionTimeRef = useRef(0);
   const turnTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const turnNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const serverOffsetRef = useRef(0);
   const lastAutoRollTurnStartRef = useRef(0); // guards against double auto-roll per turn
   const boardEntranceTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
@@ -208,7 +206,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       clearTimeout(rollTimeoutRef.current);
       clearTimeout(gameOverTimerRef.current);
       clearTimeout(turnTransitionTimeoutRef.current);
-      clearTimeout(turnNudgeTimeoutRef.current);
       clearTimeout(burstTimeoutRef.current);
       clearTimeout(coinTossFadeRef.current);
       clearTimeout(coinTossRemoveRef.current);
@@ -593,12 +590,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
           setTurnTransitioning(true);
           clearTimeout(turnTransitionTimeoutRef.current);
           turnTransitionTimeoutRef.current = setTimeout(() => setTurnTransitioning(false), 500);
-          // Your-turn nudge
-          if (state.currentTurn === mySlotRef.current && !state.winner) {
-            setTurnNudge(true);
-            clearTimeout(turnNudgeTimeoutRef.current);
-            turnNudgeTimeoutRef.current = setTimeout(() => setTurnNudge(false), 1000);
-          }
         }
       }
       setCurrentTurn(state.currentTurn);
@@ -878,7 +869,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       clearTimeout(hintTimeoutRef.current);
       clearTimeout(rollTimeoutRef.current);
       clearTimeout(turnTransitionTimeoutRef.current);
-      clearTimeout(turnNudgeTimeoutRef.current);
       clearTimeout(burstTimeoutRef.current);
       clearTimeout(coinTossFadeRef.current);
       clearTimeout(coinTossRemoveRef.current);
@@ -927,7 +917,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     clearTimeout(burstTimeoutRef.current);
     clearTimeout(hintTimeoutRef.current);
     clearTimeout(turnTransitionTimeoutRef.current);
-    clearTimeout(turnNudgeTimeoutRef.current);
     clearTimeout(coinTossFadeRef.current);
     clearTimeout(coinTossRemoveRef.current);
     clearTimeout(cameraShakeTimeoutRef.current);
@@ -1089,7 +1078,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   // --- Render ---
 
   return (
-    <div className={`${styles.popup} ${turnNudge ? styles.popupNudge : ''}`} style={{ left: position.x, top: position.y }}>
+    <div className={styles.popup} style={{ left: position.x, top: position.y }}>
       {/* Title bar */}
       <div className={styles.titleBar} onMouseDown={handleDragStart}>
         <span className={styles.titleText}>
