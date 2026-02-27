@@ -30,10 +30,11 @@ export const LADDERS: Record<number, number> = {
   23: 38,   // grid(8,7)→(7,7)   — short 1-row hop, vertical center
   26: 67,   // grid(8,4)→(5,6)   — lower-center, diagonal right 3 rows
   58: 92,   // grid(6,2)→(3,1)   — mid-left edge, nearly vertical 3 rows
-  49: 104,  // grid(6,11)→(3,13) — mid-right, diagonal right 3 rows
+  49: 106,  // grid(6,11)→(2,14) — mid-right to upper far-right, diagonal 4 rows
   70: 81,   // grid(5,9)→(4,9)   — short 1-row hop, vertical center-right
   82: 131,  // grid(4,8)→(1,10)  — center to upper-right, diagonal 3 rows
   85: 112,  // grid(4,5)→(2,8)   — center-left to upper-center, diagonal 2 rows
+  114: 125, // grid(2,6)→(1,4)   — upper-center, short 1-row hop left
 };
 
 export type PlayerColor = 'red' | 'green' | 'blue' | 'yellow' | 'purple' | 'orange' | 'teal';
