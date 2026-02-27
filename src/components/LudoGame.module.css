@@ -92,6 +92,7 @@
   gap: 16px;
   flex: 1;
   min-height: 0;
+  position: relative;
   animation: layoutFadeIn 350ms ease-out;
 }
 
@@ -1219,6 +1220,151 @@
 }
 
 /* Reduced motion */
+/* Game-over overlay */
+.gameOverOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  border-radius: var(--radius-lg, 12px);
+  animation: overlayFadeIn 400ms ease-out;
+}
+
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.gameOverCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 40px;
+  background: var(--bg-primary, #1a1a2e);
+  border: 1px solid var(--border-medium, #444);
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  animation: cardPopIn 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  text-align: center;
+  min-width: 200px;
+}
+
+@keyframes cardPopIn {
+  from { opacity: 0; transform: scale(0.7) translateY(20px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.gameOverTrophy {
+  font-size: 3rem;
+  line-height: 1;
+  animation: trophyBounce 600ms ease-out;
+}
+
+@keyframes trophyBounce {
+  0% { transform: scale(0); }
+  50% { transform: scale(1.3); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); }
+}
+
+.gameOverTitle {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.gameOverDot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.gameOverFinishOrder {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-secondary, #aaa);
+}
+
+.gameOverPlace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gameOverPlaceNum {
+  font-weight: 600;
+  width: 28px;
+  text-align: right;
+  color: var(--text-muted, #888);
+}
+
+.gameOverPlaceDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.gameOverButtons {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.playAgainBtn {
+  padding: 8px 24px;
+  background: #4285f4;
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-full, 20px);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, transform 100ms;
+}
+
+.playAgainBtn:hover {
+  background: #5a9bf4;
+}
+
+.playAgainBtn:active {
+  transform: scale(0.95);
+}
+
+.leaveBtn {
+  padding: 8px 20px;
+  background: none;
+  color: var(--text-secondary, #aaa);
+  border: 1px solid var(--border-light, #555);
+  border-radius: var(--radius-full, 20px);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms, color 150ms, transform 100ms;
+}
+
+.leaveBtn:hover {
+  background: var(--bg-tertiary, #333);
+  color: var(--text-primary, #fff);
+  border-color: var(--border-medium, #666);
+}
+
+.leaveBtn:active {
+  transform: scale(0.95);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .popup,
   .token,
@@ -1247,7 +1393,10 @@
   .finishDot,
   .errorText,
   .playingLayout,
-  .boardColumn {
+  .boardColumn,
+  .gameOverOverlay,
+  .gameOverCard,
+  .gameOverTrophy {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

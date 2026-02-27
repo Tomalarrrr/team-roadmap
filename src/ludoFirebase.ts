@@ -192,7 +192,9 @@ export async function joinGame(
   // Check if all required players have joined — start the game
   const joinedCount = Object.values(state.players).filter(Boolean).length + 1;
   if (joinedCount >= maxSlots) {
-    await update(gameRef, { startedAt: Date.now(), turnStartedAt: Date.now() });
+    const activePlayers: LudoColor[] = (['red', 'green', 'yellow', 'blue'] as LudoColor[]).slice(0, maxSlots);
+    const randomFirst = activePlayers[Math.floor(Math.random() * activePlayers.length)];
+    await update(gameRef, { startedAt: Date.now(), turnStartedAt: Date.now(), currentTurn: randomFirst });
   }
 
   return {
@@ -264,10 +266,13 @@ export async function resetGame(code: string, playerCount: number): Promise<void
   const { ref, update } = getDbModule();
   const db = getFirebaseDatabase();
 
+  const activePlayers: LudoColor[] = (['red', 'green', 'yellow', 'blue'] as LudoColor[]).slice(0, playerCount);
+  const randomFirst = activePlayers[Math.floor(Math.random() * activePlayers.length)];
+
   const gameRef = ref(db, `ludo/${code}`);
   await update(gameRef, {
     tokens: INITIAL_TOKENS,
-    currentTurn: 'red' as LudoColor,
+    currentTurn: randomFirst,
     turnPhase: 'roll' as TurnPhase,
     diceValue: null,
     consecutiveSixes: 0,

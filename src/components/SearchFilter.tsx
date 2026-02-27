@@ -7,6 +7,7 @@ import styles from './SearchFilter.module.css';
 
 const ConnectFourGame = lazy(() => import('./ConnectFourGame').then(m => ({ default: m.ConnectFourGame })));
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
+const SnakesGame = lazy(() => import('./SnakesGame').then(m => ({ default: m.SnakesGame })));
 
 interface SearchFilterProps {
   projects: Project[];
@@ -82,6 +83,7 @@ export const SearchFilter = memo(function SearchFilter({
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
   const [showConnectFour, setShowConnectFour] = useState(false);
   const [showLudo, setShowLudo] = useState(false);
+  const [showSnakes, setShowSnakes] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -126,7 +128,7 @@ export const SearchFilter = memo(function SearchFilter({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Easter egg: Connect Four & Ludo (only when site is unlocked)
+  // Easter egg: Connect Four, Ludo & Snakes (only when site is unlocked)
   useEffect(() => {
     if (isLocked) return;
     if (filters.search.trim().toLowerCase() === 'connect four') {
@@ -136,6 +138,11 @@ export const SearchFilter = memo(function SearchFilter({
     }
     if (filters.search.trim().toLowerCase() === 'ludo') {
       setShowLudo(true);
+      setFilters(f => ({ ...f, search: '' }));
+      setIsOpen(false);
+    }
+    if (filters.search.trim().toLowerCase() === 'snakes') {
+      setShowSnakes(true);
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
     }
@@ -409,6 +416,12 @@ export const SearchFilter = memo(function SearchFilter({
       {showLudo && createPortal(
         <Suspense fallback={null}>
           <LudoGame onClose={() => setShowLudo(false)} isSearchOpen={isOpen} />
+        </Suspense>,
+        document.body
+      )}
+      {showSnakes && createPortal(
+        <Suspense fallback={null}>
+          <SnakesGame onClose={() => setShowSnakes(false)} isSearchOpen={isOpen} />
         </Suspense>,
         document.body
       )}

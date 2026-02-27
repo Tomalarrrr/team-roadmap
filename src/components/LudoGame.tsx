@@ -451,6 +451,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const [rollingFace, setRollingFace] = useState(1);
   const [lastMovedToken, setLastMovedToken] = useState<number | null>(null);
   const [showBurst, setShowBurst] = useState(false);
+  const [showGameOver, setShowGameOver] = useState(false);
   const [statusHint, setStatusHint] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(TURN_SECONDS);
 
@@ -475,6 +476,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const diceAnimKeyRef = useRef(0);
   const rolledThisTurnRef = useRef(false);
   const autoMoveRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const gameOverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const homeStuckRolls = useRef(0); // consecutive non-6 rolls while all tokens in base
 
   // Cell-by-cell animation state
   const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
@@ -528,6 +531,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       clearTimeout(rollTimeoutRef.current);
       clearTimeout(movedTimeoutRef.current);
       clearTimeout(autoMoveRef.current);
+      clearTimeout(gameOverTimerRef.current);
       for (const timer of captureShowTimers.current) clearTimeout(timer);
       for (const timer of introTimersRef.current) clearTimeout(timer);
       for (const timer of effectTimers.current) clearTimeout(timer);
@@ -778,9 +782,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (state.winner) {
         setWinner(state.winner);
         setShowBurst(true);
+        // Delay game-over overlay so the winning animation plays out
+        clearTimeout(gameOverTimerRef.current);
+        gameOverTimerRef.current = setTimeout(() => setShowGameOver(true), 1200);
       } else {
         setWinner(null);
         setShowBurst(false);
+        setShowGameOver(false);
+        clearTimeout(gameOverTimerRef.current);
       }
 
       setFinishOrder(
@@ -855,10 +864,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
     const finishedColors = getFinishedColors(newTokens, curPlayerCount);
 
-    // Check for game end
-    const activePlayers = TURN_ORDER.slice(0, curPlayerCount);
-    const unfinishedPlayers = activePlayers.filter(c => !finishedColors.has(c));
-    const gameWinner = unfinishedPlayers.length <= 1 ? updatedFinishOrder[0] || null : null;
+    // Check for game end — first player to finish all tokens wins
+    const gameWinner = updatedFinishOrder.length > 0 ? updatedFinishOrder[0] : null;
 
     const { nextColor, nextSixes } = getNextTurn(
       curColor, roll, curSixes, captured, reachedHome,
@@ -906,11 +913,18 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     isRollingRef.current = true;
     setIsRolling(true);
 
-    // Kickstart: if all 4 tokens are still in base, re-roll once on non-6
-    // Boosts P(6) from ~17% to ~31% to get the game moving
+    // Pity-timer: guarantee a 6 after 4 consecutive non-6 rolls while all tokens
+    // are stuck in base. Resets as soon as any token leaves base.
     const allInBase = getColorTokenIndices(mc).every(i => tokensRef.current[i] === 'base');
     let roll = Math.floor(Math.random() * 6) + 1;
-    if (allInBase && roll !== 6) roll = Math.floor(Math.random() * 6) + 1;
+    if (allInBase && homeStuckRolls.current >= 4) {
+      roll = 6;
+    }
+    if (allInBase) {
+      homeStuckRolls.current = roll === 6 ? 0 : homeStuckRolls.current + 1;
+    } else {
+      homeStuckRolls.current = 0;
+    }
 
     rollTimeoutRef.current = setTimeout(async () => {
       setIsRolling(false);
@@ -1278,6 +1292,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       gameEffects.current = [];
       setGameStats({});
       statsInitRef.current = false;
+      homeStuckRolls.current = 0;
+      setShowGameOver(false);
+      clearTimeout(gameOverTimerRef.current);
       await resetGame(gc, activePlayerCountRef.current);
     } catch {
       // Silent failure for easter egg
@@ -1322,11 +1339,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setValidMoves(new Map());
     setIsRolling(false);
     setShowBurst(false);
+    setShowGameOver(false);
+    clearTimeout(gameOverTimerRef.current);
     setStatusHint(null);
     prevTokensRef.current = 'bas'.repeat(16);
     moveInFlightRef.current = false;
     isRollingRef.current = false;
     rolledThisTurnRef.current = false;
+    homeStuckRolls.current = 0;
     dragCleanupRef.current?.();
     dragCleanupRef.current = null;
   }, []);
@@ -1875,24 +1895,60 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 </div>
               )}
 
-              {/* Controls */}
-              {isSpectating ? (
+              {/* Controls (non-winner) */}
+              {isSpectating && !winner && (
                 <div className={styles.controls}>
                   <button className={styles.resetBtn} onClick={handleBackToLobby}>
                     Leave
                   </button>
                 </div>
-              ) : winner ? (
-                <div className={styles.controls}>
-                  <button className={styles.resetBtn} onClick={handleNewGame}>
-                    New Game
-                  </button>
-                  <button className={styles.resetBtn} onClick={handleBackToLobby}>
-                    Leave
-                  </button>
-                </div>
-              ) : null}
+              )}
             </div>
+
+            {/* Game-over overlay (delayed to let animations finish) */}
+            {showGameOver && winner && (
+              <div className={styles.gameOverOverlay}>
+                <div className={styles.gameOverCard}>
+                  <div className={styles.gameOverTrophy}>🏆</div>
+                  <div className={styles.gameOverTitle}>
+                    <span className={styles.gameOverDot} style={{ background: COLOR_HEX[winner] }} />
+                    {isSpectating
+                      ? `${playerNames[winner] || COLOR_LABELS[winner]} wins!`
+                      : winner === myColor
+                        ? 'You win!'
+                        : `${playerNames[winner] || COLOR_LABELS[winner]} wins!`}
+                  </div>
+                  {finishOrder.length > 1 && (
+                    <div className={styles.gameOverFinishOrder}>
+                      {finishOrder.map((c, i) => (
+                        <span key={c} className={styles.gameOverPlace}>
+                          <span className={styles.gameOverPlaceNum}>{i === 0 ? '1st' : i === 1 ? '2nd' : i === 2 ? '3rd' : '4th'}</span>
+                          <span className={styles.gameOverPlaceDot} style={{ background: COLOR_HEX[c] }} />
+                          {playerNames[c] || COLOR_LABELS[c]}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {!isSpectating && (
+                    <div className={styles.gameOverButtons}>
+                      <button className={styles.playAgainBtn} onClick={handleNewGame}>
+                        Play Again
+                      </button>
+                      <button className={styles.leaveBtn} onClick={handleBackToLobby}>
+                        Leave
+                      </button>
+                    </div>
+                  )}
+                  {isSpectating && (
+                    <div className={styles.gameOverButtons}>
+                      <button className={styles.leaveBtn} onClick={handleBackToLobby}>
+                        Leave
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
