@@ -98,11 +98,10 @@ export async function joinGame(
   serverOffset = 0,
 ): Promise<{ state: SnakesGameState; assignedSlot: number }> {
   await ensureInitialized();
-  const { ref, get, set, runTransaction } = getDbModule();
+  const { ref, get, set, update } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
-  // Prime the local cache so runTransaction gets real data on first pass
   const snapshot = await get(gameRef);
 
   if (!snapshot.exists()) {
@@ -133,39 +132,36 @@ export async function joinGame(
     }
   }
 
-  // Atomically claim an empty slot via transaction (prevents two players grabbing the same slot)
-  let assignedSlot = -1;
-  const result = await runTransaction(gameRef, (current: SnakesGameState | null) => {
-    if (!current) return undefined;
-    const curPlayers = current.players || {};
+  // Claim an empty slot via get+update (runTransaction unreliably gets null on first pass)
+  const curPlayers = state.players || {};
 
-    // Find next empty slot
-    let slot = -1;
-    for (let i = 1; i < current.playerCount; i++) {
-      if (!curPlayers[`p${i}`]) { slot = i; break; }
-    }
-    if (slot === -1) return undefined; // full — abort
+  let slot = -1;
+  for (let i = 1; i < state.playerCount; i++) {
+    if (!curPlayers[`p${i}`]) { slot = i; break; }
+  }
+  if (slot === -1) throw new Error('Game is full');
 
-    assignedSlot = slot;
-    const updated = { ...current, players: { ...curPlayers, [`p${slot}`]: { sessionId, name: userName } } };
+  const updates: Record<string, unknown> = {
+    [`players/p${slot}`]: { sessionId, name: userName },
+  };
 
-    // Start the game if all players have now joined
-    const joinedCount = Object.values(updated.players).filter(Boolean).length;
-    if (joinedCount >= current.playerCount && !current.startedAt) {
-      const serverNow = Date.now() + serverOffset;
-      updated.startedAt = serverNow;
-      updated.turnStartedAt = serverNow;
-      updated.currentTurn = Math.floor(Math.random() * current.playerCount);
-    }
-    return updated;
-  });
-
-  if (!result.committed || assignedSlot === -1) {
-    throw new Error('Game is full');
+  // Start the game if all players have now joined
+  const joinedCount = Object.values(curPlayers).filter(Boolean).length + 1;
+  if (joinedCount >= state.playerCount && !state.startedAt) {
+    const serverNow = Date.now() + serverOffset;
+    const firstPlayer = Math.floor(Math.random() * state.playerCount);
+    updates.startedAt = serverNow;
+    updates.turnStartedAt = serverNow;
+    updates.currentTurn = firstPlayer;
+    updates.firstPlayer = firstPlayer;
   }
 
-  const newState = result.snapshot.val() as SnakesGameState;
-  return { state: newState, assignedSlot };
+  await update(gameRef, updates);
+
+  // Re-read to return the full updated state
+  const freshSnap = await get(gameRef);
+  const newState = freshSnap.val() as SnakesGameState;
+  return { state: newState, assignedSlot: slot };
 }
 
 export async function spectateGame(code: string): Promise<SnakesGameState> {
