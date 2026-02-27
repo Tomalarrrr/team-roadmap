@@ -440,7 +440,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [winTally, setWinTally] = useState<Record<number, number>>({});
   const [gameNumber, setGameNumber] = useState(1);
   const [hoveredCell, setHoveredCell] = useState<number | null>(null);
-  const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; player: number }>>([]);
+  const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; player: number; left: number }>>([]);
 
   // Drag state
   const [position, setPosition] = useState(() => ({
@@ -849,7 +849,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     subscribeToReactions(gameCode, (reaction) => {
       if (cancelled) return;
       const id = `${reaction.key}-${reaction.ts}`;
-      setFloatingReactions(prev => [...prev, { id, emoji: reaction.emoji, player: reaction.player }]);
+      setFloatingReactions(prev => [...prev, { id, emoji: reaction.emoji, player: reaction.player, left: 20 + Math.random() * 60 }]);
       setTimeout(() => {
         setFloatingReactions(prev => prev.filter(r => r.id !== id));
       }, 2500);
@@ -1312,7 +1312,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 )}
                 <canvas ref={confettiCanvasRef} className={styles.confettiCanvas} />
                 {floatingReactions.map(r => (
-                  <div key={r.id} className={styles.floatingReaction} style={{ left: `${20 + Math.random() * 60}%` }}>
+                  <div key={r.id} className={styles.floatingReaction} style={{ left: `${r.left}%` }}>
                     {r.emoji}
                   </div>
                 ))}
