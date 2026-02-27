@@ -5,17 +5,30 @@ export const BOARD_COLS = 15;
 export const BOARD_ROWS = 10;
 export const BOARD_SIZE = BOARD_COLS * BOARD_ROWS; // 150
 
-// Snake/ladder map for 15×10 board — brutal placement
+// Snake/ladder map for 15×10 board — vertical-oriented, varied lengths.
+// Drops/climbs range from quick (2 rows) to devastating (5+ rows).
 export const SNAKES: Record<number, number> = {
-  14: 3, 22: 7, 38: 12, 47: 18, 56: 31,
-  69: 24, 88: 51, 97: 44, 105: 63,
-  126: 89, 134: 77, 142: 98, 148: 101,
+  145: 66,  // col 5, rows 0→5, drop 5 — devastating near-finish snake!
+  142: 98,  // col 8→7, rows 0→3, drop 3
+  134: 77,  // col 13, rows 1→4, drop 3
+  121: 31,  // col 0, rows 1→7, drop 6 — longest snake on the board
+  102: 49,  // col 11, rows 3→6, drop 3
+  89: 62,   // col 1, rows 4→5, drop 1 — quick sting
+  70: 21,   // col 9, rows 5→8, drop 3
+  54: 24,   // col 6, rows 6→8, drop 2
+  43: 13,   // col 12, rows 7→9, drop 2
 };
 
 export const LADDERS: Record<number, number> = {
-  2: 26, 8: 34, 17: 53, 29: 64, 41: 76,
-  52: 85, 66: 93, 78: 112, 91: 121, 103: 130,
-  115: 140, 127: 145,
+  4: 94,    // col 3, rows 9→3, climb 6 — jackpot early ladder!
+  8: 53,    // col 7, rows 9→6, climb 3
+  20: 71,   // col 10, rows 8→5, climb 3
+  45: 76,   // col 14, rows 7→4, climb 3
+  39: 82,   // col 8, rows 7→4, climb 3
+  58: 93,   // col 2, rows 6→3, climb 3
+  73: 108,  // col 12, rows 5→2, climb 3
+  84: 127,  // col 6, rows 4→1, climb 3
+  123: 148, // col 2, rows 1→0, climb 1 — quick boost near finish
 };
 
 export type PlayerColor = 'red' | 'green' | 'blue' | 'yellow' | 'purple' | 'orange' | 'teal';

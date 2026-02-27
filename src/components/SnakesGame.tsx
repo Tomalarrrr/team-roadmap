@@ -114,9 +114,10 @@ function DiceFace({ value }: { value: number }) {
 
 // --- SVG helpers for snakes and ladders ---
 
+// Returns SVG coordinates in a 150×100 viewBox (matching the 15×10 board at 10 units per cell)
 function cellCenter(cell: number): [number, number] {
   const [row, col] = cellToGrid(cell);
-  return [col * COL_PCT + COL_PCT / 2, row * ROW_PCT + ROW_PCT / 2]; // x, y in percentage
+  return [col * 10 + 5, row * 10 + 5]; // x, y in isometric units
 }
 
 // Ladder color palettes for variety
@@ -132,23 +133,23 @@ function renderLadderSVG(from: number, to: number, index: number) {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const len = Math.sqrt(dx * dx + dy * dy);
-  const railGap = 2.2;
+  const railGap = 1.4;
   const nx = (-dy / len) * railGap;
   const ny = (dx / len) * railGap;
   const rungs = Math.max(3, Math.floor(len / 6));
   const palette = LADDER_PALETTES[index % LADDER_PALETTES.length];
 
   // Rail width for 3D look
-  const railW = 1.0;
-  const rungW = 0.7;
+  const railW = 0.65;
+  const rungW = 0.45;
 
   return (
-    <g key={`ladder-${from}-${to}`} opacity="0.78">
+    <g key={`ladder-${from}-${to}`} opacity="0.88">
       {/* Shadow behind entire ladder */}
-      <line x1={x1 + nx + 0.4} y1={y1 + ny + 0.4} x2={x2 + nx + 0.4} y2={y2 + ny + 0.4}
-        stroke="rgba(0,0,0,0.15)" strokeWidth={railW + 0.6} strokeLinecap="round" />
-      <line x1={x1 - nx + 0.4} y1={y1 - ny + 0.4} x2={x2 - nx + 0.4} y2={y2 - ny + 0.4}
-        stroke="rgba(0,0,0,0.15)" strokeWidth={railW + 0.6} strokeLinecap="round" />
+      <line x1={x1 + nx + 0.25} y1={y1 + ny + 0.25} x2={x2 + nx + 0.25} y2={y2 + ny + 0.25}
+        stroke="rgba(0,0,0,0.10)" strokeWidth={railW + 0.3} strokeLinecap="round" />
+      <line x1={x1 - nx + 0.25} y1={y1 - ny + 0.25} x2={x2 - nx + 0.25} y2={y2 - ny + 0.25}
+        stroke="rgba(0,0,0,0.10)" strokeWidth={railW + 0.3} strokeLinecap="round" />
 
       {/* Left rail - dark side */}
       <line x1={x1 + nx} y1={y1 + ny} x2={x2 + nx} y2={y2 + ny}
@@ -179,9 +180,9 @@ function renderLadderSVG(from: number, to: number, index: number) {
           <g key={i}>
             {/* Rung shadow */}
             <line
-              x1={rx + nx + 0.3} y1={ry + ny + 0.3}
-              x2={rx - nx + 0.3} y2={ry - ny + 0.3}
-              stroke="rgba(0,0,0,0.12)" strokeWidth={rungW + 0.3} strokeLinecap="round" />
+              x1={rx + nx + 0.2} y1={ry + ny + 0.2}
+              x2={rx - nx + 0.2} y2={ry - ny + 0.2}
+              stroke="rgba(0,0,0,0.08)" strokeWidth={rungW + 0.2} strokeLinecap="round" />
             {/* Rung main */}
             <line
               x1={rx + nx} y1={ry + ny} x2={rx - nx} y2={ry - ny}
@@ -222,8 +223,8 @@ function renderSnakeSVG(from: number, to: number, index: number) {
 
   // Build a sinusoidal wavy path with multiple undulations
   const segments = 40;
-  const waveAmp = Math.min(4.5, len * 0.12);
-  const waveFreq = Math.max(2, Math.floor(len / 12));
+  const waveAmp = Math.min(2.0, len * 0.06);
+  const waveFreq = Math.max(3, Math.floor(len / 8));
 
   const points: [number, number][] = [];
   for (let i = 0; i <= segments; i++) {
@@ -261,8 +262,8 @@ function renderSnakeSVG(from: number, to: number, index: number) {
   const palette = SNAKE_PALETTES[index % SNAKE_PALETTES.length];
 
   // Body thickness tapers from head to tail
-  const headWidth = 1.6;
-  const tailWidth = 0.4;
+  const headWidth = 1.1;
+  const tailWidth = 0.3;
 
   // Head direction (from first two points)
   const hdx = points[1][0] - points[0][0];
@@ -274,15 +275,15 @@ function renderSnakeSVG(from: number, to: number, index: number) {
   const hny = hux;
 
   // Head shape: rounded diamond
-  const headSize = 1.6;
+  const headSize = 1.2;
   const headX = points[0][0];
   const headY = points[0][1];
 
   // Eye positions
-  const eyeOffX = hnx * 0.65;
-  const eyeOffY = hny * 0.65;
-  const eyeFwdX = -hux * 0.25;
-  const eyeFwdY = -huy * 0.25;
+  const eyeOffX = hnx * 0.5;
+  const eyeOffY = hny * 0.5;
+  const eyeFwdX = -hux * 0.2;
+  const eyeFwdY = -huy * 0.2;
 
   // Tongue
   const tongueX = headX - hux * headSize * 0.9;
@@ -295,16 +296,16 @@ function renderSnakeSVG(from: number, to: number, index: number) {
   const tailPt = points[points.length - 1];
 
   return (
-    <g key={`snake-${from}-${to}`} opacity="0.82">
+    <g key={`snake-${from}-${to}`} opacity="0.9">
       {/* Shadow layer */}
-      <path d={bodyPath} fill="none" stroke={palette.shadow} strokeWidth={headWidth + 0.8}
-        strokeLinecap="round" strokeOpacity="0.25" />
+      <path d={bodyPath} fill="none" stroke={palette.shadow} strokeWidth={headWidth + 0.4}
+        strokeLinecap="round" strokeOpacity="0.18" />
       {/* Main body - thick stroke */}
       <path d={bodyPath} fill="none" stroke={palette.body} strokeWidth={headWidth}
         strokeLinecap="round" />
       {/* Belly highlight stripe */}
-      <path d={bodyPath} fill="none" stroke={palette.belly} strokeWidth={headWidth * 0.35}
-        strokeLinecap="round" strokeOpacity="0.6" />
+      <path d={bodyPath} fill="none" stroke={palette.belly} strokeWidth={headWidth * 0.3}
+        strokeLinecap="round" strokeOpacity="0.5" />
 
       {/* Head - wider ellipse */}
       <ellipse
@@ -316,10 +317,10 @@ function renderSnakeSVG(from: number, to: number, index: number) {
       />
 
       {/* Eyes */}
-      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.45" fill="#fff" />
-      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.22" fill="#111" />
-      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.45" fill="#fff" />
-      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.22" fill="#111" />
+      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.35" fill="#fff" />
+      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.17" fill="#111" />
+      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.35" fill="#fff" />
+      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.17" fill="#111" />
 
       {/* Forked tongue */}
       <path
@@ -1218,7 +1219,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   );
 
   const snakeLadderSVG = useMemo(() => (
-    <svg className={styles.svgOverlay} viewBox="0 0 100 100" preserveAspectRatio="none">
+    <svg className={styles.svgOverlay} viewBox="0 0 150 100" preserveAspectRatio="none">
       {Object.entries(LADDERS).map(([from, to], i) => renderLadderSVG(Number(from), to, i))}
       {Object.entries(SNAKES).map(([from, to], i) => renderSnakeSVG(Number(from), to, i))}
     </svg>
@@ -1437,7 +1438,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                   const isSnakeH = SNAKES[hoveredCell] !== undefined;
                   const hc = isSnakeH ? '#e4002b' : '#34a853';
                   return (
-                    <svg className={styles.svgOverlay} viewBox="0 0 100 100" preserveAspectRatio="none" style={{ zIndex: 6 }}>
+                    <svg className={styles.svgOverlay} viewBox="0 0 150 100" preserveAspectRatio="none" style={{ zIndex: 6 }}>
                       <line x1={sx} y1={sy} x2={dx2} y2={dy2} stroke={hc} strokeWidth="1.2" strokeDasharray="2 1.5" opacity="0.6" />
                       <circle cx={sx} cy={sy} r="3" fill={hc} opacity="0.25" />
                       <circle cx={dx2} cy={dy2} r="3" fill={hc} opacity="0.25" />
