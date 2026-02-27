@@ -793,7 +793,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         moveInFlightRef.current = false;
       });
     }, 650);
-  }, [isMyTurn, startTokenAnimation]);
+  }, [isMyTurn]);
 
   const handleRollDiceRef = useRef(handleRollDice);
   handleRollDiceRef.current = handleRollDice;
@@ -1501,11 +1501,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 <button
                   className={[
                     styles.dice,
-                    isMyTurn && !isRolling && winner === null ? styles.diceActive : '',
+                    isMyTurn && !isRolling && !isAnimating && winner === null ? styles.diceActive : '',
                     isRolling ? styles.diceRolling : '',
                   ].filter(Boolean).join(' ')}
                   onClick={handleRollDice}
-                  disabled={!isMyTurn || isRolling || winner !== null}
+                  disabled={!isMyTurn || isRolling || winner !== null || isAnimating}
                   aria-label="Roll dice"
                 >
                   {isRolling ? (
@@ -1518,7 +1518,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                     <DiceFace value={1} />
                   )}
                 </button>
-                {isMyTurn && !isRolling && !hasRolledThisTurn && !winner && (
+                {isMyTurn && !isRolling && !isAnimating && !hasRolledThisTurn && !winner && (
                   <span className={styles.rollReminder}>Roll!</span>
                 )}
                 {consecutiveSixes > 0 && winner === null && (
