@@ -92,10 +92,18 @@ export async function joinGame(
   userName: string
 ): Promise<{ state: SnakesGameState; assignedSlot: number }> {
   await ensureInitialized();
-  const { ref, runTransaction } = getDbModule();
+  const { ref, get, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
+
+  // Prime the local cache so the transaction gets real data on first call.
+  // Without this, runTransaction fires with null (empty cache) and aborts.
+  const prefetch = await get(gameRef);
+  if (!prefetch.exists()) {
+    throw new Error('Game not found');
+  }
+
   let assignedSlot = -1;
   let abortReason: 'not_found' | 'full' = 'not_found';
 
