@@ -90,32 +90,6 @@ export function cellCenter(cell: number): [number, number] {
   return [col * 10 + 5, row * 10 + 5]; // x, y in isometric units
 }
 
-// Generate a wavy SVG polyline path string matching the snake body -- used for hit targets
-export function snakeHitPath(from: number, to: number): string {
-  const [x1, y1] = cellCenter(from);
-  const [x2, y2] = cellCenter(to);
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len = Math.sqrt(dx * dx + dy * dy);
-  const ux = dx / len;
-  const uy = dy / len;
-  const nx = -uy;
-  const ny = ux;
-  const segments = 20;
-  const waveAmp = Math.min(2.0, len * 0.06);
-  const waveFreq = Math.max(3, Math.floor(len / 8));
-  const points: string[] = [];
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const taper = Math.sin(t * Math.PI);
-    const wave = Math.sin(t * waveFreq * Math.PI * 2) * waveAmp * taper;
-    const px = x1 + dx * t + nx * wave;
-    const py = y1 + dy * t + ny * wave;
-    points.push(`${px.toFixed(1)},${py.toFixed(1)}`);
-  }
-  return points.join(' ');
-}
-
 // Ladder color palettes for variety
 export const LADDER_PALETTES = [
   { rail: '#8d6e3f', rung: '#a0845c', highlight: '#c4a872', shadow: '#5c4627' },

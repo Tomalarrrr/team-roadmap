@@ -5,30 +5,26 @@ export const BOARD_COLS = 15;
 export const BOARD_ROWS = 10;
 export const BOARD_SIZE = BOARD_COLS * BOARD_ROWS; // 150
 
-// Snake/ladder map for 15×10 board — diagonal-oriented, varied lengths.
-// Each snake/ladder spans 5-8 columns for a visually interesting diagonal look.
+// Snake/ladder map for 15×10 board — traditional layout with varied lengths.
+// Well distributed across the board with a mix of short, medium, and long paths.
 export const SNAKES: Record<number, number> = {
-  140: 65,  // grid(0,10)→(5,4) — devastating near-finish, drop 5 rows diagonal left
-  124: 80,  // grid(1,3)→(4,10) — long diagonal right, drop 3 rows
-  133: 83,  // grid(1,12)→(4,7) — diagonal left, drop 3 rows
-  118: 22,  // grid(2,2)→(8,8) — longest snake, drop 6 rows diagonal right
-  101: 56,  // grid(3,10)→(6,4) — diagonal left, drop 3 rows
-  89: 52,   // grid(4,1)→(6,8) — diagonal right, drop 2 rows
-  73: 24,   // grid(5,12)→(8,6) — diagonal left, drop 3 rows
-  58: 20,   // grid(6,2)→(8,10) — diagonal right, drop 2 rows
-  42: 6,    // grid(7,11)→(9,5) — diagonal left, drop 2 rows
+  34: 8,    // grid(7,3)→(9,7) — early board, drop 2 rows
+  52: 19,   // grid(6,8)→(8,11) — lower middle, drop 2 rows
+  76: 40,   // grid(4,14)→(7,9) — middle board, drop 3 rows
+  97: 63,   // grid(3,6)→(5,2) — upper middle, drop 2 rows
+  113: 74,  // grid(2,7)→(5,13) — upper board, drop 3 rows
+  131: 95,  // grid(1,10)→(3,4) — near top, drop 2 rows
+  146: 112, // grid(0,4)→(2,8) — near finish, drop 2 rows
 };
 
 export const LADDERS: Record<number, number> = {
-  3: 99,    // grid(9,2)→(3,8) — jackpot early ladder, climb 6 rows diagonal right
-  8: 48,    // grid(9,7)→(6,12) — diagonal right, climb 3 rows
-  29: 69,   // grid(8,1)→(5,8) — diagonal right, climb 3 rows
-  17: 67,   // grid(8,13)→(5,6) — diagonal left, climb 3 rows
-  36: 79,   // grid(7,5)→(4,11) — diagonal right, climb 3 rows
-  60: 97,   // grid(6,0)→(3,6) — diagonal right, climb 3 rows
-  51: 94,   // grid(6,9)→(3,3) — diagonal left, climb 3 rows
-  86: 130,  // grid(4,4)→(1,9) — diagonal right, climb 3 rows
-  116: 141, // grid(2,4)→(0,9) — near finish, climb 2 rows diagonal right
+  5: 38,    // grid(9,4)→(7,7) — early boost, climb 2 rows
+  14: 49,   // grid(9,13)→(6,11) — early board, climb 3 rows
+  28: 65,   // grid(8,2)→(5,4) — lower middle, climb 3 rows
+  41: 81,   // grid(7,10)→(4,9) — middle board, climb 3 rows
+  58: 98,   // grid(6,2)→(3,7) — middle, climb 3 rows
+  69: 107,  // grid(5,8)→(2,13) — upper middle, climb 3 rows
+  84: 126,  // grid(4,6)→(1,5) — upper board, climb 3 rows
 };
 
 export type PlayerColor = 'red' | 'green' | 'blue' | 'yellow' | 'purple' | 'orange' | 'teal';

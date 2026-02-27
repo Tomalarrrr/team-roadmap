@@ -61,8 +61,6 @@ import {
   BOARD_CELLS,
   DUST_DIRS,
   DiceFace,
-  cellCenter,
-  snakeHitPath,
   renderLadderSVG,
   renderSnakeSVG,
   launchConfetti,
@@ -115,7 +113,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [turnNudge, setTurnNudge] = useState(false);
   const [winTally, setWinTally] = useState<Record<number, number>>({});
   const [gameNumber, setGameNumber] = useState(1);
-  const [hoveredCell, setHoveredCell] = useState<number | null>(null);
   const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; player: number; left: number }>>([]);
   const [turnStartedAtState, setTurnStartedAtState] = useState(Date.now());
   const [serverOffsetState, setServerOffsetState] = useState(0);
@@ -1003,8 +1000,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
 
   // --- Board rendering ---
 
-  const handleCellHoverEnter = useCallback((cell: number) => setHoveredCell(cell), []);
-  const handleCellHoverLeave = useCallback(() => setHoveredCell(null), []);
 
   const gameStats = useMemo(
     () => winner !== null && moveLog.length > 0 ? computeGameStats(moveLog, activePlayerCount) : null,
@@ -1171,55 +1166,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                     <BoardCell
                       key={cellNum}
                       cellNum={cellNum}
-                      hoveredCell={hoveredCell}
-                      onHoverEnter={handleCellHoverEnter}
-                      onHoverLeave={handleCellHoverLeave}
                     />
                   ))}
                 </div>
                 {snakeLadderSVG}
-                {/* Interactive hover hit targets — wavy polylines for snakes, thick lines for ladders */}
-                <svg className={styles.svgOverlay} viewBox="0 0 150 100" preserveAspectRatio="none"
-                  style={{ zIndex: 6, pointerEvents: 'none' }}>
-                  {Object.entries(SNAKES).map(([from, to]) => (
-                    <polyline key={`hit-s-${from}`}
-                      points={snakeHitPath(Number(from), to)}
-                      fill="none" stroke="transparent" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"
-                      style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                      onMouseEnter={() => setHoveredCell(Number(from))}
-                      onMouseLeave={() => setHoveredCell(null)}
-                    />
-                  ))}
-                  {Object.entries(LADDERS).map(([from, to]) => {
-                    const [x1, y1] = cellCenter(Number(from));
-                    const [x2, y2] = cellCenter(to);
-                    return (
-                      <line key={`hit-l-${from}`}
-                        x1={x1} y1={y1} x2={x2} y2={y2}
-                        stroke="transparent" strokeWidth="6" strokeLinecap="round"
-                        style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                        onMouseEnter={() => setHoveredCell(Number(from))}
-                        onMouseLeave={() => setHoveredCell(null)}
-                      />
-                    );
-                  })}
-                </svg>
-                {/* Hover highlight SVG */}
-                {hoveredCell !== null && (() => {
-                  const dest = SNAKES[hoveredCell] ?? LADDERS[hoveredCell];
-                  if (dest === undefined) return null;
-                  const [sx, sy] = cellCenter(hoveredCell);
-                  const [dx2, dy2] = cellCenter(dest);
-                  const isSnakeH = SNAKES[hoveredCell] !== undefined;
-                  const hc = isSnakeH ? '#e4002b' : '#34a853';
-                  return (
-                    <svg className={styles.svgOverlay} viewBox="0 0 150 100" preserveAspectRatio="none" style={{ zIndex: 6 }}>
-                      <line x1={sx} y1={sy} x2={dx2} y2={dy2} stroke={hc} strokeWidth="1.2" strokeDasharray="2 1.5" opacity="0.6" />
-                      <circle cx={sx} cy={sy} r="3" fill={hc} opacity="0.25" />
-                      <circle cx={dx2} cy={dy2} r="3" fill={hc} opacity="0.25" />
-                    </svg>
-                  );
-                })()}
                 {/* Tokens */}
                 {Array.from({ length: activePlayerCount }, (_, i) => renderToken(i))}
                 {/* Winner burst */}

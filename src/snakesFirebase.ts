@@ -213,19 +213,19 @@ export async function makeMove(
   updates: SnakesMoveUpdate
 ): Promise<boolean> {
   await ensureInitialized();
-  const { ref, runTransaction } = getDbModule();
+  const { ref, get, update } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
-  const result = await runTransaction(gameRef, (current: SnakesGameState | null) => {
-    if (!current) return undefined;
-    // Only apply if the game state matches what the client expects
-    if (current.currentTurn !== expectedTurn) return undefined;
-    if (current.winner !== null) return undefined;
-    return { ...current, ...updates };
-  });
+  const snapshot = await get(gameRef);
+  if (!snapshot.exists()) return false;
 
-  return result.committed;
+  const current = snapshot.val() as SnakesGameState;
+  if (current.currentTurn !== expectedTurn) return false;
+  if (current.winner !== null) return false;
+
+  await update(gameRef, updates);
+  return true;
 }
 
 export async function resetGame(code: string, playerCount: number, serverOffset = 0): Promise<void> {
