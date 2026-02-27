@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import {
   createGame,
   joinGame,
@@ -9,6 +9,8 @@ import {
   sendReaction,
   subscribeToReactions,
   cleanupOldReactions,
+  cleanupOldGames,
+  subscribeToServerTimeOffset,
   type SnakesGameState,
   type SnakesMoveUpdate,
 } from '../snakesFirebase';
@@ -71,6 +73,31 @@ const DICE_PIPS: Record<number, [number, number][]> = {
 
 // Pre-computed board cell indices
 const BOARD_CELLS = Array.from({ length: BOARD_SIZE }, (_, i) => i + 1);
+
+// Pre-computed danger/opportunity zone cells (1-2 cells before snake heads / ladder bases)
+const NEAR_SNAKE_CELLS = new Set<number>();
+for (const head of Object.keys(SNAKES).map(Number)) {
+  for (let offset = 1; offset <= 2; offset++) {
+    const cell = head - offset;
+    if (cell >= 1 && SNAKES[cell] === undefined && LADDERS[cell] === undefined) {
+      NEAR_SNAKE_CELLS.add(cell);
+    }
+  }
+}
+const NEAR_LADDER_CELLS = new Set<number>();
+for (const base of Object.keys(LADDERS).map(Number)) {
+  for (let offset = 1; offset <= 2; offset++) {
+    const cell = base - offset;
+    if (cell >= 1 && SNAKES[cell] === undefined && LADDERS[cell] === undefined) {
+      NEAR_LADDER_CELLS.add(cell);
+    }
+  }
+}
+
+// Dust poof scatter directions [dx, dy] for landing particles
+const DUST_DIRS: [string, string][] = [
+  ['12px', '-9px'], ['-10px', '-11px'], ['14px', '5px'], ['-13px', '7px'], ['3px', '-14px'],
+];
 
 // --- DiceFace ---
 
@@ -395,6 +422,113 @@ function launchConfetti(
   animRef.current = requestAnimationFrame(animate);
 }
 
+// --- CountdownTimer (isolated to prevent parent re-renders on tick) ---
+
+const CountdownTimer = memo(function CountdownTimer({
+  turnStartedAt,
+  serverOffset,
+}: {
+  turnStartedAt: number;
+  serverOffset: number;
+}) {
+  const [timeLeft, setTimeLeft] = useState(() => {
+    const serverNow = Date.now() + serverOffset;
+    return Math.max(Math.ceil(TURN_SECONDS - (serverNow - turnStartedAt) / 1000), 0);
+  });
+
+  useEffect(() => {
+    const update = () => {
+      const serverNow = Date.now() + serverOffset;
+      setTimeLeft(Math.max(Math.ceil(TURN_SECONDS - (serverNow - turnStartedAt) / 1000), 0));
+    };
+    update();
+    const interval = setInterval(update, 500);
+    return () => clearInterval(interval);
+  }, [turnStartedAt, serverOffset]);
+
+  return (
+    <div className={styles.countdown}>
+      <svg className={styles.countdownRing} viewBox="0 0 48 48">
+        <circle className={styles.countdownTrack} cx="24" cy="24" r="20" />
+        <circle
+          className={`${styles.countdownProgress} ${timeLeft <= 5 ? styles.countdownProgressUrgent : ''}`}
+          cx="24" cy="24" r="20"
+          strokeDasharray={2 * Math.PI * 20}
+          strokeDashoffset={2 * Math.PI * 20 * (1 - timeLeft / TURN_SECONDS)}
+          transform="rotate(-90 24 24)"
+        />
+      </svg>
+      <span className={`${styles.countdownNumber} ${timeLeft <= 5 ? styles.countdownNumberUrgent : ''}`}>
+        {timeLeft}
+      </span>
+    </div>
+  );
+});
+
+// --- BoardCell (memoized — only re-renders when its hover state changes) ---
+
+function getCellHoverState(cellNum: number, hoveredCell: number | null): number {
+  if (hoveredCell === null) return 0;
+  if (hoveredCell === cellNum) return 1;
+  if (SNAKES[hoveredCell] === cellNum || LADDERS[hoveredCell] === cellNum) return 2;
+  return 3;
+}
+
+const BoardCell = memo(function BoardCell({
+  cellNum,
+  hoveredCell,
+  onHoverEnter,
+  onHoverLeave,
+}: {
+  cellNum: number;
+  hoveredCell: number | null;
+  onHoverEnter: (cell: number) => void;
+  onHoverLeave: () => void;
+}) {
+  const [gridRow, gridCol] = cellToGrid(cellNum);
+  const isEven = (gridRow + gridCol) % 2 === 0;
+  const isSnakeHead = SNAKES[cellNum] !== undefined;
+  const isLadderBottom = LADDERS[cellNum] !== undefined;
+  const isNearSnake = NEAR_SNAKE_CELLS.has(cellNum);
+  const isNearLadder = NEAR_LADDER_CELLS.has(cellNum);
+  const isWinCell = cellNum === BOARD_SIZE;
+  const isHoverSource = hoveredCell === cellNum;
+  const isHoverDest = hoveredCell !== null && (SNAKES[hoveredCell] === cellNum || LADDERS[hoveredCell] === cellNum);
+  const isDimmed = hoveredCell !== null && !isHoverSource && !isHoverDest;
+
+  return (
+    <div
+      className={[
+        styles.cell,
+        isEven ? styles.cellEven : styles.cellOdd,
+        isSnakeHead ? styles.cellSnakeHead : '',
+        isLadderBottom ? styles.cellLadderBottom : '',
+        isNearSnake ? styles.cellNearSnake : '',
+        isNearLadder ? styles.cellNearLadder : '',
+        isWinCell ? styles.cellWin : '',
+        isHoverSource ? styles.cellHighlightSource : '',
+        isHoverDest ? styles.cellHighlightDest : '',
+        isDimmed ? styles.cellDimmed : '',
+      ].filter(Boolean).join(' ')}
+      style={{ gridRow: gridRow + 1, gridColumn: gridCol + 1 }}
+      aria-label={`Cell ${cellNum}`}
+      onMouseEnter={() => {
+        if (isSnakeHead || isLadderBottom) onHoverEnter(cellNum);
+      }}
+      onMouseLeave={onHoverLeave}
+    >
+      <span className={styles.cellNumber}>{cellNum}</span>
+      {isHoverSource && (
+        <span className={styles.cellTooltip}>
+          {cellNum} &rarr; {SNAKES[cellNum] ?? LADDERS[cellNum]}
+        </span>
+      )}
+    </div>
+  );
+}, (prev, next) => {
+  return getCellHoverState(prev.cellNum, prev.hoveredCell) === getCellHoverState(next.cellNum, next.hoveredCell);
+});
+
 // --- Component ---
 
 interface SnakesGameProps {
@@ -432,7 +566,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [showBurst, setShowBurst] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
   const [statusHint, setStatusHint] = useState<string | null>(null);
-  const [timeLeft, setTimeLeft] = useState(TURN_SECONDS);
   const [hasRolledThisTurn, setHasRolledThisTurn] = useState(false);
   const [, setRenderTick] = useState(0);
   const [turnTransitioning, setTurnTransitioning] = useState(false);
@@ -441,6 +574,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [gameNumber, setGameNumber] = useState(1);
   const [hoveredCell, setHoveredCell] = useState<number | null>(null);
   const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; player: number; left: number }>>([]);
+  const [turnStartedAtState, setTurnStartedAtState] = useState(Date.now());
 
   // Drag state
   const [position, setPosition] = useState(() => ({
@@ -475,6 +609,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const lastReactionTimeRef = useRef(0);
   const turnTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const turnNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const serverOffsetRef = useRef(0);
 
   // Mirrored refs for closure safety
   const gameCodeRef = useRef(gameCode);
@@ -512,6 +647,16 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
       dragCleanupRef.current?.();
     };
+  }, []);
+
+  // Subscribe to Firebase server time offset for clock skew compensation
+  useEffect(() => {
+    let unsub: (() => void) | null = null;
+    let cancelled = false;
+    subscribeToServerTimeOffset((offset) => {
+      if (!cancelled) serverOffsetRef.current = offset;
+    }).then(u => { if (cancelled) u(); else unsub = u; });
+    return () => { cancelled = true; unsub?.(); };
   }, []);
 
   // --- Utility ---
@@ -637,11 +782,13 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         diceValue: roll,
         consecutiveSixes: turnResult.nextSixes,
         winner: winnerIdx,
-        turnStartedAt: Date.now(),
+        turnStartedAt: Date.now() + serverOffsetRef.current,
         moveLog: serializeMoveLog(newLog),
       };
 
-      makeMove(gameCodeRef.current!, updates).catch(err => {
+      makeMove(gameCodeRef.current!, currentTurnRef.current, updates).then(committed => {
+        if (!committed) moveInFlightRef.current = false;
+      }).catch(err => {
         console.error('[Snakes] Move failed:', err);
         moveInFlightRef.current = false;
       });
@@ -749,6 +896,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       }
       prevPositionsRef.current = state.positions;
       turnStartedAtRef.current = state.turnStartedAt;
+      setTurnStartedAtState(state.turnStartedAt);
 
       // Update players
       const names: Record<number, string> = {};
@@ -872,17 +1020,22 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     if (gamePhase !== 'playing' || winner !== null) return;
 
     const interval = setInterval(() => {
-      const elapsed = (Date.now() - turnStartedAtRef.current) / 1000;
-      const remaining = Math.max(Math.ceil(TURN_SECONDS - elapsed), -BACKUP_GRACE);
-      setTimeLeft(remaining);
+      const serverNow = Date.now() + serverOffsetRef.current;
+      const elapsed = (serverNow - turnStartedAtRef.current) / 1000;
+      const remaining = Math.ceil(TURN_SECONDS - elapsed);
 
       // Auto-roll at 0s for current player
-      if (remaining <= 0 && isMyTurn && !isRollingRef.current && !moveInFlightRef.current) {
+      if (remaining <= 0 && mySlotRef.current !== null &&
+          currentTurnRef.current === mySlotRef.current &&
+          !isRollingRef.current && !moveInFlightRef.current) {
         handleRollDiceRef.current();
       }
 
-      // Backup skip at -BACKUP_GRACE for non-current players
-      if (remaining <= -BACKUP_GRACE && !isMyTurn && mySlotRef.current !== null && !moveInFlightRef.current) {
+      // Backup skip: only the next player in turn order attempts it (prevents race)
+      const nextPlayer = (currentTurnRef.current + 1) % activePlayerCountRef.current;
+      if (remaining <= -BACKUP_GRACE &&
+          mySlotRef.current === nextPlayer &&
+          !moveInFlightRef.current) {
         moveInFlightRef.current = true;
         const roll = Math.floor(Math.random() * 6) + 1;
         const currentPos = positionsRef.current[currentTurnRef.current];
@@ -897,26 +1050,29 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         };
         const newLog = [...moveLogRef.current, entry].slice(-MAX_LOG_ENTRIES);
 
-        makeMove(gameCodeRef.current!, {
+        makeMove(gameCodeRef.current!, currentTurnRef.current, {
           positions: serializePositions(newPositions),
           currentTurn: winnerIdx !== null ? currentTurnRef.current : turnResult.nextTurn,
           diceValue: roll,
           consecutiveSixes: turnResult.nextSixes,
           winner: winnerIdx,
-          turnStartedAt: Date.now(),
+          turnStartedAt: Date.now() + serverOffsetRef.current,
           moveLog: serializeMoveLog(newLog),
+        }).then(committed => {
+          if (!committed) moveInFlightRef.current = false;
         }).catch(() => { moveInFlightRef.current = false; });
       }
     }, 500);
 
     return () => clearInterval(interval);
-  }, [gamePhase, winner, isMyTurn]);
+  }, [gamePhase, winner]);
 
   // --- Game actions ---
 
   const handleCreateGame = useCallback(async () => {
     setIsLoading(true);
     setError(null);
+    cleanupOldGames().catch(() => {}); // fire-and-forget stale game cleanup
     try {
       const code = await createGame(sessionId, userName, playerCount);
       setGameCode(code);
@@ -1048,52 +1204,20 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
 
   // --- Board rendering ---
 
+  const handleCellHoverEnter = useCallback((cell: number) => setHoveredCell(cell), []);
+  const handleCellHoverLeave = useCallback(() => setHoveredCell(null), []);
+
+  const gameStats = useMemo(
+    () => winner !== null && moveLog.length > 0 ? computeGameStats(moveLog, activePlayerCount) : null,
+    [winner, moveLog, activePlayerCount],
+  );
+
   const snakeLadderSVG = useMemo(() => (
     <svg className={styles.svgOverlay} viewBox="0 0 100 100" preserveAspectRatio="none">
       {Object.entries(LADDERS).map(([from, to], i) => renderLadderSVG(Number(from), to, i))}
       {Object.entries(SNAKES).map(([from, to], i) => renderSnakeSVG(Number(from), to, i))}
     </svg>
   ), []);
-
-  function renderCell(cellNum: number) {
-    const [gridRow, gridCol] = cellToGrid(cellNum);
-    const isEven = (gridRow + gridCol) % 2 === 0;
-    const isSnakeHead = SNAKES[cellNum] !== undefined;
-    const isLadderBottom = LADDERS[cellNum] !== undefined;
-    const isWinCell = cellNum === BOARD_SIZE;
-    const isHoverSource = hoveredCell === cellNum;
-    const isHoverDest = hoveredCell !== null && (SNAKES[hoveredCell] === cellNum || LADDERS[hoveredCell] === cellNum);
-    const isDimmed = hoveredCell !== null && !isHoverSource && !isHoverDest;
-
-    return (
-      <div
-        key={cellNum}
-        className={[
-          styles.cell,
-          isEven ? styles.cellEven : styles.cellOdd,
-          isSnakeHead ? styles.cellSnakeHead : '',
-          isLadderBottom ? styles.cellLadderBottom : '',
-          isWinCell ? styles.cellWin : '',
-          isHoverSource ? styles.cellHighlightSource : '',
-          isHoverDest ? styles.cellHighlightDest : '',
-          isDimmed ? styles.cellDimmed : '',
-        ].filter(Boolean).join(' ')}
-        style={{ gridRow: gridRow + 1, gridColumn: gridCol + 1 }}
-        aria-label={`Cell ${cellNum}`}
-        onMouseEnter={() => {
-          if (isSnakeHead || isLadderBottom) setHoveredCell(cellNum);
-        }}
-        onMouseLeave={() => setHoveredCell(null)}
-      >
-        <span className={styles.cellNumber}>{cellNum}</span>
-        {isHoverSource && (
-          <span className={styles.cellTooltip}>
-            {cellNum} &rarr; {SNAKES[cellNum] ?? LADDERS[cellNum]}
-          </span>
-        )}
-      </div>
-    );
-  }
 
   function renderToken(playerIdx: number) {
     const pos = positions[playerIdx];
@@ -1143,7 +1267,15 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
           top: `${top - halfToken}%`,
         }}
         aria-label={`${COLOR_LABELS[color]} token on cell ${pos}`}
-      />
+      >
+        {isArriving && DUST_DIRS.map(([dx, dy], i) => (
+          <span
+            key={`dust-${i}`}
+            className={styles.dustParticle}
+            style={{ '--dust-dx': dx, '--dust-dy': dy } as React.CSSProperties}
+          />
+        ))}
+      </div>
     );
   }
 
@@ -1279,8 +1411,16 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
             {/* Board */}
             <div className={styles.boardColumn}>
               <div className={styles.boardWrapper}>
-                <div className={styles.board}>
-                  {BOARD_CELLS.map(renderCell)}
+                <div className={styles.board} style={{ '--board-wear': Math.min(moveLog.length / 50, 1) } as React.CSSProperties}>
+                  {BOARD_CELLS.map(cellNum => (
+                    <BoardCell
+                      key={cellNum}
+                      cellNum={cellNum}
+                      hoveredCell={hoveredCell}
+                      onHoverEnter={handleCellHoverEnter}
+                      onHoverLeave={handleCellHoverLeave}
+                    />
+                  ))}
                 </div>
                 {snakeLadderSVG}
                 {/* Hover highlight SVG */}
@@ -1340,21 +1480,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
 
               {/* Countdown timer */}
               {winner === null && (
-                <div className={styles.countdown}>
-                  <svg className={styles.countdownRing} viewBox="0 0 48 48">
-                    <circle className={styles.countdownTrack} cx="24" cy="24" r="20" />
-                    <circle
-                      className={`${styles.countdownProgress} ${timeLeft <= 5 ? styles.countdownProgressUrgent : ''}`}
-                      cx="24" cy="24" r="20"
-                      strokeDasharray={2 * Math.PI * 20}
-                      strokeDashoffset={2 * Math.PI * 20 * (1 - Math.max(timeLeft, 0) / TURN_SECONDS)}
-                      transform="rotate(-90 24 24)"
-                    />
-                  </svg>
-                  <span className={`${styles.countdownNumber} ${timeLeft <= 5 ? styles.countdownNumberUrgent : ''}`}>
-                    {Math.max(timeLeft, 0)}
-                  </span>
-                </div>
+                <CountdownTimer
+                  key={`${currentTurn}-${turnStartedAtState}`}
+                  turnStartedAt={turnStartedAtState}
+                  serverOffset={serverOffsetRef.current}
+                />
               )}
 
               {statusHint && gamePhase === 'playing' && (
@@ -1386,6 +1516,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 {isMyTurn && !isRolling && !hasRolledThisTurn && !winner && (
                   <span className={styles.rollReminder}>Roll!</span>
                 )}
+                {consecutiveSixes > 0 && winner === null && (
+                  <span className={`${styles.streakBadge} ${consecutiveSixes >= 2 ? styles.streakDanger : ''}`}>
+                    {'\u{1F525}'.repeat(consecutiveSixes)}
+                  </span>
+                )}
                 {isAnimating && !isMyTurn && (
                   <span className={styles.statusHint}>Moving...</span>
                 )}
@@ -1403,7 +1538,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                         if (now - lastReactionTimeRef.current < 2000) return;
                         lastReactionTimeRef.current = now;
                         if (gameCode && mySlot !== null) {
-                          sendReaction(gameCode, mySlot, emoji);
+                          sendReaction(gameCode, mySlot, emoji).catch(() => {});
                         }
                       }}
                     >
@@ -1422,6 +1557,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                   const isMe = mySlot === i;
                   const isWinner = winner === i;
                   const isDimmed = winner !== null && winner !== i;
+                  const isNearWin = !winner && positions[i] >= BOARD_SIZE - 6 && positions[i] > 0;
 
                   return (
                     <div
@@ -1432,6 +1568,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                         isMe ? styles.playerChipMe : '',
                         isWinner ? styles.playerChipWinner : '',
                         isDimmed ? styles.playerChipDimmed : '',
+                        isNearWin ? styles.playerChipNearWin : '',
                       ].filter(Boolean).join(' ')}
                     >
                       <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
@@ -1453,11 +1590,12 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 <div className={styles.moveLog}>
                   <div className={styles.moveLogLabel}>Recent Moves</div>
                   <div className={styles.moveLogEntries}>
-                    {moveLog.slice(-10).reverse().map((entry) => {
+                    {moveLog.slice(-10).reverse().map((entry, idx) => {
+                      const logIdx = moveLog.length - 1 - idx;
                       const color = PLAYER_COLORS[entry.player];
                       const name = playerNames[entry.player] || COLOR_LABELS[color];
                       return (
-                        <div key={`log-${entry.player}-${entry.dice}-${entry.from}-${entry.to}`} className={styles.moveLogEntry}>
+                        <div key={logIdx} className={styles.moveLogEntry}>
                           <span className={styles.moveLogDot} style={{ background: COLOR_HEX[color] }} />
                           <span>{name}</span>
                           <span style={{ opacity: 0.6 }}>rolled {entry.dice}:</span>
@@ -1500,35 +1638,32 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                     </div>
                   )}
                   {/* Post-game stats */}
-                  {moveLog.length > 0 && (() => {
-                    const stats = computeGameStats(moveLog, activePlayerCount);
-                    return (
-                      <div className={styles.statsGrid}>
-                        {stats.map((s, i) => {
-                          if (s.totalMoves === 0) return null;
-                          const color = PLAYER_COLORS[i];
-                          const name = playerNames[i] || COLOR_LABELS[color];
-                          return (
-                            <div key={i} className={styles.statCard}>
-                              <div className={styles.statCardHeader}>
-                                <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
-                                <span>{name}</span>
-                              </div>
-                              <div className={styles.statRow}><span>Moves</span><span>{s.totalMoves}</span></div>
-                              <div className={styles.statRow}><span>Snakes</span><span className={styles.moveLogSnake}>{s.snakesHit}</span></div>
-                              <div className={styles.statRow}><span>Ladders</span><span className={styles.moveLogLadder}>{s.laddersClimbed}</span></div>
-                              {s.biggestSnakeFall > 0 && (
-                                <div className={styles.statRow}><span>Worst snake</span><span>-{s.biggestSnakeFall}</span></div>
-                              )}
-                              {s.biggestLadderGain > 0 && (
-                                <div className={styles.statRow}><span>Best ladder</span><span>+{s.biggestLadderGain}</span></div>
-                              )}
+                  {gameStats && (
+                    <div className={styles.statsGrid}>
+                      {gameStats.map((s, i) => {
+                        if (s.totalMoves === 0) return null;
+                        const color = PLAYER_COLORS[i];
+                        const name = playerNames[i] || COLOR_LABELS[color];
+                        return (
+                          <div key={i} className={styles.statCard}>
+                            <div className={styles.statCardHeader}>
+                              <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
+                              <span>{name}</span>
                             </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })()}
+                            <div className={styles.statRow}><span>Moves</span><span>{s.totalMoves}</span></div>
+                            <div className={styles.statRow}><span>Snakes</span><span className={styles.moveLogSnake}>{s.snakesHit}</span></div>
+                            <div className={styles.statRow}><span>Ladders</span><span className={styles.moveLogLadder}>{s.laddersClimbed}</span></div>
+                            {s.biggestSnakeFall > 0 && (
+                              <div className={styles.statRow}><span>Worst snake</span><span>-{s.biggestSnakeFall}</span></div>
+                            )}
+                            {s.biggestLadderGain > 0 && (
+                              <div className={styles.statRow}><span>Best ladder</span><span>+{s.biggestLadderGain}</span></div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {!isSpectating && (
                     <div className={styles.gameOverButtons}>
                       <button className={styles.playAgainBtn} onClick={handleNewGame}>

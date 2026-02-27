@@ -186,28 +186,6 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
-/* Turn timer (inline, small) */
-.timer {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-left: 2px;
-  font-variant-numeric: tabular-nums;
-  min-width: 22px;
-  text-align: center;
-  transition: color 300ms ease, text-shadow 300ms ease;
-}
-
-.timerUrgent {
-  color: #e4002b;
-  animation: timerPulse 1.2s ease-in-out infinite;
-}
-
-@keyframes timerPulse {
-  0%, 100% { opacity: 1; text-shadow: 0 0 6px rgba(228, 0, 43, 0.3); }
-  50% { opacity: 0.35; text-shadow: none; }
-}
-
 /* Countdown ring — prominent circular timer */
 .countdown {
   position: relative;
@@ -314,6 +292,18 @@
     inset 0 0 30px rgba(141, 110, 63, 0.05);
 }
 
+/* Progressive board wear — warm tint that deepens as the game progresses */
+.board::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(120, 90, 40, calc(var(--board-wear, 0) * 0.08));
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 5px;
+  transition: background 3s ease;
+}
+
 .cell {
   display: flex;
   align-items: flex-start;
@@ -350,6 +340,14 @@
 
 .cellLadderBottom {
   background: rgba(46, 125, 50, 0.07);
+}
+
+.cellNearSnake {
+  background: rgba(198, 40, 40, 0.035);
+}
+
+.cellNearLadder {
+  background: rgba(46, 125, 50, 0.035);
 }
 
 .cellWin {
@@ -473,6 +471,24 @@
 
 .tokenArriving {
   animation: tokenHop 650ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Landing dust poof particles */
+.dustParticle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(141, 110, 63, 0.45);
+  top: 50%;
+  left: 50%;
+  pointer-events: none;
+  animation: dustScatter 450ms ease-out forwards;
+}
+
+@keyframes dustScatter {
+  0%   { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+  100% { transform: translate(calc(-50% + var(--dust-dx, 0px)), calc(-50% + var(--dust-dy, 0px))) scale(0.2); opacity: 0; }
 }
 
 /* Two alternating classes so each step restarts the hop animation in sync */
@@ -667,6 +683,28 @@
 @keyframes rollNudge {
   0%, 100% { opacity: 0.5; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.06); }
+}
+
+/* Dice streak fire indicator */
+.streakBadge {
+  font-size: 0.8rem;
+  line-height: 1;
+  animation: streakPulse 1s ease-in-out infinite;
+}
+
+.streakDanger {
+  filter: saturate(1.5);
+  animation: streakDangerPulse 0.6s ease-in-out infinite;
+}
+
+@keyframes streakPulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
+}
+
+@keyframes streakDangerPulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.2); opacity: 1; }
 }
 
 /* Dice result bounce */
@@ -946,6 +984,16 @@
   opacity: 0.35;
 }
 
+.playerChipNearWin {
+  animation: goldenShimmer 2s ease-in-out infinite;
+  border-color: rgba(255, 193, 7, 0.25) !important;
+}
+
+@keyframes goldenShimmer {
+  0%, 100% { box-shadow: 0 0 3px rgba(255, 193, 7, 0.08); }
+  50% { box-shadow: 0 0 8px rgba(255, 193, 7, 0.25), inset 0 0 6px rgba(255, 193, 7, 0.06); }
+}
+
 .playerChipDot {
   width: 8px;
   height: 8px;
@@ -1033,13 +1081,6 @@
 
 .moveLogLadder {
   color: #34a853;
-}
-
-/* Controls */
-.controls {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
 }
 
 .resetBtn {
@@ -1295,7 +1336,6 @@
   .winText,
   .burst,
   .waitingText,
-  .timerUrgent,
   .countdownNumberUrgent,
   .statusHint,
   .rollReminder,
@@ -1310,7 +1350,11 @@
   .gameOverTrophy,
   .statusDotTransition,
   .popupNudge,
-  .floatingReaction {
+  .floatingReaction,
+  .dustParticle,
+  .playerChipNearWin,
+  .streakBadge,
+  .streakDanger {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

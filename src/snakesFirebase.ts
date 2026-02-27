@@ -92,75 +92,71 @@ export async function joinGame(
   userName: string
 ): Promise<{ state: SnakesGameState; assignedSlot: number }> {
   await ensureInitialized();
-  const { ref, get, set, update } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
-  const snapshot = await get(gameRef);
+  let assignedSlot = -1;
+  let abortReason: 'not_found' | 'full' = 'not_found';
 
-  if (!snapshot.exists()) {
-    throw new Error('Game not found');
-  }
+  const result = await runTransaction(gameRef, (current: SnakesGameState | null) => {
+    // Reset per-retry state
+    assignedSlot = -1;
+    if (!current) { abortReason = 'not_found'; return undefined; }
 
-  const state = snapshot.val() as SnakesGameState;
+    const players = current.players || {};
 
-  // Reconnection by sessionId
-  for (let i = 0; i < state.playerCount; i++) {
-    const key = `p${i}`;
-    const player = state.players[key];
-    if (player && player.sessionId === sessionId) {
-      return { state, assignedSlot: i };
+    // Reconnection by sessionId
+    for (let i = 0; i < current.playerCount; i++) {
+      const key = `p${i}`;
+      if (players[key]?.sessionId === sessionId) {
+        assignedSlot = i;
+        return current; // no change needed
+      }
     }
-  }
 
-  // Reconnection by name
-  for (let i = 0; i < state.playerCount; i++) {
-    const key = `p${i}`;
-    const player = state.players[key];
-    if (player && player.name === userName) {
-      const playerRef = ref(db, `snakes/${code}/players/${key}/sessionId`);
-      await set(playerRef, sessionId);
-      return {
-        state: {
-          ...state,
-          players: { ...state.players, [key]: { sessionId, name: userName } },
-        },
-        assignedSlot: i,
-      };
+    // Reconnection by name
+    for (let i = 0; i < current.playerCount; i++) {
+      const key = `p${i}`;
+      if (players[key]?.name === userName) {
+        assignedSlot = i;
+        return {
+          ...current,
+          players: { ...players, [key]: { sessionId, name: userName } },
+        };
+      }
     }
-  }
 
-  // Find next empty slot
-  let assignedSlot: number | null = null;
-  for (let i = 1; i < state.playerCount; i++) {
-    const key = `p${i}`;
-    if (!state.players[key]) {
-      assignedSlot = i;
-      break;
+    // Find next empty slot
+    for (let i = 1; i < current.playerCount; i++) {
+      const key = `p${i}`;
+      if (!players[key]) {
+        assignedSlot = i;
+        const updatedPlayers = { ...players, [key]: { sessionId, name: userName } };
+        const joinedCount = Object.values(updatedPlayers).filter(Boolean).length;
+        const updated = { ...current, players: updatedPlayers };
+
+        // Start the game if all players have joined
+        if (joinedCount >= current.playerCount) {
+          updated.startedAt = Date.now();
+          updated.turnStartedAt = Date.now();
+          updated.currentTurn = Math.floor(Math.random() * current.playerCount);
+        }
+
+        return updated;
+      }
     }
+
+    // No empty slots
+    abortReason = 'full';
+    return undefined;
+  });
+
+  if (!result.committed || assignedSlot === -1) {
+    throw new Error(abortReason === 'not_found' ? 'Game not found' : 'Game is full');
   }
 
-  if (assignedSlot === null) {
-    throw new Error('Game is full');
-  }
-
-  const playerRef = ref(db, `snakes/${code}/players/p${assignedSlot}`);
-  await set(playerRef, { sessionId, name: userName });
-
-  // Check if all required players have joined — start the game
-  const joinedCount = Object.values(state.players).filter(Boolean).length + 1;
-  if (joinedCount >= state.playerCount) {
-    const randomFirst = Math.floor(Math.random() * state.playerCount);
-    await update(gameRef, { startedAt: Date.now(), turnStartedAt: Date.now(), currentTurn: randomFirst });
-  }
-
-  return {
-    state: {
-      ...state,
-      players: { ...state.players, [`p${assignedSlot}`]: { sessionId, name: userName } },
-    },
-    assignedSlot,
-  };
+  return { state: result.snapshot.val() as SnakesGameState, assignedSlot };
 }
 
 export async function spectateGame(code: string): Promise<SnakesGameState> {
@@ -208,14 +204,23 @@ export async function subscribeToGame(
 
 export async function makeMove(
   code: string,
+  expectedTurn: number,
   updates: SnakesMoveUpdate
-): Promise<void> {
+): Promise<boolean> {
   await ensureInitialized();
-  const { ref, update } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
-  await update(gameRef, updates);
+  const result = await runTransaction(gameRef, (current: SnakesGameState | null) => {
+    if (!current) return undefined;
+    // Only apply if the game state matches what the client expects
+    if (current.currentTurn !== expectedTurn) return undefined;
+    if (current.winner !== null) return undefined;
+    return { ...current, ...updates };
+  });
+
+  return result.committed;
 }
 
 export async function resetGame(code: string, playerCount: number): Promise<void> {
@@ -278,4 +283,38 @@ export async function cleanupOldReactions(code: string): Promise<void> {
   const q = query(reactionsRef, orderByChild('ts'), endAt(cutoff));
   const snapshot = await get(q);
   snapshot.forEach((child: { ref: unknown }) => { remove(child.ref as ReturnType<typeof ref>); });
+}
+
+// --- Game cleanup (TTL) ---
+
+export async function cleanupOldGames(): Promise<void> {
+  await ensureInitialized();
+  const { ref, get, remove } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const snakesRef = ref(db, 'snakes');
+  const snapshot = await get(snakesRef);
+  if (!snapshot.exists()) return;
+
+  const now = Date.now();
+  const TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+  snapshot.forEach((child: { val: () => SnakesGameState | null; ref: unknown }) => {
+    const game = child.val();
+    if (game?.createdAt && now - game.createdAt > TTL) {
+      remove(child.ref as ReturnType<typeof ref>);
+    }
+  });
+}
+
+// --- Server time offset ---
+
+export async function subscribeToServerTimeOffset(
+  callback: (offset: number) => void,
+): Promise<() => void> {
+  await ensureInitialized();
+  const { ref, onValue } = getDbModule();
+  const db = getFirebaseDatabase();
+  const offsetRef = ref(db, '.info/serverTimeOffset');
+  return onValue(offsetRef, (snap: { val: () => number | null }) => callback(snap.val() || 0));
 }
