@@ -10,13 +10,15 @@ export const BOARD_SIZE = BOARD_COLS * BOARD_ROWS; // 150
 // No snake crosses another snake; no ladder crosses another ladder.
 export const SNAKES: Record<number, number> = {
   148: 118, // grid(0,2)→(2,2)   — top-left, vertical drop 2 rows
-  137: 97,  // grid(0,13)→(3,6)  — top-right corner, long diagonal left 3 rows
+  142: 114, // grid(0,8)→(2,6)   — top-center, diagonal left 2 rows
+  137: 103, // grid(0,13)→(3,12) — top-right corner, nearly vertical 3 rows
   126: 90,  // grid(1,5)→(4,0)   — upper-center to far-left edge, diagonal 3 rows
-  116: 38,  // grid(2,4)→(7,7)   — BIG aggressive 5-row plunge, left to center
   101: 75,  // grid(3,10)→(5,14) — center-right to far-right edge, diagonal right 2 rows
   94: 88,   // grid(3,3)→(4,2)   — short 1-row nip, upper-left
+  86: 69,   // grid(4,4)→(5,8)   — center, diagonal right 1 row
   64: 36,   // grid(5,3)→(7,5)   — mid-left, short diagonal right 2 rows
-  53: 19,   // grid(6,7)→(8,11)  — lower-center, diagonal right 2 rows
+  60: 34,   // grid(6,0)→(7,3)   — left edge, diagonal right 1 row
+  53: 39,   // grid(6,7)→(7,8)   — center, slight right 1 row
   44: 22,   // grid(7,13)→(8,8)  — lower-right, nearly horizontal 1 row
   17: 12,   // grid(8,13)→(9,11) — short 1-row nip, bottom-right
 };
