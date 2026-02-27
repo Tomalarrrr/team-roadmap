@@ -14,8 +14,8 @@ import styles from '../SnakesGame.module.css';
 
 export const TURN_SECONDS = 10;
 export const BACKUP_GRACE = 10;
-export const STEP_MS = 340;
-export const SLIDE_MS = 1100;
+export const STEP_MS = 200;
+export const SLIDE_MS = 800;
 export const MAX_LOG_ENTRIES = 20;
 export const COL_PCT = 100 / BOARD_COLS;  // ~6.667% per column
 export const ROW_PCT = 100 / BOARD_ROWS;  // 10% per row

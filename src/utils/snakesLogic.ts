@@ -12,18 +12,24 @@ export const SNAKES: Record<number, number> = {
   148: 118, // grid(0,2)→(2,2)   — top-left, vertical drop 2 rows
   137: 97,  // grid(0,13)→(3,6)  — top-right corner, long diagonal left 3 rows
   126: 90,  // grid(1,5)→(4,0)   — upper-center to far-left edge, diagonal 3 rows
+  116: 38,  // grid(2,4)→(7,7)   — BIG aggressive 5-row plunge, left to center
   101: 75,  // grid(3,10)→(5,14) — center-right to far-right edge, diagonal right 2 rows
+  94: 88,   // grid(3,3)→(4,2)   — short 1-row nip, upper-left
   64: 36,   // grid(5,3)→(7,5)   — mid-left, short diagonal right 2 rows
   53: 19,   // grid(6,7)→(8,11)  — lower-center, diagonal right 2 rows
   44: 22,   // grid(7,13)→(8,8)  — lower-right, nearly horizontal 1 row
+  17: 12,   // grid(8,13)→(9,11) — short 1-row nip, bottom-right
 };
 
 export const LADDERS: Record<number, number> = {
   2: 31,    // grid(9,1)→(7,0)   — bottom-left corner to far-left edge, vertical 2 rows
+  9: 80,    // grid(9,8)→(4,10)  — BIG aggressive 5-row jackpot, bottom to mid-board
   13: 41,   // grid(9,12)→(7,10) — bottom-right, nearly vertical 2 rows
+  23: 38,   // grid(8,7)→(7,7)   — short 1-row hop, vertical center
   26: 67,   // grid(8,4)→(5,6)   — lower-center, diagonal right 3 rows
   58: 92,   // grid(6,2)→(3,1)   — mid-left edge, nearly vertical 3 rows
   49: 104,  // grid(6,11)→(3,13) — mid-right, diagonal right 3 rows
+  70: 81,   // grid(5,9)→(4,9)   — short 1-row hop, vertical center-right
   82: 131,  // grid(4,8)→(1,10)  — center to upper-right, diagonal 3 rows
   85: 112,  // grid(4,5)→(2,8)   — center-left to upper-center, diagonal 2 rows
 };
