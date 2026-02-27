@@ -16,13 +16,13 @@
   resize: both;
   max-height: 95vh;
   max-width: 95vw;
-  animation: popupIn 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: popupIn 600ms cubic-bezier(0.22, 0.61, 0.36, 1);
   transform: translateZ(0);
 }
 
 @keyframes popupIn {
-  0%   { opacity: 0; transform: scale(0.88) translateY(24px); }
-  60%  { opacity: 1; transform: scale(1.02) translateY(-2px); }
+  0%   { opacity: 0; transform: scale(0.92) translateY(18px); }
+  70%  { opacity: 1; transform: scale(1.01) translateY(-1px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
@@ -72,7 +72,7 @@
   background: none;
   color: var(--text-muted);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease, transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background-color 180ms ease, color 180ms ease, transform 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .closeBtn:hover {
@@ -105,7 +105,7 @@
   flex: 1;
   min-height: 0;
   position: relative;
-  animation: layoutFadeIn 500ms ease-out;
+  animation: layoutFadeIn 650ms ease-out;
 }
 
 @keyframes layoutFadeIn {
@@ -120,12 +120,12 @@
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  animation: boardScaleIn 550ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: boardScaleIn 750ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes boardScaleIn {
-  0%   { opacity: 0; transform: scale(0.94); }
-  60%  { opacity: 1; transform: scale(1.01); }
+  0%   { opacity: 0; transform: scale(0.96); }
+  70%  { opacity: 1; transform: scale(1.005); }
   100% { opacity: 1; transform: scale(1); }
 }
 
@@ -176,13 +176,13 @@
 }
 
 .statusDotTransition {
-  animation: dotMorph 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: dotMorph 650ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes dotMorph {
   0%   { transform: scale(1); opacity: 1; }
-  30%  { transform: scale(1.6); opacity: 0.7; filter: brightness(1.3); }
-  60%  { transform: scale(1.1); opacity: 0.9; }
+  35%  { transform: scale(1.3); opacity: 0.8; filter: brightness(1.15); }
+  65%  { transform: scale(1.05); opacity: 0.95; }
   100% { transform: scale(1); opacity: 1; }
 }
 
@@ -244,12 +244,12 @@
 }
 
 .winText {
-  animation: bannerIn 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: bannerIn 750ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes bannerIn {
-  0%   { opacity: 0; transform: scale(0.7); }
-  50%  { opacity: 1; transform: scale(1.06); }
+  0%   { opacity: 0; transform: scale(0.85); }
+  60%  { opacity: 1; transform: scale(1.02); }
   100% { opacity: 1; transform: scale(1); }
 }
 
@@ -260,7 +260,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  animation: hintIn 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  animation: hintIn 500ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes hintIn {
@@ -324,9 +324,9 @@
 }
 
 .cellNumber {
-  font-size: 0.4rem;
+  font-size: 0.5rem;
   font-weight: 700;
-  color: rgba(100, 80, 50, 0.3);
+  color: rgba(100, 80, 50, 0.45);
   line-height: 1;
   pointer-events: none;
   position: relative;
@@ -405,13 +405,16 @@
   font-size: 1.6rem;
   pointer-events: none;
   z-index: 25;
-  animation: floatUp 2.5s ease-out forwards;
+  animation: floatUp 3s ease-out forwards;
 }
 
 @keyframes floatUp {
-  0%   { opacity: 1; transform: translateY(0) scale(1); }
-  60%  { opacity: 1; transform: translateY(-120px) scale(1.15); }
-  100% { opacity: 0; transform: translateY(-200px) scale(0.8); }
+  0%   { opacity: 0; transform: translateY(0) scale(0.6); }
+  10%  { opacity: 1; transform: translateY(-10px) scale(1.05); }
+  30%  { opacity: 1; transform: translateY(-50px) scale(1.02) translateX(5px); }
+  55%  { opacity: 0.9; transform: translateY(-100px) scale(1.03) translateX(-4px); }
+  80%  { opacity: 0.5; transform: translateY(-150px) scale(1.0) translateX(3px); }
+  100% { opacity: 0; transform: translateY(-190px) scale(0.85) translateX(-2px); }
 }
 
 /* SVG overlay for snakes and ladders */
@@ -434,8 +437,8 @@
   z-index: 10;
   cursor: default;
   pointer-events: none;
-  transition: left 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              top 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transition: left 500ms cubic-bezier(0.22, 0.61, 0.36, 1),
+              top 500ms cubic-bezier(0.22, 0.61, 0.36, 1);
   box-shadow:
     inset 0 -2px 4px rgba(0, 0, 0, 0.3),
     inset 0 2px 4px rgba(255, 255, 255, 0.25),
@@ -459,18 +462,18 @@
 .tokenTeal   { background: radial-gradient(circle at 35% 35%, #4db6ac 0%, #00897b 40%, #004d40 100%); }
 
 .tokenEntering {
-  animation: tokenEnter 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: tokenEnter 650ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes tokenEnter {
   0%   { transform: scale(0); opacity: 0; }
-  50%  { transform: scale(1.2); opacity: 1; }
-  75%  { transform: scale(0.9); }
+  50%  { transform: scale(1.08); opacity: 1; }
+  80%  { transform: scale(0.97); }
   100% { transform: scale(1); }
 }
 
 .tokenArriving {
-  animation: tokenHop 650ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: tokenHop 800ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 /* Landing dust poof particles */
@@ -483,7 +486,7 @@
   top: 50%;
   left: 50%;
   pointer-events: none;
-  animation: dustScatter 450ms ease-out forwards;
+  animation: dustScatter 550ms ease-out forwards;
 }
 
 @keyframes dustScatter {
@@ -494,82 +497,79 @@
 /* Two alternating classes so each step restarts the hop animation in sync */
 .tokenSteppingA,
 .tokenSteppingB {
-  transition: left 240ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              top 240ms cubic-bezier(0.25, 0.46, 0.45, 0.94) !important;
+  transition: left 300ms cubic-bezier(0.22, 0.61, 0.36, 1),
+              top 300ms cubic-bezier(0.22, 0.61, 0.36, 1) !important;
 }
 
 .tokenSteppingA {
-  animation: stepHopA 280ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: stepHopA 360ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
 }
 
 .tokenSteppingB {
-  animation: stepHopB 280ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: stepHopB 360ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
 }
 
-/* Physics-inspired hop: lift -> float -> drop -> squash -> settle
-   Slow, deliberate pace — each cell hop is savored */
+/* Gentle arc: lift -> float -> settle
+   Smooth, deliberate pace — each cell hop is savored */
 @keyframes stepHopA {
   0%   { transform: translateY(0) scale(1, 1); }
-  22%  { transform: translateY(-24%) scale(0.94, 1.08); }
-  40%  { transform: translateY(-26%) scale(0.95, 1.07); }
-  55%  { transform: translateY(-18%) scale(0.97, 1.04); }
-  75%  { transform: translateY(-2%) scale(1.01, 0.99); }
-  88%  { transform: translateY(3%) scale(1.05, 0.95); }
+  25%  { transform: translateY(-18%) scale(0.97, 1.04); }
+  45%  { transform: translateY(-20%) scale(0.97, 1.03); }
+  65%  { transform: translateY(-8%) scale(0.99, 1.01); }
+  85%  { transform: translateY(1%) scale(1.01, 0.99); }
   100% { transform: translateY(0) scale(1, 1); }
 }
 
 @keyframes stepHopB {
   0%   { transform: translateY(0) scale(1, 1); }
-  22%  { transform: translateY(-24%) scale(0.94, 1.08); }
-  40%  { transform: translateY(-26%) scale(0.95, 1.07); }
-  55%  { transform: translateY(-18%) scale(0.97, 1.04); }
-  75%  { transform: translateY(-2%) scale(1.01, 0.99); }
-  88%  { transform: translateY(3%) scale(1.05, 0.95); }
+  25%  { transform: translateY(-18%) scale(0.97, 1.04); }
+  45%  { transform: translateY(-20%) scale(0.97, 1.03); }
+  65%  { transform: translateY(-8%) scale(0.99, 1.01); }
+  85%  { transform: translateY(1%) scale(1.01, 0.99); }
   100% { transform: translateY(0) scale(1, 1); }
 }
 
-/* Arrival bounce — generous, satisfying settle */
+/* Arrival settle — smooth, graceful landing */
 @keyframes tokenHop {
   0%   { transform: translateY(0) scale(1, 1); }
-  20%  { transform: translateY(-35%) scale(0.92, 1.12); }
-  38%  { transform: translateY(-38%) scale(0.93, 1.10); }
-  55%  { transform: translateY(-10%) scale(0.98, 1.03); }
-  70%  { transform: translateY(4%) scale(1.06, 0.94); }
-  82%  { transform: translateY(-2%) scale(0.99, 1.02); }
-  92%  { transform: translateY(1%) scale(1.01, 0.99); }
+  22%  { transform: translateY(-24%) scale(0.95, 1.06); }
+  42%  { transform: translateY(-26%) scale(0.96, 1.05); }
+  60%  { transform: translateY(-6%) scale(0.99, 1.01); }
+  78%  { transform: translateY(2%) scale(1.02, 0.98); }
+  90%  { transform: translateY(-1%) scale(1.005, 1); }
   100% { transform: translateY(0) scale(1, 1); }
 }
 
-/* Snake/ladder slide — slow, dramatic traversal */
+/* Snake/ladder slide — smooth interpolation between path waypoints.
+   Duration must be short enough to track JS-driven waypoint updates (~90-130ms apart)
+   rather than the total traversal time. The total duration comes from the step count. */
 .tokenSliding {
-  transition: left 900ms cubic-bezier(0.22, 0.68, 0.36, 1),
-              top 900ms cubic-bezier(0.22, 0.68, 0.36, 1) !important;
+  transition: left 160ms ease-out,
+              top 160ms ease-out !important;
 }
 
 .tokenSnakeSlide {
-  animation: snakeSlide 900ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  animation: snakeSlide 1100ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes snakeSlide {
   0%   { transform: scale(1) rotate(0); filter: brightness(1); }
-  15%  { transform: scale(0.92) rotate(-3deg); filter: brightness(0.95); }
-  35%  { transform: scale(0.85) rotate(4deg); filter: brightness(0.9); }
-  55%  { transform: scale(0.82) rotate(-2deg); filter: brightness(0.88); }
-  75%  { transform: scale(0.9) rotate(1deg); filter: brightness(0.95); }
-  90%  { transform: scale(0.98) rotate(-0.5deg); filter: brightness(1); }
+  18%  { transform: scale(0.94) rotate(-2deg); filter: brightness(0.96); }
+  40%  { transform: scale(0.88) rotate(2.5deg); filter: brightness(0.92); }
+  60%  { transform: scale(0.86) rotate(-1.5deg); filter: brightness(0.91); }
+  80%  { transform: scale(0.94) rotate(0.5deg); filter: brightness(0.97); }
   100% { transform: scale(1) rotate(0); filter: brightness(1); }
 }
 
 .tokenLadderClimb {
-  animation: ladderClimb 900ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  animation: ladderClimb 1100ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes ladderClimb {
   0%   { transform: scale(1) translateY(0); filter: brightness(1); }
-  20%  { transform: scale(1.08) translateY(-5%); filter: brightness(1.05); }
-  45%  { transform: scale(1.18) translateY(-14%); filter: brightness(1.1); }
-  65%  { transform: scale(1.12) translateY(-8%); filter: brightness(1.06); }
-  80%  { transform: scale(1.04) translateY(-2%); filter: brightness(1.02); }
+  25%  { transform: scale(1.06) translateY(-4%); filter: brightness(1.04); }
+  50%  { transform: scale(1.12) translateY(-10%); filter: brightness(1.07); }
+  72%  { transform: scale(1.06) translateY(-4%); filter: brightness(1.03); }
   100% { transform: scale(1) translateY(0); filter: brightness(1); }
 }
 
@@ -587,14 +587,14 @@
 }
 
 .burstActive {
-  animation: burstAnim 1000ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+  animation: burstAnim 1200ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
 }
 
 @keyframes burstAnim {
-  0%   { transform: scale(0); opacity: 0.8; }
-  40%  { transform: scale(0.9); opacity: 0.7; }
-  70%  { transform: scale(1.15); opacity: 0.4; }
-  100% { transform: scale(1.2); opacity: 0; }
+  0%   { transform: scale(0); opacity: 0.6; }
+  45%  { transform: scale(0.85); opacity: 0.5; }
+  75%  { transform: scale(1.05); opacity: 0.25; }
+  100% { transform: scale(1.1); opacity: 0; }
 }
 
 /* --- Dice --- */
@@ -605,9 +605,9 @@
   border: 2px solid #ddd;
   border-radius: 10px;
   cursor: pointer;
-  transition: transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1),
-              box-shadow 250ms ease,
-              border-color 250ms ease;
+  transition: transform 250ms cubic-bezier(0.22, 0.61, 0.36, 1),
+              box-shadow 300ms ease,
+              border-color 300ms ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -617,7 +617,7 @@
 }
 
 .dice:hover:not(:disabled) {
-  transform: scale(1.1);
+  transform: scale(1.06);
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
 }
 
@@ -639,21 +639,20 @@
 }
 
 @keyframes dicePulse {
-  0%, 100% { box-shadow: 0 0 10px rgba(123, 167, 188, 0.25), 0 2px 8px rgba(0, 0, 0, 0.08); transform: scale(1); }
-  50% { box-shadow: 0 0 22px rgba(123, 167, 188, 0.55), 0 2px 8px rgba(0, 0, 0, 0.08); transform: scale(1.04); }
+  0%, 100% { box-shadow: 0 0 10px rgba(123, 167, 188, 0.2), 0 2px 8px rgba(0, 0, 0, 0.08); transform: scale(1); }
+  50% { box-shadow: 0 0 18px rgba(123, 167, 188, 0.4), 0 2px 8px rgba(0, 0, 0, 0.08); transform: scale(1.02); }
 }
 
 .diceRolling {
-  animation: diceShake 500ms ease-in-out infinite;
+  animation: diceShake 600ms ease-in-out infinite;
 }
 
 @keyframes diceShake {
-  0%   { transform: rotate(-3deg) scale(0.97); }
-  20%  { transform: rotate(4deg) scale(1.03); }
-  40%  { transform: rotate(-2deg) scale(0.98); }
-  60%  { transform: rotate(3deg) scale(1.02); }
-  80%  { transform: rotate(-4deg) scale(0.97); }
-  100% { transform: rotate(-3deg) scale(0.97); }
+  0%   { transform: rotate(-2deg) scale(0.98); }
+  25%  { transform: rotate(2.5deg) scale(1.01); }
+  50%  { transform: rotate(-1.5deg) scale(0.99); }
+  75%  { transform: rotate(2deg) scale(1.01); }
+  100% { transform: rotate(-2deg) scale(0.98); }
 }
 
 /* Dice face — 3x3 grid for standard pip placement */
@@ -693,8 +692,8 @@
 }
 
 .streakDanger {
-  filter: saturate(1.5);
-  animation: streakDangerPulse 0.6s ease-in-out infinite;
+  filter: saturate(1.3);
+  animation: streakDangerPulse 0.9s ease-in-out infinite;
 }
 
 @keyframes streakPulse {
@@ -704,7 +703,7 @@
 
 @keyframes streakDangerPulse {
   0%, 100% { transform: scale(1); opacity: 0.85; }
-  50% { transform: scale(1.2); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 1; }
 }
 
 /* Dice result bounce */
@@ -712,15 +711,14 @@
   display: flex;
   width: 100%;
   height: 100%;
-  animation: diceBounce 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: diceBounce 750ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes diceBounce {
-  0%   { transform: scale(0.3) rotate(-12deg); opacity: 0; }
-  35%  { transform: scale(1.2) rotate(4deg); opacity: 1; }
-  55%  { transform: scale(0.92) rotate(-2deg); }
-  72%  { transform: scale(1.06) rotate(1deg); }
-  85%  { transform: scale(0.98) rotate(-0.5deg); }
+  0%   { transform: scale(0.5) rotate(-6deg); opacity: 0; }
+  40%  { transform: scale(1.06) rotate(2deg); opacity: 1; }
+  65%  { transform: scale(0.97) rotate(-1deg); }
+  85%  { transform: scale(1.02) rotate(0.3deg); }
   100% { transform: scale(1) rotate(0deg); }
 }
 
@@ -751,12 +749,12 @@
   font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 200ms ease, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 200ms ease;
+  transition: background-color 250ms ease, transform 250ms cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 250ms ease;
   box-shadow: 0 2px 8px rgba(123, 167, 188, 0.25);
 }
 
 .createBtn:hover { background: #6a96ab; box-shadow: 0 4px 14px rgba(123, 167, 188, 0.35); transform: translateY(-1px); }
-.createBtn:active { transform: scale(0.96) translateY(0); transition-duration: 80ms; }
+.createBtn:active { transform: scale(0.97) translateY(0); transition-duration: 120ms; }
 .createBtn:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
 
 .playerCountSelector {
@@ -949,9 +947,9 @@
   color: var(--text-muted);
   background: var(--bg-primary);
   border: 1px solid transparent;
-  transition: border-color 350ms ease, color 350ms ease, opacity 400ms ease,
-              background-color 350ms ease, box-shadow 350ms ease,
-              font-weight 200ms ease, transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: border-color 400ms ease, color 400ms ease, opacity 500ms ease,
+              background-color 400ms ease, box-shadow 400ms ease,
+              font-weight 250ms ease, transform 350ms cubic-bezier(0.22, 0.61, 0.36, 1);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1022,7 +1020,7 @@
   display: flex;
   flex-direction: column;
   gap: 3px;
-  animation: statsSlideIn 300ms ease-out;
+  animation: statsSlideIn 450ms ease-out;
 }
 
 .moveLogLabel {
@@ -1056,7 +1054,7 @@
   color: var(--text-tertiary);
   padding: 2px 0;
   line-height: 1.3;
-  animation: logEntryIn 400ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  animation: logEntryIn 500ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 @keyframes logEntryIn {
@@ -1134,7 +1132,7 @@
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(6px);
   border-radius: var(--radius-lg, 12px);
-  animation: overlayFadeIn 600ms ease-out;
+  animation: overlayFadeIn 750ms ease-out;
 }
 
 @keyframes overlayFadeIn {
@@ -1152,31 +1150,19 @@
   border: 1px solid var(--border-medium, #444);
   border-radius: 18px;
   box-shadow: 0 20px 56px rgba(0, 0, 0, 0.5);
-  animation: cardPopIn 650ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  animation: cardPopIn 850ms cubic-bezier(0.22, 0.61, 0.36, 1);
   text-align: center;
   min-width: 200px;
 }
 
 @keyframes cardPopIn {
-  0%   { opacity: 0; transform: scale(0.65) translateY(24px); }
-  50%  { opacity: 1; transform: scale(1.04) translateY(-4px); }
-  75%  { transform: scale(0.97) translateY(1px); }
+  0%   { opacity: 0; transform: scale(0.8) translateY(16px); }
+  55%  { opacity: 1; transform: scale(1.02) translateY(-2px); }
+  80%  { transform: scale(0.99) translateY(0); }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-.gameOverTrophy {
-  font-size: 3rem;
-  line-height: 1;
-  animation: trophyBounce 800ms cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-@keyframes trophyBounce {
-  0%   { transform: scale(0) rotate(-10deg); }
-  40%  { transform: scale(1.35) rotate(5deg); }
-  60%  { transform: scale(0.85) rotate(-3deg); }
-  80%  { transform: scale(1.05) rotate(1deg); }
-  100% { transform: scale(1) rotate(0); }
-}
+/* .gameOverTrophy is defined in the new styles section below with trophySpin */
 
 .gameOverTitle {
   font-size: 1.4rem;
@@ -1210,12 +1196,12 @@
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 200ms ease, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 200ms ease;
+  transition: background 250ms ease, transform 250ms cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 250ms ease;
   box-shadow: 0 2px 10px rgba(66, 133, 244, 0.3);
 }
 
 .playAgainBtn:hover { background: #5a9bf4; box-shadow: 0 4px 16px rgba(66, 133, 244, 0.4); transform: translateY(-1px); }
-.playAgainBtn:active { transform: scale(0.95) translateY(0); transition-duration: 80ms; }
+.playAgainBtn:active { transform: scale(0.97) translateY(0); transition-duration: 120ms; }
 
 .leaveBtn {
   padding: 8px 20px;
@@ -1226,7 +1212,7 @@
   font-size: 0.85rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background 200ms ease, color 200ms ease, border-color 200ms ease, transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background 250ms ease, color 250ms ease, border-color 250ms ease, transform 250ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .leaveBtn:hover {
@@ -1256,7 +1242,7 @@
   border: 1px solid var(--border-light, #444);
   border-radius: var(--radius-md, 8px);
   cursor: pointer;
-  transition: transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1), background 150ms ease, border-color 150ms ease;
+  transition: transform 200ms cubic-bezier(0.22, 0.61, 0.36, 1), background 200ms ease, border-color 200ms ease;
   padding: 0;
   line-height: 1;
 }
@@ -1264,7 +1250,7 @@
 .reactionBtn:hover {
   background: var(--bg-tertiary, #333);
   border-color: var(--border-medium, #666);
-  transform: scale(1.15);
+  transform: scale(1.08);
 }
 
 .reactionBtn:active {
@@ -1298,6 +1284,15 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  opacity: 0;
+  animation: statCardIn 600ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--stat-delay, 0ms);
+}
+
+@keyframes statCardIn {
+  0%   { opacity: 0; transform: translateY(12px) scale(0.96); }
+  70%  { opacity: 1; transform: translateY(-2px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .statCardHeader {
@@ -1319,6 +1314,354 @@
 .statRow span:last-child {
   font-weight: 600;
   color: var(--text-primary, #fff);
+}
+
+/* --- Player presence --- */
+.presenceOnline,
+.presenceOffline {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--bg-primary, #1a1a2e);
+}
+
+.presenceOnline {
+  background: #34a853;
+  animation: presencePulse 3s ease-in-out infinite;
+}
+.presenceOffline { background: #888; }
+
+@keyframes presencePulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 168, 83, 0); }
+  50%      { box-shadow: 0 0 3px 1px rgba(52, 168, 83, 0.35); }
+}
+
+.playerChipDot {
+  position: relative;
+}
+
+.disconnectedBadge {
+  font-size: 0.5rem;
+  color: #e4002b;
+  opacity: 0.7;
+  margin-left: 2px;
+}
+
+/* --- Share link row --- */
+.shareLinkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* --- Theme selector --- */
+.themeSelector {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/* --- Board themes --- */
+.boardJungle {
+  background: linear-gradient(145deg, #2d4a2d 0%, #1e3a1e 50%, #163016 100%) !important;
+  border-color: #4a7a4a !important;
+  box-shadow:
+    0 0 0 1px rgba(74, 122, 74, 0.5),
+    0 4px 20px rgba(0, 0, 0, 0.25),
+    inset 0 0 40px rgba(0, 40, 0, 0.12) !important;
+}
+
+.boardJungle .cell { border-color: rgba(74, 122, 74, 0.12) !important; }
+.boardJungle .cellEven { background: linear-gradient(135deg, #2d5a2d 0%, #254d25 100%) !important; }
+.boardJungle .cellOdd { background: linear-gradient(135deg, #1e4a1e 0%, #1a3e1a 100%) !important; }
+.boardJungle .cellNumber { color: rgba(150, 200, 150, 0.35) !important; }
+.boardJungle .cellSnakeHead { background: rgba(255, 80, 80, 0.12) !important; }
+.boardJungle .cellLadderBottom { background: rgba(100, 200, 100, 0.12) !important; }
+.boardJungle .cellWin {
+  background: linear-gradient(135deg, #2d6a2d 0%, #3d8a3d 50%, #4da04d 100%) !important;
+  box-shadow: inset 0 0 10px rgba(100, 200, 100, 0.3) !important;
+}
+
+.boardSpace {
+  background: linear-gradient(145deg, #0a0a2e 0%, #0d0d3a 50%, #151540 100%) !important;
+  border-color: #3a3a7a !important;
+  box-shadow:
+    0 0 0 1px rgba(100, 100, 200, 0.3),
+    0 4px 20px rgba(0, 0, 30, 0.4),
+    inset 0 0 40px rgba(50, 50, 150, 0.08),
+    0 0 30px rgba(100, 100, 255, 0.04) !important;
+}
+
+.boardSpace .cell { border-color: rgba(100, 100, 200, 0.08) !important; }
+.boardSpace .cellEven { background: linear-gradient(135deg, #12123a 0%, #0e0e32 100%) !important; }
+.boardSpace .cellOdd { background: linear-gradient(135deg, #0a0a2e 0%, #080828 100%) !important; }
+.boardSpace .cellNumber { color: rgba(150, 150, 255, 0.3) !important; }
+.boardSpace .cellSnakeHead { background: rgba(255, 60, 60, 0.15) !important; }
+.boardSpace .cellLadderBottom { background: rgba(80, 120, 255, 0.12) !important; }
+.boardSpace .cellWin {
+  background: linear-gradient(135deg, #1a1a4a 0%, #2a2a6a 50%, #3a3a8a 100%) !important;
+  box-shadow: inset 0 0 12px rgba(100, 100, 255, 0.3) !important;
+}
+
+/* --- Camera shake --- */
+.cameraShakeSnake {
+  animation: shakeSnake 650ms ease-out;
+}
+
+.cameraShakeLadder {
+  animation: flashLadder 650ms ease-out;
+}
+
+@keyframes shakeSnake {
+  0%   { transform: translate(0, 0) rotate(0); }
+  12%  { transform: translate(-2px, 1.5px) rotate(-0.3deg); }
+  24%  { transform: translate(2.5px, -1.5px) rotate(0.3deg); }
+  36%  { transform: translate(-1.5px, 2px) rotate(-0.2deg); }
+  50%  { transform: translate(1.5px, -0.5px) rotate(0.15deg); }
+  65%  { transform: translate(-0.5px, 1px) rotate(-0.1deg); }
+  80%  { transform: translate(0.5px, -0.5px) rotate(0.05deg); }
+  100% { transform: translate(0, 0) rotate(0); }
+}
+
+@keyframes flashLadder {
+  0%   { filter: brightness(1); }
+  18%  { filter: brightness(1.18) drop-shadow(0 0 14px rgba(255, 215, 0, 0.35)); }
+  45%  { filter: brightness(1.08) drop-shadow(0 0 8px rgba(255, 215, 0, 0.15)); }
+  100% { filter: brightness(1) drop-shadow(0 0 0 transparent); }
+}
+
+/* --- MVP Awards --- */
+.mvpAwards {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.mvpAward {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.65rem;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg-tertiary, #252540);
+  border: 1px solid var(--border-light, #444);
+  opacity: 0;
+  animation: mvpSlideIn 650ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.mvpAward:nth-child(1) { animation-delay: 0ms; }
+.mvpAward:nth-child(2) { animation-delay: 150ms; }
+.mvpAward:nth-child(3) { animation-delay: 300ms; }
+.mvpAward:nth-child(4) { animation-delay: 450ms; }
+.mvpAward:nth-child(5) { animation-delay: 600ms; }
+
+.mvpTitle {
+  font-weight: 700;
+  color: #ffc107;
+}
+
+.mvpDetail {
+  color: var(--text-secondary, #aaa);
+}
+
+@keyframes mvpSlideIn {
+  0%   { opacity: 0; transform: translateX(-12px) scale(0.97); }
+  65%  { opacity: 1; transform: translateX(1px) scale(1.005); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+/* --- Share button --- */
+.shareBtn {
+  padding: 5px 14px;
+  background: none;
+  color: var(--text-muted, #888);
+  border: 1px solid var(--border-light, #444);
+  border-radius: var(--radius-full, 20px);
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.shareBtn:hover {
+  background: var(--bg-tertiary, #333);
+  color: var(--text-primary, #fff);
+}
+
+/* --- Rematch waiting --- */
+.rematchWaiting {
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* --- Game history --- */
+.historySection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  max-width: 280px;
+}
+
+.historyEntry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  padding: 3px 0;
+}
+
+/* --- Coin toss --- */
+.coinTossCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 36px 48px;
+  background: var(--bg-primary, #1a1a2e);
+  border: 1px solid var(--border-medium, #444);
+  border-radius: 20px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  animation: cardPopIn 850ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  text-align: center;
+}
+
+.coinTossLabel {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted, #888);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  opacity: 0;
+  animation: cascadeIn 550ms ease-out 200ms both;
+}
+
+.coinTossToken {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  display: block;
+  animation: coinSpin 2.8s cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+.coinTossSpin {
+  /* Wrapper only — spin animation lives on .coinTossToken child */
+}
+
+.coinTossText {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  opacity: 0;
+  animation: cascadeIn 600ms ease-out 2.0s both;
+}
+
+.coinTossOverlayFadeOut {
+  animation: overlayFadeOut 800ms ease-in forwards !important;
+}
+
+@keyframes coinSpin {
+  0%   { transform: rotateY(0deg) scale(0.5); opacity: 0; }
+  10%  { opacity: 1; }
+  25%  { transform: rotateY(360deg) scale(1.06); opacity: 1; }
+  45%  { transform: rotateY(720deg) scale(0.97); }
+  65%  { transform: rotateY(1080deg) scale(1.03); }
+  85%  { transform: rotateY(1260deg) scale(0.99); }
+  100% { transform: rotateY(1440deg) scale(1); }
+}
+
+@keyframes overlayFadeOut {
+  0%   { opacity: 1; }
+  100% { opacity: 0; pointer-events: none; }
+}
+
+/* --- Cascade animation system (for staggered reveals) --- */
+.cascadeItem {
+  opacity: 0;
+  animation: cascadeIn 600ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--cascade-delay, 0ms);
+}
+
+@keyframes cascadeIn {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.98); }
+  75%  { opacity: 1; transform: translateY(-0.5px) scale(1.002); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* --- Camera shake (light variants for medium-impact events) --- */
+.cameraShakeSnakeLight {
+  animation: shakeSnakeLight 550ms ease-out;
+}
+
+@keyframes shakeSnakeLight {
+  0%   { transform: translate(0, 0); }
+  18%  { transform: translate(-1px, 0.7px); }
+  36%  { transform: translate(1.2px, -0.7px); }
+  55%  { transform: translate(-0.5px, 0.8px); }
+  75%  { transform: translate(0.3px, -0.3px); }
+  100% { transform: translate(0, 0); }
+}
+
+.cameraShakeLadderLight {
+  animation: flashLadderLight 550ms ease-out;
+}
+
+@keyframes flashLadderLight {
+  0%   { filter: brightness(1); }
+  22%  { filter: brightness(1.08) drop-shadow(0 0 6px rgba(255, 215, 0, 0.15)); }
+  100% { filter: brightness(1) drop-shadow(0 0 0 transparent); }
+}
+
+/* --- Lobby entrance stagger --- */
+.lobbyEnter {
+  opacity: 0;
+  animation: lobbyItemIn 600ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  animation-delay: var(--lobby-delay, 0ms);
+}
+
+@keyframes lobbyItemIn {
+  0%   { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Waiting screen player slot fill --- */
+.playerSlotFilled {
+  animation: slotFillIn 550ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes slotFillIn {
+  0%   { transform: scale(0.95); opacity: 0.3; }
+  65%  { transform: scale(1.01); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* --- Spinning trophy --- */
+.gameOverTrophy {
+  font-size: 3rem;
+  line-height: 1;
+  opacity: 0;
+  animation: trophySpin 1600ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+}
+
+@keyframes trophySpin {
+  0%   { opacity: 0; transform: scale(0.3) rotateY(0) rotate(-5deg); }
+  20%  { opacity: 1; }
+  40%  { opacity: 1; transform: scale(1.08) rotateY(360deg) rotate(2deg); }
+  65%  { opacity: 1; transform: scale(0.96) rotateY(540deg) rotate(-1deg); }
+  85%  { opacity: 1; transform: scale(1.02) rotateY(680deg) rotate(0.3deg); }
+  100% { opacity: 1; transform: scale(1) rotateY(720deg) rotate(0); }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1354,7 +1697,22 @@
   .dustParticle,
   .playerChipNearWin,
   .streakBadge,
-  .streakDanger {
+  .streakDanger,
+  .cameraShakeSnake,
+  .cameraShakeLadder,
+  .cameraShakeSnakeLight,
+  .cameraShakeLadderLight,
+  .coinTossSpin,
+  .coinTossToken,
+  .coinTossLabel,
+  .coinTossText,
+  .coinTossOverlayFadeOut,
+  .mvpAward,
+  .statCard,
+  .cascadeItem,
+  .lobbyEnter,
+  .playerSlotFilled,
+  .presenceOnline {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

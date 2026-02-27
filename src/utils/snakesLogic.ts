@@ -196,17 +196,27 @@ export function serializeMoveLog(entries: MoveLogEntry[]): string {
 
 export function deserializeMoveLog(str: string): MoveLogEntry[] {
   if (!str) return [];
-  return str.split(',').filter(Boolean).map(chunk => {
-    const mechSuffix = chunk.endsWith('s') ? 'snake' : chunk.endsWith('l') ? 'ladder' : null;
-    const clean = mechSuffix ? chunk.slice(0, -1) : chunk;
-    const parts = clean.split(':');
-    const player = parseInt(parts[0]);
-    const dice = parseInt(parts[1]);
-    const moveParts = parts[2].split('>');
-    const from = parseInt(moveParts[0]);
-    const to = parseInt(moveParts[1]);
-    return { player, dice, from, to, mechanism: mechSuffix } as MoveLogEntry;
-  });
+  const entries: MoveLogEntry[] = [];
+  for (const chunk of str.split(',')) {
+    if (!chunk) continue;
+    try {
+      const mechSuffix = chunk.endsWith('s') ? 'snake' : chunk.endsWith('l') ? 'ladder' : null;
+      const clean = mechSuffix ? chunk.slice(0, -1) : chunk;
+      const parts = clean.split(':');
+      if (parts.length < 3) continue;
+      const player = parseInt(parts[0]);
+      const dice = parseInt(parts[1]);
+      const moveParts = parts[2].split('>');
+      if (moveParts.length < 2) continue;
+      const from = parseInt(moveParts[0]);
+      const to = parseInt(moveParts[1]);
+      if (isNaN(player) || isNaN(dice) || isNaN(from) || isNaN(to)) continue;
+      entries.push({ player, dice, from, to, mechanism: mechSuffix });
+    } catch {
+      continue; // skip malformed entries
+    }
+  }
+  return entries;
 }
 
 // --- Post-game stats ---
@@ -250,6 +260,137 @@ export function computeGameStats(
   }
 
   return stats;
+}
+
+// --- MVP Awards ---
+
+export interface MvpAward {
+  playerIndex: number;
+  title: string;
+  detail: string;
+}
+
+export function computeMvpAwards(
+  stats: PlayerStats[],
+  winner: number,
+  playerCount: number,
+): MvpAward[] {
+  const awards: MvpAward[] = [];
+  if (stats.length === 0) return awards;
+
+  // Winner award
+  const winnerStat = stats[winner];
+  if (winnerStat) {
+    awards.push({
+      playerIndex: winner,
+      title: 'Champion',
+      detail: `Won in ${winnerStat.totalMoves} moves`,
+    });
+  }
+
+  // Most snakes survived (hit most snakes but still played well)
+  let maxSnakes = 0;
+  let snakeSurvivor = -1;
+  for (let i = 0; i < playerCount; i++) {
+    if (stats[i] && stats[i].snakesHit > maxSnakes) {
+      maxSnakes = stats[i].snakesHit;
+      snakeSurvivor = i;
+    }
+  }
+  if (snakeSurvivor >= 0 && maxSnakes >= 2) {
+    awards.push({
+      playerIndex: snakeSurvivor,
+      title: 'Snake Magnet',
+      detail: `Hit ${maxSnakes} snakes`,
+    });
+  }
+
+  // Luckiest roller (most ladders)
+  let maxLadders = 0;
+  let luckiest = -1;
+  for (let i = 0; i < playerCount; i++) {
+    if (stats[i] && stats[i].laddersClimbed > maxLadders) {
+      maxLadders = stats[i].laddersClimbed;
+      luckiest = i;
+    }
+  }
+  if (luckiest >= 0 && maxLadders >= 2 && luckiest !== snakeSurvivor) {
+    awards.push({
+      playerIndex: luckiest,
+      title: 'Lucky Climber',
+      detail: `Climbed ${maxLadders} ladders`,
+    });
+  }
+
+  // Biggest single event
+  let biggestFall = 0;
+  let bigFallPlayer = -1;
+  let biggestGain = 0;
+  let bigGainPlayer = -1;
+  for (let i = 0; i < playerCount; i++) {
+    if (stats[i]?.biggestSnakeFall > biggestFall) {
+      biggestFall = stats[i].biggestSnakeFall;
+      bigFallPlayer = i;
+    }
+    if (stats[i]?.biggestLadderGain > biggestGain) {
+      biggestGain = stats[i].biggestLadderGain;
+      bigGainPlayer = i;
+    }
+  }
+  if (bigFallPlayer >= 0 && biggestFall >= 40) {
+    awards.push({
+      playerIndex: bigFallPlayer,
+      title: 'Epic Fall',
+      detail: `Dropped ${biggestFall} cells in one snake`,
+    });
+  }
+  if (bigGainPlayer >= 0 && biggestGain >= 40) {
+    awards.push({
+      playerIndex: bigGainPlayer,
+      title: 'Rocket Launch',
+      detail: `Climbed ${biggestGain} cells in one ladder`,
+    });
+  }
+
+  return awards;
+}
+
+// --- Snake/ladder path waypoints for animated traversal ---
+
+// Compute grid-coordinate waypoints along a snake's sinusoidal body
+export function computeSnakePath(headCell: number, tailCell: number, steps = 12): [number, number][] {
+  const [hRow, hCol] = cellToGrid(headCell);
+  const [tRow, tCol] = cellToGrid(tailCell);
+  const dx = tCol - hCol;
+  const dy = tRow - hRow;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  const nx = -dy / len;
+  const ny = dx / len;
+  const waveAmp = Math.min(1.5, len * 0.05);
+  const waveFreq = Math.max(3, Math.floor(len / 3));
+
+  const waypoints: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const taper = Math.sin(t * Math.PI);
+    const wave = Math.sin(t * waveFreq * Math.PI * 2) * waveAmp * taper;
+    const row = hRow + dy * t + ny * wave;
+    const col = hCol + dx * t + nx * wave;
+    waypoints.push([row, col]);
+  }
+  return waypoints;
+}
+
+// Compute grid-coordinate waypoints along a ladder (rung-by-rung)
+export function computeLadderPath(bottomCell: number, topCell: number, steps = 8): [number, number][] {
+  const [bRow, bCol] = cellToGrid(bottomCell);
+  const [tRow, tCol] = cellToGrid(topCell);
+  const waypoints: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    waypoints.push([bRow + (tRow - bRow) * t, bCol + (tCol - bCol) * t]);
+  }
+  return waypoints;
 }
 
 // --- Token stacking offsets ---

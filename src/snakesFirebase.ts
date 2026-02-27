@@ -21,6 +21,11 @@ export interface SnakesGameState {
   turnStartedAt: number;
   playerCount: number;
   moveLog: string;
+  winTally?: Record<number, number>;
+  lastSeen?: Record<number, number>;
+  rematchVotes?: Record<number, boolean>;
+  gameNumber?: number;
+  firstPlayer?: number;
 }
 
 export interface SnakesMoveUpdate {
@@ -244,6 +249,8 @@ export async function resetGame(code: string, playerCount: number, serverOffset 
     startedAt: Date.now() + serverOffset,
     turnStartedAt: Date.now() + serverOffset,
     moveLog: '',
+    rematchVotes: null,
+    firstPlayer: randomFirst,
   });
 }
 
@@ -321,4 +328,107 @@ export async function subscribeToServerTimeOffset(
   const db = getFirebaseDatabase();
   const offsetRef = ref(db, '.info/serverTimeOffset');
   return onValue(offsetRef, (snap: { val: () => number | null }) => callback(snap.val() || 0));
+}
+
+// --- Player presence heartbeat ---
+
+export async function updatePresence(
+  code: string,
+  playerSlot: number,
+  serverOffset = 0,
+): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = getDbModule();
+  const db = getFirebaseDatabase();
+  const presenceRef = ref(db, `snakes/${code}/lastSeen/${playerSlot}`);
+  await set(presenceRef, Date.now() + serverOffset);
+}
+
+// --- Win tally ---
+
+export async function updateWinTally(
+  code: string,
+  winnerSlot: number,
+): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+  const tallyRef = ref(db, `snakes/${code}/winTally/${winnerSlot}`);
+  await runTransaction(tallyRef, (current: number | null) => (current || 0) + 1);
+}
+
+// --- Rematch voting ---
+
+export async function voteRematch(
+  code: string,
+  playerSlot: number,
+): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = getDbModule();
+  const db = getFirebaseDatabase();
+  const voteRef = ref(db, `snakes/${code}/rematchVotes/${playerSlot}`);
+  await set(voteRef, true);
+}
+
+export async function clearRematchVotes(code: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, remove } = getDbModule();
+  const db = getFirebaseDatabase();
+  const votesRef = ref(db, `snakes/${code}/rematchVotes`);
+  await remove(votesRef);
+}
+
+// --- Persistent game history ---
+
+export interface GameHistoryEntry {
+  code: string;
+  winner: number;
+  winnerName: string;
+  players: Record<number, string>;
+  playerCount: number;
+  totalMoves: number;
+  timestamp: number;
+}
+
+export async function logGameResult(
+  sessionId: string,
+  entry: GameHistoryEntry,
+): Promise<void> {
+  await ensureInitialized();
+  const { ref, push, set } = getDbModule();
+  const db = getFirebaseDatabase();
+  const historyRef = ref(db, `snakesHistory/${sessionId}`);
+  const newRef = push(historyRef);
+  await set(newRef, entry);
+}
+
+export async function getGameHistory(
+  sessionId: string,
+): Promise<GameHistoryEntry[]> {
+  await ensureInitialized();
+  const { ref, get, query, orderByChild, limitToLast } = getDbModule();
+  const db = getFirebaseDatabase();
+  const historyRef = ref(db, `snakesHistory/${sessionId}`);
+  const q = query(historyRef, orderByChild('timestamp'), limitToLast(20));
+  const snapshot = await get(q);
+  if (!snapshot.exists()) return [];
+  const entries: GameHistoryEntry[] = [];
+  snapshot.forEach((child: { val: () => GameHistoryEntry | null }) => {
+    const val = child.val();
+    if (val) entries.push(val);
+  });
+  return entries.reverse();
+}
+
+// --- Store first player for coin toss ---
+
+export async function setFirstPlayer(
+  code: string,
+  playerSlot: number,
+): Promise<void> {
+  await ensureInitialized();
+  const { ref, set } = getDbModule();
+  const db = getFirebaseDatabase();
+  const firstPlayerRef = ref(db, `snakes/${code}/firstPlayer`);
+  await set(firstPlayerRef, playerSlot);
 }
