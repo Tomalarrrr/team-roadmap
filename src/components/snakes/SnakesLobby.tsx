@@ -2,8 +2,13 @@ import React from 'react';
 import {
   PLAYER_COLORS,
   COLOR_HEX,
+  cellToGrid,
+  SNAKES,
+  LADDERS,
+  BOARD_SIZE,
 } from '../../utils/snakesLogic';
 import { type GameHistoryEntry } from '../../snakesFirebase';
+import { BOARD_CELLS, renderLadderSVG, renderSnakeSVG } from './snakesHelpers';
 import styles from '../SnakesGame.module.css';
 
 // --- SnakesLobby (lobby + waiting phases) ---
@@ -72,7 +77,54 @@ export function SnakesLobby({
             </button>
           ))}
         </div>
-        <div className={styles.lobbyEnter} style={{ '--lobby-delay': '80ms' } as React.CSSProperties}>
+        {/* Board theme selector */}
+        <div className={`${styles.themeSelector} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '80ms' } as React.CSSProperties}>
+          <span className={styles.playerCountLabel}>Theme:</span>
+          {(['classic', 'jungle', 'space'] as const).map(t => (
+            <button
+              key={t}
+              className={`${styles.playerCountBtn} ${boardTheme === t ? styles.playerCountBtnActive : ''}`}
+              onClick={() => onBoardThemeChange(t)}
+            >
+              {t === 'classic' ? '\u{1F3F0} Classic' : t === 'jungle' ? '\u{1F333} Jungle' : '\u{1F680} Space'}
+            </button>
+          ))}
+        </div>
+        {/* Board preview */}
+        <div className={`${styles.boardPreviewWrapper} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '120ms' } as React.CSSProperties}>
+          <div
+            key={boardTheme}
+            className={[
+              styles.boardPreview,
+              boardTheme === 'jungle' ? styles.boardJungle : '',
+              boardTheme === 'space' ? styles.boardSpace : '',
+              styles.boardPreviewFadeIn,
+            ].filter(Boolean).join(' ')}
+          >
+            {BOARD_CELLS.map(cellNum => {
+              const [gridRow, gridCol] = cellToGrid(cellNum);
+              const isEven = (gridRow + gridCol) % 2 === 0;
+              return (
+                <div
+                  key={cellNum}
+                  className={[
+                    styles.cell,
+                    isEven ? styles.cellEven : styles.cellOdd,
+                    SNAKES[cellNum] !== undefined ? styles.cellSnakeHead : '',
+                    LADDERS[cellNum] !== undefined ? styles.cellLadderBottom : '',
+                    cellNum === BOARD_SIZE ? styles.cellWin : '',
+                  ].filter(Boolean).join(' ')}
+                  style={{ gridRow: gridRow + 1, gridColumn: gridCol + 1 }}
+                />
+              );
+            })}
+            <svg className={styles.svgOverlay} viewBox="0 0 150 100" preserveAspectRatio="none">
+              {Object.entries(LADDERS).map(([from, to], i) => renderLadderSVG(Number(from), to, i))}
+              {Object.entries(SNAKES).map(([from, to], i) => renderSnakeSVG(Number(from), to, i))}
+            </svg>
+          </div>
+        </div>
+        <div className={styles.lobbyEnter} style={{ '--lobby-delay': '200ms' } as React.CSSProperties}>
           <button
             className={styles.createBtn}
             onClick={onCreateGame}
@@ -81,8 +133,8 @@ export function SnakesLobby({
             {isLoading ? 'Creating...' : 'Create Game'}
           </button>
         </div>
-        <span className={`${styles.lobbyDivider} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '160ms' } as React.CSSProperties}>or</span>
-        <div className={`${styles.joinSection} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '320ms' } as React.CSSProperties}>
+        <span className={`${styles.lobbyDivider} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '280ms' } as React.CSSProperties}>or</span>
+        <div className={`${styles.joinSection} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '360ms' } as React.CSSProperties}>
           <input
             className={styles.codeInput}
             placeholder="CODE"
@@ -106,22 +158,9 @@ export function SnakesLobby({
             Spectate
           </button>
         </div>
-        {/* Board theme selector */}
-        <div className={`${styles.themeSelector} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '320ms' } as React.CSSProperties}>
-          <span className={styles.playerCountLabel}>Theme:</span>
-          {(['classic', 'jungle', 'space'] as const).map(t => (
-            <button
-              key={t}
-              className={`${styles.playerCountBtn} ${boardTheme === t ? styles.playerCountBtnActive : ''}`}
-              onClick={() => onBoardThemeChange(t)}
-            >
-              {t === 'classic' ? '\u{1F3F0} Classic' : t === 'jungle' ? '\u{1F333} Jungle' : '\u{1F680} Space'}
-            </button>
-          ))}
-        </div>
         {/* Game history */}
         {gameHistory.length > 0 && (
-          <div className={`${styles.historySection} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '400ms' } as React.CSSProperties}>
+          <div className={`${styles.historySection} ${styles.lobbyEnter}`} style={{ '--lobby-delay': '440ms' } as React.CSSProperties}>
             <div className={styles.moveLogLabel}>Recent Games</div>
             {gameHistory.slice(0, 5).map((h, i) => {
               const isWin = h.players[h.winner] === userName;

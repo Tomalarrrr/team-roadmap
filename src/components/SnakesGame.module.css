@@ -1368,6 +1368,41 @@
   justify-content: center;
 }
 
+/* --- Board preview in lobby --- */
+.boardPreviewWrapper {
+  display: flex;
+  justify-content: center;
+}
+
+.boardPreview {
+  width: 200px;
+  aspect-ratio: 3 / 2;
+  display: grid;
+  grid-template-columns: repeat(15, 1fr);
+  grid-template-rows: repeat(10, 1fr);
+  border-radius: 6px;
+  border: 2px solid #8d6e3f;
+  background: linear-gradient(145deg, #fefcf3 0%, #f8f3e6 50%, #f2ecda 100%);
+  overflow: hidden;
+  position: relative;
+  box-shadow:
+    0 0 0 1px rgba(141, 110, 63, 0.2),
+    0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.boardPreview .cellNumber {
+  display: none;
+}
+
+.boardPreviewFadeIn {
+  animation: boardPreviewFadeIn 350ms ease-out;
+}
+
+@keyframes boardPreviewFadeIn {
+  0%   { opacity: 0; transform: scale(0.97); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
 /* --- Board themes --- */
 .boardJungle {
   background: linear-gradient(145deg, #2d4a2d 0%, #1e3a1e 50%, #163016 100%) !important;
@@ -1712,6 +1747,7 @@
   .cascadeItem,
   .lobbyEnter,
   .playerSlotFilled,
+  .boardPreviewFadeIn,
   .presenceOnline {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
