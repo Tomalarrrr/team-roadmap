@@ -237,7 +237,7 @@ function renderSnakeSVG(from: number, to: number, index: number) {
     points.push([px, py]);
   }
 
-  // Build smooth cubic bezier through points
+  // Build smooth quadratic bezier through points
   function buildSmoothPath(pts: [number, number][]): string {
     if (pts.length < 2) return '';
     let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
@@ -245,13 +245,9 @@ function renderSnakeSVG(from: number, to: number, index: number) {
       const prev = pts[i - 1];
       const curr = pts[i];
       const next = pts[i + 1];
-      const cp1x = curr[0] - (next[0] - prev[0]) / 6;
-      const cp1y = curr[1] - (next[1] - prev[1]) / 6;
-      if (i === 1) {
-        d += ` Q ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${curr[0].toFixed(2)} ${curr[1].toFixed(2)}`;
-      } else {
-        d += ` S ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${curr[0].toFixed(2)} ${curr[1].toFixed(2)}`;
-      }
+      const cpx = curr[0] - (next[0] - prev[0]) / 6;
+      const cpy = curr[1] - (next[1] - prev[1]) / 6;
+      d += ` Q ${cpx.toFixed(2)} ${cpy.toFixed(2)}, ${curr[0].toFixed(2)} ${curr[1].toFixed(2)}`;
     }
     const last = pts[pts.length - 1];
     d += ` L ${last[0].toFixed(2)} ${last[1].toFixed(2)}`;
@@ -538,8 +534,8 @@ interface SnakesGameProps {
 }
 
 export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
-  const sessionId = sessionStorage.getItem('roadmap-user-id') || 'anonymous';
-  const userName = sessionStorage.getItem('roadmap-user-name') || 'Player';
+  const [sessionId] = useState(() => sessionStorage.getItem('roadmap-user-id') || 'anonymous');
+  const [userName] = useState(() => sessionStorage.getItem('roadmap-user-name') || 'Player');
 
   // Multiplayer state
   const [gamePhase, setGamePhase] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
@@ -576,6 +572,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [hoveredCell, setHoveredCell] = useState<number | null>(null);
   const [floatingReactions, setFloatingReactions] = useState<Array<{ id: string; emoji: string; player: number; left: number }>>([]);
   const [turnStartedAtState, setTurnStartedAtState] = useState(Date.now());
+  const [serverOffsetState, setServerOffsetState] = useState(0);
 
   // Drag state
   const [position, setPosition] = useState(() => ({
@@ -611,6 +608,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const turnTransitionTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const turnNudgeTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const serverOffsetRef = useRef(0);
+  const lastAutoRollTurnStartRef = useRef(0); // guards against double auto-roll per turn
+  const boardEntranceTimers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  const burstTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const reactionTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   // Mirrored refs for closure safety
   const gameCodeRef = useRef(gameCode);
@@ -621,8 +622,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   positionsRef.current = positions;
   const currentTurnRef = useRef(currentTurn);
   currentTurnRef.current = currentTurn;
-  const diceValueRef = useRef(diceValue);
-  diceValueRef.current = diceValue;
   const consecutiveSixesRef = useRef(consecutiveSixes);
   consecutiveSixesRef.current = consecutiveSixes;
   const winnerRef = useRef(winner);
@@ -643,8 +642,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       clearTimeout(gameOverTimerRef.current);
       clearTimeout(turnTransitionTimeoutRef.current);
       clearTimeout(turnNudgeTimeoutRef.current);
+      clearTimeout(burstTimeoutRef.current);
       for (const t of slideTimerRefs.current.values()) clearTimeout(t);
       for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
+      for (const t of boardEntranceTimers.current.values()) clearTimeout(t);
+      for (const t of reactionTimers.current.values()) clearTimeout(t);
       if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
       dragCleanupRef.current?.();
     };
@@ -655,7 +657,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     let unsub: (() => void) | null = null;
     let cancelled = false;
     subscribeToServerTimeOffset((offset) => {
-      if (!cancelled) serverOffsetRef.current = offset;
+      if (!cancelled) {
+        serverOffsetRef.current = offset;
+        setServerOffsetState(offset);
+      }
     }).then(u => { if (cancelled) u(); else unsub = u; });
     return () => { cancelled = true; unsub?.(); };
   }, []);
@@ -804,6 +809,9 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isSearchOpen) onClose();
+      // Don't hijack space/enter when user is in an input, textarea, or button
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'BUTTON' || tag === 'SELECT') return;
       if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing') {
         e.preventDefault();
         handleRollDiceRef.current();
@@ -856,10 +864,13 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
             if (oldPositions[i] === 0 && parsed[i] > 0) {
               tokenEnteredBoard.current.add(i);
               // Clear entrance flag after animation
-              setTimeout(() => {
+              const prev = boardEntranceTimers.current.get(i);
+              if (prev) clearTimeout(prev);
+              boardEntranceTimers.current.set(i, setTimeout(() => {
                 tokenEnteredBoard.current.delete(i);
+                boardEntranceTimers.current.delete(i);
                 setRenderTick(n => n + 1);
-              }, 500);
+              }, 500));
             }
 
             // Check if a snake or ladder was involved
@@ -901,7 +912,15 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         const p = state.players[`p${i}`];
         if (p) names[i] = p.name;
       }
-      setPlayerNames(names);
+      // Only update if names actually changed to avoid unnecessary re-renders
+      setPlayerNames(prev => {
+        const keys = Object.keys(names);
+        if (keys.length !== Object.keys(prev).length) return names;
+        for (const k of keys) {
+          if (prev[Number(k)] !== names[Number(k)]) return names;
+        }
+        return prev;
+      });
 
       // Phase transitions
       const joinedCount = Object.keys(state.players).filter(k => state.players[k]).length;
@@ -945,7 +964,8 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         } else {
           // Live win: burst animation + confetti + delayed overlay reveal
           setShowBurst(true);
-          setTimeout(() => setShowBurst(false), 1000);
+          clearTimeout(burstTimeoutRef.current);
+          burstTimeoutRef.current = setTimeout(() => setShowBurst(false), 1000);
           clearTimeout(gameOverTimerRef.current);
           gameOverTimerRef.current = setTimeout(() => setShowGameOver(true), 1200);
           // Launch confetti
@@ -995,9 +1015,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       if (cancelled) return;
       const id = `${reaction.key}-${reaction.ts}`;
       setFloatingReactions(prev => [...prev, { id, emoji: reaction.emoji, player: reaction.player, left: 20 + Math.random() * 60 }]);
-      setTimeout(() => {
+      reactionTimers.current.set(id, setTimeout(() => {
         setFloatingReactions(prev => prev.filter(r => r.id !== id));
-      }, 2500);
+        reactionTimers.current.delete(id);
+      }, 2500));
     }).then(unsub => {
       if (cancelled) unsub(); else unsubscribe = unsub;
     });
@@ -1021,11 +1042,39 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       const elapsed = (serverNow - turnStartedAtRef.current) / 1000;
       const remaining = Math.ceil(TURN_SECONDS - elapsed);
 
-      // Auto-roll at 0s for current player
+      // Safety: if moveInFlight has been stuck for 8s past timer expiry (18s total),
+      // reset it. Scoped to the current player's client only — other clients use
+      // the backup skip path, and resetting their moveInFlight would cause it to
+      // rapid-fire. The per-turn guard prevents double auto-roll.
+      if (remaining <= -8 && moveInFlightRef.current && !isRollingRef.current &&
+          mySlotRef.current !== null && currentTurnRef.current === mySlotRef.current) {
+        moveInFlightRef.current = false;
+      }
+
+      // Auto-roll at 0s for current player (once per turn via turnStartedAt guard)
       if (remaining <= 0 && mySlotRef.current !== null &&
           currentTurnRef.current === mySlotRef.current &&
-          !isRollingRef.current && !moveInFlightRef.current) {
+          !isRollingRef.current && !moveInFlightRef.current &&
+          lastAutoRollTurnStartRef.current !== turnStartedAtRef.current) {
+        // Force-clear any lingering animation state that might block handleRollDice.
+        // After 10s+ since turn start, all animations should have long completed;
+        // stale refs here mean a timer was lost (e.g. tab throttled).
+        if (tokenAnimPos.current.size > 0 || tokenSlideClass.current.size > 0) {
+          for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
+          tokenAnimTimers.current.clear();
+          tokenAnimPos.current.clear();
+          tokenAnimParity.current.clear();
+          for (const t of slideTimerRefs.current.values()) clearTimeout(t);
+          slideTimerRefs.current.clear();
+          tokenSlideClass.current.clear();
+          setRenderTick(n => n + 1); // re-render so dice button also re-enables
+        }
         handleRollDiceRef.current();
+        // Mark this turn as auto-rolled so we don't fire again if handleRollDice
+        // succeeded (moveInFlight will be true), or if it failed transiently.
+        if (moveInFlightRef.current) {
+          lastAutoRollTurnStartRef.current = turnStartedAtRef.current;
+        }
       }
 
       // Backup skip: only the next player in turn order attempts it (prevents race)
@@ -1117,10 +1166,13 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const handleNewGame = useCallback(async () => {
     if (!gameCode) return;
     try {
+      // Hide overlay immediately for responsiveness, but don't nuke game state yet
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
 
-      // Clear ALL animation + rolling state so dice becomes rollable
+      await resetGame(gameCode, activePlayerCount);
+
+      // Only clear local state after Firebase write succeeds
       tokenAnimPos.current.clear();
       tokenAnimParity.current.clear();
       for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
@@ -1128,20 +1180,29 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       tokenSlideClass.current.clear();
       for (const t of slideTimerRefs.current.values()) clearTimeout(t);
       slideTimerRefs.current.clear();
+      for (const t of boardEntranceTimers.current.values()) clearTimeout(t);
+      boardEntranceTimers.current.clear();
+      for (const t of reactionTimers.current.values()) clearTimeout(t);
+      reactionTimers.current.clear();
+      clearTimeout(hintTimeoutRef.current);
+      clearTimeout(rollTimeoutRef.current);
+      clearTimeout(turnTransitionTimeoutRef.current);
+      clearTimeout(turnNudgeTimeoutRef.current);
+      clearTimeout(burstTimeoutRef.current);
       lastMovedPlayerRef.current = null;
       tokenEnteredBoard.current.clear();
       moveInFlightRef.current = false;
       isRollingRef.current = false;
+      lastAutoRollTurnStartRef.current = 0;
       setIsRolling(false);
       prevPositionsRef.current = '';
       isInitialLoadRef.current = false;
       setHasRolledThisTurn(false);
       setGameNumber(n => n + 1);
       if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
-
-      await resetGame(gameCode, activePlayerCount);
     } catch (err) {
       console.error('[Snakes] Reset failed:', err);
+      setShowGameOver(true); // restore overlay since reset failed
     }
   }, [gameCode, activePlayerCount]);
 
@@ -1157,6 +1218,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     setShowGameOver(false);
     clearTimeout(gameOverTimerRef.current);
     clearTimeout(rollTimeoutRef.current);
+    clearTimeout(burstTimeoutRef.current);
+    clearTimeout(hintTimeoutRef.current);
+    clearTimeout(turnTransitionTimeoutRef.current);
+    clearTimeout(turnNudgeTimeoutRef.current);
     setMoveLog([]);
     setHasRolledThisTurn(false);
     setIsRolling(false);
@@ -1164,7 +1229,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     moveInFlightRef.current = false;
     prevPositionsRef.current = '';
     lastMovedPlayerRef.current = null;
-    // Clear all animation timers (hop, slide) to prevent orphan callbacks
+    // Clear all animation timers (hop, slide, entrance, reactions) to prevent orphan callbacks
     tokenAnimPos.current.clear();
     tokenAnimParity.current.clear();
     for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
@@ -1172,7 +1237,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     tokenSlideClass.current.clear();
     for (const t of slideTimerRefs.current.values()) clearTimeout(t);
     slideTimerRefs.current.clear();
+    for (const t of boardEntranceTimers.current.values()) clearTimeout(t);
+    boardEntranceTimers.current.clear();
     tokenEnteredBoard.current.clear();
+    for (const t of reactionTimers.current.values()) clearTimeout(t);
+    reactionTimers.current.clear();
     setWinTally({});
     setGameNumber(1);
     setFloatingReactions([]);
@@ -1429,6 +1498,36 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                   ))}
                 </div>
                 {snakeLadderSVG}
+                {/* Interactive hover hit targets — thick invisible strokes over each snake/ladder */}
+                <svg className={styles.svgOverlay} viewBox="0 0 100 100" preserveAspectRatio="none"
+                  style={{ zIndex: 6, pointerEvents: 'none' }}>
+                  {Object.entries(SNAKES).map(([from, to]) => {
+                    const [x1, y1] = cellCenter(Number(from));
+                    const [x2, y2] = cellCenter(to);
+                    return (
+                      <line key={`hit-s-${from}`}
+                        x1={x1} y1={y1} x2={x2} y2={y2}
+                        stroke="transparent" strokeWidth="4" strokeLinecap="round"
+                        style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                        onMouseEnter={() => setHoveredCell(Number(from))}
+                        onMouseLeave={() => setHoveredCell(null)}
+                      />
+                    );
+                  })}
+                  {Object.entries(LADDERS).map(([from, to]) => {
+                    const [x1, y1] = cellCenter(Number(from));
+                    const [x2, y2] = cellCenter(to);
+                    return (
+                      <line key={`hit-l-${from}`}
+                        x1={x1} y1={y1} x2={x2} y2={y2}
+                        stroke="transparent" strokeWidth="4" strokeLinecap="round"
+                        style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                        onMouseEnter={() => setHoveredCell(Number(from))}
+                        onMouseLeave={() => setHoveredCell(null)}
+                      />
+                    );
+                  })}
+                </svg>
                 {/* Hover highlight SVG */}
                 {hoveredCell !== null && (() => {
                   const dest = SNAKES[hoveredCell] ?? LADDERS[hoveredCell];
@@ -1489,7 +1588,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 <CountdownTimer
                   key={`${currentTurn}-${turnStartedAtState}`}
                   turnStartedAt={turnStartedAtState}
-                  serverOffset={serverOffsetRef.current}
+                  serverOffset={serverOffsetState}
                 />
               )}
 

@@ -5,30 +5,30 @@ export const BOARD_COLS = 15;
 export const BOARD_ROWS = 10;
 export const BOARD_SIZE = BOARD_COLS * BOARD_ROWS; // 150
 
-// Snake/ladder map for 15×10 board — vertical-oriented, varied lengths.
-// Drops/climbs range from quick (2 rows) to devastating (5+ rows).
+// Snake/ladder map for 15×10 board — diagonal-oriented, varied lengths.
+// Each snake/ladder spans 5-8 columns for a visually interesting diagonal look.
 export const SNAKES: Record<number, number> = {
-  145: 66,  // col 5, rows 0→5, drop 5 — devastating near-finish snake!
-  142: 98,  // col 8→7, rows 0→3, drop 3
-  134: 77,  // col 13, rows 1→4, drop 3
-  121: 31,  // col 0, rows 1→7, drop 6 — longest snake on the board
-  102: 49,  // col 11, rows 3→6, drop 3
-  89: 62,   // col 1, rows 4→5, drop 1 — quick sting
-  70: 21,   // col 9, rows 5→8, drop 3
-  54: 24,   // col 6, rows 6→8, drop 2
-  43: 13,   // col 12, rows 7→9, drop 2
+  140: 65,  // grid(0,10)→(5,4) — devastating near-finish, drop 5 rows diagonal left
+  124: 80,  // grid(1,3)→(4,10) — long diagonal right, drop 3 rows
+  133: 83,  // grid(1,12)→(4,7) — diagonal left, drop 3 rows
+  118: 22,  // grid(2,2)→(8,8) — longest snake, drop 6 rows diagonal right
+  101: 56,  // grid(3,10)→(6,4) — diagonal left, drop 3 rows
+  89: 52,   // grid(4,1)→(6,8) — diagonal right, drop 2 rows
+  73: 24,   // grid(5,12)→(8,6) — diagonal left, drop 3 rows
+  58: 20,   // grid(6,2)→(8,10) — diagonal right, drop 2 rows
+  42: 6,    // grid(7,11)→(9,5) — diagonal left, drop 2 rows
 };
 
 export const LADDERS: Record<number, number> = {
-  4: 94,    // col 3, rows 9→3, climb 6 — jackpot early ladder!
-  8: 53,    // col 7, rows 9→6, climb 3
-  20: 71,   // col 10, rows 8→5, climb 3
-  45: 76,   // col 14, rows 7→4, climb 3
-  39: 82,   // col 8, rows 7→4, climb 3
-  58: 93,   // col 2, rows 6→3, climb 3
-  73: 108,  // col 12, rows 5→2, climb 3
-  84: 127,  // col 6, rows 4→1, climb 3
-  123: 148, // col 2, rows 1→0, climb 1 — quick boost near finish
+  3: 99,    // grid(9,2)→(3,8) — jackpot early ladder, climb 6 rows diagonal right
+  8: 48,    // grid(9,7)→(6,12) — diagonal right, climb 3 rows
+  29: 69,   // grid(8,1)→(5,8) — diagonal right, climb 3 rows
+  17: 67,   // grid(8,13)→(5,6) — diagonal left, climb 3 rows
+  36: 79,   // grid(7,5)→(4,11) — diagonal right, climb 3 rows
+  60: 97,   // grid(6,0)→(3,6) — diagonal right, climb 3 rows
+  51: 94,   // grid(6,9)→(3,3) — diagonal left, climb 3 rows
+  86: 130,  // grid(4,4)→(1,9) — diagonal right, climb 3 rows
+  116: 141, // grid(2,4)→(0,9) — near finish, climb 2 rows diagonal right
 };
 
 export type PlayerColor = 'red' | 'green' | 'blue' | 'yellow' | 'purple' | 'orange' | 'teal';
