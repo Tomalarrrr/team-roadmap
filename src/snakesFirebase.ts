@@ -92,79 +92,72 @@ export async function joinGame(
   userName: string
 ): Promise<{ state: SnakesGameState; assignedSlot: number }> {
   await ensureInitialized();
-  const { ref, get, runTransaction } = getDbModule();
+  const { ref, get, set, update } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
+  const snapshot = await get(gameRef);
 
-  // Prime the local cache so the transaction gets real data on first call.
-  // Without this, runTransaction fires with null (empty cache) and aborts.
-  const prefetch = await get(gameRef);
-  if (!prefetch.exists()) {
+  if (!snapshot.exists()) {
     throw new Error('Game not found');
   }
 
-  let assignedSlot = -1;
-  let abortReason: 'not_found' | 'full' = 'not_found';
+  const state = snapshot.val() as SnakesGameState;
+  const players = state.players || {};
 
-  const result = await runTransaction(gameRef, (current: SnakesGameState | null) => {
-    // Reset per-retry state
-    assignedSlot = -1;
-    if (!current) { abortReason = 'not_found'; return undefined; }
-
-    const players = current.players || {};
-
-    // Reconnection by sessionId
-    for (let i = 0; i < current.playerCount; i++) {
-      const key = `p${i}`;
-      if (players[key]?.sessionId === sessionId) {
-        assignedSlot = i;
-        return current; // no change needed
-      }
+  // Reconnection by sessionId
+  for (let i = 0; i < state.playerCount; i++) {
+    const key = `p${i}`;
+    if (players[key]?.sessionId === sessionId) {
+      return { state, assignedSlot: i };
     }
-
-    // Reconnection by name
-    for (let i = 0; i < current.playerCount; i++) {
-      const key = `p${i}`;
-      if (players[key]?.name === userName) {
-        assignedSlot = i;
-        return {
-          ...current,
-          players: { ...players, [key]: { sessionId, name: userName } },
-        };
-      }
-    }
-
-    // Find next empty slot
-    for (let i = 1; i < current.playerCount; i++) {
-      const key = `p${i}`;
-      if (!players[key]) {
-        assignedSlot = i;
-        const updatedPlayers = { ...players, [key]: { sessionId, name: userName } };
-        const joinedCount = Object.values(updatedPlayers).filter(Boolean).length;
-        const updated = { ...current, players: updatedPlayers };
-
-        // Start the game if all players have joined
-        if (joinedCount >= current.playerCount) {
-          updated.startedAt = Date.now();
-          updated.turnStartedAt = Date.now();
-          updated.currentTurn = Math.floor(Math.random() * current.playerCount);
-        }
-
-        return updated;
-      }
-    }
-
-    // No empty slots
-    abortReason = 'full';
-    return undefined;
-  });
-
-  if (!result.committed || assignedSlot === -1) {
-    throw new Error(abortReason === 'not_found' ? 'Game not found' : 'Game is full');
   }
 
-  return { state: result.snapshot.val() as SnakesGameState, assignedSlot };
+  // Reconnection by name (handles tab close → new sessionId)
+  for (let i = 0; i < state.playerCount; i++) {
+    const key = `p${i}`;
+    if (players[key]?.name === userName) {
+      const playerRef = ref(db, `snakes/${code}/players/${key}/sessionId`);
+      await set(playerRef, sessionId);
+      return {
+        state: { ...state, players: { ...players, [key]: { sessionId, name: userName } } },
+        assignedSlot: i,
+      };
+    }
+  }
+
+  // Find next empty slot
+  let assignedSlot = -1;
+  for (let i = 1; i < state.playerCount; i++) {
+    const key = `p${i}`;
+    if (!players[key]) {
+      assignedSlot = i;
+      break;
+    }
+  }
+
+  if (assignedSlot === -1) {
+    throw new Error('Game is full');
+  }
+
+  const slotKey = `p${assignedSlot}`;
+  const playerRef = ref(db, `snakes/${code}/players/${slotKey}`);
+  await set(playerRef, { sessionId, name: userName });
+
+  // Check if all required players have joined — start the game
+  const joinedCount = Object.values(players).filter(Boolean).length + 1;
+  if (joinedCount >= state.playerCount) {
+    await update(gameRef, {
+      startedAt: Date.now(),
+      turnStartedAt: Date.now(),
+      currentTurn: Math.floor(Math.random() * state.playerCount),
+    });
+  }
+
+  return {
+    state: { ...state, players: { ...players, [slotKey]: { sessionId, name: userName } } },
+    assignedSlot,
+  };
 }
 
 export async function spectateGame(code: string): Promise<SnakesGameState> {
