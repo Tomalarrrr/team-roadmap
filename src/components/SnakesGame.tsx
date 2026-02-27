@@ -847,11 +847,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         for (let i = 0; i < state.playerCount; i++) {
           if (oldPositions[i] !== parsed[i]) {
             // Find the intermediate position (before snake/ladder)
-            // Look at the dice value to find where the hop should stop
             const hopTarget = oldPositions[i] + (state.diceValue || 0);
-            const isSamePos = oldPositions[i] === parsed[i]; // overshoot, stayed
-
-            if (isSamePos) continue;
 
             lastMovedPlayerRef.current = i;
 
@@ -1159,6 +1155,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     setWinner(null);
     setShowGameOver(false);
     clearTimeout(gameOverTimerRef.current);
+    clearTimeout(rollTimeoutRef.current);
     setMoveLog([]);
     setHasRolledThisTurn(false);
     setIsRolling(false);
@@ -1166,6 +1163,14 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     moveInFlightRef.current = false;
     prevPositionsRef.current = '';
     lastMovedPlayerRef.current = null;
+    // Clear all animation timers (hop, slide) to prevent orphan callbacks
+    tokenAnimPos.current.clear();
+    tokenAnimParity.current.clear();
+    for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
+    tokenAnimTimers.current.clear();
+    tokenSlideClass.current.clear();
+    for (const t of slideTimerRefs.current.values()) clearTimeout(t);
+    slideTimerRefs.current.clear();
     tokenEnteredBoard.current.clear();
     setWinTally({});
     setGameNumber(1);
