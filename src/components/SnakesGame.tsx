@@ -226,8 +226,8 @@ function renderSnakeSVG(from: number, to: number, index: number) {
   const palette = SNAKE_PALETTES[index % SNAKE_PALETTES.length];
 
   // Body thickness tapers from head to tail
-  const headWidth = 2.2;
-  const tailWidth = 0.6;
+  const headWidth = 1.6;
+  const tailWidth = 0.4;
 
   // Head direction (from first two points)
   const hdx = points[1][0] - points[0][0];
@@ -239,22 +239,22 @@ function renderSnakeSVG(from: number, to: number, index: number) {
   const hny = hux;
 
   // Head shape: rounded diamond
-  const headSize = 2.0;
+  const headSize = 1.6;
   const headX = points[0][0];
   const headY = points[0][1];
 
   // Eye positions
-  const eyeOffX = hnx * 0.8;
-  const eyeOffY = hny * 0.8;
-  const eyeFwdX = -hux * 0.3;
-  const eyeFwdY = -huy * 0.3;
+  const eyeOffX = hnx * 0.65;
+  const eyeOffY = hny * 0.65;
+  const eyeFwdX = -hux * 0.25;
+  const eyeFwdY = -huy * 0.25;
 
   // Tongue
   const tongueX = headX - hux * headSize * 0.9;
   const tongueY = headY - huy * headSize * 0.9;
-  const tongueForkL = `${(tongueX - hux * 1.8 + hnx * 0.6).toFixed(2)} ${(tongueY - huy * 1.8 + hny * 0.6).toFixed(2)}`;
-  const tongueForkR = `${(tongueX - hux * 1.8 - hnx * 0.6).toFixed(2)} ${(tongueY - huy * 1.8 - hny * 0.6).toFixed(2)}`;
-  const tongueMid = `${(tongueX - hux * 1.2).toFixed(2)} ${(tongueY - huy * 1.2).toFixed(2)}`;
+  const tongueForkL = `${(tongueX - hux * 1.4 + hnx * 0.45).toFixed(2)} ${(tongueY - huy * 1.4 + hny * 0.45).toFixed(2)}`;
+  const tongueForkR = `${(tongueX - hux * 1.4 - hnx * 0.45).toFixed(2)} ${(tongueY - huy * 1.4 - hny * 0.45).toFixed(2)}`;
+  const tongueMid = `${(tongueX - hux * 0.95).toFixed(2)} ${(tongueY - huy * 0.95).toFixed(2)}`;
 
   // Tail end (last two points)
   const tailPt = points[points.length - 1];
@@ -281,10 +281,10 @@ function renderSnakeSVG(from: number, to: number, index: number) {
       />
 
       {/* Eyes */}
-      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.55" fill="#fff" />
-      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.28" fill="#111" />
-      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.55" fill="#fff" />
-      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.28" fill="#111" />
+      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.45" fill="#fff" />
+      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.22" fill="#111" />
+      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.45" fill="#fff" />
+      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.22" fill="#111" />
 
       {/* Forked tongue */}
       <path
@@ -476,7 +476,9 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   // --- Roll dice & apply move ---
 
   const handleRollDice = useCallback(() => {
-    if (!isMyTurn || isRollingRef.current || moveInFlightRef.current || isAnimating) return;
+    // Read animation refs directly (not closure-captured) for live accuracy
+    const animating = tokenAnimPos.current.size > 0 || tokenSlideClass.current.size > 0;
+    if (!isMyTurn || isRollingRef.current || moveInFlightRef.current || animating) return;
 
     isRollingRef.current = true;
     setIsRolling(true);
@@ -533,7 +535,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         moveInFlightRef.current = false;
       });
     }, 650);
-  }, [isMyTurn, isAnimating, startTokenAnimation]);
+  }, [isMyTurn, startTokenAnimation]);
 
   const handleRollDiceRef = useRef(handleRollDice);
   handleRollDiceRef.current = handleRollDice;
@@ -560,9 +562,18 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     let unsubscribe: (() => void) | null = null;
     let cancelled = false;
 
-    subscribeToGame(gameCode, (state: SnakesGameState | null) => {
-      if (cancelled || !state) return;
+    subscribeToGame(gameCode, (rawState: SnakesGameState | null) => {
+      if (cancelled || !rawState) return;
       setError(null);
+
+      // Firebase RTDB deletes fields set to null — normalize undefined → null
+      const state = {
+        ...rawState,
+        winner: rawState.winner ?? null,
+        diceValue: rawState.diceValue ?? null,
+        startedAt: rawState.startedAt ?? null,
+        moveLog: rawState.moveLog ?? '',
+      };
 
       const parsed = deserializePositions(state.positions, state.playerCount);
 
@@ -1105,12 +1116,12 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 />
                 {winner !== null ? (
                   <span className={styles.winText}>
-                    {playerNames[winner] || PLAYER_COLORS[winner]} wins!
+                    {playerNames[winner] || COLOR_LABELS[PLAYER_COLORS[winner]]} wins!
                   </span>
                 ) : (
                   <>
                     <span>
-                      {isMyTurn ? 'Your turn' : `${playerNames[currentTurn] || PLAYER_COLORS[currentTurn]}'s turn`}
+                      {isMyTurn ? 'Your turn' : `${playerNames[currentTurn] || COLOR_LABELS[PLAYER_COLORS[currentTurn]]}'s turn`}
                     </span>
                     <span className={`${styles.timer} ${timeLeft <= 10 ? styles.timerUrgent : ''}`}>
                       {timeLeft > 0 ? `${timeLeft}s` : 'Time!'}
