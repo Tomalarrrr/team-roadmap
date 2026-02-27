@@ -2,8 +2,8 @@
 
 // Classic snake/ladder map — easy to swap for any variant
 export const SNAKES: Record<number, number> = {
-  16: 6, 47: 26, 49: 11, 56: 53, 62: 19,
-  64: 60, 87: 24, 93: 73, 95: 75, 98: 78,
+  16: 6, 34: 12, 47: 26, 49: 11, 56: 53, 62: 19,
+  64: 60, 74: 54, 87: 24, 93: 73, 95: 75, 98: 78,
 };
 
 export const LADDERS: Record<number, number> = {

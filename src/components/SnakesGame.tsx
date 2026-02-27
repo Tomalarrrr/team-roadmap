@@ -653,12 +653,18 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setActivePlayerCount(state.playerCount);
       setMoveLog(deserializeMoveLog(state.moveLog || ''));
 
-      // Winner burst + delayed game-over overlay (skip on initial load/reconnect)
-      if (state.winner !== null && winnerRef.current === null && !isInitialLoadRef.current) {
-        setShowBurst(true);
-        setTimeout(() => setShowBurst(false), 1000);
-        clearTimeout(gameOverTimerRef.current);
-        gameOverTimerRef.current = setTimeout(() => setShowGameOver(true), 1200);
+      // Winner burst + game-over overlay
+      if (state.winner !== null && winnerRef.current === null) {
+        if (isInitialLoadRef.current) {
+          // Reconnecting to a finished game: show overlay immediately, no celebration
+          setShowGameOver(true);
+        } else {
+          // Live win: burst animation + delayed overlay reveal
+          setShowBurst(true);
+          setTimeout(() => setShowBurst(false), 1000);
+          clearTimeout(gameOverTimerRef.current);
+          gameOverTimerRef.current = setTimeout(() => setShowGameOver(true), 1200);
+        }
       }
       if (state.winner === null) {
         setShowGameOver(false);
@@ -1122,11 +1128,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 <button
                   className={[
                     styles.dice,
-                    isMyTurn && !isRolling && !moveInFlightRef.current && !isAnimating ? styles.diceActive : '',
+                    isMyTurn && !isRolling && winner === null ? styles.diceActive : '',
                     isRolling ? styles.diceRolling : '',
                   ].filter(Boolean).join(' ')}
                   onClick={handleRollDice}
-                  disabled={!isMyTurn || isRolling || moveInFlightRef.current || isAnimating || winner !== null}
+                  disabled={!isMyTurn || isRolling || winner !== null}
                   aria-label="Roll dice"
                 >
                   {isRolling ? (
