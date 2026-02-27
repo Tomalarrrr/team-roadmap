@@ -84,55 +84,216 @@ function cellCenter(cell: number): [number, number] {
   return [col * 10 + 5, row * 10 + 5]; // x, y in percentage
 }
 
-function renderLadderSVG(from: number, to: number) {
+// Ladder color palettes for variety
+const LADDER_PALETTES = [
+  { rail: '#8d6e3f', rung: '#a0845c', highlight: '#c4a872', shadow: '#5c4627' },
+  { rail: '#6d4c2a', rung: '#8b6d45', highlight: '#b8956a', shadow: '#4a3219' },
+  { rail: '#7b5b3a', rung: '#9e7e55', highlight: '#c9a76e', shadow: '#523c24' },
+];
+
+function renderLadderSVG(from: number, to: number, index: number) {
   const [x1, y1] = cellCenter(from);
   const [x2, y2] = cellCenter(to);
   const dx = x2 - x1;
   const dy = y2 - y1;
   const len = Math.sqrt(dx * dx + dy * dy);
-  const nx = (-dy / len) * 1.5;
-  const ny = (dx / len) * 1.5;
-  const rungs = Math.max(2, Math.floor(len / 8));
+  const railGap = 2.2;
+  const nx = (-dy / len) * railGap;
+  const ny = (dx / len) * railGap;
+  const rungs = Math.max(3, Math.floor(len / 6));
+  const palette = LADDER_PALETTES[index % LADDER_PALETTES.length];
+
+  // Rail width for 3D look
+  const railW = 1.0;
+  const rungW = 0.7;
 
   return (
-    <g key={`ladder-${from}-${to}`} opacity="0.6">
+    <g key={`ladder-${from}-${to}`} opacity="0.78">
+      {/* Shadow behind entire ladder */}
+      <line x1={x1 + nx + 0.4} y1={y1 + ny + 0.4} x2={x2 + nx + 0.4} y2={y2 + ny + 0.4}
+        stroke="rgba(0,0,0,0.15)" strokeWidth={railW + 0.6} strokeLinecap="round" />
+      <line x1={x1 - nx + 0.4} y1={y1 - ny + 0.4} x2={x2 - nx + 0.4} y2={y2 - ny + 0.4}
+        stroke="rgba(0,0,0,0.15)" strokeWidth={railW + 0.6} strokeLinecap="round" />
+
+      {/* Left rail - dark side */}
       <line x1={x1 + nx} y1={y1 + ny} x2={x2 + nx} y2={y2 + ny}
-        stroke="#2e7d32" strokeWidth="0.8" strokeLinecap="round" />
+        stroke={palette.shadow} strokeWidth={railW} strokeLinecap="round" />
+      {/* Left rail - main face */}
+      <line x1={x1 + nx - 0.15} y1={y1 + ny - 0.15} x2={x2 + nx - 0.15} y2={y2 + ny - 0.15}
+        stroke={palette.rail} strokeWidth={railW * 0.7} strokeLinecap="round" />
+      {/* Left rail - highlight edge */}
+      <line x1={x1 + nx - 0.3} y1={y1 + ny - 0.3} x2={x2 + nx - 0.3} y2={y2 + ny - 0.3}
+        stroke={palette.highlight} strokeWidth={railW * 0.2} strokeLinecap="round" strokeOpacity="0.6" />
+
+      {/* Right rail - dark side */}
       <line x1={x1 - nx} y1={y1 - ny} x2={x2 - nx} y2={y2 - ny}
-        stroke="#2e7d32" strokeWidth="0.8" strokeLinecap="round" />
+        stroke={palette.shadow} strokeWidth={railW} strokeLinecap="round" />
+      {/* Right rail - main face */}
+      <line x1={x1 - nx - 0.15} y1={y1 - ny - 0.15} x2={x2 - nx - 0.15} y2={y2 - ny - 0.15}
+        stroke={palette.rail} strokeWidth={railW * 0.7} strokeLinecap="round" />
+      {/* Right rail - highlight edge */}
+      <line x1={x1 - nx - 0.3} y1={y1 - ny - 0.3} x2={x2 - nx - 0.3} y2={y2 - ny - 0.3}
+        stroke={palette.highlight} strokeWidth={railW * 0.2} strokeLinecap="round" strokeOpacity="0.6" />
+
+      {/* Rungs */}
       {Array.from({ length: rungs }, (_, i) => {
         const t = (i + 1) / (rungs + 1);
         const rx = x1 + dx * t;
         const ry = y1 + dy * t;
         return (
-          <line key={i}
-            x1={rx + nx} y1={ry + ny} x2={rx - nx} y2={ry - ny}
-            stroke="#2e7d32" strokeWidth="0.6" strokeLinecap="round" />
+          <g key={i}>
+            {/* Rung shadow */}
+            <line
+              x1={rx + nx + 0.3} y1={ry + ny + 0.3}
+              x2={rx - nx + 0.3} y2={ry - ny + 0.3}
+              stroke="rgba(0,0,0,0.12)" strokeWidth={rungW + 0.3} strokeLinecap="round" />
+            {/* Rung main */}
+            <line
+              x1={rx + nx} y1={ry + ny} x2={rx - nx} y2={ry - ny}
+              stroke={palette.rung} strokeWidth={rungW} strokeLinecap="round" />
+            {/* Rung highlight */}
+            <line
+              x1={rx + nx - 0.15} y1={ry + ny - 0.15}
+              x2={rx - nx - 0.15} y2={ry - ny - 0.15}
+              stroke={palette.highlight} strokeWidth={rungW * 0.25} strokeLinecap="round" strokeOpacity="0.5" />
+          </g>
         );
       })}
     </g>
   );
 }
 
-function renderSnakeSVG(from: number, to: number) {
+// Snake color palette for variety
+const SNAKE_PALETTES = [
+  { body: '#c62828', belly: '#ef5350', shadow: '#7f1818' },   // red
+  { body: '#2e7d32', belly: '#66bb6a', shadow: '#1b4d1e' },   // green
+  { body: '#6a1b9a', belly: '#ab47bc', shadow: '#3c0f57' },   // purple
+  { body: '#e65100', belly: '#ff8a50', shadow: '#8c3100' },   // orange
+  { body: '#00695c', belly: '#4db6ac', shadow: '#003d33' },   // teal
+];
+
+function renderSnakeSVG(from: number, to: number, index: number) {
   const [x1, y1] = cellCenter(from); // head (higher number)
   const [x2, y2] = cellCenter(to);   // tail (lower number)
-  const mx = (x1 + x2) / 2;
-  const my = (y1 + y2) / 2;
   const dx = x2 - x1;
   const dy = y2 - y1;
   const len = Math.sqrt(dx * dx + dy * dy);
-  const wave = Math.min(8, len * 0.3);
-  const nx = (-dy / len) * wave;
-  const ny = (dx / len) * wave;
+
+  // Direction unit vector and perpendicular
+  const ux = dx / len;
+  const uy = dy / len;
+  const nx = -uy;
+  const ny = ux;
+
+  // Build a sinusoidal wavy path with multiple undulations
+  const segments = 40;
+  const waveAmp = Math.min(4.5, len * 0.12);
+  const waveFreq = Math.max(2, Math.floor(len / 12));
+
+  const points: [number, number][] = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    // Taper the wave at head and tail
+    const taper = Math.sin(t * Math.PI);
+    const wave = Math.sin(t * waveFreq * Math.PI * 2) * waveAmp * taper;
+    const px = x1 + dx * t + nx * wave;
+    const py = y1 + dy * t + ny * wave;
+    points.push([px, py]);
+  }
+
+  // Build smooth cubic bezier through points
+  function buildSmoothPath(pts: [number, number][]): string {
+    if (pts.length < 2) return '';
+    let d = `M ${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
+    for (let i = 1; i < pts.length - 1; i++) {
+      const prev = pts[i - 1];
+      const curr = pts[i];
+      const next = pts[i + 1];
+      const cp1x = curr[0] - (next[0] - prev[0]) / 6;
+      const cp1y = curr[1] - (next[1] - prev[1]) / 6;
+      if (i === 1) {
+        d += ` Q ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${curr[0].toFixed(2)} ${curr[1].toFixed(2)}`;
+      } else {
+        d += ` S ${cp1x.toFixed(2)} ${cp1y.toFixed(2)}, ${curr[0].toFixed(2)} ${curr[1].toFixed(2)}`;
+      }
+    }
+    const last = pts[pts.length - 1];
+    d += ` L ${last[0].toFixed(2)} ${last[1].toFixed(2)}`;
+    return d;
+  }
+
+  const bodyPath = buildSmoothPath(points);
+  const palette = SNAKE_PALETTES[index % SNAKE_PALETTES.length];
+
+  // Body thickness tapers from head to tail
+  const headWidth = 2.2;
+  const tailWidth = 0.6;
+
+  // Head direction (from first two points)
+  const hdx = points[1][0] - points[0][0];
+  const hdy = points[1][1] - points[0][1];
+  const hlen = Math.sqrt(hdx * hdx + hdy * hdy) || 1;
+  const hux = hdx / hlen;
+  const huy = hdy / hlen;
+  const hnx = -huy;
+  const hny = hux;
+
+  // Head shape: rounded diamond
+  const headSize = 2.0;
+  const headX = points[0][0];
+  const headY = points[0][1];
+
+  // Eye positions
+  const eyeOffX = hnx * 0.8;
+  const eyeOffY = hny * 0.8;
+  const eyeFwdX = -hux * 0.3;
+  const eyeFwdY = -huy * 0.3;
+
+  // Tongue
+  const tongueX = headX - hux * headSize * 0.9;
+  const tongueY = headY - huy * headSize * 0.9;
+  const tongueForkL = `${(tongueX - hux * 1.8 + hnx * 0.6).toFixed(2)} ${(tongueY - huy * 1.8 + hny * 0.6).toFixed(2)}`;
+  const tongueForkR = `${(tongueX - hux * 1.8 - hnx * 0.6).toFixed(2)} ${(tongueY - huy * 1.8 - hny * 0.6).toFixed(2)}`;
+  const tongueMid = `${(tongueX - hux * 1.2).toFixed(2)} ${(tongueY - huy * 1.2).toFixed(2)}`;
+
+  // Tail end (last two points)
+  const tailPt = points[points.length - 1];
 
   return (
-    <g key={`snake-${from}-${to}`} opacity="0.55">
-      <path
-        d={`M ${x1} ${y1} Q ${mx + nx} ${my + ny}, ${x2} ${y2}`}
-        fill="none" stroke="#c62828" strokeWidth="1.2" strokeLinecap="round"
+    <g key={`snake-${from}-${to}`} opacity="0.82">
+      {/* Shadow layer */}
+      <path d={bodyPath} fill="none" stroke={palette.shadow} strokeWidth={headWidth + 0.8}
+        strokeLinecap="round" strokeOpacity="0.25" />
+      {/* Main body - thick stroke */}
+      <path d={bodyPath} fill="none" stroke={palette.body} strokeWidth={headWidth}
+        strokeLinecap="round" />
+      {/* Belly highlight stripe */}
+      <path d={bodyPath} fill="none" stroke={palette.belly} strokeWidth={headWidth * 0.35}
+        strokeLinecap="round" strokeOpacity="0.6" />
+
+      {/* Head - wider ellipse */}
+      <ellipse
+        cx={headX} cy={headY}
+        rx={headSize * 0.9} ry={headSize * 0.7}
+        transform={`rotate(${Math.atan2(huy, hux) * 180 / Math.PI}, ${headX}, ${headY})`}
+        fill={palette.body}
+        stroke={palette.shadow} strokeWidth="0.3"
       />
-      <circle cx={x1} cy={y1} r="1.5" fill="#c62828" />
+
+      {/* Eyes */}
+      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.55" fill="#fff" />
+      <circle cx={headX + eyeOffX + eyeFwdX} cy={headY + eyeOffY + eyeFwdY} r="0.28" fill="#111" />
+      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.55" fill="#fff" />
+      <circle cx={headX - eyeOffX + eyeFwdX} cy={headY - eyeOffY + eyeFwdY} r="0.28" fill="#111" />
+
+      {/* Forked tongue */}
+      <path
+        d={`M ${tongueX.toFixed(2)} ${tongueY.toFixed(2)} L ${tongueMid} L ${tongueForkL} M ${tongueMid} L ${tongueForkR}`}
+        fill="none" stroke="#e53935" strokeWidth="0.35" strokeLinecap="round"
+      />
+
+      {/* Tail tip */}
+      <circle cx={tailPt[0]} cy={tailPt[1]} r={tailWidth * 0.6} fill={palette.body} />
     </g>
   );
 }
@@ -205,6 +366,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const slideTimerRefs = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const lastMovedPlayerRef = useRef<number | null>(null);
   const tokenEnteredBoard = useRef<Set<number>>(new Set());
+  const isInitialLoadRef = useRef(true);
 
   // Mirrored refs for closure safety
   const gameCodeRef = useRef(gameCode);
@@ -491,8 +653,8 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setActivePlayerCount(state.playerCount);
       setMoveLog(deserializeMoveLog(state.moveLog || ''));
 
-      // Winner burst + delayed game-over overlay
-      if (state.winner !== null && winnerRef.current === null) {
+      // Winner burst + delayed game-over overlay (skip on initial load/reconnect)
+      if (state.winner !== null && winnerRef.current === null && !isInitialLoadRef.current) {
         setShowBurst(true);
         setTimeout(() => setShowBurst(false), 1000);
         clearTimeout(gameOverTimerRef.current);
@@ -502,6 +664,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         setShowGameOver(false);
         clearTimeout(gameOverTimerRef.current);
       }
+      isInitialLoadRef.current = false;
     }).then(unsub => {
       if (cancelled) {
         unsub();
@@ -621,6 +784,22 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     try {
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
+
+      // Clear ALL animation state so dice becomes rollable
+      tokenAnimPos.current.clear();
+      tokenAnimParity.current.clear();
+      for (const timer of tokenAnimTimers.current.values()) clearTimeout(timer);
+      tokenAnimTimers.current.clear();
+      tokenSlideClass.current.clear();
+      for (const t of slideTimerRefs.current.values()) clearTimeout(t);
+      slideTimerRefs.current.clear();
+      lastMovedPlayerRef.current = null;
+      tokenEnteredBoard.current.clear();
+      moveInFlightRef.current = false;
+      prevPositionsRef.current = '';
+      isInitialLoadRef.current = false;
+      setHasRolledThisTurn(false);
+
       await resetGame(gameCode, activePlayerCount);
     } catch (err) {
       console.error('[Snakes] Reset failed:', err);
@@ -678,8 +857,8 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
 
   const snakeLadderSVG = useMemo(() => (
     <svg className={styles.svgOverlay} viewBox="0 0 100 100" preserveAspectRatio="none">
-      {Object.entries(LADDERS).map(([from, to]) => renderLadderSVG(Number(from), to))}
-      {Object.entries(SNAKES).map(([from, to]) => renderSnakeSVG(Number(from), to))}
+      {Object.entries(LADDERS).map(([from, to], i) => renderLadderSVG(Number(from), to, i))}
+      {Object.entries(SNAKES).map(([from, to], i) => renderSnakeSVG(Number(from), to, i))}
     </svg>
   ), []);
 
