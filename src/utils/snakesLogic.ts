@@ -5,26 +5,27 @@ export const BOARD_COLS = 15;
 export const BOARD_ROWS = 10;
 export const BOARD_SIZE = BOARD_COLS * BOARD_ROWS; // 150
 
-// Snake/ladder map for 15×10 board — traditional layout with varied lengths.
-// Well distributed across the board with a mix of short, medium, and long paths.
+// Snake/ladder map for 15×10 board.
+// Spread across entire board (edges, corners, center) with mixed orientations.
+// No snake crosses another snake; no ladder crosses another ladder.
 export const SNAKES: Record<number, number> = {
-  34: 8,    // grid(7,3)→(9,7) — early board, drop 2 rows
-  52: 19,   // grid(6,8)→(8,11) — lower middle, drop 2 rows
-  76: 40,   // grid(4,14)→(7,9) — middle board, drop 3 rows
-  97: 63,   // grid(3,6)→(5,2) — upper middle, drop 2 rows
-  113: 74,  // grid(2,7)→(5,13) — upper board, drop 3 rows
-  131: 95,  // grid(1,10)→(3,4) — near top, drop 2 rows
-  146: 112, // grid(0,4)→(2,8) — near finish, drop 2 rows
+  148: 118, // grid(0,2)→(2,2)   — top-left, vertical drop 2 rows
+  137: 97,  // grid(0,13)→(3,6)  — top-right corner, long diagonal left 3 rows
+  126: 90,  // grid(1,5)→(4,0)   — upper-center to far-left edge, diagonal 3 rows
+  101: 75,  // grid(3,10)→(5,14) — center-right to far-right edge, diagonal right 2 rows
+  64: 36,   // grid(5,3)→(7,5)   — mid-left, short diagonal right 2 rows
+  53: 19,   // grid(6,7)→(8,11)  — lower-center, diagonal right 2 rows
+  44: 22,   // grid(7,13)→(8,8)  — lower-right, nearly horizontal 1 row
 };
 
 export const LADDERS: Record<number, number> = {
-  5: 38,    // grid(9,4)→(7,7) — early boost, climb 2 rows
-  14: 49,   // grid(9,13)→(6,11) — early board, climb 3 rows
-  28: 65,   // grid(8,2)→(5,4) — lower middle, climb 3 rows
-  41: 81,   // grid(7,10)→(4,9) — middle board, climb 3 rows
-  58: 98,   // grid(6,2)→(3,7) — middle, climb 3 rows
-  69: 107,  // grid(5,8)→(2,13) — upper middle, climb 3 rows
-  84: 126,  // grid(4,6)→(1,5) — upper board, climb 3 rows
+  2: 31,    // grid(9,1)→(7,0)   — bottom-left corner to far-left edge, vertical 2 rows
+  13: 41,   // grid(9,12)→(7,10) — bottom-right, nearly vertical 2 rows
+  26: 67,   // grid(8,4)→(5,6)   — lower-center, diagonal right 3 rows
+  58: 92,   // grid(6,2)→(3,1)   — mid-left edge, nearly vertical 3 rows
+  49: 104,  // grid(6,11)→(3,13) — mid-right, diagonal right 3 rows
+  82: 131,  // grid(4,8)→(1,10)  — center to upper-right, diagonal 3 rows
+  85: 112,  // grid(4,5)→(2,8)   — center-left to upper-center, diagonal 2 rows
 };
 
 export type PlayerColor = 'red' | 'green' | 'blue' | 'yellow' | 'purple' | 'orange' | 'teal';

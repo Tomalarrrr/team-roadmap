@@ -222,7 +222,7 @@ export async function makeMove(
 
   const current = snapshot.val() as SnakesGameState;
   if (current.currentTurn !== expectedTurn) return false;
-  if (current.winner !== null) return false;
+  if (current.winner != null) return false;
 
   await update(gameRef, updates);
   return true;

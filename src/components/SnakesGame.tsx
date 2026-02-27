@@ -123,10 +123,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   // Rematch flow
   const [rematchVotes, setRematchVotes] = useState<Record<number, boolean>>({});
 
-  // Board theme
-  const [boardTheme, setBoardTheme] = useState<'classic' | 'jungle' | 'space'>(() => {
-    return (localStorage.getItem('snakes-theme') as 'classic' | 'jungle' | 'space') || 'classic';
-  });
 
   // Game history
   const [gameHistory, setGameHistory] = useState<GameHistoryEntry[]>([]);
@@ -253,10 +249,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     getGameHistory(sessionId).then(setGameHistory).catch(() => {});
   }, [sessionId]);
 
-  // Save board theme preference
-  useEffect(() => {
-    localStorage.setItem('snakes-theme', boardTheme);
-  }, [boardTheme]);
 
   // Auto-join from URL parameter (?snakes=CODE)
   useEffect(() => {
@@ -1133,8 +1125,6 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
             onJoinCodeChange={(code) => { setJoinCode(code); setError(null); }}
             onJoinGame={handleJoinGame}
             onSpectateGame={handleSpectateGame}
-            boardTheme={boardTheme}
-            onBoardThemeChange={setBoardTheme}
             gameHistory={gameHistory}
             userName={userName}
             isLoading={isLoading}
@@ -1161,7 +1151,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 cameraShake === 'snakeLight' ? styles.cameraShakeSnakeLight : '',
                 cameraShake === 'ladderLight' ? styles.cameraShakeLadderLight : '',
               ].filter(Boolean).join(' ')}>
-                <div className={`${styles.board} ${boardTheme === 'jungle' ? styles.boardJungle : ''} ${boardTheme === 'space' ? styles.boardSpace : ''}`} style={{ '--board-wear': Math.min(moveLog.length / 50, 1) } as React.CSSProperties}>
+                <div className={styles.board} style={{ '--board-wear': Math.min(moveLog.length / 50, 1) } as React.CSSProperties}>
                   {BOARD_CELLS.map(cellNum => (
                     <BoardCell
                       key={cellNum}
