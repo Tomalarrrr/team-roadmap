@@ -150,6 +150,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const turnStartedAtRef = useRef<number>(Date.now());
   const prevPositionsRef = useRef('');
   const prevGameFingerprintRef = useRef('');
+  const prevMoveLogStringRef = useRef('');
   const hintTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gameOverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -620,7 +621,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setConsecutiveSixes(state.consecutiveSixes);
       setWinner(state.winner);
       setActivePlayerCount(state.playerCount);
-      setMoveLog(deserializeMoveLog(state.moveLog || ''));
+      const rawMoveLog = state.moveLog || '';
+      if (rawMoveLog !== prevMoveLogStringRef.current) {
+        prevMoveLogStringRef.current = rawMoveLog;
+        setMoveLog(deserializeMoveLog(rawMoveLog));
+      }
 
       // Sync shared state from Firebase
       if (state.winTally) setWinTally(state.winTally);
@@ -921,6 +926,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setIsRolling(false);
       prevPositionsRef.current = '';
       prevGameFingerprintRef.current = '';
+      prevMoveLogStringRef.current = '';
       isInitialLoadRef.current = false;
       setHasRolledThisTurn(false);
       if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
@@ -968,6 +974,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     lastAutoRollTurnStartRef.current = 0;
     prevPositionsRef.current = '';
     prevGameFingerprintRef.current = '';
+    prevMoveLogStringRef.current = '';
     lastMovedPlayerRef.current = null;
     // Clear all animation timers (hop, slide, entrance, reactions) to prevent orphan callbacks
     tokenAnimPos.current.clear();
@@ -1029,6 +1036,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     () => gameStats && winner !== null ? computeMvpAwards(gameStats, winner, activePlayerCount) : [],
     [gameStats, winner, activePlayerCount],
   );
+
+  const boardWear = useMemo(() => Math.min(moveLog.length / 50, 1), [moveLog.length]);
+
+  const recentMoves = useMemo(() => moveLog.slice(-10).reverse(), [moveLog]);
 
   const shareResultText = useMemo(() => {
     if (winner === null || !gameStats) return '';
@@ -1178,7 +1189,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 cameraShake === 'snakeLight' ? styles.cameraShakeSnakeLight : '',
                 cameraShake === 'ladderLight' ? styles.cameraShakeLadderLight : '',
               ].filter(Boolean).join(' ')}>
-                <div className={styles.board} style={{ '--board-wear': Math.min(moveLog.length / 50, 1) } as React.CSSProperties}>
+                <div className={styles.board} style={{ '--board-wear': boardWear } as React.CSSProperties}>
                   {BOARD_CELLS.map(cellNum => (
                     <BoardCell
                       key={cellNum}
@@ -1344,7 +1355,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                 <div className={styles.moveLog}>
                   <div className={styles.moveLogLabel}>Recent Moves</div>
                   <div className={styles.moveLogEntries}>
-                    {moveLog.slice(-10).reverse().map((entry, idx) => {
+                    {recentMoves.map((entry, idx) => {
                       const logIdx = moveLog.length - 1 - idx;
                       const color = PLAYER_COLORS[entry.player];
                       const name = playerNames[entry.player] || COLOR_LABELS[color];
