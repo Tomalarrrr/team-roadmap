@@ -188,9 +188,9 @@ describe('resolveMove', () => {
       expect(resolveMove(0, 1)).toEqual({ newPos: 1, landed: null, finalPos: 1 });
     });
 
-    it('enters board and hits ladder at cell 3', () => {
-      // Ladder at 3 → 99
-      expect(resolveMove(0, 3)).toEqual({ newPos: 3, landed: 'ladder', finalPos: 99 });
+    it('enters board and hits ladder at cell 2', () => {
+      // Ladder at 2 → 31
+      expect(resolveMove(0, 2)).toEqual({ newPos: 2, landed: 'ladder', finalPos: 31 });
     });
 
     it('enters board on a safe cell', () => {
@@ -200,20 +200,20 @@ describe('resolveMove', () => {
   });
 
   describe('snake hits', () => {
-    it('hits snake at 140 → 65', () => {
-      expect(resolveMove(135, 5)).toEqual({ newPos: 140, landed: 'snake', finalPos: 65 });
+    it('hits snake at 148 → 118', () => {
+      expect(resolveMove(145, 3)).toEqual({ newPos: 148, landed: 'snake', finalPos: 118 });
     });
 
-    it('hits snake at 118 → 22 (longest snake)', () => {
-      expect(resolveMove(115, 3)).toEqual({ newPos: 118, landed: 'snake', finalPos: 22 });
+    it('hits snake at 126 → 90 (biggest drop)', () => {
+      expect(resolveMove(121, 5)).toEqual({ newPos: 126, landed: 'snake', finalPos: 90 });
     });
 
-    it('hits snake at 42 → 6', () => {
-      expect(resolveMove(40, 2)).toEqual({ newPos: 42, landed: 'snake', finalPos: 6 });
+    it('hits snake at 44 → 22', () => {
+      expect(resolveMove(40, 4)).toEqual({ newPos: 44, landed: 'snake', finalPos: 22 });
     });
 
-    it('hits snake at 89 → 52', () => {
-      expect(resolveMove(84, 5)).toEqual({ newPos: 89, landed: 'snake', finalPos: 52 });
+    it('hits snake at 86 → 69', () => {
+      expect(resolveMove(83, 3)).toEqual({ newPos: 86, landed: 'snake', finalPos: 69 });
     });
 
     it('every defined snake is reachable and results in a snake landing', () => {
@@ -229,20 +229,20 @@ describe('resolveMove', () => {
   });
 
   describe('ladder hits', () => {
-    it('hits ladder at 3 → 99 (jackpot early ladder)', () => {
-      expect(resolveMove(1, 2)).toEqual({ newPos: 3, landed: 'ladder', finalPos: 99 });
+    it('hits ladder at 9 → 80 (big jackpot ladder)', () => {
+      expect(resolveMove(5, 4)).toEqual({ newPos: 9, landed: 'ladder', finalPos: 80 });
     });
 
-    it('hits ladder at 8 → 48', () => {
-      expect(resolveMove(5, 3)).toEqual({ newPos: 8, landed: 'ladder', finalPos: 48 });
+    it('hits ladder at 26 → 67', () => {
+      expect(resolveMove(22, 4)).toEqual({ newPos: 26, landed: 'ladder', finalPos: 67 });
     });
 
-    it('hits ladder at 86 → 130', () => {
-      expect(resolveMove(82, 4)).toEqual({ newPos: 86, landed: 'ladder', finalPos: 130 });
+    it('hits ladder at 82 → 131', () => {
+      expect(resolveMove(78, 4)).toEqual({ newPos: 82, landed: 'ladder', finalPos: 131 });
     });
 
-    it('hits ladder at 116 → 141', () => {
-      expect(resolveMove(112, 4)).toEqual({ newPos: 116, landed: 'ladder', finalPos: 141 });
+    it('hits ladder at 113 → 125', () => {
+      expect(resolveMove(109, 4)).toEqual({ newPos: 113, landed: 'ladder', finalPos: 125 });
     });
 
     it('every defined ladder is reachable and results in a ladder landing', () => {

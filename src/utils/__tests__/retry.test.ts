@@ -45,8 +45,15 @@ describe('isRetryableError', () => {
     expect(isRetryableError(new Error('Failed to fetch'))).toBe(true);
   });
 
-  it('returns false for other errors', () => {
-    expect(isRetryableError(new Error('Validation failed'))).toBe(false);
-    expect(isRetryableError(new Error('Invalid input'))).toBe(false);
+  it('returns false for permanent errors', () => {
+    expect(isRetryableError(new Error('Permission denied'))).toBe(false);
+    expect(isRetryableError(new Error('Unauthorized access'))).toBe(false);
+    expect(isRetryableError(new Error('invalid_argument: bad data'))).toBe(false);
+    expect(isRetryableError(new Error('Resource already exists'))).toBe(false);
+  });
+
+  it('returns true for unknown errors (fail-open strategy)', () => {
+    expect(isRetryableError(new Error('Validation failed'))).toBe(true);
+    expect(isRetryableError(new Error('Something went wrong'))).toBe(true);
   });
 });
