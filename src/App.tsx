@@ -64,6 +64,8 @@ const getSessionInfo = () => {
 // Get session info once at module load
 const sessionInfo = getSessionInfo();
 
+const formFallback = <div className={styles.formLoading}><span className={styles.spinner} /></div>;
+
 function App() {
   const { showToast } = useToast();
   const {
@@ -1120,14 +1122,14 @@ function App() {
 
       {/* Add Team Member Modal */}
       <Modal isOpen={modal?.type === 'add-member'} onClose={closeModal} title="Add Team Member">
-        <Suspense fallback={null}>
+        <Suspense fallback={formFallback}>
           <TeamMemberForm onSubmit={handleAddMember} onCancel={closeModal} />
         </Suspense>
       </Modal>
 
       {/* Edit Team Member Modal */}
       <Modal isOpen={modal?.type === 'edit-member'} onClose={closeModal} title="Edit Team Member">
-        <Suspense fallback={null}>
+        <Suspense fallback={formFallback}>
           {modal?.type === 'edit-member' && (
             <TeamMemberForm
               initialValues={{ name: modal.member.name, jobTitle: modal.member.jobTitle }}
@@ -1143,7 +1145,7 @@ function App() {
 
       {/* Add Project Modal */}
       <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New Project">
-        <Suspense fallback={null}>
+        <Suspense fallback={formFallback}>
           {modal?.type === 'add-project' && (
             <ProjectForm
               initialValues={{
@@ -1161,7 +1163,7 @@ function App() {
 
       {/* Edit Project Modal */}
       <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit Project">
-        <Suspense fallback={null}>
+        <Suspense fallback={formFallback}>
           {modal?.type === 'edit-project' && (
             <ProjectForm
               initialValues={{
@@ -1187,7 +1189,7 @@ function App() {
 
       {/* Add Milestone Modal */}
       <Modal isOpen={modal?.type === 'add-milestone'} onClose={closeModal} title="Add Milestone">
-        <Suspense fallback={null}>
+        <Suspense fallback={formFallback}>
           {modal?.type === 'add-milestone' && (
             <MilestoneForm
               projectStartDate={modal.project.startDate}
@@ -1201,7 +1203,7 @@ function App() {
 
       {/* Edit Milestone Modal */}
       <Modal isOpen={modal?.type === 'edit-milestone'} onClose={closeModal} title="Edit Milestone">
-        <Suspense fallback={null}>
+        <Suspense fallback={formFallback}>
           {modal?.type === 'edit-milestone' && (
             <MilestoneForm
               initialValues={{
@@ -1230,7 +1232,7 @@ function App() {
       <OfflineBanner isOnline={isOnline} isSyncing={isSaving} />
 
       {/* Keyboard Shortcuts Modal */}
-      <Suspense fallback={null}>
+      <Suspense fallback={formFallback}>
         <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </Suspense>
 

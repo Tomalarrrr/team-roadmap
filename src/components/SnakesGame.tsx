@@ -637,7 +637,9 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       if (state.winner !== null && winnerRef.current === null) {
         // Increment win tally in Firebase
         if (gameCodeRef.current) {
-          updateWinTally(gameCodeRef.current, state.winner).catch(() => {});
+          updateWinTally(gameCodeRef.current, state.winner).catch(() => {
+            console.warn('[Snakes] Failed to update win tally');
+          });
         }
         if (isInitialLoadRef.current) {
           // Reconnecting to a finished game: show overlay immediately, no celebration
@@ -887,7 +889,9 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
           playerCount: activePlayerCountRef.current,
           totalMoves: moveLogRef.current.length,
           timestamp: Date.now(),
-        }).catch(() => {});
+        }).catch(() => {
+          console.warn('[Snakes] Failed to save game history');
+        });
       }
 
       setShowGameOver(false);

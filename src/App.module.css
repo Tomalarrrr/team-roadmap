@@ -67,6 +67,13 @@
   animation: spin 0.8s linear infinite;
 }
 
+.formLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+}
+
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
