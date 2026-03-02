@@ -1,5 +1,5 @@
 import type { Unsubscribe } from 'firebase/database';
-import { ensureInitialized, getDbModule, getFirebaseDatabase } from './firebase';
+import { ensureInitialized, getDbModule, getFirebaseDatabase, markFirebaseActivity } from './firebase';
 
 export interface ConnectFourPlayer {
   sessionId: string;
@@ -141,6 +141,7 @@ export async function subscribeToGame(
   const unsubscribe = onValue(
     gameRef,
     (snapshot) => {
+      markFirebaseActivity();
       if (!snapshot.exists()) {
         callback(null);
         return;

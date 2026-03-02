@@ -9,7 +9,8 @@ import {
   updateTeamMemberAtPath,
   updateLeaveBlockAtPath,
   setupConnectionLifecycle,
-  forceReconnect
+  forceReconnect,
+  getLastFirebaseActivity,
 } from '../firebase';
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -267,6 +268,9 @@ export function useRoadmap() {
     // data in 5 minutes, force reconnect to recover from zombie WebSockets.
     // Uses a cooldown (not a one-shot) so it retries if the first reconnect
     // doesn't restore data flow, but doesn't spam reconnects.
+    // Also checks global Firebase activity (game listeners, presence, etc.) so
+    // we don't force-reconnect when the connection is alive but only the
+    // roadmap path is quiet (e.g. user is playing a game).
     const STALE_THRESHOLD_MS = 5 * 60 * 1000;
     const STALE_RECONNECT_COOLDOWN_MS = 2 * 60 * 1000; // 2 min between retries
     let lastStaleReconnectTime = 0;
@@ -275,8 +279,12 @@ export function useRoadmap() {
       const now = Date.now();
       const timeSinceData = now - lastDataReceivedRef.current;
 
-      // No action needed if we've received data recently
+      // No action needed if we've received data recently on the roadmap path
       if (timeSinceData < STALE_THRESHOLD_MS) return;
+
+      // Also skip if ANY Firebase listener received data recently (e.g. game in progress)
+      const timeSinceAnyActivity = now - getLastFirebaseActivity();
+      if (timeSinceAnyActivity < STALE_THRESHOLD_MS) return;
 
       // Skip if: error recovery is running, we know we're offline, or cooldown active
       if (isRecoveringRef.current || !lastConnectionStateRef.current) return;

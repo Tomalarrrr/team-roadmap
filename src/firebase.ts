@@ -97,6 +97,26 @@ export function getFirebaseDatabase() {
 }
 
 // ============================================
+// GLOBAL FIREBASE ACTIVITY TRACKING
+// ============================================
+// Tracks when *any* Firebase listener (roadmap, snakes, ludo, etc.) last
+// received data.  The stale-connection detector in useRoadmap checks this so
+// it won't force-reconnect when the connection is actually alive (e.g. a game
+// is running but the roadmap path is quiet).
+
+let lastFirebaseActivityTs = Date.now();
+
+/** Call from any Firebase onValue/onChildAdded callback to signal the connection is alive. */
+export function markFirebaseActivity(): void {
+  lastFirebaseActivityTs = Date.now();
+}
+
+/** Returns the timestamp of the most recent Firebase data received across all listeners. */
+export function getLastFirebaseActivity(): number {
+  return lastFirebaseActivityTs;
+}
+
+// ============================================
 // CONNECTION LIFECYCLE MANAGEMENT
 // ============================================
 
@@ -195,6 +215,7 @@ export async function subscribeToRoadmap(
   const unsubscribe = onValue(
     roadmapRef!,
     (snapshot) => {
+      markFirebaseActivity();
       const data = snapshot.val();
       const roadmapData = firebaseSnapshotToRoadmapData(data);
 

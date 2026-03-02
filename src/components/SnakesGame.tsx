@@ -149,6 +149,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const isRollingRef = useRef(false);
   const turnStartedAtRef = useRef<number>(Date.now());
   const prevPositionsRef = useRef('');
+  const prevGameFingerprintRef = useRef('');
   const hintTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gameOverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -448,6 +449,28 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
         moveLog: rawState.moveLog ?? '',
       };
 
+      // Fast path: if only lastSeen (presence heartbeat) changed, update
+      // presence state and skip the expensive game-state processing.
+      // The game listener covers the entire snakes/${code} node, so every
+      // 5-second presence write from each player triggers this callback.
+      const joinedPlayerKeys = Object.keys(state.players || {}).sort().join(',');
+      const gameFingerprint = `${state.positions}|${state.currentTurn}|${state.diceValue}|${state.winner}|${state.moveLog}|${state.turnStartedAt}|${state.startedAt}|${JSON.stringify(state.rematchVotes ?? '')}|${state.gameNumber ?? ''}|${joinedPlayerKeys}|${JSON.stringify(state.winTally ?? '')}`;
+      if (gameFingerprint === prevGameFingerprintRef.current) {
+        // Only presence or other non-game fields changed
+        if (state.lastSeen) setPlayerPresence(prev => {
+          // Shallow compare to avoid unnecessary re-render
+          const prevKeys = Object.keys(prev);
+          const newKeys = Object.keys(state.lastSeen!);
+          if (prevKeys.length !== newKeys.length) return state.lastSeen!;
+          for (const k of newKeys) {
+            if (prev[Number(k)] !== state.lastSeen![Number(k)]) return state.lastSeen!;
+          }
+          return prev;
+        });
+        return;
+      }
+      prevGameFingerprintRef.current = gameFingerprint;
+
       const parsed = deserializePositions(state.positions, state.playerCount);
 
       // Reset moveInFlight on state change
@@ -664,10 +687,23 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     let unsubscribe: (() => void) | null = null;
     let cancelled = false;
 
+    const MAX_FLOATING_REACTIONS = 15;
     subscribeToReactions(gameCode, (reaction) => {
       if (cancelled) return;
       const id = `${reaction.key}-${reaction.ts}`;
-      setFloatingReactions(prev => [...prev, { id, emoji: reaction.emoji, player: reaction.player, left: 20 + Math.random() * 60 }]);
+      const newItem = { id, emoji: reaction.emoji, player: reaction.player, left: 20 + Math.random() * 60 };
+      setFloatingReactions(prev => {
+        const next = [...prev, newItem];
+        if (next.length <= MAX_FLOATING_REACTIONS) return next;
+        // Evict oldest, clean up their removal timers (idempotent — safe in updater)
+        const keep = next.slice(-MAX_FLOATING_REACTIONS);
+        const evictedIds = new Set(next.slice(0, next.length - MAX_FLOATING_REACTIONS).map(r => r.id));
+        for (const eid of evictedIds) {
+          const t = reactionTimers.current.get(eid);
+          if (t) { clearTimeout(t); reactionTimers.current.delete(eid); }
+        }
+        return keep;
+      });
       reactionTimers.current.set(id, setTimeout(() => {
         setFloatingReactions(prev => prev.filter(r => r.id !== id));
         reactionTimers.current.delete(id);
@@ -884,6 +920,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
       setCameraShake(null);
       setIsRolling(false);
       prevPositionsRef.current = '';
+      prevGameFingerprintRef.current = '';
       isInitialLoadRef.current = false;
       setHasRolledThisTurn(false);
       if (confettiAnimRef.current) cancelAnimationFrame(confettiAnimRef.current);
@@ -930,6 +967,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     moveInFlightRef.current = false;
     lastAutoRollTurnStartRef.current = 0;
     prevPositionsRef.current = '';
+    prevGameFingerprintRef.current = '';
     lastMovedPlayerRef.current = null;
     // Clear all animation timers (hop, slide, entrance, reactions) to prevent orphan callbacks
     tokenAnimPos.current.clear();
