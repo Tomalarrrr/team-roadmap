@@ -253,7 +253,7 @@ function getNextTurn(
     };
   }
 
-  // Three consecutive 6s = lose turn
+  // Three consecutive 6s = move is used but no bonus turn
   if (diceValue === 6 && consecutiveSixes >= 2) {
     return {
       nextColor: findNextActivePlayer(currentColor, playerCount, finishedColors),

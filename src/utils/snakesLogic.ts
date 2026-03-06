@@ -103,9 +103,9 @@ export function resolveMove(currentPos: number, diceValue: number): MoveResult {
     newPos = currentPos + diceValue;
   }
 
-  // Exact finish: must land exactly on final cell
-  if (newPos > BOARD_SIZE) {
-    return { newPos: currentPos, landed: null, finalPos: currentPos };
+  // Win: reaching or exceeding the final cell counts as a win
+  if (newPos >= BOARD_SIZE) {
+    return { newPos: BOARD_SIZE, landed: null, finalPos: BOARD_SIZE };
   }
 
   // Check snake or ladder
@@ -163,7 +163,7 @@ export function computeHopPath(fromCell: number, toCell: number): number[] {
   if (toCell > fromCell) {
     for (let c = fromCell + 1; c <= toCell; c++) path.push(c);
   }
-  // If toCell === fromCell (overshoot stayed), path is empty — no animation needed
+  // If toCell === fromCell, path is empty — no animation needed
   return path;
 }
 

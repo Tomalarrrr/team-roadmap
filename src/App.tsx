@@ -40,15 +40,16 @@ type ModalType =
 
 // Generate a simple user ID for this session (in production, use auth)
 const getSessionInfo = () => {
-  // Use localStorage so identity survives tab close/reopen (critical for game reconnection)
-  let userId = localStorage.getItem('roadmap-user-id') || sessionStorage.getItem('roadmap-user-id');
+  // userId is always per-tab (sessionStorage) so two tabs = two players.
+  // userName is stored in localStorage so it survives tab close/reopen for
+  // game reconnection by name matching.
+  let userId = sessionStorage.getItem('roadmap-user-id');
   let userName = localStorage.getItem('roadmap-user-name') || sessionStorage.getItem('roadmap-user-name');
 
   if (!userId) {
     userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    sessionStorage.setItem('roadmap-user-id', userId);
   }
-  localStorage.setItem('roadmap-user-id', userId);
-  sessionStorage.setItem('roadmap-user-id', userId);
 
   if (!userName) {
     // Generate anonymous user name

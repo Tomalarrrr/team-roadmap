@@ -820,6 +820,17 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     return () => clearInterval(interval);
   }, [gamePhase, winner]);
 
+  // Reset CountdownTimer display when unpausing
+  const prevPausedRef = useRef(gamePaused);
+  useEffect(() => {
+    if (prevPausedRef.current && !gamePaused) {
+      const now = Date.now() + serverOffsetRef.current;
+      turnStartedAtRef.current = now;
+      setTurnStartedAtState(now);
+    }
+    prevPausedRef.current = gamePaused;
+  }, [gamePaused]);
+
   // --- Game actions ---
 
   const handleCreateGame = useCallback(async () => {
