@@ -8,6 +8,7 @@ import styles from './SearchFilter.module.css';
 const ConnectFourGame = lazy(() => import('./ConnectFourGame').then(m => ({ default: m.ConnectFourGame })));
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
 const SnakesGame = lazy(() => import('./SnakesGame').then(m => ({ default: m.SnakesGame })));
+import { GameErrorBoundary } from './GameErrorBoundary';
 
 interface SearchFilterProps {
   projects: Project[];
@@ -176,12 +177,14 @@ export const SearchFilter = memo(function SearchFilter({
     return { searchResults: results.slice(0, 8), totalResultCount: results.length };
   }, [filters.search, projects, recentProjects]);
 
-  // Reset selection when search changes (getDerivedStateFromProps pattern)
-  const [prevSearch, setPrevSearch] = useState(filters.search);
-  if (prevSearch !== filters.search) {
-    setPrevSearch(filters.search);
-    setSelectedIndex(0);
-  }
+  // Reset selection when search changes
+  const prevSearchRef = useRef(filters.search);
+  useEffect(() => {
+    if (prevSearchRef.current !== filters.search) {
+      prevSearchRef.current = filters.search;
+      setSelectedIndex(0);
+    }
+  }, [filters.search]);
 
   // Handle selecting a project (saves to recent)
   const handleSelectProject = useCallback((projectId: string) => {
@@ -416,21 +419,27 @@ export const SearchFilter = memo(function SearchFilter({
         </div>
       )}
       {showConnectFour && createPortal(
-        <Suspense fallback={null}>
-          <ConnectFourGame onClose={() => setShowConnectFour(false)} isSearchOpen={isOpen} />
-        </Suspense>,
+        <GameErrorBoundary gameName="Connect Four" onClose={() => setShowConnectFour(false)}>
+          <Suspense fallback={null}>
+            <ConnectFourGame onClose={() => setShowConnectFour(false)} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
         document.body
       )}
       {showLudo && createPortal(
-        <Suspense fallback={null}>
-          <LudoGame onClose={() => setShowLudo(false)} isSearchOpen={isOpen} />
-        </Suspense>,
+        <GameErrorBoundary gameName="Ludo" onClose={() => setShowLudo(false)}>
+          <Suspense fallback={null}>
+            <LudoGame onClose={() => setShowLudo(false)} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
         document.body
       )}
       {showSnakes && createPortal(
-        <Suspense fallback={null}>
-          <SnakesGame onClose={() => setShowSnakes(false)} isSearchOpen={isOpen} />
-        </Suspense>,
+        <GameErrorBoundary gameName="Snakes" onClose={() => setShowSnakes(false)}>
+          <Suspense fallback={null}>
+            <SnakesGame onClose={() => setShowSnakes(false)} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
         document.body
       )}
     </>

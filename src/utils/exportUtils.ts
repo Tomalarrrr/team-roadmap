@@ -10,7 +10,23 @@ interface ExportOption {
   action: () => void;
 }
 
-// Helper function to inline all computed styles for perfect rendering
+// Visually relevant CSS properties for export rendering.
+// Copying only these instead of all ~350 computed properties per element
+// reduces export time from seconds to milliseconds for large timelines.
+const EXPORT_CSS_PROPERTIES = [
+  'display', 'position', 'top', 'left', 'right', 'bottom',
+  'width', 'height', 'min-width', 'min-height', 'max-width', 'max-height',
+  'margin', 'padding', 'box-sizing', 'overflow', 'z-index',
+  'flex', 'flex-direction', 'flex-wrap', 'align-items', 'justify-content', 'gap',
+  'grid-template-columns', 'grid-template-rows', 'grid-column', 'grid-row',
+  'background', 'background-color', 'background-image',
+  'border', 'border-radius', 'border-color', 'border-width', 'border-style',
+  'color', 'font-family', 'font-size', 'font-weight', 'font-style',
+  'line-height', 'letter-spacing', 'text-align', 'text-decoration', 'text-transform', 'white-space',
+  'opacity', 'visibility', 'transform', 'box-shadow', 'text-shadow',
+  'vertical-align', 'text-overflow', 'word-break', 'overflow-wrap',
+];
+
 function inlineStyles(element: HTMLElement): HTMLElement {
   const clone = element.cloneNode(true) as HTMLElement;
   const elements = [element, ...Array.from(element.querySelectorAll('*'))];
@@ -21,14 +37,12 @@ function inlineStyles(element: HTMLElement): HTMLElement {
       const computedStyle = window.getComputedStyle(el);
       const clonedEl = clonedElements[index] as HTMLElement;
 
-      // Copy all computed styles to inline styles for guaranteed rendering
-      Array.from(computedStyle).forEach((property) => {
-        clonedEl.style.setProperty(
-          property,
-          computedStyle.getPropertyValue(property),
-          computedStyle.getPropertyPriority(property)
-        );
-      });
+      for (const property of EXPORT_CSS_PROPERTIES) {
+        const value = computedStyle.getPropertyValue(property);
+        if (value) {
+          clonedEl.style.setProperty(property, value);
+        }
+      }
     }
   });
 

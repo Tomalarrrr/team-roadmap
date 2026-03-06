@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface ViewportPositionOptions {
   position: { x: number; y: number } | null;
@@ -13,13 +13,13 @@ export function useViewportPosition(
   const [computedPosition, setComputedPosition] = useState<{ x: number; y: number } | null>(null);
 
   // Reset computed position when input position changes (prevents stale flash on reopen)
-  const [prevPosition, setPrevPosition] = useState(position);
-  if (position !== prevPosition) {
-    setPrevPosition(position);
-    if (computedPosition !== null) {
+  const prevPositionRef = useRef(position);
+  useEffect(() => {
+    if (position !== prevPositionRef.current) {
+      prevPositionRef.current = position;
       setComputedPosition(null);
     }
-  }
+  }, [position]);
 
   useEffect(() => {
     if (!isOpen || !position || !menuRef.current) {

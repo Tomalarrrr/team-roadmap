@@ -42,8 +42,10 @@ export function useUndoManager({ userId, maxHistory = 50 }: UndoManagerOptions) 
     }, 0);
   }, []);
 
-  // Generate unique action ID
-  const generateId = () => `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  // Generate unique action ID using crypto when available
+  const generateId = () => typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
   // Record an action (uses type assertion for flexibility with discriminated unions)
   const recordAction = useCallback((

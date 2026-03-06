@@ -7,11 +7,19 @@ interface VaultUnlockProps {
   onCancel: () => void;
 }
 
+// NOTE: This is an accidental-edit guard (like a screen lock), NOT a security boundary.
+// The PIN is intentionally client-side. It prevents casual/accidental edits, not attackers.
 const VAULT_PIN = '0002';
 const DIGIT_COUNT = 4;
 const EXIT_ANIMATION_MS = 400;
 const SUCCESS_DELAY_MS = 900;
 const SHAKE_DURATION_MS = 550;
+
+function derivePhase(isOpen: boolean, currentPhase: 'hidden' | 'visible' | 'exiting'): 'hidden' | 'visible' | 'exiting' {
+  if (isOpen && currentPhase !== 'visible') return 'visible';
+  if (!isOpen && currentPhase === 'visible') return 'exiting';
+  return currentPhase;
+}
 
 export function VaultUnlock({ isOpen, onUnlocked, onCancel }: VaultUnlockProps) {
   const [phase, setPhase] = useState<'hidden' | 'visible' | 'exiting'>(
@@ -23,13 +31,10 @@ export function VaultUnlock({ isOpen, onUnlocked, onCancel }: VaultUnlockProps) 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
-  // Synchronous derived state transitions (same pattern as Modal.tsx)
-  if (isOpen && phase !== 'visible') {
-    setPhase('visible');
-  }
-  if (!isOpen && phase === 'visible') {
-    setPhase('exiting');
-  }
+  // Derive phase transitions from props via effect (avoids setState during render)
+  useEffect(() => {
+    setPhase(prev => derivePhase(isOpen, prev));
+  }, [isOpen]);
 
   // Exit animation timer
   useEffect(() => {

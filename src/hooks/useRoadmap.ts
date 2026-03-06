@@ -70,10 +70,13 @@ function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
   };
 }
 
-// Remove undefined values recursively (Firebase rejects undefined)
-function sanitizeForFirebase<T>(obj: T): T {
-  if (obj === null || obj === undefined) {
-    return '' as T;
+// Remove undefined values recursively (Firebase rejects undefined but accepts null)
+export function sanitizeForFirebase<T>(obj: T): T {
+  if (obj === undefined) {
+    return null as T;
+  }
+  if (obj === null) {
+    return obj;
   }
   if (Array.isArray(obj)) {
     return obj.map(item => sanitizeForFirebase(item)) as T;
@@ -81,7 +84,8 @@ function sanitizeForFirebase<T>(obj: T): T {
   if (typeof obj === 'object') {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
-      result[key] = value === undefined ? '' : sanitizeForFirebase(value);
+      if (value === undefined) continue; // Strip undefined keys entirely
+      result[key] = sanitizeForFirebase(value);
     }
     return result as T;
   }
@@ -317,10 +321,10 @@ export function useRoadmap() {
 
   // Optimistic save: update UI immediately, save in background, rollback on failure
   const optimisticSave = useCallback(async (newData: RoadmapData) => {
-    // Use ref to get current data (avoids stale closure during rapid updates)
-    const currentData = dataRef.current;
-    const previousData = pendingUpdateRef.current || currentData;
-    pendingUpdateRef.current = previousData;
+    // Capture pre-save state for rollback. On first concurrent save, snapshot current data.
+    // Subsequent concurrent saves keep the original pre-save snapshot.
+    const rollbackData = pendingUpdateRef.current ?? dataRef.current;
+    pendingUpdateRef.current = rollbackData;
 
     // Sanitize data to remove undefined values (Firebase rejects them)
     const sanitizedData = sanitizeForFirebase(normalizeData(newData));
@@ -337,10 +341,10 @@ export function useRoadmap() {
       pendingUpdateRef.current = null;
       setLastSaved(new Date());
     } catch (error) {
-      // Rollback on failure
+      // Rollback on failure to pre-save snapshot
       console.error('Save failed, rolling back:', error);
-      dataRef.current = previousData;
-      setData(previousData);
+      dataRef.current = rollbackData;
+      setData(rollbackData);
       pendingUpdateRef.current = null;
       setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;

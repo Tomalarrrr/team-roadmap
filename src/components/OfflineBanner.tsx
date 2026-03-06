@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { subscribeToQueueChanges, type QueuedOperation } from '../utils/offlineQueue';
+import { useState, useEffect, useRef } from 'react';
 import styles from './OfflineBanner.module.css';
 
 interface OfflineBannerProps {
@@ -8,34 +7,22 @@ interface OfflineBannerProps {
 }
 
 export function OfflineBanner({ isOnline, isSyncing }: OfflineBannerProps) {
-  const [pendingCount, setPendingCount] = useState(0);
   const [cooldown, setCooldown] = useState(false);
 
-  // Subscribe to queue changes to show pending operation count
+  const needsDisplay = !isOnline;
+
+  // Detect transition from offline -> online to show "synced" briefly
+  const prevNeedsDisplayRef = useRef(needsDisplay);
   useEffect(() => {
-    const unsubscribe = subscribeToQueueChanges((queue: QueuedOperation[]) => {
-      setPendingCount(queue.length);
-    });
-
-    return unsubscribe;
-  }, []);
-
-  // Derive visibility: show when offline, has pending, or in cooldown after sync
-  const needsDisplay = !isOnline || pendingCount > 0;
-
-  // Detect transition from "needs display" → "doesn't need display" to start cooldown
-  // Uses getDerivedStateFromProps pattern (setState during render)
-  const [prevNeedsDisplay, setPrevNeedsDisplay] = useState(needsDisplay);
-  if (needsDisplay !== prevNeedsDisplay) {
-    setPrevNeedsDisplay(needsDisplay);
-    if (!needsDisplay) {
-      setCooldown(true); // Show "synced" message briefly
-    } else {
+    if (prevNeedsDisplayRef.current && !needsDisplay) {
+      setCooldown(true);
+    } else if (needsDisplay) {
       setCooldown(false);
     }
-  }
+    prevNeedsDisplayRef.current = needsDisplay;
+  }, [needsDisplay]);
 
-  // Clear cooldown after 2s — setState only in timeout callback
+  // Clear cooldown after 2s
   useEffect(() => {
     if (!cooldown) return;
     const timeout = setTimeout(() => setCooldown(false), 2000);
@@ -53,26 +40,12 @@ export function OfflineBanner({ isOnline, isSyncing }: OfflineBannerProps) {
             <path d="M1 1l22 22M9 9a3 3 0 0 0 4.24 4.24M16.24 16.24A9 9 0 0 0 12 21a9 9 0 0 0-9-9c0-1.34.29-2.61.81-3.76M21 12a9 9 0 0 0-2.81-6.53" />
           </svg>
         ),
-        message: pendingCount > 0
-          ? `You're offline. ${pendingCount} change${pendingCount === 1 ? '' : 's'} pending.`
-          : "You're offline. Changes will sync when reconnected.",
+        message: "You're offline. Changes will sync when reconnected.",
         variant: 'offline' as const
       };
     }
 
-    if (isSyncing && pendingCount > 0) {
-      return {
-        icon: (
-          <svg className={`${styles.icon} ${styles.spinning}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c-1.657 0-3-4.03-3-9s1.343-9 3-9m0 18c1.657 0 3-4.03 3-9s-1.343-9-3-9" />
-          </svg>
-        ),
-        message: `Syncing ${pendingCount} change${pendingCount === 1 ? '' : 's'}...`,
-        variant: 'syncing' as const
-      };
-    }
-
-    if (pendingCount === 0 && isOnline) {
+    if (isOnline) {
       return {
         icon: (
           <svg className={styles.icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

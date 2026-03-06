@@ -1,5 +1,6 @@
 import type { Unsubscribe } from 'firebase/database';
 import { ensureInitialized, getDbModule, getFirebaseDatabase, markFirebaseActivity } from './firebase';
+import { generateGameCode } from './utils/gameUtils';
 
 export interface ConnectFourPlayer {
   sessionId: string;
@@ -18,16 +19,6 @@ export interface ConnectFourGameState {
     yellow?: ConnectFourPlayer | null;
   };
   createdAt: number;
-}
-
-const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 to avoid confusion
-
-function generateGameCode(): string {
-  let code = '';
-  for (let i = 0; i < 4; i++) {
-    code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-  }
-  return code;
 }
 
 export async function createGame(sessionId: string, userName: string): Promise<string> {
@@ -68,50 +59,61 @@ export async function joinGame(
   userName: string
 ): Promise<{ state: ConnectFourGameState; assignedColor: 'red' | 'yellow' }> {
   await ensureInitialized();
-  const { ref, get, update } = getDbModule();
+  const { ref, runTransaction, get } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `connectFour/${code}`);
-  const snapshot = await get(gameRef);
+  let assignedColor: 'red' | 'yellow' = 'yellow';
+  let joinError: string | null = null;
 
-  if (!snapshot.exists()) {
-    throw new Error('Game not found');
-  }
-
-  const state = snapshot.val() as ConnectFourGameState;
-
-  // Check if this session is already in the game (reconnection by sessionId)
-  if (state.players.red.sessionId === sessionId) {
-    return { state, assignedColor: 'red' };
-  }
-  if (state.players.yellow && state.players.yellow.sessionId === sessionId) {
-    return { state, assignedColor: 'yellow' };
-  }
-
-  // If game is full, allow reconnection by name (handles tab close → new sessionId)
-  const normalName = userName.trim().toLowerCase();
-  if (state.players.yellow) {
-    if (state.players.yellow.name.trim().toLowerCase() === normalName) {
-      await update(gameRef, { 'players/yellow/sessionId': sessionId });
-      return { state: { ...state, players: { ...state.players, yellow: { sessionId, name: state.players.yellow.name } } }, assignedColor: 'yellow' };
+  await runTransaction(gameRef, (current: ConnectFourGameState | null) => {
+    if (!current) {
+      // Transaction gets null on first pass — abort and let it retry with real data
+      return current;
     }
-    if (state.players.red.name.trim().toLowerCase() === normalName) {
-      await update(gameRef, { 'players/red/sessionId': sessionId });
-      return { state: { ...state, players: { ...state.players, red: { sessionId, name: state.players.red.name } } }, assignedColor: 'red' };
-    }
-    throw new Error('Game is full');
-  }
 
-  // Set yellow player and start the turn timer atomically
-  await update(gameRef, {
-    'players/yellow': { sessionId, name: userName },
-    turnStartedAt: Date.now(),
+    const players = current.players;
+
+    // Reconnection by sessionId (no mutation needed, just identify color)
+    if (players.red?.sessionId === sessionId) {
+      assignedColor = 'red';
+      return current; // No change
+    }
+    if (players.yellow?.sessionId === sessionId) {
+      assignedColor = 'yellow';
+      return current; // No change
+    }
+
+    // Reconnection by name (handles tab close → new sessionId)
+    const normalName = userName.trim().toLowerCase();
+    if (players.yellow) {
+      if (players.yellow.name.trim().toLowerCase() === normalName) {
+        assignedColor = 'yellow';
+        return { ...current, players: { ...players, yellow: { ...players.yellow, sessionId } } };
+      }
+      if (players.red.name.trim().toLowerCase() === normalName) {
+        assignedColor = 'red';
+        return { ...current, players: { ...players, red: { ...players.red, sessionId } } };
+      }
+      joinError = 'Game is full';
+      return; // Abort transaction
+    }
+
+    // Claim yellow slot atomically
+    assignedColor = 'yellow';
+    return {
+      ...current,
+      players: { ...players, yellow: { sessionId, name: userName } },
+      turnStartedAt: Date.now(),
+    };
   });
 
-  return {
-    state: { ...state, players: { ...state.players, yellow: { sessionId, name: userName } } },
-    assignedColor: 'yellow',
-  };
+  if (joinError) throw new Error(joinError);
+
+  // Read final state after transaction
+  const finalSnap = await get(gameRef);
+  if (!finalSnap.exists()) throw new Error('Game not found');
+  return { state: finalSnap.val() as ConnectFourGameState, assignedColor };
 }
 
 export async function spectateGame(code: string): Promise<ConnectFourGameState> {
@@ -158,19 +160,70 @@ export async function subscribeToGame(
   return unsubscribe;
 }
 
+/**
+ * Validate that a new board state represents exactly one new piece placed
+ * in a valid (gravity-respecting) position by the correct player.
+ */
+function validateMove(
+  oldBoard: string,
+  newBoard: string,
+  expectedTurn: 'red' | 'yellow'
+): boolean {
+  if (newBoard.length !== 48) return false;
+  if (!/^[.RY]+$/.test(newBoard)) return false;
+
+  const ROWS = 6;
+  const COLS = 8;
+  const piece = expectedTurn === 'red' ? 'R' : 'Y';
+
+  // Find exactly one new piece
+  let diffCount = 0;
+  let diffIndex = -1;
+  for (let i = 0; i < 48; i++) {
+    if (oldBoard[i] !== newBoard[i]) {
+      diffCount++;
+      diffIndex = i;
+      // New cell must be the current player's piece, old must be empty
+      if (oldBoard[i] !== '.' || newBoard[i] !== piece) return false;
+    }
+  }
+  if (diffCount !== 1) return false;
+
+  // Gravity check: the cell below must be occupied or this is the bottom row
+  const row = Math.floor(diffIndex / COLS);
+  if (row < ROWS - 1) {
+    const belowIndex = diffIndex + COLS;
+    if (newBoard[belowIndex] === '.') return false;
+  }
+
+  return true;
+}
+
 export async function makeMove(
   code: string,
   board: string,
   currentTurn: 'red' | 'yellow',
   winner: string | null,
   winningCells: string | null
-): Promise<void> {
+): Promise<boolean> {
   await ensureInitialized();
-  const { ref, update } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `connectFour/${code}`);
-  await update(gameRef, { board, currentTurn, winner, winningCells, turnStartedAt: Date.now() });
+  const result = await runTransaction(gameRef, (current: ConnectFourGameState | null) => {
+    if (!current) return current;
+
+    // Reject move if game is already over
+    if (current.winner) return;
+
+    // Validate the move against current server state
+    if (!validateMove(current.board, board, current.currentTurn)) return;
+
+    return { ...current, board, currentTurn, winner, winningCells, turnStartedAt: Date.now() };
+  });
+
+  return result.committed;
 }
 
 export async function resetGame(code: string, nextStarter: 'red' | 'yellow'): Promise<void> {

@@ -1,6 +1,7 @@
 import type { Unsubscribe } from 'firebase/database';
 import { ensureInitialized, getDbModule, getFirebaseDatabase, markFirebaseActivity } from './firebase';
 import { serializePositions } from './utils/snakesLogic';
+import { generateGameCode } from './utils/gameUtils';
 
 // --- Types ---
 
@@ -36,18 +37,6 @@ export interface SnakesMoveUpdate {
   winner: number | null;
   turnStartedAt: number;
   moveLog: string;
-}
-
-// --- Game code generation ---
-
-const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-
-function generateGameCode(): string {
-  let code = '';
-  for (let i = 0; i < 4; i++) {
-    code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-  }
-  return code;
 }
 
 // --- Firebase API ---
@@ -98,71 +87,77 @@ export async function joinGame(
   serverOffset = 0,
 ): Promise<{ state: SnakesGameState; assignedSlot: number }> {
   await ensureInitialized();
-  const { ref, get, set, update } = getDbModule();
+  const { ref, runTransaction, get } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
-  const snapshot = await get(gameRef);
+  let assignedSlot = -1;
+  let joinError: string | null = null;
 
-  if (!snapshot.exists()) {
-    throw new Error('Game not found');
-  }
+  await runTransaction(gameRef, (current: SnakesGameState | null) => {
+    if (!current) return current; // Retry with real data
 
-  const state = snapshot.val() as SnakesGameState;
-  const players = state.players || {};
+    const players = current.players || {};
 
-  // Reconnection by sessionId (no write needed)
-  for (let i = 0; i < state.playerCount; i++) {
-    const key = `p${i}`;
-    if (players[key]?.sessionId === sessionId) {
-      return { state, assignedSlot: i };
+    // Reconnection by sessionId
+    for (let i = 0; i < current.playerCount; i++) {
+      if (players[`p${i}`]?.sessionId === sessionId) {
+        assignedSlot = i;
+        return current; // No change
+      }
     }
-  }
 
-  // Reconnection by name (handles tab close → new sessionId)
-  const normalName = userName.trim().toLowerCase();
-  for (let i = 0; i < state.playerCount; i++) {
-    const key = `p${i}`;
-    if (players[key]?.name?.trim().toLowerCase() === normalName) {
-      const playerRef = ref(db, `snakes/${code}/players/${key}/sessionId`);
-      await set(playerRef, sessionId);
-      return {
-        state: { ...state, players: { ...players, [key]: { sessionId, name: players[key].name } } },
-        assignedSlot: i,
-      };
+    // Reconnection by name
+    const normalName = userName.trim().toLowerCase();
+    for (let i = 0; i < current.playerCount; i++) {
+      const key = `p${i}`;
+      if (players[key]?.name?.trim().toLowerCase() === normalName) {
+        assignedSlot = i;
+        return {
+          ...current,
+          players: { ...players, [key]: { ...players[key], sessionId } },
+        };
+      }
     }
-  }
 
-  // Claim an empty slot via get+update (runTransaction unreliably gets null on first pass)
-  const curPlayers = state.players || {};
+    // Find empty slot
+    let slot = -1;
+    for (let i = 1; i < current.playerCount; i++) {
+      if (!players[`p${i}`]) { slot = i; break; }
+    }
+    if (slot === -1) {
+      joinError = 'Game is full';
+      return; // Abort
+    }
 
-  let slot = -1;
-  for (let i = 1; i < state.playerCount; i++) {
-    if (!curPlayers[`p${i}`]) { slot = i; break; }
-  }
-  if (slot === -1) throw new Error('Game is full');
+    assignedSlot = slot;
+    const updated: SnakesGameState = {
+      ...current,
+      players: { ...players, [`p${slot}`]: { sessionId, name: userName } },
+    };
 
-  const updates: Record<string, unknown> = {
-    [`players/p${slot}`]: { sessionId, name: userName },
-  };
+    // Start game if all players joined
+    const joinedCount = Object.values(players).filter(Boolean).length + 1;
+    if (joinedCount >= current.playerCount && !current.startedAt) {
+      const serverNow = Date.now() + serverOffset;
+      const arr = new Uint8Array(1);
+      crypto.getRandomValues(arr);
+      const firstPlayer = arr[0] % current.playerCount;
+      updated.startedAt = serverNow;
+      updated.turnStartedAt = serverNow;
+      updated.currentTurn = firstPlayer;
+      updated.firstPlayer = firstPlayer;
+    }
 
-  // Start the game if all players have now joined
-  const joinedCount = Object.values(curPlayers).filter(Boolean).length + 1;
-  if (joinedCount >= state.playerCount && !state.startedAt) {
-    const serverNow = Date.now() + serverOffset;
-    const firstPlayer = Math.floor(Math.random() * state.playerCount);
-    updates.startedAt = serverNow;
-    updates.turnStartedAt = serverNow;
-    updates.currentTurn = firstPlayer;
-    updates.firstPlayer = firstPlayer;
-  }
+    return updated;
+  });
 
-  await update(gameRef, updates);
+  if (joinError) throw new Error(joinError);
 
-  // Re-read to return the full updated state
-  const freshSnap = await get(gameRef);
-  const newState = freshSnap.val() as SnakesGameState;
-  return { state: newState, assignedSlot: slot };
+  // Read final state
+  const finalSnap = await get(gameRef);
+  if (!finalSnap.exists()) throw new Error('Game not found');
+  return { state: finalSnap.val() as SnakesGameState, assignedSlot };
 }
 
 export async function spectateGame(code: string): Promise<SnakesGameState> {
@@ -215,19 +210,19 @@ export async function makeMove(
   updates: SnakesMoveUpdate
 ): Promise<boolean> {
   await ensureInitialized();
-  const { ref, get, update } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `snakes/${code}`);
-  const snapshot = await get(gameRef);
-  if (!snapshot.exists()) return false;
+  const result = await runTransaction(gameRef, (current: SnakesGameState | null) => {
+    if (!current) return current;
+    if (current.currentTurn !== expectedTurn) return; // Abort: not this player's turn
+    if (current.winner != null) return; // Abort: game over
 
-  const current = snapshot.val() as SnakesGameState;
-  if (current.currentTurn !== expectedTurn) return false;
-  if (current.winner != null) return false;
+    return { ...current, ...updates };
+  });
 
-  await update(gameRef, updates);
-  return true;
+  return result.committed;
 }
 
 export async function resetGame(code: string, playerCount: number, serverOffset = 0): Promise<void> {
@@ -237,7 +232,9 @@ export async function resetGame(code: string, playerCount: number, serverOffset 
 
   const gameRef = ref(db, `snakes/${code}`);
   const initialPositions = serializePositions(new Array(playerCount).fill(0));
-  const randomFirst = Math.floor(Math.random() * playerCount);
+  const arr = new Uint8Array(1);
+  crypto.getRandomValues(arr);
+  const randomFirst = arr[0] % playerCount;
   await update(gameRef, {
     positions: initialPositions,
     currentTurn: randomFirst,

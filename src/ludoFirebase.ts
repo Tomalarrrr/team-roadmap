@@ -1,5 +1,6 @@
 import type { Unsubscribe } from 'firebase/database';
 import { ensureInitialized, getDbModule, getFirebaseDatabase, markFirebaseActivity } from './firebase';
+import { generateGameCode } from './utils/gameUtils';
 
 // --- Types ---
 
@@ -79,18 +80,6 @@ export function deserializeTokens(str: string): TokenPosition[] {
   return tokens;
 }
 
-// --- Game code generation ---
-
-const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-
-function generateGameCode(): string {
-  let code = '';
-  for (let i = 0; i < 4; i++) {
-    code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-  }
-  return code;
-}
-
 // --- Firebase API ---
 
 const JOIN_ORDER: LudoColor[] = ['green', 'yellow', 'blue'];
@@ -140,71 +129,83 @@ export async function joinGame(
   userName: string
 ): Promise<{ state: LudoGameState; assignedColor: LudoColor }> {
   await ensureInitialized();
-  const { ref, get, set, update } = getDbModule();
+  const { ref, runTransaction, get } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `ludo/${code}`);
-  const snapshot = await get(gameRef);
+  let assignedColor: LudoColor = 'green';
+  let joinError: string | null = null;
 
-  if (!snapshot.exists()) {
-    throw new Error('Game not found');
-  }
+  await runTransaction(gameRef, (current: LudoGameState | null) => {
+    if (!current) return current; // Retry with real data
 
-  const state = snapshot.val() as LudoGameState;
+    const allColors: LudoColor[] = ['red', ...JOIN_ORDER];
 
-  // Check if this session is already in the game (reconnection by sessionId)
-  for (const color of ['red', ...JOIN_ORDER] as LudoColor[]) {
-    const player = state.players[color];
-    if (player && player.sessionId === sessionId) {
-      return { state, assignedColor: color };
+    // Reconnection by sessionId
+    for (const color of allColors) {
+      const player = current.players[color];
+      if (player && player.sessionId === sessionId) {
+        assignedColor = color;
+        return current; // No change
+      }
     }
-  }
 
-  // Check for reconnection by name (handles tab close → new sessionId)
-  const normalName = userName.trim().toLowerCase();
-  for (const color of ['red', ...JOIN_ORDER] as LudoColor[]) {
-    const player = state.players[color];
-    if (player && player.name.trim().toLowerCase() === normalName) {
-      const playerRef = ref(db, `ludo/${code}/players/${color}/sessionId`);
-      await set(playerRef, sessionId);
-      return { state: { ...state, players: { ...state.players, [color]: { sessionId, name: player.name } } }, assignedColor: color as LudoColor };
+    // Reconnection by name
+    const normalName = userName.trim().toLowerCase();
+    for (const color of allColors) {
+      const player = current.players[color];
+      if (player && player.name.trim().toLowerCase() === normalName) {
+        assignedColor = color;
+        return {
+          ...current,
+          players: { ...current.players, [color]: { ...player, sessionId } },
+        };
+      }
     }
-  }
 
-  // Find next empty slot
-  let assignedColor: LudoColor | null = null;
-  const maxSlots = state.playerCount;
-  const availableColors = JOIN_ORDER.slice(0, maxSlots - 1);
-
-  for (const color of availableColors) {
-    if (!state.players[color]) {
-      assignedColor = color;
-      break;
+    // Find empty slot
+    const maxSlots = current.playerCount;
+    const availableColors = JOIN_ORDER.slice(0, maxSlots - 1);
+    let foundColor: LudoColor | null = null;
+    for (const color of availableColors) {
+      if (!current.players[color]) {
+        foundColor = color;
+        break;
+      }
     }
-  }
 
-  if (!assignedColor) {
-    throw new Error('Game is full');
-  }
+    if (!foundColor) {
+      joinError = 'Game is full';
+      return; // Abort
+    }
 
-  const playerRef = ref(db, `ludo/${code}/players/${assignedColor}`);
-  await set(playerRef, { sessionId, name: userName });
+    assignedColor = foundColor;
+    const updated: LudoGameState = {
+      ...current,
+      players: { ...current.players, [foundColor]: { sessionId, name: userName } },
+    };
 
-  // Check if all required players have joined — start the game
-  const joinedCount = Object.values(state.players).filter(Boolean).length + 1;
-  if (joinedCount >= maxSlots) {
-    const activePlayers: LudoColor[] = (['red', 'green', 'yellow', 'blue'] as LudoColor[]).slice(0, maxSlots);
-    const randomFirst = activePlayers[Math.floor(Math.random() * activePlayers.length)];
-    await update(gameRef, { startedAt: Date.now(), turnStartedAt: Date.now(), currentTurn: randomFirst });
-  }
+    // Start game if all players joined
+    const joinedCount = Object.values(current.players).filter(Boolean).length + 1;
+    if (joinedCount >= maxSlots) {
+      const activePlayers: LudoColor[] = (['red', 'green', 'yellow', 'blue'] as LudoColor[]).slice(0, maxSlots);
+      const arr = new Uint8Array(1);
+      crypto.getRandomValues(arr);
+      const randomFirst = activePlayers[arr[0] % activePlayers.length];
+      updated.startedAt = Date.now();
+      updated.turnStartedAt = Date.now();
+      updated.currentTurn = randomFirst;
+    }
 
-  return {
-    state: {
-      ...state,
-      players: { ...state.players, [assignedColor]: { sessionId, name: userName } },
-    },
-    assignedColor,
-  };
+    return updated;
+  });
+
+  if (joinError) throw new Error(joinError);
+
+  // Read final state
+  const finalSnap = await get(gameRef);
+  if (!finalSnap.exists()) throw new Error('Game not found');
+  return { state: finalSnap.val() as LudoGameState, assignedColor };
 }
 
 export async function subscribeToGame(
@@ -238,14 +239,23 @@ export async function subscribeToGame(
 
 export async function makeMove(
   code: string,
+  expectedTurn: LudoColor,
   updates: LudoMoveUpdate
-): Promise<void> {
+): Promise<boolean> {
   await ensureInitialized();
-  const { ref, update } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `ludo/${code}`);
-  await update(gameRef, updates);
+  const result = await runTransaction(gameRef, (current: LudoGameState | null) => {
+    if (!current) return current;
+    if (current.currentTurn !== expectedTurn) return; // Abort: not this player's turn
+    if (current.winner != null) return; // Abort: game over
+
+    return { ...current, ...updates };
+  });
+
+  return result.committed;
 }
 
 export async function spectateGame(code: string): Promise<LudoGameState> {
@@ -269,7 +279,9 @@ export async function resetGame(code: string, playerCount: number): Promise<void
   const db = getFirebaseDatabase();
 
   const activePlayers: LudoColor[] = (['red', 'green', 'yellow', 'blue'] as LudoColor[]).slice(0, playerCount);
-  const randomFirst = activePlayers[Math.floor(Math.random() * activePlayers.length)];
+  const arr = new Uint8Array(1);
+  crypto.getRandomValues(arr);
+  const randomFirst = activePlayers[arr[0] % activePlayers.length];
 
   const gameRef = ref(db, `ludo/${code}`);
   await update(gameRef, {

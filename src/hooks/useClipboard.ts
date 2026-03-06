@@ -82,7 +82,7 @@ export function useClipboard({ onPasteProject, onPasteMilestone, onShowToast }: 
 
         return {
           ...m,
-          id: `milestone-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
+          id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `milestone-${Date.now()}`,
           startDate: toISODateString(addDays(now, startOffset)),
           endDate: toISODateString(addDays(now, endOffset))
         };

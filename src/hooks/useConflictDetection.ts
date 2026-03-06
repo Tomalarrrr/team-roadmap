@@ -72,7 +72,7 @@ export function useConflictDetection(): ConflictDetectionResult {
 
     setConflict(prev => ({
       ...prev,
-      remoteChangeDetected: prev.hasLocalChanges, // Only flag if we have unsaved local changes
+      remoteChangeDetected: true,
       lastRemoteChangeTime: Date.now()
     }));
   }, []);
@@ -134,22 +134,16 @@ export function useDataVersion(data: RoadmapData): {
   hasChanged: boolean;
 } {
   const currentHash = hashData(data);
-  const [tracked, setTracked] = useState<{ hash: string; previousHash: string | null }>({
-    hash: currentHash,
-    previousHash: null
-  });
+  const previousHashRef = useRef<string | null>(null);
 
-  // Derived state during render (React getDerivedStateFromProps pattern):
-  // When hash changes, shift current → previous and store new hash
-  let previousHash = tracked.previousHash;
-  if (tracked.hash !== currentHash) {
-    previousHash = tracked.hash;
-    setTracked({ hash: currentHash, previousHash });
-  }
+  useEffect(() => {
+    // After render, shift: current becomes previous for next comparison
+    previousHashRef.current = currentHash;
+  }, [currentHash]);
 
   return {
     currentHash,
-    previousHash,
-    hasChanged: previousHash !== null && previousHash !== currentHash
+    previousHash: previousHashRef.current,
+    hasChanged: previousHashRef.current !== null && previousHashRef.current !== currentHash
   };
 }

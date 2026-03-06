@@ -256,25 +256,25 @@ describe('resolveMove', () => {
     });
   });
 
-  describe('overshoot (exact finish required)', () => {
-    it('stays put when dice overshoots past 150', () => {
-      expect(resolveMove(149, 3)).toEqual({ newPos: 149, landed: null, finalPos: 149 });
+  describe('overshoot wins (no exact finish required)', () => {
+    it('wins when dice overshoots past 150', () => {
+      expect(resolveMove(149, 3)).toEqual({ newPos: 150, landed: null, finalPos: 150 });
     });
 
-    it('stays put when dice overshoots by 1', () => {
-      expect(resolveMove(149, 2)).toEqual({ newPos: 149, landed: null, finalPos: 149 });
+    it('wins when dice overshoots by 1', () => {
+      expect(resolveMove(149, 2)).toEqual({ newPos: 150, landed: null, finalPos: 150 });
     });
 
-    it('stays at 148 with dice 6', () => {
-      expect(resolveMove(148, 6)).toEqual({ newPos: 148, landed: null, finalPos: 148 });
+    it('wins from 148 with dice 6', () => {
+      expect(resolveMove(148, 6)).toEqual({ newPos: 150, landed: null, finalPos: 150 });
     });
 
-    it('stays at 147 with dice 4', () => {
-      expect(resolveMove(147, 4)).toEqual({ newPos: 147, landed: null, finalPos: 147 });
+    it('wins from 147 with dice 4', () => {
+      expect(resolveMove(147, 4)).toEqual({ newPos: 150, landed: null, finalPos: 150 });
     });
   });
 
-  describe('exact win on 150', () => {
+  describe('win on reaching 150', () => {
     it('wins on exact landing at 150', () => {
       expect(resolveMove(146, 4)).toEqual({ newPos: 150, landed: null, finalPos: 150 });
     });

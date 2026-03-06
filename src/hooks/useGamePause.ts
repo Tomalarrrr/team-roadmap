@@ -48,10 +48,10 @@ export function useGamePause() {
 
   const togglePause = useCallback(async () => {
     await ensureInitialized();
-    const { ref, set } = getDbModule();
+    const { ref, runTransaction } = getDbModule();
     const db = getFirebaseDatabase();
     const pauseRef = ref(db, 'gamePaused');
-    await set(pauseRef, !cachedPaused);
+    await runTransaction(pauseRef, (current: boolean | null) => !(current ?? false));
   }, []);
 
   return { paused, togglePause };

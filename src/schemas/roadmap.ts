@@ -1,13 +1,5 @@
 import { z } from 'zod';
-
-// Date string format: YYYY-MM-DD
-const dateStringSchema = z.string().regex(
-  /^\d{4}-\d{2}-\d{2}$/,
-  'Invalid date format. Expected YYYY-MM-DD'
-);
-
-// Hex color (#RRGGBB format)
-const colorSchema = z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color format');
+import { dateStringSchema, colorSchema } from './primitives';
 
 // Milestone schema
 export const milestoneSchema = z.object({

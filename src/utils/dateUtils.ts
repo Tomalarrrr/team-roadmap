@@ -19,11 +19,14 @@ function getCachedDate(dateStr: string): Date {
     cached = parseISO(dateStr);
     parsedDateCache.set(dateStr, cached);
 
-    // Auto-cleanup: keep cache size under 1000 entries
+    // Evict oldest half when cache grows too large (Map preserves insertion order)
     if (parsedDateCache.size > 1000) {
-      // Remove oldest 200 entries
-      const keysToDelete = Array.from(parsedDateCache.keys()).slice(0, 200);
-      keysToDelete.forEach(key => parsedDateCache.delete(key));
+      const halfSize = parsedDateCache.size >> 1;
+      let count = 0;
+      for (const key of parsedDateCache.keys()) {
+        if (count++ >= halfSize) break;
+        parsedDateCache.delete(key);
+      }
     }
   }
   return cached;

@@ -1,0 +1,115 @@
+{
+  "rules": {
+    "roadmap": {
+      ".read": true,
+      ".write": true,
+      "projects": {
+        "$projectId": {
+          ".validate": "newData.hasChildren(['id', 'title', 'owner', 'startDate', 'endDate', 'statusColor'])",
+          "id": { ".validate": "newData.isString() && newData.val().length > 0" },
+          "title": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
+          "owner": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "endDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "statusColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
+          "milestones": {
+            "$milestoneId": {
+              ".validate": "newData.hasChildren(['id', 'title', 'startDate', 'endDate', 'statusColor'])"
+            }
+          },
+          "dependencies": { ".validate": true }
+        }
+      },
+      "teamMembers": {
+        "$memberId": {
+          ".validate": "newData.hasChildren(['id', 'name'])",
+          "id": { ".validate": "newData.isString() && newData.val().length > 0" },
+          "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" }
+        }
+      },
+      "dependencies": {
+        "$depId": {
+          ".validate": "newData.hasChildren(['id', 'fromProjectId', 'toProjectId', 'type'])"
+        }
+      },
+      "leaveBlocks": {
+        "$leaveId": {
+          ".validate": "newData.hasChildren(['id', 'memberId', 'startDate', 'endDate', 'coverage', 'type'])"
+        }
+      },
+      "periodMarkers": {
+        "$markerId": {
+          ".validate": "newData.hasChildren(['id', 'startDate', 'endDate', 'color'])"
+        }
+      }
+    },
+
+    "presence": {
+      ".read": true,
+      "$sessionId": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['id', 'name', 'color', 'lastSeen'])",
+        "lastSeen": { ".validate": "newData.isNumber()" }
+      }
+    },
+
+    "connectFour": {
+      ".read": true,
+      "$gameCode": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['board', 'currentTurn', 'players', 'createdAt'])",
+        "board": {
+          ".validate": "newData.isString() && newData.val().length == 48 && newData.val().matches(/^[.RY]+$/)"
+        },
+        "currentTurn": {
+          ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'yellow')"
+        },
+        "players": {
+          "red": { ".validate": "newData.hasChildren(['sessionId', 'name'])" },
+          "yellow": { ".validate": "newData.hasChildren(['sessionId', 'name'])" }
+        },
+        "createdAt": { ".validate": "newData.isNumber()" }
+      }
+    },
+
+    "snakes": {
+      ".read": true,
+      "$gameCode": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['players', 'positions', 'currentTurn', 'createdAt', 'playerCount'])",
+        "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 4" },
+        "currentTurn": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+        "createdAt": { ".validate": "newData.isNumber()" }
+      }
+    },
+
+    "snakesHistory": {
+      ".read": true,
+      "$sessionId": {
+        ".write": true
+      }
+    },
+
+    "ludo": {
+      ".read": true,
+      "$gameCode": {
+        ".write": true,
+        ".validate": "newData.hasChildren(['players', 'tokens', 'currentTurn', 'createdAt', 'playerCount'])",
+        "currentTurn": {
+          ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'green' || newData.val() == 'yellow' || newData.val() == 'blue')"
+        },
+        "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 4" },
+        "createdAt": { ".validate": "newData.isNumber()" }
+      }
+    },
+
+    "gamePaused": {
+      ".read": true,
+      ".write": true,
+      ".validate": "newData.isBoolean()"
+    },
+
+    ".read": false,
+    ".write": false
+  }
+}

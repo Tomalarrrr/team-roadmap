@@ -16,6 +16,7 @@ import { TimelineSkeleton } from './components/Skeleton';
 import { OfflineBanner } from './components/OfflineBanner';
 import { usePresence } from './hooks/usePresence';
 import { VaultUnlock } from './components/VaultUnlock';
+import { generateSessionId } from './utils/gameUtils';
 import styles from './App.module.css';
 
 // Lazy load form components (not needed until user clicks)
@@ -47,7 +48,7 @@ const getSessionInfo = () => {
   let userName = localStorage.getItem('roadmap-user-name') || sessionStorage.getItem('roadmap-user-name');
 
   if (!userId) {
-    userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+    userId = generateSessionId();
     sessionStorage.setItem('roadmap-user-id', userId);
   }
 
@@ -486,7 +487,12 @@ function App() {
           console.warn('Undo UPDATE_PROJECT failed: data is not a valid Project');
         }
         break;
-      // Add more cases as needed
+      // Currently only project operations are recorded for undo.
+      // Milestone, member, dependency, and leave types are defined in the
+      // ActionType union but not yet wired into recordAction calls.
+      default:
+        console.warn(`Undo not implemented for action type: ${action.type}`);
+        break;
     }
   }, [undo, deleteProject, addProject, updateProject, addDependency]);
 
