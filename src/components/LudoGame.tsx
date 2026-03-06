@@ -934,7 +934,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     };
 
     try {
-      await makeMove(gc, mc, update);
+      await makeMove(gc, curColor, update);
     } catch {
       moveInFlightRef.current = false;
     }
@@ -1067,7 +1067,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         finishOrder: curFinishOrder.join(','),
         turnStartedAt: Date.now(),
       };
-      try { await makeMove(gc, update); } catch { moveInFlightRef.current = false; }
+      try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
     }, 800);
   }, [executeMove, showHint]);
 

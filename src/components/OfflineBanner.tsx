@@ -6,7 +6,7 @@ interface OfflineBannerProps {
   isSyncing?: boolean;
 }
 
-export function OfflineBanner({ isOnline, isSyncing }: OfflineBannerProps) {
+export function OfflineBanner({ isOnline }: OfflineBannerProps) {
   const [cooldown, setCooldown] = useState(false);
 
   const needsDisplay = !isOnline;
