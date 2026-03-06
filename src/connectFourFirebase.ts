@@ -89,14 +89,15 @@ export async function joinGame(
   }
 
   // If game is full, allow reconnection by name (handles tab close → new sessionId)
+  const normalName = userName.trim().toLowerCase();
   if (state.players.yellow) {
-    if (state.players.yellow.name === userName) {
+    if (state.players.yellow.name.trim().toLowerCase() === normalName) {
       await update(gameRef, { 'players/yellow/sessionId': sessionId });
-      return { state: { ...state, players: { ...state.players, yellow: { sessionId, name: userName } } }, assignedColor: 'yellow' };
+      return { state: { ...state, players: { ...state.players, yellow: { sessionId, name: state.players.yellow.name } } }, assignedColor: 'yellow' };
     }
-    if (state.players.red.name === userName) {
+    if (state.players.red.name.trim().toLowerCase() === normalName) {
       await update(gameRef, { 'players/red/sessionId': sessionId });
-      return { state: { ...state, players: { ...state.players, red: { sessionId, name: userName } } }, assignedColor: 'red' };
+      return { state: { ...state, players: { ...state.players, red: { sessionId, name: state.players.red.name } } }, assignedColor: 'red' };
     }
     throw new Error('Game is full');
   }

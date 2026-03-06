@@ -1277,6 +1277,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
                   key={`${currentTurn}-${turnStartedAtState}`}
                   turnStartedAt={turnStartedAtState}
                   serverOffset={serverOffsetState}
+                  paused={gamePaused}
                 />
               )}
 

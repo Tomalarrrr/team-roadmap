@@ -483,6 +483,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const autoMoveRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gameOverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const homeStuckRolls = useRef(0); // consecutive non-6 rolls while all tokens in base
+  const pityThreshold = useRef(3 + Math.floor(Math.random() * 4)); // random 3-6
+  const lastTwoRolls = useRef<[number, number]>([0, 0]); // anti-streak tracking
 
   // Cell-by-cell animation state
   const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
@@ -951,8 +953,20 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     isRollingRef.current = true;
     setIsRolling(true);
 
-    // Pity-timer: guarantee a 6 after 4 consecutive non-6 rolls when the only
-    // way to progress is rolling a 6. This covers:
+    // Anti-streak: if last 2 rolls were the same value, avoid a third in a row
+    const fairRoll = (): number => {
+      let r = Math.floor(Math.random() * 6) + 1;
+      const [prev2, prev1] = lastTwoRolls.current;
+      if (prev2 === prev1 && prev1 === r && prev1 !== 0) {
+        // Reroll once (still random, just not the same value)
+        r = Math.floor(Math.random() * 5) + 1;
+        if (r >= prev1) r++; // maps 1-5 to 1-6 excluding prev1
+      }
+      return r;
+    };
+
+    // Pity-timer: guarantee a 6 after N consecutive non-6 rolls (N random 3-6)
+    // when the only way to progress is rolling a 6. This covers:
     //  - all non-finished tokens at home
     //  - some at home, rest in final corridor (no tokens on the regular track)
     const myIndices = getColorTokenIndices(mc);
@@ -962,15 +976,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       return t === 'base' || t === 'final-6' || t.startsWith('final-');
     });
     const needsSix = hasTokenAtHome && noneOnTrack;
-    let roll = Math.floor(Math.random() * 6) + 1;
-    if (needsSix && homeStuckRolls.current >= 4) {
+    let roll = fairRoll();
+    if (needsSix && homeStuckRolls.current >= pityThreshold.current) {
       roll = 6;
     }
     if (needsSix) {
-      homeStuckRolls.current = roll === 6 ? 0 : homeStuckRolls.current + 1;
+      if (roll === 6) {
+        homeStuckRolls.current = 0;
+        pityThreshold.current = 3 + Math.floor(Math.random() * 4); // new random 3-6
+      } else {
+        homeStuckRolls.current += 1;
+      }
     } else {
       homeStuckRolls.current = 0;
     }
+    lastTwoRolls.current = [lastTwoRolls.current[1], roll];
 
     rollTimeoutRef.current = setTimeout(async () => {
       setIsRolling(false);
@@ -1385,6 +1405,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     isRollingRef.current = false;
     rolledThisTurnRef.current = false;
     homeStuckRolls.current = 0;
+    pityThreshold.current = 3 + Math.floor(Math.random() * 4);
+    lastTwoRolls.current = [0, 0];
     dragCleanupRef.current?.();
     dragCleanupRef.current = null;
   }, []);
@@ -1425,7 +1447,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // --- Derived values ---
 
   const isMyTurn = myColor === currentTurn;
-  const diceCanRoll = isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running';
+  const diceCanRoll = isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused;
   const showRollReminder = diceCanRoll && timeLeft <= TURN_SECONDS - 5;
 
   const statusMessage = isSpectating

@@ -40,13 +40,15 @@ type ModalType =
 
 // Generate a simple user ID for this session (in production, use auth)
 const getSessionInfo = () => {
-  let userId = sessionStorage.getItem('roadmap-user-id');
-  let userName = sessionStorage.getItem('roadmap-user-name');
+  // Use localStorage so identity survives tab close/reopen (critical for game reconnection)
+  let userId = localStorage.getItem('roadmap-user-id') || sessionStorage.getItem('roadmap-user-id');
+  let userName = localStorage.getItem('roadmap-user-name') || sessionStorage.getItem('roadmap-user-name');
 
   if (!userId) {
     userId = `user-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
-    sessionStorage.setItem('roadmap-user-id', userId);
   }
+  localStorage.setItem('roadmap-user-id', userId);
+  sessionStorage.setItem('roadmap-user-id', userId);
 
   if (!userName) {
     // Generate anonymous user name
@@ -55,8 +57,9 @@ const getSessionInfo = () => {
     const adj = adjectives[Math.floor(Math.random() * adjectives.length)];
     const noun = nouns[Math.floor(Math.random() * nouns.length)];
     userName = `${adj} ${noun}`;
-    sessionStorage.setItem('roadmap-user-name', userName);
   }
+  localStorage.setItem('roadmap-user-name', userName);
+  sessionStorage.setItem('roadmap-user-name', userName);
 
   return { userId, userName };
 };

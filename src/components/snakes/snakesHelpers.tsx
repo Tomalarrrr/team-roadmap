@@ -394,9 +394,11 @@ export function launchConfetti(
 export const CountdownTimer = memo(function CountdownTimer({
   turnStartedAt,
   serverOffset,
+  paused,
 }: {
   turnStartedAt: number;
   serverOffset: number;
+  paused?: boolean;
 }) {
   const [timeLeft, setTimeLeft] = useState(() => {
     const serverNow = Date.now() + serverOffset;
@@ -405,13 +407,14 @@ export const CountdownTimer = memo(function CountdownTimer({
 
   useEffect(() => {
     const update = () => {
+      if (paused) return;
       const serverNow = Date.now() + serverOffset;
       setTimeLeft(Math.max(Math.ceil(TURN_SECONDS - (serverNow - turnStartedAt) / 1000), 0));
     };
     update();
     const interval = setInterval(update, 500);
     return () => clearInterval(interval);
-  }, [turnStartedAt, serverOffset]);
+  }, [turnStartedAt, serverOffset, paused]);
 
   return (
     <div className={styles.countdown}>

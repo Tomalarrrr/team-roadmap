@@ -161,12 +161,13 @@ export async function joinGame(
   }
 
   // Check for reconnection by name (handles tab close → new sessionId)
+  const normalName = userName.trim().toLowerCase();
   for (const color of ['red', ...JOIN_ORDER] as LudoColor[]) {
     const player = state.players[color];
-    if (player && player.name === userName) {
+    if (player && player.name.trim().toLowerCase() === normalName) {
       const playerRef = ref(db, `ludo/${code}/players/${color}/sessionId`);
       await set(playerRef, sessionId);
-      return { state: { ...state, players: { ...state.players, [color]: { sessionId, name: userName } } }, assignedColor: color as LudoColor };
+      return { state: { ...state, players: { ...state.players, [color]: { sessionId, name: player.name } } }, assignedColor: color as LudoColor };
     }
   }
 

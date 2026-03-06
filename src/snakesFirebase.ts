@@ -120,13 +120,14 @@ export async function joinGame(
   }
 
   // Reconnection by name (handles tab close → new sessionId)
+  const normalName = userName.trim().toLowerCase();
   for (let i = 0; i < state.playerCount; i++) {
     const key = `p${i}`;
-    if (players[key]?.name === userName) {
+    if (players[key]?.name?.trim().toLowerCase() === normalName) {
       const playerRef = ref(db, `snakes/${code}/players/${key}/sessionId`);
       await set(playerRef, sessionId);
       return {
-        state: { ...state, players: { ...players, [key]: { sessionId, name: userName } } },
+        state: { ...state, players: { ...players, [key]: { sessionId, name: players[key].name } } },
         assignedSlot: i,
       };
     }
