@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useGamePause } from '../hooks/useGamePause';
 import {
   createGame,
   joinGame,
@@ -101,6 +102,10 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   const userName = sessionStorage.getItem('roadmap-user-name') || 'Player';
 
   // Multiplayer state
+  const { paused: gamePaused, togglePause: toggleGamePause } = useGamePause();
+  const gamePausedRef = useRef(gamePaused);
+  gamePausedRef.current = gamePaused;
+
   const [gamePhase, setGamePhase] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
@@ -324,6 +329,7 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     if (!gameCode || !myColor) return;
     if (winner || moveInFlightRef.current) return;
     if (myColor !== currentPlayer) return;
+    if (gamePausedRef.current) return;
 
     let targetRow = -1;
     for (let r = ROWS - 1; r >= 0; r--) {
@@ -367,6 +373,11 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     const tick = () => {
       if (winnerRef.current) {
         setTimeLeft(TURN_SECONDS);
+        return;
+      }
+
+      if (gamePausedRef.current) {
+        turnStartedAtRef.current = Date.now();
         return;
       }
 
@@ -497,6 +508,18 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
             <span className={styles.spectateBadge}>Spectating</span>
           )}
         </span>
+        <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={toggleGamePause} aria-label={gamePaused ? 'Resume all games' : 'Pause all games'}>
+          {gamePaused ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+              <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+            </svg>
+          )}
+        </button>
         <button
           className={styles.closeBtn}
           onClick={onClose}
@@ -507,6 +530,13 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
           </svg>
         </button>
       </div>
+
+      {gamePaused && gamePhase === 'playing' && (
+        <div className={styles.pauseOverlay}>
+          <div className={styles.pauseText}>PAUSED</div>
+          <button className={styles.pauseResumeBtn} onClick={toggleGamePause}>Resume</button>
+        </div>
+      )}
 
       {/* Game area */}
       <div className={styles.gameArea}>

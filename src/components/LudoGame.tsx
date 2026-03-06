@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useGamePause } from '../hooks/useGamePause';
 import {
   createGame,
   joinGame,
@@ -423,6 +424,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const userName = sessionStorage.getItem('roadmap-user-name') || 'Player';
 
   // Multiplayer state
+  const { paused: gamePaused, togglePause: toggleGamePause } = useGamePause();
+  const gamePausedRef = useRef(gamePaused);
+  gamePausedRef.current = gamePaused;
+
   const [gamePhase, setGamePhase] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
@@ -905,7 +910,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     );
 
     // Show feedback
-    if (roll === 6 && curSixes >= 2) showHint('Three 6s — turn lost!');
+    if (roll === 6 && curSixes >= 2) showHint('Three 6s — no bonus turn');
     else if (captured) showHint('Captured! Bonus turn');
     else if (reachedHome) showHint('Home! Bonus turn');
     else if (roll === 6 && nextColor === curColor) showHint('Rolled 6! Bonus turn');
@@ -940,19 +945,28 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (introPhaseRef.current === 'running') return;
     if (currentTurnRef.current !== mc || turnPhaseRef.current !== 'roll') return;
     if (winnerRef.current || isRollingRef.current || moveInFlightRef.current) return;
+    if (gamePausedRef.current) return;
 
     moveInFlightRef.current = true;
     isRollingRef.current = true;
     setIsRolling(true);
 
-    // Pity-timer: guarantee a 6 after 4 consecutive non-6 rolls while all tokens
-    // are stuck in base. Resets as soon as any token leaves base.
-    const allInBase = getColorTokenIndices(mc).every(i => tokensRef.current[i] === 'base');
+    // Pity-timer: guarantee a 6 after 4 consecutive non-6 rolls when the only
+    // way to progress is rolling a 6. This covers:
+    //  - all non-finished tokens at home
+    //  - some at home, rest in final corridor (no tokens on the regular track)
+    const myIndices = getColorTokenIndices(mc);
+    const hasTokenAtHome = myIndices.some(i => tokensRef.current[i] === 'base');
+    const noneOnTrack = myIndices.every(i => {
+      const t = tokensRef.current[i];
+      return t === 'base' || t === 'final-6' || t.startsWith('final-');
+    });
+    const needsSix = hasTokenAtHome && noneOnTrack;
     let roll = Math.floor(Math.random() * 6) + 1;
-    if (allInBase && homeStuckRolls.current >= 4) {
+    if (needsSix && homeStuckRolls.current >= 4) {
       roll = 6;
     }
-    if (allInBase) {
+    if (needsSix) {
       homeStuckRolls.current = roll === 6 ? 0 : homeStuckRolls.current + 1;
     } else {
       homeStuckRolls.current = 0;
@@ -972,24 +986,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       const curPlayerCount = activePlayerCountRef.current;
       const finishedColors = getFinishedColors(currentTokens, curPlayerCount);
 
-      // Three consecutive 6s penalty
-      if (roll === 6 && curSixes >= 2) {
-        showHint('Three 6s — turn lost!');
-        const nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
-        const update: LudoMoveUpdate = {
-          tokens: serializeTokens(currentTokens),
-          currentTurn: nextColor,
-          turnPhase: 'roll',
-          diceValue: roll,
-          consecutiveSixes: 0,
-          winner: null,
-          finishOrder: curFinishOrder.join(','),
-          turnStartedAt: Date.now(),
-        };
-        try { await makeMove(gc, update); } catch { moveInFlightRef.current = false; }
-        return;
-      }
-
       // Check valid moves
       const moves = getValidMoves(currentTokens, curColor, roll);
 
@@ -1002,10 +998,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         });
         let nextColor: LudoColor;
         let nextSixes: number;
-        if (roll === 6) {
+        if (roll === 6 && curSixes < 2) {
           nextColor = curColor;
           nextSixes = curSixes + 1;
           showHint('No moves, but rolled 6!');
+        } else if (roll === 6 && curSixes >= 2) {
+          nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
+          nextSixes = 0;
+          showHint('Three 6s — no bonus turn');
         } else {
           nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
           nextSixes = 0;
@@ -1056,6 +1056,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (!mc) return;
     if (currentTurnRef.current !== mc || turnPhaseRef.current !== 'move') return;
     if (winnerRef.current || moveInFlightRef.current) return;
+    if (gamePausedRef.current) return;
 
     const dice = diceValueRef.current;
     if (dice === null) return;
@@ -1087,6 +1088,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const tick = () => {
       if (winnerRef.current || introPhaseRef.current === 'running') {
         setTimeLeft(TURN_SECONDS);
+        return;
+      }
+
+      if (gamePausedRef.current) {
+        turnStartedAtRef.current = Date.now();
         return;
       }
 
@@ -1574,12 +1580,31 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             <span className={styles.spectateBadge}>Spectating</span>
           )}
         </span>
+        <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={toggleGamePause} aria-label={gamePaused ? 'Resume all games' : 'Pause all games'}>
+          {gamePaused ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+              <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+            </svg>
+          )}
+        </button>
         <button className={styles.closeBtn} onClick={onClose} aria-label="Close Ludo">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
       </div>
+
+      {gamePaused && gamePhase === 'playing' && (
+        <div className={styles.pauseOverlay}>
+          <div className={styles.pauseText}>PAUSED</div>
+          <button className={styles.pauseResumeBtn} onClick={toggleGamePause}>Resume</button>
+        </div>
+      )}
 
       <div className={styles.gameArea}>
 

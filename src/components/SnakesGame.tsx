@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useGamePause } from '../hooks/useGamePause';
 import {
   createGame,
   joinGame,
@@ -82,6 +83,10 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
   const [userName] = useState(() => sessionStorage.getItem('roadmap-user-name') || 'Player');
 
   // Multiplayer state
+  const { paused: gamePaused, togglePause: toggleGamePause } = useGamePause();
+  const gamePausedRef = useRef(gamePaused);
+  gamePausedRef.current = gamePaused;
+
   const [gamePhase, setGamePhase] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
@@ -349,6 +354,7 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     // Read animation refs directly (not closure-captured) for live accuracy
     const animating = tokenAnimPos.current.size > 0 || tokenSlideClass.current.size > 0;
     if (!isMyTurn || isRollingRef.current || moveInFlightRef.current || animating) return;
+    if (gamePausedRef.current) return;
 
     isRollingRef.current = true;
     setIsRolling(true);
@@ -734,6 +740,11 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
     if (gamePhase !== 'playing' || winner !== null) return;
 
     const interval = setInterval(() => {
+      if (gamePausedRef.current) {
+        turnStartedAtRef.current = Date.now() + serverOffsetRef.current;
+        return;
+      }
+
       const serverNow = Date.now() + serverOffsetRef.current;
       const elapsed = (serverNow - turnStartedAtRef.current) / 1000;
       const remaining = Math.ceil(TURN_SECONDS - elapsed);
@@ -1146,12 +1157,31 @@ export function SnakesGame({ onClose, isSearchOpen }: SnakesGameProps) {
             <span className={styles.spectateBadge}>Spectating</span>
           )}
         </span>
+        <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={toggleGamePause} aria-label={gamePaused ? 'Resume all games' : 'Pause all games'}>
+          {gamePaused ? (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
+            </svg>
+          ) : (
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+              <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+            </svg>
+          )}
+        </button>
         <button className={styles.closeBtn} onClick={onClose} aria-label="Close Snakes & Ladders">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
       </div>
+
+      {gamePaused && gamePhase === 'playing' && (
+        <div className={styles.pauseOverlay}>
+          <div className={styles.pauseText}>PAUSED</div>
+          <button className={styles.pauseResumeBtn} onClick={toggleGamePause}>Resume</button>
+        </div>
+      )}
 
       <SnakesErrorBoundary onReset={handleBackToLobby}>
       <div className={styles.gameArea}>

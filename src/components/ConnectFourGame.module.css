@@ -79,6 +79,50 @@
   transition-duration: 50ms;
 }
 
+.pauseBtnActive {
+  color: #ef4444;
+}
+
+.pauseBtnActive:hover {
+  color: #ef4444;
+  transform: none;
+}
+
+.pauseOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  border-radius: inherit;
+}
+
+.pauseText {
+  font-size: 2rem;
+  font-weight: 700;
+  color: white;
+  letter-spacing: 0.1em;
+}
+
+.pauseResumeBtn {
+  padding: 8px 24px;
+  background: white;
+  color: #111;
+  font-size: 0.9rem;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 100ms ease;
+}
+
+.pauseResumeBtn:hover {
+  transform: scale(1.05);
+}
+
 /* Game area */
 .gameArea {
   flex: 1;
