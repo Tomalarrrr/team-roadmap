@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { generateGameCode, generateSessionId } from '../gameUtils';
 
 describe('generateGameCode', () => {
-  it('generates a code of default length 6', () => {
+  it('generates a code of default length 4', () => {
     const code = generateGameCode();
-    expect(code).toHaveLength(6);
+    expect(code).toHaveLength(4);
   });
 
   it('generates a code of custom length', () => {
@@ -27,7 +27,7 @@ describe('generateGameCode', () => {
     for (let i = 0; i < 1000; i++) {
       codes.add(generateGameCode());
     }
-    // With 30^6 = ~729M combinations, 1000 codes should all be unique
+    // With 30^4 = ~810K combinations, 1000 codes should all be unique
     expect(codes.size).toBe(1000);
   });
 });

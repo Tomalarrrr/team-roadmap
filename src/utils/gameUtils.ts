@@ -4,9 +4,9 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 to avoid co
 
 /**
  * Generate a cryptographically random game code.
- * Uses 6 characters from a 30-char alphabet for ~7.3 billion combinations.
+ * Uses 4 characters from a 30-char alphabet for ~810K combinations.
  */
-export function generateGameCode(length = 6): string {
+export function generateGameCode(length = 4): string {
   const array = new Uint8Array(length);
   crypto.getRandomValues(array);
   let code = '';
