@@ -1602,10 +1602,39 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }
 
       if (powerUpId === 'banana-peel') {
-        // Show placement UI
-        setPlacingBanana(true);
-        // Store the updated inventory so we can use it when placement completes
-        setActivePowerUp({ id: powerUpId, slot });
+        // Auto-place banana on the player's current token position
+        const myIndices = getColorTokenIndices(mc);
+        let placedCell: number | null = null;
+        for (const i of myIndices) {
+          if (currentTokens[i].startsWith('track-')) {
+            placedCell = parseInt(currentTokens[i].split('-')[1]);
+            break;
+          }
+        }
+        if (placedCell === null || SAFE_ZONES.has(placedCell)) {
+          showHint("Can't place banana here!");
+          return;
+        }
+
+        const newEffects = [...boardEffectsRef.current, { type: 'banana' as const, cell: placedCell, ownerColorIdx: colorIndex(mc) }];
+        const gc = gameCodeRef.current;
+        if (gc) {
+          makeMove(gc, mc, {
+            tokens: serializeTokens(currentTokens),
+            currentTurn: mc,
+            turnPhase: turnPhaseRef.current,
+            diceValue: diceValueRef.current,
+            consecutiveSixes: consecutiveSixesRef.current,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: turnStartedAtRef.current,
+            powerUps: serializeInventory(newInv),
+            activeBuffs: serializeBuffs(activeBuffsRef.current),
+            boardEffects: serializeBoardEffects(newEffects),
+            coins: serializeCoins(coinsRef.current),
+          });
+        }
+        showHint(`Banana peel placed on cell ${placedCell}!`);
         return;
       }
     }
@@ -2604,34 +2633,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 )}
               </div>
 
-              {/* Power-up inventory (Mario Mode) */}
-              {powerUpsEnabled && myColor && !isSpectating && (
-                <LudoPowerUpPanel
-                  inventory={getInventoryForColor(inventory, myColor)}
-                  canUseBefore={isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
-                  canUseAfter={isMyTurn && turnPhase === 'move' && !winner && !gamePaused}
-                  onUse={handleUsePowerUp}
-                  coins={myColor ? coins[colorIndex(myColor)] : 0}
-                  isMyTurn={isMyTurn}
-                />
-              )}
-
-              {/* Active buff indicators */}
-              {powerUpsEnabled && activeBuffs.length > 0 && (
-                <div className={styles.activeBuffsBar}>
-                  {activeBuffs.map((buff, i) => {
-                    const buffColor = colorFromIndex(buff.playerColorIdx);
-                    return (
-                      <span key={i} className={styles.buffIndicator}>
-                        <span className={styles.buffPlayerDot} style={{ background: COLOR_HEX[buffColor] }} />
-                        {buff.type === 'star' ? '⭐' : buff.type === 'lightning' ? '⚡' : '🪶'}
-                        <span className={styles.buffDuration}>{buff.duration}</span>
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
-
               {/* Player bar */}
               <div className={`${styles.playerBar} ${styles.playerBarVertical}`}>
                 {TURN_ORDER.slice(0, activePlayerCount).map(color => {
@@ -2685,6 +2686,34 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                       })}
                     </tbody>
                   </table>
+                </div>
+              )}
+
+              {/* Power-up inventory (Mario Mode) — below stats */}
+              {powerUpsEnabled && myColor && !isSpectating && (
+                <LudoPowerUpPanel
+                  inventory={getInventoryForColor(inventory, myColor)}
+                  canUseBefore={isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
+                  canUseAfter={isMyTurn && turnPhase === 'move' && !winner && !gamePaused}
+                  onUse={handleUsePowerUp}
+                  coins={myColor ? coins[colorIndex(myColor)] : 0}
+                  isMyTurn={isMyTurn}
+                />
+              )}
+
+              {/* Active buff indicators */}
+              {powerUpsEnabled && activeBuffs.length > 0 && (
+                <div className={styles.activeBuffsBar}>
+                  {activeBuffs.map((buff, i) => {
+                    const buffColor = colorFromIndex(buff.playerColorIdx);
+                    return (
+                      <span key={i} className={styles.buffIndicator}>
+                        <span className={styles.buffPlayerDot} style={{ background: COLOR_HEX[buffColor] }} />
+                        {buff.type === 'star' ? '⭐' : buff.type === 'lightning' ? '⚡' : '🪶'}
+                        <span className={styles.buffDuration}>{buff.duration}</span>
+                      </span>
+                    );
+                  })}
                 </div>
               )}
 

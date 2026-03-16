@@ -43,8 +43,8 @@ export const COLOR_OFFSET: Record<LudoColor, number> = {
 
 const TURN_ORDER: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
 
-// Mystery box cells — not on safe zones or start/entry positions, ~2-3 per quadrant
-export const MYSTERY_BOX_CELLS = new Set([4, 7, 11, 17, 20, 24, 30, 33, 37, 43]);
+// Mystery box cells — 6 total, spread evenly around the board (~1 per quadrant section)
+export const MYSTERY_BOX_CELLS = new Set([4, 11, 20, 30, 37, 43]);
 
 export const INVENTORY_SIZE = 2;
 
@@ -62,7 +62,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'warp-pipe': {
     id: 'warp-pipe',
     name: 'Warp Pipe',
-    emoji: '🟢',
+    emoji: '🚇',
     description: 'Teleport to the nearest safe zone ahead',
     tier: 'common',
     timing: 'after-roll',
@@ -86,7 +86,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'green-shell': {
     id: 'green-shell',
     name: 'Green Shell',
-    emoji: '🟩',
+    emoji: '🐢',
     description: 'Hits the first opponent ahead — knocks them back 3',
     tier: 'uncommon',
     timing: 'after-roll',
@@ -94,7 +94,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'red-shell': {
     id: 'red-shell',
     name: 'Red Shell',
-    emoji: '🟥',
+    emoji: '🔴',
     description: 'Homing! Hits nearest opponent behind — knocks back 3',
     tier: 'uncommon',
     timing: 'after-roll',
@@ -110,7 +110,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'blue-shell': {
     id: 'blue-shell',
     name: 'Blue Shell',
-    emoji: '🔵',
+    emoji: '💙',
     description: 'Targets the player in 1st place — knocks back 5',
     tier: 'rare',
     timing: 'after-roll',
