@@ -6,7 +6,7 @@
       "projects": {
         "$projectId": {
           ".validate": "newData.hasChildren(['id', 'title', 'owner', 'startDate', 'endDate', 'statusColor'])",
-          "id": { ".validate": "newData.isString() && newData.val().length > 0" },
+          "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
           "title": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
           "owner": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
           "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
@@ -14,34 +14,81 @@
           "statusColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
           "milestones": {
             "$milestoneId": {
-              ".validate": "newData.hasChildren(['id', 'title', 'startDate', 'endDate', 'statusColor'])"
+              ".validate": "newData.hasChildren(['id', 'title', 'startDate', 'endDate', 'statusColor'])",
+              "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+              "title": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
+              "description": { ".validate": "newData.isString() && newData.val().length <= 1000" },
+              "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+              "endDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+              "statusColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
+              "tags": {
+                ".validate": true,
+                "$tag": { ".validate": "newData.isString() && newData.val().length <= 50" }
+              },
+              "$other": { ".validate": false }
             }
           },
-          "dependencies": { ".validate": true }
+          "dependencies": { ".validate": true },
+          "$other": { ".validate": false }
         }
       },
       "teamMembers": {
         "$memberId": {
           ".validate": "newData.hasChildren(['id', 'name'])",
-          "id": { ".validate": "newData.isString() && newData.val().length > 0" },
-          "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" }
+          "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "jobTitle": { ".validate": "newData.isString() && newData.val().length <= 100" },
+          "nameColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
+          "order": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 200" },
+          "$other": { ".validate": false }
         }
       },
       "dependencies": {
         "$depId": {
-          ".validate": "newData.hasChildren(['id', 'fromProjectId', 'toProjectId', 'type'])"
+          ".validate": "newData.hasChildren(['id', 'fromProjectId', 'toProjectId', 'type'])",
+          "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "fromProjectId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "fromMilestoneId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+          "toProjectId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "toMilestoneId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+          "type": { ".validate": "newData.isString() && (newData.val() == 'finish-to-start' || newData.val() == 'start-to-start' || newData.val() == 'finish-to-finish')" },
+          "waypoints": {
+            ".validate": true,
+            "$wp": {
+              ".validate": "newData.hasChildren(['x', 'y'])",
+              "x": { ".validate": "newData.isNumber()" },
+              "y": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
         }
       },
       "leaveBlocks": {
         "$leaveId": {
-          ".validate": "newData.hasChildren(['id', 'memberId', 'startDate', 'endDate', 'coverage', 'type'])"
+          ".validate": "newData.hasChildren(['id', 'memberId', 'startDate', 'endDate', 'coverage', 'type'])",
+          "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "memberId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "endDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "coverage": { ".validate": "newData.isString() && (newData.val() == 'quarter' || newData.val() == 'half' || newData.val() == 'full')" },
+          "type": { ".validate": "newData.isString() && (newData.val() == 'annual-leave' || newData.val() == 'training' || newData.val() == 'conference' || newData.val() == 'other')" },
+          "label": { ".validate": "newData.isString() && newData.val().length <= 200" },
+          "$other": { ".validate": false }
         }
       },
       "periodMarkers": {
         "$markerId": {
-          ".validate": "newData.hasChildren(['id', 'startDate', 'endDate', 'color'])"
+          ".validate": "newData.hasChildren(['id', 'startDate', 'endDate', 'color'])",
+          "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+          "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "endDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "color": { ".validate": "newData.isString() && (newData.val() == 'grey' || newData.val() == 'yellow' || newData.val() == 'orange' || newData.val() == 'red' || newData.val() == 'green')" },
+          "label": { ".validate": "newData.isString() && newData.val().length <= 200" },
+          "$other": { ".validate": false }
         }
-      }
+      },
+      "$other": { ".validate": false }
     },
 
     "presence": {
@@ -49,7 +96,12 @@
       "$sessionId": {
         ".write": true,
         ".validate": "newData.hasChildren(['id', 'name', 'color', 'lastSeen'])",
-        "lastSeen": { ".validate": "newData.isNumber()" }
+        "id": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+        "name": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+        "color": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
+        "lastSeen": { ".validate": "newData.isNumber()" },
+        "editingProjectId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "$other": { ".validate": false }
       }
     },
 
@@ -65,10 +117,26 @@
           ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'yellow')"
         },
         "players": {
-          "red": { ".validate": "newData.hasChildren(['sessionId', 'name'])" },
-          "yellow": { ".validate": "newData.hasChildren(['sessionId', 'name'])" }
+          "red": {
+            ".validate": "newData.hasChildren(['sessionId', 'name'])",
+            "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
+            "$other": { ".validate": false }
+          },
+          "yellow": {
+            ".validate": "newData.hasChildren(['sessionId', 'name'])",
+            "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
+            "$other": { ".validate": false }
+          },
+          "$other": { ".validate": false }
         },
-        "createdAt": { ".validate": "newData.isNumber()" }
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "winner": { ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'yellow' || newData.val() == 'draw')" },
+        "winningCells": { ".validate": "newData.isString() && newData.val().length <= 100" },
+        "startingColor": { ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'yellow')" },
+        "turnStartedAt": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
       }
     },
 
@@ -79,14 +147,61 @@
         ".validate": "newData.hasChildren(['players', 'positions', 'currentTurn', 'createdAt', 'playerCount'])",
         "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 4" },
         "currentTurn": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
-        "createdAt": { ".validate": "newData.isNumber()" }
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "startedAt": { ".validate": "newData.isNumber()" },
+        "turnStartedAt": { ".validate": "newData.isNumber()" },
+        "positions": { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "diceValue": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 6" },
+        "consecutiveSixes": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
+        "winner": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+        "gameOver": { ".validate": "newData.isBoolean()" },
+        "moveLog": { ".validate": "newData.isString() && newData.val().length <= 10000" },
+        "firstPlayer": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+        "players": {
+          "$slot": {
+            ".validate": "newData.hasChildren(['sessionId', 'name'])",
+            "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
+            "$other": { ".validate": false }
+          }
+        },
+        "lastSeen": {
+          "$playerSlot": { ".validate": "newData.isNumber()" }
+        },
+        "winTally": {
+          "$winnerSlot": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000" }
+        },
+        "rematchVotes": {
+          "$playerSlot": { ".validate": "newData.isBoolean()" }
+        },
+        "reactions": {
+          "$reactionId": {
+            ".validate": "newData.hasChildren(['player', 'emoji', 'ts'])",
+            "player": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+            "emoji": { ".validate": "newData.isString() && newData.val().length <= 10" },
+            "ts": { ".validate": "newData.isNumber()" },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
       }
     },
 
     "snakesHistory": {
       ".read": true,
       "$sessionId": {
-        ".write": true
+        ".write": true,
+        "$entryId": {
+          ".validate": "newData.hasChildren(['code', 'winner', 'timestamp'])",
+          "code": { ".validate": "newData.isString() && newData.val().length <= 20" },
+          "winner": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+          "winnerName": { ".validate": "newData.isString() && newData.val().length <= 50" },
+          "players": { ".validate": true },
+          "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 4" },
+          "totalMoves": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000" },
+          "timestamp": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
       }
     },
 
@@ -113,19 +228,24 @@
         "winner": {
           ".validate": "!newData.exists() || newData.val() === null || (newData.isString() && (newData.val() == 'red' || newData.val() == 'green' || newData.val() == 'yellow' || newData.val() == 'blue'))"
         },
-        "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 4" },
+        "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 4" },
         "createdAt": { ".validate": "newData.isNumber()" },
         "turnStartedAt": { ".validate": "newData.isNumber()" },
         "startedAt": { ".validate": "!newData.exists() || newData.val() === null || newData.isNumber()" },
-        "finishOrder": { ".validate": "newData.isString()" },
+        "finishOrder": { ".validate": "newData.isString() && newData.val().length <= 50" },
+        "singlePlayer": { ".validate": "newData.isBoolean()" },
+        "paused": { ".validate": "newData.isBoolean()" },
+        "pausedAt": { ".validate": "!newData.exists() || newData.val() === null || newData.isNumber()" },
         "players": {
           ".validate": "newData.hasChild('red')",
           "$color": {
             ".validate": "newData.hasChildren(['sessionId', 'name'])",
-            "sessionId": { ".validate": "newData.isString()" },
-            "name": { ".validate": "newData.isString() && newData.val().length <= 50" }
+            "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
+            "$other": { ".validate": false }
           }
         },
+        "powerUpsEnabled": { ".validate": "newData.isBoolean()" },
         "powerUps": {
           ".validate": "newData.isString() && newData.val().length <= 500"
         },
@@ -136,14 +256,15 @@
           ".validate": "newData.isString() && newData.val().length <= 500"
         },
         "coins": {
-          ".validate": "newData.isString() && newData.val().matches(/^[0-9,]+$/) && newData.val().length <= 20"
+          ".validate": "newData.isString() && newData.val().matches(/^[0-9,:]+$/) && newData.val().length <= 20"
         },
         "mysteryBoxes": {
           ".validate": "newData.isString() && newData.val().length <= 500"
         },
         "marioMode": {
           ".validate": "newData.isBoolean()"
-        }
+        },
+        "$other": { ".validate": false }
       }
     },
 

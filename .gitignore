@@ -15,6 +15,7 @@ dist-ssr
 
 # Database backups
 backups/
+backup-firebase.sh
 
 # Editor directories and files
 .vscode/*

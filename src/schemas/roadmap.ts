@@ -3,12 +3,12 @@ import { dateStringSchema, colorSchema } from './primitives';
 
 // Milestone schema
 export const milestoneSchema = z.object({
-  id: z.string().min(1, 'Milestone ID is required'),
-  title: z.string().min(1, 'Milestone title is required'),
-  description: z.string().optional().default(''),
+  id: z.string().min(1, 'Milestone ID is required').max(100),
+  title: z.string().min(1, 'Milestone title is required').max(200),
+  description: z.string().max(1000).optional().default(''),
   startDate: dateStringSchema,
   endDate: dateStringSchema,
-  tags: z.array(z.string()).default([]),
+  tags: z.array(z.string().max(50)).max(20).default([]),
   statusColor: colorSchema
 }).refine(
   (data) => data.startDate <= data.endDate,
@@ -17,14 +17,14 @@ export const milestoneSchema = z.object({
 
 // Project schema
 export const projectSchema = z.object({
-  id: z.string().min(1, 'Project ID is required'),
-  title: z.string().min(1, 'Project title is required'),
-  owner: z.string().min(1, 'Project owner is required'),
+  id: z.string().min(1, 'Project ID is required').max(100),
+  title: z.string().min(1, 'Project title is required').max(200),
+  owner: z.string().min(1, 'Project owner is required').max(100),
   startDate: dateStringSchema,
   endDate: dateStringSchema,
   statusColor: colorSchema,
-  milestones: z.array(milestoneSchema).default([]),
-  dependencies: z.array(z.string()).optional().default([])
+  milestones: z.array(milestoneSchema).max(100).default([]),
+  dependencies: z.array(z.string().max(100)).optional().default([])
 }).refine(
   (data) => data.startDate <= data.endDate,
   { message: 'Start date must be before or equal to end date', path: ['startDate'] }
@@ -32,11 +32,11 @@ export const projectSchema = z.object({
 
 // Team member schema
 export const teamMemberSchema = z.object({
-  id: z.string().min(1, 'Member ID is required'),
-  name: z.string().min(1, 'Member name is required'),
-  jobTitle: z.string().default(''),
+  id: z.string().min(1, 'Member ID is required').max(100),
+  name: z.string().min(1, 'Member name is required').max(100),
+  jobTitle: z.string().max(100).default(''),
   nameColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color format').optional(),
-  order: z.number().optional()
+  order: z.number().min(0).max(200).optional()
 });
 
 // Waypoint schema (for dependency paths)
@@ -54,13 +54,13 @@ export const dependencyTypeSchema = z.enum([
 
 // Dependency schema
 export const dependencySchema = z.object({
-  id: z.string().min(1, 'Dependency ID is required'),
-  fromProjectId: z.string().min(1, 'From project ID is required'),
-  fromMilestoneId: z.string().optional(),
-  toProjectId: z.string().min(1, 'To project ID is required'),
-  toMilestoneId: z.string().optional(),
+  id: z.string().min(1, 'Dependency ID is required').max(100),
+  fromProjectId: z.string().min(1, 'From project ID is required').max(100),
+  fromMilestoneId: z.string().max(100).optional(),
+  toProjectId: z.string().min(1, 'To project ID is required').max(100),
+  toMilestoneId: z.string().max(100).optional(),
   type: dependencyTypeSchema,
-  waypoints: z.array(waypointSchema).optional()
+  waypoints: z.array(waypointSchema).max(50).optional()
 });
 
 // Leave type enum
@@ -80,13 +80,13 @@ export const leaveCoverageSchema = z.enum([
 
 // Leave block schema
 export const leaveBlockSchema = z.object({
-  id: z.string().min(1, 'Leave block ID is required'),
-  memberId: z.string().min(1, 'Member ID is required'),
+  id: z.string().min(1, 'Leave block ID is required').max(100),
+  memberId: z.string().min(1, 'Member ID is required').max(100),
   startDate: dateStringSchema,
   endDate: dateStringSchema,
   coverage: leaveCoverageSchema,
   type: leaveTypeSchema,
-  label: z.string().optional()
+  label: z.string().max(200).optional()
 }).refine(
   (data) => data.startDate <= data.endDate,
   { message: 'Start date must be before or equal to end date', path: ['startDate'] }
@@ -103,11 +103,11 @@ export const periodMarkerColorSchema = z.enum([
 
 // Period marker schema
 export const periodMarkerSchema = z.object({
-  id: z.string().min(1, 'Period marker ID is required'),
+  id: z.string().min(1, 'Period marker ID is required').max(100),
   startDate: dateStringSchema,
   endDate: dateStringSchema,
   color: periodMarkerColorSchema,
-  label: z.string().optional()
+  label: z.string().max(200).optional()
 }).refine(
   (data) => data.startDate <= data.endDate,
   { message: 'Start date must be before or equal to end date', path: ['startDate'] }
