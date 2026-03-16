@@ -1877,24 +1877,30 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   }, [showHint]);
 
   // Discard handler for full inventory
-  // Uses direct Firebase update (not makeMove) since the turn may have already advanced
+  // Uses a transaction to read-modify-write only this player's inventory slot,
+  // preventing concurrent overwrites of other players' items.
   const handleDiscard = useCallback(async (slot: number) => {
     const mc = myColorRef.current;
     if (!mc || !pendingDiscard) return;
-    const newInv = discardSlot(inventoryRef.current, mc, slot, pendingDiscard);
+    const discardedId = pendingDiscard;
     setPendingDiscard(null);
-    showHint(`Got ${POWER_UPS[pendingDiscard].emoji} ${POWER_UPS[pendingDiscard].name}!`);
+    showHint(`Got ${POWER_UPS[discardedId].emoji} ${POWER_UPS[discardedId].name}!`);
 
-    // Write just the powerUps field directly — this is safe because only inventory changes
     const gc = gameCodeRef.current;
     if (gc) {
       try {
         const { ensureInitialized, getDbModule, getFirebaseDatabase } = await import('../firebase');
         await ensureInitialized();
-        const { ref, update } = getDbModule();
+        const { ref, runTransaction } = getDbModule();
         const db = getFirebaseDatabase();
         const gameRef = ref(db, `ludo/${gc}`);
-        await update(gameRef, { powerUps: serializeInventory(newInv) });
+        await runTransaction(gameRef, (current: LudoGameState | null) => {
+          if (!current || !current.powerUps) return current;
+          // Re-read current inventory from Firebase (not stale local state)
+          const currentInv = deserializeInventory(current.powerUps);
+          const patched = discardSlot(currentInv, mc, slot, discardedId);
+          return { ...current, powerUps: serializeInventory(patched) };
+        });
       } catch {
         // Silent failure — inventory will sync on next state update
       }

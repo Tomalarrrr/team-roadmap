@@ -95,11 +95,37 @@
       "$gameCode": {
         ".write": true,
         ".validate": "newData.hasChildren(['players', 'tokens', 'currentTurn', 'createdAt', 'playerCount'])",
+        "tokens": {
+          ".validate": "newData.isString() && newData.val().length == 48 && newData.val().matches(/^(bas|t[0-9]{2}|f[0-9]{2})+$/)"
+        },
         "currentTurn": {
           ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'green' || newData.val() == 'yellow' || newData.val() == 'blue')"
         },
+        "turnPhase": {
+          ".validate": "newData.isString() && (newData.val() == 'roll' || newData.val() == 'move')"
+        },
+        "diceValue": {
+          ".validate": "!newData.exists() || newData.val() === null || (newData.isNumber() && newData.val() >= 1 && newData.val() <= 12)"
+        },
+        "consecutiveSixes": {
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3"
+        },
+        "winner": {
+          ".validate": "!newData.exists() || newData.val() === null || (newData.isString() && (newData.val() == 'red' || newData.val() == 'green' || newData.val() == 'yellow' || newData.val() == 'blue'))"
+        },
         "playerCount": { ".validate": "newData.isNumber() && newData.val() >= 2 && newData.val() <= 4" },
-        "createdAt": { ".validate": "newData.isNumber()" }
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "turnStartedAt": { ".validate": "newData.isNumber()" },
+        "startedAt": { ".validate": "!newData.exists() || newData.val() === null || newData.isNumber()" },
+        "finishOrder": { ".validate": "newData.isString()" },
+        "players": {
+          ".validate": "newData.hasChild('red')",
+          "$color": {
+            ".validate": "newData.hasChildren(['sessionId', 'name'])",
+            "sessionId": { ".validate": "newData.isString()" },
+            "name": { ".validate": "newData.isString() && newData.val().length <= 50" }
+          }
+        }
       }
     },
 
