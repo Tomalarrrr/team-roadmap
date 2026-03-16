@@ -19,7 +19,6 @@ interface PowerUpPanelProps {
 }
 
 export function LudoPowerUpPanel({ inventory, canUseBefore, canUseAfter, onUse, coins, isMyTurn }: PowerUpPanelProps) {
-  const [hoveredSlot, setHoveredSlot] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
 
   return (
@@ -70,49 +69,50 @@ export function LudoPowerUpPanel({ inventory, canUseBefore, canUseAfter, onUse, 
               })}
             </div>
             <div className={styles.powerUpInfoFooter}>
-              Land on golden ? blocks to collect items. Hold up to 2.
+              Land on golden ? blocks to collect items. Hold 1 at a time.
             </div>
           </div>
         </div>
       )}
-      <div className={styles.powerUpSlots}>
-        {inventory.map((powerUp, slot) => {
-          const def = powerUp ? POWER_UPS[powerUp] : null;
-          const canUse = !!(isMyTurn && def && (
-            (def.timing === 'before-roll' && canUseBefore) ||
-            (def.timing === 'after-roll' && canUseAfter)
-          ));
+      {(() => {
+        const powerUp = inventory[0];
+        const def = powerUp ? POWER_UPS[powerUp] : null;
+        const canUse = !!(isMyTurn && def && (
+          (def.timing === 'before-roll' && canUseBefore) ||
+          (def.timing === 'after-roll' && canUseAfter)
+        ));
 
-          return (
-            <div
-              key={slot}
-              className={[
-                styles.powerUpSlot,
-                def ? styles.powerUpSlotFilled : '',
-                canUse ? styles.powerUpSlotUsable : '',
-              ].filter(Boolean).join(' ')}
-              onMouseEnter={() => setHoveredSlot(slot)}
-              onMouseLeave={() => setHoveredSlot(null)}
-              onClick={() => canUse && powerUp && onUse(slot, powerUp)}
-              role={canUse ? 'button' : undefined}
-              aria-label={def ? `Use ${def.name}` : 'Empty slot'}
-            >
+        return (
+          <div
+            className={[
+              styles.powerUpSingle,
+              def ? styles.powerUpSingleFilled : '',
+              canUse ? styles.powerUpSingleUsable : '',
+            ].filter(Boolean).join(' ')}
+            onClick={() => canUse && powerUp && onUse(0, powerUp)}
+            role={canUse ? 'button' : undefined}
+          >
+            <div className={styles.powerUpSingleIcon}>
               {def ? (
                 <span className={styles.powerUpEmoji}>{def.emoji}</span>
               ) : (
                 <span className={styles.powerUpEmpty}>?</span>
               )}
-              {hoveredSlot === slot && def && (
-                <div className={styles.powerUpTooltip}>
-                  <span className={styles.powerUpTooltipName}>{def.name}</span>
-                  <span className={styles.powerUpTooltipDesc}>{def.description}</span>
-                  {canUse && <span className={styles.powerUpTooltipUse}>Click to use</span>}
-                </div>
-              )}
             </div>
-          );
-        })}
-      </div>
+            {def ? (
+              <div className={styles.powerUpSingleText}>
+                <span className={styles.powerUpSingleName}>{def.name}</span>
+                <span className={styles.powerUpSingleDesc}>{def.description}</span>
+                {canUse && <span className={styles.powerUpSingleUse}>Tap to use</span>}
+              </div>
+            ) : (
+              <div className={styles.powerUpSingleText}>
+                <span className={styles.powerUpSingleEmpty}>No item</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -135,7 +135,7 @@ export function PowerUpDiscardModal({ inventory, newPowerUp, onDiscard, onKeep }
           <span className={styles.discardNewEmoji}>{newDef.emoji}</span>
           <span className={styles.discardNewName}>{newDef.name}</span>
         </div>
-        <div className={styles.discardPrompt}>Replace which item?</div>
+        <div className={styles.discardPrompt}>Replace your current item?</div>
         <div className={styles.discardSlots}>
           {inventory.map((powerUp, slot) => {
             if (!powerUp) return null;
@@ -147,13 +147,13 @@ export function PowerUpDiscardModal({ inventory, newPowerUp, onDiscard, onKeep }
                 onClick={() => onDiscard(slot)}
               >
                 <span>{def.emoji}</span>
-                <span className={styles.discardSlotName}>{def.name}</span>
+                <span className={styles.discardSlotName}>Replace {def.name}</span>
               </button>
             );
           })}
         </div>
         <button className={styles.discardKeepBtn} onClick={onKeep}>
-          Skip (keep current items)
+          Keep current item
         </button>
       </div>
     </div>

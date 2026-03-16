@@ -1,6 +1,7 @@
 import type { Unsubscribe } from 'firebase/database';
 import { ensureInitialized, getDbModule, getFirebaseDatabase, markFirebaseActivity } from './firebase';
 import { generateGameCode } from './utils/gameUtils';
+import { initMysteryBoxes, serializeMysteryBoxes } from './ludoPowerUps';
 
 // --- Types ---
 
@@ -33,10 +34,11 @@ export interface LudoGameState {
   playerCount: number;
   // Mario Mode power-up fields (optional for backwards compat)
   powerUpsEnabled?: boolean;
-  powerUps?: string;        // Serialized inventory (2-char codes, 4 players × 2 slots)
+  powerUps?: string;        // Serialized inventory (2-char codes, 4 players × 1 slot)
   boardEffects?: string;    // Persistent board effects (banana peels, etc.)
   activeBuffs?: string;     // Duration-based buffs (star, lightning, etc.)
   coins?: string;           // Coin counts per player "R:G:Y:B"
+  mysteryBoxes?: string;    // Active mystery box cells + cooldowns "cell:cd,cell:cd,..."
 }
 
 export interface LudoMoveUpdate {
@@ -53,6 +55,7 @@ export interface LudoMoveUpdate {
   boardEffects?: string;
   activeBuffs?: string;
   coins?: string;
+  mysteryBoxes?: string;
 }
 
 // --- Serialization ---
@@ -128,10 +131,11 @@ export async function createGame(
         playerCount,
         ...(powerUpsEnabled ? {
           powerUpsEnabled: true,
-          powerUps: '__'.repeat(8),
+          powerUps: '__'.repeat(4),
           boardEffects: '',
           activeBuffs: '',
           coins: '0:0:0:0',
+          mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
         } : {}),
       };
       await set(gameRef, initialState);
@@ -321,10 +325,11 @@ export async function resetGame(code: string, playerCount: number): Promise<void
     turnStartedAt: Date.now(),
     playerCount,
     ...(hasPowerUps ? {
-      powerUps: '__'.repeat(8),
+      powerUps: '__'.repeat(4),
       boardEffects: '',
       activeBuffs: '',
       coins: '0:0:0:0',
+      mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
     } : {}),
   });
 }

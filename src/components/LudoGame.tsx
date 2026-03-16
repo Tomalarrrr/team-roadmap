@@ -16,7 +16,6 @@ import {
   type TurnPhase,
 } from '../ludoFirebase';
 import {
-  MYSTERY_BOX_CELLS,
   POWER_UPS,
   type PowerUpId,
   drawPowerUp,
@@ -44,6 +43,12 @@ import {
   applyStarEffect,
   type BoardEffect,
   colorFromIndex,
+  deserializeMysteryBoxes,
+  serializeMysteryBoxes,
+  collectMysteryBox,
+  tickMysteryBoxCooldowns,
+  getActiveMysteryBoxCells,
+  type MysteryBoxState,
   type ActiveBuff,
 } from '../ludoPowerUps';
 import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal, BananaPeelPlacer } from './LudoPowerUpPanel';
@@ -535,7 +540,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const captureShowTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Game effects (deploy sparkle, home celebration)
-  const gameEffects = useRef<{ type: 'deploy' | 'home'; color: LudoColor; coords?: [number, number]; ts: number }[]>([]);
+  const gameEffects = useRef<{ type: 'deploy' | 'home' | 'starPoof'; color: LudoColor; coords?: [number, number]; ts: number }[]>([]);
   const effectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Stats tracking (dice roll distribution + captures)
@@ -555,11 +560,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const [marioMode, setMarioMode] = useState(false);
   const [powerUpsEnabled, setPowerUpsEnabled] = useState(false);
   const [inventory, setInventory] = useState<(PowerUpId | null)[][]>(() =>
-    [[null, null], [null, null], [null, null], [null, null]]
+    [[null], [null], [null], [null]]
   );
   const [boardEffects, setBoardEffects] = useState<BoardEffect[]>([]);
   const [activeBuffs, setActiveBuffs] = useState<ActiveBuff[]>([]);
   const [coins, setCoins] = useState<number[]>([0, 0, 0, 0]);
+  const [mysteryBoxes, setMysteryBoxes] = useState<MysteryBoxState[]>([]);
   const [pendingDiscard, setPendingDiscard] = useState<PowerUpId | null>(null);
   const [goldenMushroomRolls, setGoldenMushroomRolls] = useState<[number, number, number] | null>(null);
   const [placingBanana, setPlacingBanana] = useState(false);
@@ -575,6 +581,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   coinsRef.current = coins;
   const powerUpsEnabledRef = useRef(powerUpsEnabled);
   powerUpsEnabledRef.current = powerUpsEnabled;
+  const mysteryBoxesRef = useRef(mysteryBoxes);
+  mysteryBoxesRef.current = mysteryBoxes;
   const activePowerUpRef = useRef(activePowerUp);
   activePowerUpRef.current = activePowerUp;
   const goldenMushroomRef = useRef(goldenMushroomRolls);
@@ -904,6 +912,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (state.boardEffects !== undefined) setBoardEffects(deserializeBoardEffects(state.boardEffects));
         if (state.activeBuffs !== undefined) setActiveBuffs(deserializeBuffs(state.activeBuffs));
         if (state.coins) setCoins(deserializeCoins(state.coins));
+        if (state.mysteryBoxes) setMysteryBoxes(deserializeMysteryBoxes(state.mysteryBoxes));
       }
 
       if (state.winner) {
@@ -1003,10 +1012,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           const victimColor = getTokenColor(i);
           const ci = colorIndex(victimColor);
           const inv = inventoryRef.current;
-          if (inv[ci][0] !== null || inv[ci][1] !== null) {
+          if (inv[ci][0] !== null) {
             // Clear victim's inventory
             const clearedInv = inv.map((slots, idx) =>
-              idx === ci ? [null, null] as (PowerUpId | null)[] : [...slots]
+              idx === ci ? [null] as (PowerUpId | null)[] : [...slots]
             );
             inventoryRef.current = clearedInv;
             setInventory(clearedInv);
@@ -1024,7 +1033,24 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (oldPos.startsWith('track-')) {
           const fromTrack = parseInt(oldPos.split('-')[1]);
           const toTrack = parseInt(newPosition.split('-')[1]);
+          const preStarTokens = [...newTokens];
           newTokens = applyStarEffect(newTokens, fromTrack, toTrack, curColor);
+          // Spawn poof effects at locations where tokens were teleported
+          for (let i = 0; i < TOTAL_TOKENS; i++) {
+            if (preStarTokens[i] !== newTokens[i] && preStarTokens[i].startsWith('track-')) {
+              const coords = getTokenCoords(preStarTokens[i], i);
+              if (coords) {
+                const effect = { type: 'starPoof' as const, color: getTokenColor(i), coords, ts: Date.now() };
+                gameEffects.current.push(effect);
+                const timer = setTimeout(() => {
+                  gameEffects.current = gameEffects.current.filter(e => e !== effect);
+                  setRenderTick(n => n + 1);
+                }, 700);
+                effectTimers.current.push(timer);
+              }
+            }
+          }
+          setRenderTick(n => n + 1);
           showHint('Star power! Opponents sent to start!');
         }
       }
@@ -1062,57 +1088,68 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     let updatedEffects = boardEffectsRef.current;
     let updatedBuffs = activeBuffsRef.current;
     let updatedCoins = [...coinsRef.current];
+    let updatedMysteryBoxes = mysteryBoxesRef.current;
 
-    if (powerUpsEnabledRef.current && newPosition.startsWith('track-')) {
-      const landedCell = parseInt(newPosition.split('-')[1]);
+    if (powerUpsEnabledRef.current) {
+      // Track-specific effects (banana, mystery box)
+      if (newPosition.startsWith('track-')) {
+        const landedCell = parseInt(newPosition.split('-')[1]);
 
-      // Check for banana peel
-      const bananaIdx = updatedEffects.findIndex(e => e.type === 'banana' && e.cell === landedCell);
-      if (bananaIdx >= 0) {
-        // Slip back 3 spaces
-        updatedEffects = updatedEffects.filter((_, i) => i !== bananaIdx);
-        newTokens = knockBack(newTokens, tokenIndex, 3);
-        showHint('Banana peel! Slipped back 3!');
-      }
-      // Check for mystery box (only on voluntary moves, not forced)
-      else if (MYSTERY_BOX_CELLS.has(landedCell)) {
-        const drawnPowerUp = drawPowerUp(newTokens, curColor, curPlayerCount);
+        // Check for banana peel
+        const bananaIdx = updatedEffects.findIndex(e => e.type === 'banana' && e.cell === landedCell);
+        if (bananaIdx >= 0) {
+          // Slip back 3 spaces
+          updatedEffects = updatedEffects.filter((_, i) => i !== bananaIdx);
+          newTokens = knockBack(newTokens, tokenIndex, 3);
+          showHint('Banana peel! Slipped back 3!');
+        }
+        // Check for mystery box (only on voluntary moves, not forced)
+        else if (getActiveMysteryBoxCells(updatedMysteryBoxes).has(landedCell)) {
+          // Collect: set cooldown to 3 rounds
+          updatedMysteryBoxes = collectMysteryBox(updatedMysteryBoxes, landedCell);
+          const drawnPowerUp = drawPowerUp(newTokens, curColor, curPlayerCount);
 
-        // Coin block: add coin immediately
-        if (drawnPowerUp === 'coin-block') {
-          const ci = colorIndex(curColor);
-          updatedCoins[ci] = (updatedCoins[ci] || 0) + 1;
-          if (updatedCoins[ci] >= 3) {
-            updatedCoins[ci] = 0;
-            // Deploy a token from base to start position for free
-            const myIndices = getColorTokenIndices(curColor);
-            const baseToken = myIndices.find(i => newTokens[i] === 'base');
-            if (baseToken !== undefined) {
-              const startPos: TokenPosition = `track-${START_POSITIONS[curColor]}`;
-              newTokens[baseToken] = startPos;
-              showHint('3 coins! Free deploy!');
+          // Coin block: add coin immediately
+          if (drawnPowerUp === 'coin-block') {
+            const ci = colorIndex(curColor);
+            updatedCoins[ci] = (updatedCoins[ci] || 0) + 1;
+            if (updatedCoins[ci] >= 3) {
+              updatedCoins[ci] = 0;
+              // Deploy a token from base to start position for free
+              const myIndices = getColorTokenIndices(curColor);
+              const baseToken = myIndices.find(i => newTokens[i] === 'base');
+              if (baseToken !== undefined) {
+                const startPos: TokenPosition = `track-${START_POSITIONS[curColor]}`;
+                newTokens[baseToken] = startPos;
+                showHint('3 coins! Free deploy!');
+              } else {
+                showHint('3 coins! But no tokens in base');
+              }
             } else {
-              showHint('3 coins! But no tokens in base');
+              showHint(`Coin! (${updatedCoins[ci]}/3)`);
             }
           } else {
-            showHint(`Coin! (${updatedCoins[ci]}/3)`);
-          }
-        } else {
-          // Try to add to inventory
-          const { inventory: newInv, added } = addToInventory(updatedInv, curColor, drawnPowerUp);
-          if (added) {
-            updatedInv = newInv;
-            showHint(`Got ${POWER_UPS[drawnPowerUp].emoji} ${POWER_UPS[drawnPowerUp].name}!`);
-          } else {
-            // Inventory full — trigger discard modal for the current player
-            setPendingDiscard(drawnPowerUp);
+            // Try to add to inventory
+            const { inventory: newInv, added } = addToInventory(updatedInv, curColor, drawnPowerUp);
+            if (added) {
+              updatedInv = newInv;
+              showHint(`Got ${POWER_UPS[drawnPowerUp].emoji} ${POWER_UPS[drawnPowerUp].name}!`);
+            } else {
+              // Inventory full — trigger discard modal for the current player
+              setPendingDiscard(drawnPowerUp);
+            }
           }
         }
       }
 
-      // Tick buffs for the current player (who just finished their move)
-      // This ensures buffs expire AFTER they've had their effect during this turn
+      // Always tick buffs (even on corridor moves)
       updatedBuffs = tickBuffs(updatedBuffs, colorIndex(curColor));
+
+      // Tick mystery box cooldowns only once per full round (when turn wraps to first player)
+      const activePlayers = TURN_ORDER.slice(0, curPlayerCount);
+      if (nextColor === activePlayers[0]) {
+        updatedMysteryBoxes = tickMysteryBoxCooldowns(updatedMysteryBoxes);
+      }
     }
 
     const update: LudoMoveUpdate = {
@@ -1132,6 +1169,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       update.boardEffects = serializeBoardEffects(updatedEffects);
       update.activeBuffs = serializeBuffs(updatedBuffs);
       update.coins = serializeCoins(updatedCoins);
+      update.mysteryBoxes = serializeMysteryBoxes(updatedMysteryBoxes);
     }
 
     try {
@@ -2059,7 +2097,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
       // Reset power-up state
-      setInventory([[null, null], [null, null], [null, null], [null, null]]);
+      setInventory([[null], [null], [null], [null]]);
       setBoardEffects([]);
       setActiveBuffs([]);
       setCoins([0, 0, 0, 0]);
@@ -2125,7 +2163,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     dragCleanupRef.current = null;
     // Reset power-up state
     setPowerUpsEnabled(false);
-    setInventory([[null, null], [null, null], [null, null], [null, null]]);
+    setInventory([[null], [null], [null], [null]]);
     setBoardEffects([]);
     setActiveBuffs([]);
     setCoins([0, 0, 0, 0]);
@@ -2191,7 +2229,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const isSafe = SAFE_ZONES.has(cellNum);
     const startColor = START_CELL_COLORS[cellNum];
     const entryColor = ENTRY_ARROW_COLORS[cellNum];
-    const isMysteryBox = powerUpsEnabled && MYSTERY_BOX_CELLS.has(cellNum);
+    const activeMysteryBoxes = powerUpsEnabled ? getActiveMysteryBoxCells(mysteryBoxes) : new Set<number>();
+    const isMysteryBox = activeMysteryBoxes.has(cellNum);
     const hasBanana = powerUpsEnabled && boardEffects.some(e => e.type === 'banana' && e.cell === cellNum);
 
     const classes = [
@@ -2558,6 +2597,18 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                         />
                       );
                     }
+                    if (ef.type === 'starPoof' && ef.coords) {
+                      return (
+                        <div
+                          key={`poof-${ef.ts}-${ef.color}`}
+                          className={styles.starPoof}
+                          style={{
+                            left: `${(ef.coords[1] - 1) * CELL_PCT}%`,
+                            top: `${(ef.coords[0] - 1) * CELL_PCT}%`,
+                          }}
+                        />
+                      );
+                    }
                     if (ef.type === 'home') {
                       return (
                         <div
@@ -2716,8 +2767,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               {powerUpsEnabled && myColor && !isSpectating && (
                 <LudoPowerUpPanel
                   inventory={getInventoryForColor(inventory, myColor)}
-                  canUseBefore={isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
-                  canUseAfter={isMyTurn && turnPhase === 'move' && !winner && !gamePaused}
+                  canUseBefore={isMyTurn && (turnPhase === 'roll' || turnPhase === 'move') && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
+                  canUseAfter={isMyTurn && (turnPhase === 'roll' || turnPhase === 'move') && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
                   onUse={handleUsePowerUp}
                   coins={myColor ? coins[colorIndex(myColor)] : 0}
                   isMyTurn={isMyTurn}

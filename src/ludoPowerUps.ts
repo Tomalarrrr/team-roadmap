@@ -43,10 +43,45 @@ export const COLOR_OFFSET: Record<LudoColor, number> = {
 
 const TURN_ORDER: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
 
-// Mystery box cells — 6 total, spread evenly around the board (~1 per quadrant section)
-export const MYSTERY_BOX_CELLS = new Set([4, 11, 20, 30, 37, 43]);
+// Mystery box generation — 5 random cells per game, spread out (min 7 apart)
+// Excluded: safe zones, start positions, entry cells
+const EXCLUDED_CELLS = new Set([
+  ...Array.from(SAFE_ZONES),
+  ...Object.values(START_POSITIONS),
+  ...Object.values(ENTRY_CELLS),
+]);
 
-export const INVENTORY_SIZE = 2;
+export function generateMysteryBoxCells(): number[] {
+  const candidates: number[] = [];
+  for (let i = 1; i <= TRACK_SIZE; i++) {
+    if (!EXCLUDED_CELLS.has(i)) candidates.push(i);
+  }
+  const selected: number[] = [];
+  const minGap = 7; // minimum cells apart
+
+  // Shuffle candidates
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+  }
+
+  for (const cell of candidates) {
+    if (selected.length >= 5) break;
+    // Check minimum spacing (circular distance)
+    const tooClose = selected.some(s => {
+      const dist = Math.min(
+        Math.abs(cell - s),
+        TRACK_SIZE - Math.abs(cell - s)
+      );
+      return dist < minGap;
+    });
+    if (!tooClose) selected.push(cell);
+  }
+
+  return selected.sort((a, b) => a - b);
+}
+
+export const INVENTORY_SIZE = 1;
 
 // --- Power-Up Definitions ---
 
@@ -149,19 +184,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   },
 };
 
-// --- Rarity & Drawing ---
-
-const TIER_WEIGHTS: Record<PowerUpTier, number> = {
-  common: 55,
-  uncommon: 30,
-  rare: 15,
-};
-
-const POWER_UPS_BY_TIER: Record<PowerUpTier, PowerUpId[]> = {
-  common: ['super-mushroom', 'warp-pipe', 'cape-feather', 'coin-block'],
-  uncommon: ['green-shell', 'red-shell', 'banana-peel'],
-  rare: ['blue-shell', 'bullet-bill', 'lightning-bolt', 'star', 'golden-mushroom'],
-};
+// --- Helpers ---
 
 export function getColorTokenIndices(color: LudoColor): number[] {
   const offset = COLOR_OFFSET[color];
@@ -220,12 +243,18 @@ export function getLeaderColor(
  * Draw a random power-up from the mystery box.
  * Blue Shell only available if drawing player is NOT in 1st place.
  */
+const ALL_POWERUP_IDS: PowerUpId[] = [
+  'super-mushroom', 'warp-pipe', 'cape-feather', 'coin-block',
+  'green-shell', 'red-shell', 'banana-peel',
+  'blue-shell', 'bullet-bill', 'lightning-bolt', 'star', 'golden-mushroom',
+];
+
 export function drawPowerUp(
   tokens: TokenPosition[],
   drawingColor: LudoColor,
   playerCount: number
 ): PowerUpId {
-  // Determine if this player is in 1st place
+  // Equal chance for all power-ups (Blue Shell excluded for leaders)
   const scores = TURN_ORDER.slice(0, playerCount).map(c => ({
     color: c,
     score: getPlayerScore(tokens, c),
@@ -233,24 +262,8 @@ export function drawPowerUp(
   scores.sort((a, b) => b.score - a.score);
   const isLeader = scores[0]?.color === drawingColor;
 
-  // Build weighted pool
-  const pool: { id: PowerUpId; weight: number }[] = [];
-  for (const [tier, ids] of Object.entries(POWER_UPS_BY_TIER) as [PowerUpTier, PowerUpId[]][]) {
-    const tierWeight = TIER_WEIGHTS[tier];
-    for (const id of ids) {
-      // Blue Shell only for non-leaders
-      if (id === 'blue-shell' && isLeader) continue;
-      pool.push({ id, weight: tierWeight / ids.length });
-    }
-  }
-
-  const totalWeight = pool.reduce((s, p) => s + p.weight, 0);
-  let roll = Math.random() * totalWeight;
-  for (const p of pool) {
-    roll -= p.weight;
-    if (roll <= 0) return p.id;
-  }
-  return pool[pool.length - 1].id;
+  const pool = ALL_POWERUP_IDS.filter(id => !(id === 'blue-shell' && isLeader));
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 // --- Serialization ---
@@ -275,7 +288,7 @@ for (const [id, code] of Object.entries(POWERUP_CODES)) {
   CODE_TO_POWERUP[code] = id as PowerUpId;
 }
 
-// Inventory: 4 players × 2 slots = 8 slots × 2 chars = 16 chars
+// Inventory: 4 players × 1 slot = 4 slots × 2 chars = 8 chars
 // "__" = empty slot
 export function serializeInventory(inv: (PowerUpId | null)[][]): string {
   return inv.map(playerSlots =>
@@ -284,10 +297,8 @@ export function serializeInventory(inv: (PowerUpId | null)[][]): string {
 }
 
 export function deserializeInventory(str: string): (PowerUpId | null)[][] {
-  if (!str || str.length < 16) {
-    return [
-      [null, null], [null, null], [null, null], [null, null],
-    ];
+  if (!str || str.length < 4) {
+    return [[null], [null], [null], [null]];
   }
   const result: (PowerUpId | null)[][] = [];
   for (let p = 0; p < 4; p++) {
@@ -303,7 +314,72 @@ export function deserializeInventory(str: string): (PowerUpId | null)[][] {
 }
 
 export function emptyInventoryStr(): string {
-  return '__'.repeat(8);
+  return '__'.repeat(4);
+}
+
+// Mystery box state: "cell:cooldown,cell:cooldown,..."
+// cooldown 0 = active, >0 = rounds until respawn (at a random new location)
+export interface MysteryBoxState {
+  cell: number;
+  cooldown: number;
+}
+
+export function serializeMysteryBoxes(boxes: MysteryBoxState[]): string {
+  return boxes.map(b => `${b.cell}:${b.cooldown}`).join(',');
+}
+
+export function deserializeMysteryBoxes(str: string): MysteryBoxState[] {
+  if (!str) return [];
+  return str.split(',').filter(Boolean).map(part => {
+    const [cellStr, cdStr] = part.split(':');
+    return { cell: parseInt(cellStr), cooldown: parseInt(cdStr) || 0 };
+  });
+}
+
+export function initMysteryBoxes(): MysteryBoxState[] {
+  return generateMysteryBoxCells().map(cell => ({ cell, cooldown: 0 }));
+}
+
+/**
+ * Tick mystery box cooldowns and respawn at random new locations.
+ */
+export function tickMysteryBoxCooldowns(boxes: MysteryBoxState[]): MysteryBoxState[] {
+  const minGap = 7;
+  const result = [...boxes];
+  for (let idx = 0; idx < result.length; idx++) {
+    const b = result[idx];
+    if (b.cooldown > 1) {
+      result[idx] = { ...b, cooldown: b.cooldown - 1 };
+    } else if (b.cooldown === 1) {
+      // Respawn at a new random valid cell with spacing
+      const activeCells = result.filter((_, i) => i !== idx && result[i].cooldown === 0).map(x => x.cell);
+      const candidates: number[] = [];
+      for (let i = 1; i <= TRACK_SIZE; i++) {
+        if (EXCLUDED_CELLS.has(i)) continue;
+        const tooClose = activeCells.some(c => Math.min(Math.abs(c - i), TRACK_SIZE - Math.abs(c - i)) < minGap);
+        if (!tooClose) candidates.push(i);
+      }
+      const newCell = candidates.length > 0
+        ? candidates[Math.floor(Math.random() * candidates.length)]
+        : b.cell;
+      result[idx] = { cell: newCell, cooldown: 0 };
+    }
+  }
+  return result;
+}
+
+/**
+ * Collect a mystery box — set its cooldown to 3 rounds.
+ */
+export function collectMysteryBox(boxes: MysteryBoxState[], cell: number): MysteryBoxState[] {
+  return boxes.map(b => b.cell === cell ? { ...b, cooldown: 3 } : b);
+}
+
+/**
+ * Get currently active mystery box cells (cooldown === 0).
+ */
+export function getActiveMysteryBoxCells(boxes: MysteryBoxState[]): Set<number> {
+  return new Set(boxes.filter(b => b.cooldown === 0).map(b => b.cell));
 }
 
 // Board effects: "type:cell:ownerIdx,..." (e.g., "BP:17:0" = banana peel at cell 17 by player 0)
@@ -588,7 +664,7 @@ export function getInventoryForColor(
   inventory: (PowerUpId | null)[][],
   color: LudoColor
 ): (PowerUpId | null)[] {
-  return inventory[colorIndex(color)] || [null, null];
+  return inventory[colorIndex(color)] || [null];
 }
 
 /**
