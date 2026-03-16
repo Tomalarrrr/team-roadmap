@@ -1779,14 +1779,28 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const moves = getValidMoves(currentTokens, curColor, pickedRoll);
 
     if (moves.length === 0) {
-      const nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
-      showHint('No valid moves');
+      // Handle bonus-turn logic for rolled 6, same as main roll path
+      let nextColor: LudoColor;
+      let nextSixes: number;
+      if (pickedRoll === 6 && curSixes < 2) {
+        nextColor = curColor;
+        nextSixes = curSixes + 1;
+        showHint('No moves, but picked 6!');
+      } else if (pickedRoll === 6 && curSixes >= 2) {
+        nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
+        nextSixes = 0;
+        showHint('Three 6s — no bonus turn');
+      } else {
+        nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
+        nextSixes = 0;
+        showHint('No valid moves');
+      }
       const update: LudoMoveUpdate = {
         tokens: serializeTokens(currentTokens),
         currentTurn: nextColor,
         turnPhase: 'roll',
         diceValue: pickedRoll,
-        consecutiveSixes: 0,
+        consecutiveSixes: nextSixes,
         winner: null,
         finishOrder: curFinishOrder.join(','),
         turnStartedAt: Date.now(),
@@ -1912,8 +1926,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }
 
       if (gamePausedRef.current) {
-        turnStartedAtRef.current = Date.now();
-        return;
+        return; // Don't touch turnStartedAtRef — Firebase adjusts on resume
       }
 
       const elapsed = Math.floor((Date.now() - turnStartedAtRef.current) / 1000);
@@ -2017,7 +2030,25 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         const dice = diceValueRef.current;
         if (dice === null) return;
         const computedMoves = getValidMoves(tokensRef.current, currentTurn, dice);
-        if (computedMoves.length === 0) return;
+        if (computedMoves.length === 0) {
+          // Force skip to prevent deadlock — shouldn't happen but is a safety net
+          const gc = gameCodeRef.current;
+          if (gc) {
+            const finished = getFinishedColors(tokensRef.current, activePlayerCountRef.current);
+            const next = findNextActivePlayer(currentTurn, activePlayerCountRef.current, finished);
+            makeMove(gc, currentTurn, {
+              tokens: serializeTokens(tokensRef.current),
+              currentTurn: next,
+              turnPhase: 'roll',
+              diceValue: dice,
+              consecutiveSixes: 0,
+              winner: null,
+              finishOrder: finishOrderRef.current.join(','),
+              turnStartedAt: Date.now(),
+            }).catch(() => {});
+          }
+          return;
+        }
 
         // Simple AI: prioritize captures > getting home > furthest advance > deploy from base
         const entries = computedMoves.map(m => [m.tokenIndex, m.newPosition] as const);

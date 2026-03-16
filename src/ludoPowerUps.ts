@@ -450,7 +450,7 @@ export function colorIndex(color: LudoColor): number {
 }
 
 export function colorFromIndex(idx: number): LudoColor {
-  return TURN_ORDER[idx];
+  return TURN_ORDER[idx] ?? 'red';
 }
 
 /**

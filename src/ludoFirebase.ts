@@ -373,6 +373,8 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       startedAt: Date.now(),
       turnStartedAt: Date.now(),
       playerCount,
+      paused: false,
+      pausedAt: null,
       ...(isSolo ? { singlePlayer: true } : {}),
       ...(hasPowerUps ? {
         powerUps: '__'.repeat(4),
