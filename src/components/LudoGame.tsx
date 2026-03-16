@@ -992,6 +992,29 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       captured = false;
     }
 
+    // Drop items when a token is captured — find who was captured and clear their inventory
+    if (powerUpsEnabledRef.current && captured) {
+      const moverColor = getTokenColor(tokenIndex);
+      for (let i = 0; i < TOTAL_TOKENS; i++) {
+        if (i === tokenIndex) continue;
+        if (getTokenColor(i) === moverColor) continue;
+        // If this token just went to base (was captured)
+        if (newTokens[i] === 'base' && currentTokens[i] !== 'base') {
+          const victimColor = getTokenColor(i);
+          const ci = colorIndex(victimColor);
+          const inv = inventoryRef.current;
+          if (inv[ci][0] !== null || inv[ci][1] !== null) {
+            // Clear victim's inventory
+            const clearedInv = inv.map((slots, idx) =>
+              idx === ci ? [null, null] as (PowerUpId | null)[] : [...slots]
+            );
+            inventoryRef.current = clearedInv;
+            setInventory(clearedInv);
+          }
+        }
+      }
+    }
+
     // Star buff: send anyone passed back to their start
     if (powerUpsEnabledRef.current) {
       const curBuffs = activeBuffsRef.current;

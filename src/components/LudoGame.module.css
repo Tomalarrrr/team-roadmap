@@ -1540,30 +1540,39 @@
   to { transform: scale(1) rotate(0); opacity: 0.9; }
 }
 
-/* Mystery Box cells — golden ? block inspired (static, no bobbing) */
+/* Mystery Box cells — small 3D golden ? block floating in the cell */
 .mysteryBox {
-  background: linear-gradient(160deg, #ffd54f 0%, #f5c542 25%, #e5a80d 55%, #cc8800 85%, #a56a00 100%) !important;
-  border: 1.5px solid #8b6914 !important;
   position: relative;
-  box-shadow:
-    inset 1px 1px 0 rgba(255, 255, 255, 0.45),
-    inset -1px -1px 0 rgba(0, 0, 0, 0.2),
-    0 1px 3px rgba(139, 105, 20, 0.4) !important;
+  /* Keep cell background white — the block sits inside */
 }
 
 .mysteryBox::after {
   content: '?' !important;
   position: absolute !important;
+  width: 65%;
+  height: 65%;
+  top: 10%;
+  left: 17%;
+  background: linear-gradient(160deg, #ffd54f 0%, #f5c542 30%, #e5a80d 60%, #cc8800 100%);
+  border: 1.5px solid #8b6914;
+  border-radius: 3px;
   color: #fff !important;
-  font-size: 0.85em !important;
+  font-size: 0.7em !important;
   font-weight: 900 !important;
   text-shadow:
     0 0.5px 0 #a57200,
-    0 1px 0 #8b6014,
-    0 1.5px 3px rgba(0, 0, 0, 0.3);
+    0 1px 0 #8b6014;
   opacity: 1 !important;
   font-family: 'Arial Black', 'Impact', sans-serif;
-  letter-spacing: -0.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.4),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.15),
+    0 2px 3px rgba(100, 70, 0, 0.4),
+    0 3px 1px rgba(100, 70, 0, 0.15);
+  pointer-events: none;
 }
 
 /* Checkered flag pattern on start cells */

@@ -416,8 +416,22 @@ export function knockBack(
 
   if (pos.startsWith('track-')) {
     const track = parseInt(pos.split('-')[1]);
-    const newTrack = ((track - 1 - spaces + TRACK_SIZE * 10) % TRACK_SIZE) + 1;
-    result[targetIdx] = `track-${newTrack}`;
+    const color = getTokenColor(targetIdx);
+    const start = START_POSITIONS[color];
+
+    // Calculate how far this token has traveled from its start
+    const distFromStart = track >= start
+      ? track - start
+      : (TRACK_SIZE - start) + track;
+
+    if (spaces >= distFromStart) {
+      // Can't go further back than spawn — clamp at start position
+      result[targetIdx] = `track-${start}`;
+    } else {
+      // Move straight back (no wrapping around the board)
+      const newTrack = ((track - 1 - spaces + TRACK_SIZE) % TRACK_SIZE) + 1;
+      result[targetIdx] = `track-${newTrack}`;
+    }
   }
 
   return result;
