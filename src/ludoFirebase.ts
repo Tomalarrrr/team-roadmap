@@ -108,51 +108,53 @@ export async function createGame(
   powerUpsEnabled = false
 ): Promise<string> {
   await ensureInitialized();
-  const { ref, get, set } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateGameCode();
     const gameRef = ref(db, `ludo/${code}`);
-    const snapshot = await get(gameRef);
 
-    if (!snapshot.exists()) {
-      const isSolo = playerCount === 1;
-      const actualPlayerCount = isSolo ? 4 : playerCount;
-      const botNames = ['Bot Green', 'Bot Yellow', 'Bot Blue'];
-      const initialState: LudoGameState = {
-        players: {
-          red: { sessionId, name: userName },
-          ...(isSolo ? {
-            green: { sessionId: 'bot-green', name: botNames[0] },
-            yellow: { sessionId: 'bot-yellow', name: botNames[1] },
-            blue: { sessionId: 'bot-blue', name: botNames[2] },
-          } : {}),
-        },
-        tokens: INITIAL_TOKENS,
-        currentTurn: 'red',
-        turnPhase: 'roll',
-        diceValue: null,
-        consecutiveSixes: 0,
-        winner: null,
-        finishOrder: '',
-        createdAt: Date.now(),
-        startedAt: isSolo ? Date.now() : null,
-        turnStartedAt: Date.now(),
-        playerCount: actualPlayerCount,
-        ...(isSolo ? { singlePlayer: true } : {}),
-        ...(powerUpsEnabled ? {
-          powerUpsEnabled: true,
-          powerUps: '__'.repeat(4),
-          boardEffects: '',
-          activeBuffs: '',
-          coins: '0:0:0:0',
-          mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
+    const isSolo = playerCount === 1;
+    const actualPlayerCount = isSolo ? 4 : playerCount;
+    const botNames = ['Bot Green', 'Bot Yellow', 'Bot Blue'];
+    const initialState: LudoGameState = {
+      players: {
+        red: { sessionId, name: userName },
+        ...(isSolo ? {
+          green: { sessionId: 'bot-green', name: botNames[0] },
+          yellow: { sessionId: 'bot-yellow', name: botNames[1] },
+          blue: { sessionId: 'bot-blue', name: botNames[2] },
         } : {}),
-      };
-      await set(gameRef, initialState);
-      return code;
-    }
+      },
+      tokens: INITIAL_TOKENS,
+      currentTurn: 'red',
+      turnPhase: 'roll',
+      diceValue: null,
+      consecutiveSixes: 0,
+      winner: null,
+      finishOrder: '',
+      createdAt: Date.now(),
+      startedAt: isSolo ? Date.now() : null,
+      turnStartedAt: Date.now(),
+      playerCount: actualPlayerCount,
+      ...(isSolo ? { singlePlayer: true } : {}),
+      ...(powerUpsEnabled ? {
+        powerUpsEnabled: true,
+        powerUps: '__'.repeat(4),
+        boardEffects: '',
+        activeBuffs: '',
+        coins: '0:0:0:0',
+        mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
+      } : {}),
+    };
+
+    // Atomic create: only succeeds if code doesn't already exist
+    const result = await runTransaction(gameRef, (current: LudoGameState | null) => {
+      if (current !== null) return; // Abort — code already taken
+      return initialState;
+    });
+    if (result.committed) return code;
   }
 
   throw new Error('Failed to generate unique game code. Try again.');
@@ -168,7 +170,6 @@ export async function joinGame(
   const db = getFirebaseDatabase();
 
   const gameRef = ref(db, `ludo/${code}`);
-  let assignedColor: LudoColor = 'green';
   let joinError: string | null = null;
 
   await runTransaction(gameRef, (current: LudoGameState | null) => {
@@ -180,8 +181,7 @@ export async function joinGame(
     for (const color of allColors) {
       const player = current.players[color];
       if (player && player.sessionId === sessionId) {
-        assignedColor = color;
-        return current; // No change
+        return current; // No change — reconnected by sessionId
       }
     }
 
@@ -190,7 +190,6 @@ export async function joinGame(
     for (const color of allColors) {
       const player = current.players[color];
       if (player && player.name.trim().toLowerCase() === normalName) {
-        assignedColor = color;
         return {
           ...current,
           players: { ...current.players, [color]: { ...player, sessionId } },
@@ -214,7 +213,6 @@ export async function joinGame(
       return; // Abort
     }
 
-    assignedColor = foundColor;
     const updated: LudoGameState = {
       ...current,
       players: { ...current.players, [foundColor]: { sessionId, name: userName } },
@@ -237,10 +235,23 @@ export async function joinGame(
 
   if (joinError) throw new Error(joinError);
 
-  // Read final state
+  // Read final committed state and determine color from it (avoids stale closure on retry)
   const finalSnap = await get(gameRef);
   if (!finalSnap.exists()) throw new Error('Game not found');
-  return { state: finalSnap.val() as LudoGameState, assignedColor };
+  const finalState = finalSnap.val() as LudoGameState;
+
+  // Determine assigned color from final state (authoritative, not closure)
+  const allColors: LudoColor[] = ['red', ...JOIN_ORDER];
+  let confirmedColor: LudoColor | null = null;
+  for (const color of allColors) {
+    const player = finalState.players[color];
+    if (player && player.sessionId === sessionId) {
+      confirmedColor = color;
+      break;
+    }
+  }
+  if (!confirmedColor) throw new Error('Failed to join game');
+  return { state: finalState, assignedColor: confirmedColor };
 }
 
 export async function subscribeToGame(
@@ -335,7 +346,7 @@ export async function spectateGame(code: string): Promise<LudoGameState> {
 
 export async function resetGame(code: string, playerCount: number): Promise<void> {
   await ensureInitialized();
-  const { ref, update } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   const activePlayers: LudoColor[] = (['red', 'green', 'yellow', 'blue'] as LudoColor[]).slice(0, playerCount);
@@ -344,31 +355,32 @@ export async function resetGame(code: string, playerCount: number): Promise<void
   const randomFirst = activePlayers[arr[0] % activePlayers.length];
 
   const gameRef = ref(db, `ludo/${code}`);
-  // Read current state to check if power-ups are enabled
-  const { get: dbGet } = getDbModule();
-  const snap = await dbGet(gameRef);
-  const current = snap.val() as LudoGameState | null;
-  const hasPowerUps = current?.powerUpsEnabled === true;
-  const isSolo = current?.singlePlayer === true;
 
-  await update(gameRef, {
-    tokens: INITIAL_TOKENS,
-    currentTurn: randomFirst,
-    turnPhase: 'roll' as TurnPhase,
-    diceValue: null,
-    consecutiveSixes: 0,
-    winner: null,
-    finishOrder: '',
-    startedAt: Date.now(),
-    turnStartedAt: Date.now(),
-    playerCount,
-    ...(isSolo ? { singlePlayer: true } : {}),
-    ...(hasPowerUps ? {
-      powerUps: '__'.repeat(4),
-      boardEffects: '',
-      activeBuffs: '',
-      coins: '0:0:0:0',
-      mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
-    } : {}),
+  await runTransaction(gameRef, (current: LudoGameState | null) => {
+    if (!current) return current;
+    const hasPowerUps = current.powerUpsEnabled === true;
+    const isSolo = current.singlePlayer === true;
+
+    return {
+      ...current,
+      tokens: INITIAL_TOKENS,
+      currentTurn: randomFirst,
+      turnPhase: 'roll' as TurnPhase,
+      diceValue: null,
+      consecutiveSixes: 0,
+      winner: null,
+      finishOrder: '',
+      startedAt: Date.now(),
+      turnStartedAt: Date.now(),
+      playerCount,
+      ...(isSolo ? { singlePlayer: true } : {}),
+      ...(hasPowerUps ? {
+        powerUps: '__'.repeat(4),
+        boardEffects: '',
+        activeBuffs: '',
+        coins: '0:0:0:0',
+        mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
+      } : {}),
+    };
   });
 }

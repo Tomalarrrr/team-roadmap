@@ -543,9 +543,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const rolledThisTurnRef = useRef(false);
   const autoMoveRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const gameOverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const homeStuckRolls = useRef(0); // consecutive non-6 rolls while all tokens in base
-  const pityThreshold = useRef(3 + Math.floor(Math.random() * 4)); // random 3-6
-  const lastTwoRolls = useRef<[number, number]>([0, 0]); // anti-streak tracking
+  const homeStuckRolls = useRef<Record<string, number>>({}); // per-color consecutive non-6 rolls
+  const pityThreshold = useRef<Record<string, number>>({}); // per-color random 3-6 threshold
+  const lastTwoRolls = useRef<Record<string, [number, number]>>({}); // per-color anti-streak tracking
 
   // Cell-by-cell animation state
   const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
@@ -896,7 +896,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         setGameStats(prev => {
           const entry = prev[roller] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
           const newRolls = [...entry.rolls];
-          newRolls[state.diceValue! - 1]++;
+          const statIdx = Math.min(state.diceValue!, 6) - 1;
+          newRolls[statIdx]++;
           return { ...prev, [roller]: { ...entry, rolls: newRolls } };
         });
       }
@@ -1241,22 +1242,20 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     isRollingRef.current = true;
     setIsRolling(true);
 
-    // Anti-streak: if last 2 rolls were the same value, avoid a third in a row
+    // Anti-streak: if last 2 rolls were the same value, avoid a third in a row (per-color)
+    const colorKey = activeColor;
     const fairRoll = (): number => {
       let r = Math.floor(Math.random() * 6) + 1;
-      const [prev2, prev1] = lastTwoRolls.current;
+      const playerRolls = lastTwoRolls.current[colorKey] || [0, 0];
+      const [prev2, prev1] = playerRolls;
       if (prev2 === prev1 && prev1 === r && prev1 !== 0) {
-        // Reroll once (still random, just not the same value)
         r = Math.floor(Math.random() * 5) + 1;
-        if (r >= prev1) r++; // maps 1-5 to 1-6 excluding prev1
+        if (r >= prev1) r++;
       }
       return r;
     };
 
-    // Pity-timer: guarantee a 6 after N consecutive non-6 rolls (N random 3-6)
-    // when the only way to progress is rolling a 6. This covers:
-    //  - all non-finished tokens at home
-    //  - some at home, rest in final corridor (no tokens on the regular track)
+    // Pity-timer: guarantee a 6 after N consecutive non-6 rolls (per-color)
     const rollIndices = getColorTokenIndices(activeColor);
     const hasTokenAtHome = rollIndices.some(i => tokensRef.current[i] === 'base');
     const noneOnTrack = rollIndices.every(i => {
@@ -1265,20 +1264,24 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     });
     const needsSix = hasTokenAtHome && noneOnTrack;
     let roll = fairRoll();
-    if (needsSix && homeStuckRolls.current >= pityThreshold.current) {
+    const stuckCount = homeStuckRolls.current[colorKey] || 0;
+    const threshold = pityThreshold.current[colorKey] ?? (3 + Math.floor(Math.random() * 4));
+    if (!(colorKey in pityThreshold.current)) pityThreshold.current[colorKey] = threshold;
+    if (needsSix && stuckCount >= threshold) {
       roll = 6;
     }
     if (needsSix) {
       if (roll === 6) {
-        homeStuckRolls.current = 0;
-        pityThreshold.current = 3 + Math.floor(Math.random() * 4); // new random 3-6
+        homeStuckRolls.current[colorKey] = 0;
+        pityThreshold.current[colorKey] = 3 + Math.floor(Math.random() * 4);
       } else {
-        homeStuckRolls.current += 1;
+        homeStuckRolls.current[colorKey] = stuckCount + 1;
       }
     } else {
-      homeStuckRolls.current = 0;
+      homeStuckRolls.current[colorKey] = 0;
     }
-    lastTwoRolls.current = [lastTwoRolls.current[1], roll];
+    const prevRolls = lastTwoRolls.current[colorKey] || [0, 0];
+    lastTwoRolls.current[colorKey] = [prevRolls[1], roll];
 
     // Super Mushroom: double the roll
     if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'super-mushroom') {
@@ -2236,7 +2239,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       gameEffects.current = [];
       setGameStats({});
       statsInitRef.current = false;
-      homeStuckRolls.current = 0;
+      homeStuckRolls.current = {};
+      pityThreshold.current = {};
+      lastTwoRolls.current = {};
+      clearTimeout(botTimerRef.current);
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
       // Reset power-up state
@@ -2299,9 +2305,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     moveInFlightRef.current = false;
     isRollingRef.current = false;
     rolledThisTurnRef.current = false;
-    homeStuckRolls.current = 0;
-    pityThreshold.current = 3 + Math.floor(Math.random() * 4);
-    lastTwoRolls.current = [0, 0];
+    homeStuckRolls.current = {};
+    pityThreshold.current = {};
+    lastTwoRolls.current = {};
     dragCleanupRef.current?.();
     dragCleanupRef.current = null;
     // Reset power-up state
@@ -2316,6 +2322,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setActivePowerUp(null);
     setGamePaused(false);
     gamePausedRef.current = false;
+    setIsSinglePlayer(false);
+    isSinglePlayerRef.current = false;
+    clearTimeout(botTimerRef.current);
   }, []);
 
   // --- Drag ---
@@ -2919,8 +2928,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               {powerUpsEnabled && myColor && !isSpectating && (
                 <LudoPowerUpPanel
                   inventory={getInventoryForColor(inventory, myColor)}
-                  canUseBefore={isMyTurn && (turnPhase === 'roll' || turnPhase === 'move') && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
-                  canUseAfter={isMyTurn && (turnPhase === 'roll' || turnPhase === 'move') && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
+                  canUseBefore={isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
+                  canUseAfter={isMyTurn && turnPhase === 'move' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
                   onUse={handleUsePowerUp}
                   coins={myColor ? coins[colorIndex(myColor)] : 0}
                   isMyTurn={isMyTurn}

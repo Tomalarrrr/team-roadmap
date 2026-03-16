@@ -212,7 +212,7 @@ export function getPlayerScore(tokens: TokenPosition[], color: LudoColor): numbe
       const track = parseInt(pos.split('-')[1]);
       const start = START_POSITIONS[color];
       const dist = track >= start ? track - start : (TRACK_SIZE - start) + track;
-      return sum + dist;
+      return sum + Math.max(1, dist); // tokens on track always score at least 1
     }
     return sum;
   }, 0);
@@ -345,14 +345,16 @@ export function initMysteryBoxes(): MysteryBoxState[] {
  */
 export function tickMysteryBoxCooldowns(boxes: MysteryBoxState[]): MysteryBoxState[] {
   const minGap = 7;
+  // Snapshot original active cells BEFORE mutations to avoid spacing check corruption
+  const originalActiveCells = boxes.filter(b => b.cooldown === 0).map(b => b.cell);
   const result = [...boxes];
   for (let idx = 0; idx < result.length; idx++) {
     const b = result[idx];
     if (b.cooldown > 1) {
       result[idx] = { ...b, cooldown: b.cooldown - 1 };
     } else if (b.cooldown === 1) {
-      // Respawn at a new random valid cell with spacing
-      const activeCells = result.filter((_, i) => i !== idx && result[i].cooldown === 0).map(x => x.cell);
+      // Respawn at a new random valid cell with spacing against original active positions
+      const activeCells = originalActiveCells.filter(c => c !== b.cell);
       const candidates: number[] = [];
       for (let i = 1; i <= TRACK_SIZE; i++) {
         if (EXCLUDED_CELLS.has(i)) continue;
