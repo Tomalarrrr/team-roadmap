@@ -1339,7 +1339,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           }
         }
         if (bestToken !== null) {
-          const newPos = calculateNewPosition(currentTokens[bestToken], 10, mc);
+          const newPos = calculateNewPosition(currentTokens[bestToken], 10, activeColor);
           if (newPos) {
             showHint('Bullet Bill! Rocket forward!');
             executeMove(bestToken, newPos, 10);
@@ -1352,10 +1352,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         diceAnimKeyRef.current += 1;
         rolledThisTurnRef.current = true;
         // Fall through to normal move logic
-        const moves2 = getValidMoves(currentTokens, mc, roll);
+        const curColor2 = currentTurnRef.current;
+        const moves2 = getValidMoves(currentTokens, curColor2, roll);
         if (moves2.length === 0) {
           const finishedColors2 = getFinishedColors(currentTokens, activePlayerCountRef.current);
-          const nextColor2 = findNextActivePlayer(mc, activePlayerCountRef.current, finishedColors2);
+          const nextColor2 = findNextActivePlayer(curColor2, activePlayerCountRef.current, finishedColors2);
           const update2: LudoMoveUpdate = {
             tokens: serializeTokens(currentTokens),
             currentTurn: nextColor2,
@@ -1366,7 +1367,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             finishOrder: finishOrderRef.current.join(','),
             turnStartedAt: Date.now(),
           };
-          makeMove(gc, mc, update2).catch(() => { moveInFlightRef.current = false; });
+          makeMove(gc, curColor2, update2).catch(() => { moveInFlightRef.current = false; });
         } else if (moves2.length === 1) {
           executeMove(moves2[0].tokenIndex, moves2[0].newPosition, roll);
         } else {
@@ -1427,7 +1428,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           finishOrder: curFinishOrder.join(','),
           turnStartedAt: Date.now(),
         };
-        try { await makeMove(gc, mc, update); } catch { moveInFlightRef.current = false; }
+        try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
         return;
       }
 
@@ -1791,7 +1792,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         boardEffects: serializeBoardEffects(boardEffectsRef.current),
         coins: serializeCoins(coinsRef.current),
       };
-      makeMove(gc, mc, update).catch(() => { moveInFlightRef.current = false; });
+      makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
       return;
     }
 

@@ -1561,11 +1561,12 @@
 .mysteryBox::before {
   content: '' !important;
   position: absolute !important;
-  width: 50%;
-  height: 20%;
-  bottom: 8%;
-  left: 25%;
-  background: radial-gradient(ellipse, rgba(0, 0, 0, 0.2) 0%, transparent 70%);
+  width: 55%;
+  height: 12%;
+  bottom: 6%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: radial-gradient(ellipse, rgba(180, 180, 180, 0.6) 0%, transparent 70%);
   border-radius: 50%;
   pointer-events: none;
   z-index: 0;
@@ -1580,8 +1581,9 @@
   position: absolute !important;
   width: 60%;
   height: 60%;
-  top: 8%;
-  left: 20%;
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
   background:
     linear-gradient(135deg, #ffe082 0%, #ffd54f 20%, #f5c542 40%, #e5a80d 70%, #cc8800 100%);
   border: 1.5px solid #8b6914;
