@@ -41,6 +41,7 @@ export interface LudoGameState {
   mysteryBoxes?: string;    // Active mystery box cells + cooldowns "cell:cd,cell:cd,..."
   paused?: boolean;         // Per-game pause state
   pausedAt?: number;        // Timestamp when paused (to adjust turnStartedAt on resume)
+  singlePlayer?: boolean;   // 1-player mode with AI bots
 }
 
 export interface LudoMoveUpdate {
@@ -116,9 +117,17 @@ export async function createGame(
     const snapshot = await get(gameRef);
 
     if (!snapshot.exists()) {
+      const isSolo = playerCount === 1;
+      const actualPlayerCount = isSolo ? 4 : playerCount;
+      const botNames = ['Bot Green', 'Bot Yellow', 'Bot Blue'];
       const initialState: LudoGameState = {
         players: {
           red: { sessionId, name: userName },
+          ...(isSolo ? {
+            green: { sessionId: 'bot-green', name: botNames[0] },
+            yellow: { sessionId: 'bot-yellow', name: botNames[1] },
+            blue: { sessionId: 'bot-blue', name: botNames[2] },
+          } : {}),
         },
         tokens: INITIAL_TOKENS,
         currentTurn: 'red',
@@ -128,9 +137,10 @@ export async function createGame(
         winner: null,
         finishOrder: '',
         createdAt: Date.now(),
-        startedAt: null,
+        startedAt: isSolo ? Date.now() : null,
         turnStartedAt: Date.now(),
-        playerCount,
+        playerCount: actualPlayerCount,
+        ...(isSolo ? { singlePlayer: true } : {}),
         ...(powerUpsEnabled ? {
           powerUpsEnabled: true,
           powerUps: '__'.repeat(4),
@@ -339,6 +349,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
   const snap = await dbGet(gameRef);
   const current = snap.val() as LudoGameState | null;
   const hasPowerUps = current?.powerUpsEnabled === true;
+  const isSolo = current?.singlePlayer === true;
 
   await update(gameRef, {
     tokens: INITIAL_TOKENS,
@@ -351,6 +362,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
     startedAt: Date.now(),
     turnStartedAt: Date.now(),
     playerCount,
+    ...(isSolo ? { singlePlayer: true } : {}),
     ...(hasPowerUps ? {
       powerUps: '__'.repeat(4),
       boardEffects: '',

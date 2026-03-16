@@ -496,6 +496,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const [playerCount, setPlayerCount] = useState(4);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSinglePlayer, setIsSinglePlayer] = useState(false);
+  const isSinglePlayerRef = useRef(false);
 
   // Game state (driven by Firebase)
   const [tokens, setTokens] = useState<TokenPosition[]>(
@@ -933,6 +935,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setGamePaused(isPaused);
       gamePausedRef.current = isPaused;
 
+      // Single player mode
+      if (state.singlePlayer) {
+        setIsSinglePlayer(true);
+        isSinglePlayerRef.current = true;
+      }
+
       if (state.winner) {
         setWinner(state.winner);
         setShowBurst(true);
@@ -1222,9 +1230,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (!gc || !mc) return;
     if (gamePausedRef.current) return;
     if (introPhaseRef.current === 'running') return;
-    if (currentTurnRef.current !== mc || turnPhaseRef.current !== 'roll') return;
+    const isBotTurn = isSinglePlayerRef.current && currentTurnRef.current !== mc;
+    if (!isBotTurn && currentTurnRef.current !== mc) return;
+    if (turnPhaseRef.current !== 'roll') return;
     if (winnerRef.current || isRollingRef.current || moveInFlightRef.current) return;
-    if (gamePausedRef.current) return;
+
+    const activeColor = currentTurnRef.current; // may differ from mc for bot turns
 
     moveInFlightRef.current = true;
     isRollingRef.current = true;
@@ -1246,9 +1257,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     // when the only way to progress is rolling a 6. This covers:
     //  - all non-finished tokens at home
     //  - some at home, rest in final corridor (no tokens on the regular track)
-    const myIndices = getColorTokenIndices(mc);
-    const hasTokenAtHome = myIndices.some(i => tokensRef.current[i] === 'base');
-    const noneOnTrack = myIndices.every(i => {
+    const rollIndices = getColorTokenIndices(activeColor);
+    const hasTokenAtHome = rollIndices.some(i => tokensRef.current[i] === 'base');
+    const noneOnTrack = rollIndices.every(i => {
       const t = tokensRef.current[i];
       return t === 'base' || t === 'final-6' || t.startsWith('final-');
     });
@@ -1277,7 +1288,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
     // Lightning debuff: halve the roll
     if (powerUpsEnabledRef.current) {
-      const ci = colorIndex(mc);
+      const ci = colorIndex(activeColor);
       if (hasLightningDebuff(activeBuffsRef.current, ci)) {
         roll = Math.max(1, Math.floor(roll / 2));
         showHint('Lightning! Half speed!');
@@ -1288,7 +1299,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'golden-mushroom') {
       const r1 = roll;
       // Apply lightning debuff to alt rolls too for fairness
-      const ci2 = colorIndex(mc);
+      const ci2 = colorIndex(activeColor);
       const isLightning = hasLightningDebuff(activeBuffsRef.current, ci2);
       let r2 = Math.floor(Math.random() * 6) + 1;
       let r3 = Math.floor(Math.random() * 6) + 1;
@@ -1319,7 +1330,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
         // Find the best token on the track to rocket
         const currentTokens = tokensRef.current;
-        const myIndices2 = getColorTokenIndices(mc);
+        const myIndices2 = getColorTokenIndices(activeColor);
         let bestToken: number | null = null;
         for (const i of myIndices2) {
           if (currentTokens[i].startsWith('track-')) {
@@ -1450,7 +1461,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const mc = myColorRef.current;
     if (!mc) return;
     if (gamePausedRef.current) return;
-    if (currentTurnRef.current !== mc || turnPhaseRef.current !== 'move') return;
+    const isBotTurn = isSinglePlayerRef.current && currentTurnRef.current !== mc;
+    if (!isBotTurn && currentTurnRef.current !== mc) return;
+    if (turnPhaseRef.current !== 'move') return;
     if (winnerRef.current || moveInFlightRef.current) return;
     if (gamePausedRef.current) return;
 
@@ -1465,7 +1478,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     clearTimeout(autoMoveRef.current);
     moveInFlightRef.current = true;
     // Check for cape feather buff
-    const capeActive = powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(mc), 'cape');
+    const turnColor = currentTurnRef.current;
+    const capeActive = powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(turnColor), 'cape');
     executeMove(move.tokenIndex, move.newPosition, dice, capeActive);
   }, [executeMove]);
 
@@ -1872,6 +1886,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // Refs for handler functions (timer uses these)
   const handleRollDiceRef = useRef(handleRollDice);
   handleRollDiceRef.current = handleRollDice;
+  const handleMoveTokenRef = useRef(handleMoveToken);
+  handleMoveTokenRef.current = handleMoveToken;
+  const validMovesRef = useRef(validMoves);
+  validMovesRef.current = validMoves;
   const executeMoveRef = useRef(executeMove);
   executeMoveRef.current = executeMove;
 
@@ -1926,10 +1944,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         }
       }
 
-      // Backup: any non-current client force-skips after 45s total
+      // Backup: any non-current client force-skips after 45s total (not in single player — bots handle it)
       if (
         remaining <= -BACKUP_GRACE &&
         !isCurrentPlayer &&
+        !isSinglePlayerRef.current &&
         myColorRef.current !== null &&
         !moveInFlightRef.current
       ) {
@@ -1961,6 +1980,90 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [gamePhase]);
+
+  // --- Single player bot AI ---
+
+  const botTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    if (!isSinglePlayer || gamePhase !== 'playing' || winner || gamePaused) return;
+    if (introPhase === 'running') return;
+
+    const isBotTurn = currentTurn !== myColor;
+    if (!isBotTurn) return;
+
+    // Clear any existing bot timer
+    clearTimeout(botTimerRef.current);
+
+    const botDelay = 600 + Math.random() * 400; // 600-1000ms to feel natural
+
+    if (turnPhase === 'roll') {
+      // Bot rolls dice
+      botTimerRef.current = setTimeout(() => {
+        if (currentTurnRef.current !== currentTurn || turnPhaseRef.current !== 'roll') return;
+        if (moveInFlightRef.current || isRollingRef.current) return;
+        handleRollDiceRef.current();
+      }, botDelay);
+    } else if (turnPhase === 'move') {
+      // Bot picks a move
+      botTimerRef.current = setTimeout(() => {
+        if (currentTurnRef.current !== currentTurn || turnPhaseRef.current !== 'move') return;
+        if (moveInFlightRef.current) return;
+
+        const dice = diceValueRef.current;
+        if (dice === null) return;
+        const computedMoves = getValidMoves(tokensRef.current, currentTurn, dice);
+        if (computedMoves.length === 0) return;
+
+        // Simple AI: prioritize captures > getting home > furthest advance > deploy from base
+        const entries = computedMoves.map(m => [m.tokenIndex, m.newPosition] as const);
+        let bestIdx = entries[0][0];
+        let bestScore = -Infinity;
+
+        for (const [tokenIdx, targetPos] of entries) {
+          let score = 0;
+          const curPos = tokensRef.current[tokenIdx];
+
+          // Deploy from base is valuable
+          if (curPos === 'base') score += 50;
+
+          // Moving into final corridor is very valuable
+          if (targetPos.startsWith('final-')) {
+            const finalNum = parseInt(targetPos.split('-')[1]);
+            score += 100 + finalNum * 20;
+          }
+
+          // Check if this move captures an opponent
+          if (targetPos.startsWith('track-')) {
+            const targetCell = parseInt(targetPos.split('-')[1]);
+            for (let i = 0; i < TOTAL_TOKENS; i++) {
+              if (getTokenColor(i) === currentTurn) continue;
+              if (tokensRef.current[i] === targetPos && !SAFE_ZONES.has(targetCell)) {
+                score += 80; // Capture!
+              }
+            }
+            // Prefer moving to safe zones
+            if (SAFE_ZONES.has(targetCell)) score += 10;
+            // Prefer advancing further along the track
+            const start = START_POSITIONS[currentTurn];
+            const dist = targetCell >= start
+              ? targetCell - start
+              : (TRACK_SIZE - start) + targetCell;
+            score += dist;
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestIdx = tokenIdx;
+          }
+        }
+
+        handleMoveTokenRef.current(bestIdx);
+      }, botDelay);
+    }
+
+    return () => clearTimeout(botTimerRef.current);
+  }, [isSinglePlayer, gamePhase, winner, gamePaused, currentTurn, turnPhase, myColor, introPhase]);
 
   // --- Intro animation (tokens race around board on game start) ---
 
@@ -2036,7 +2139,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       const code = await createGame(sessionId, userName, playerCount, marioMode);
       setGameCode(code);
       setMyColor('red');
-      setGamePhase('waiting');
+      setGamePhase(playerCount === 1 ? 'playing' : 'waiting');
       prevTokensRef.current = 'bas'.repeat(16);
     } catch {
       setError('Failed to create game. Try again.');
@@ -2452,13 +2555,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           <div className={styles.lobby}>
             <div className={styles.playerCountSelector}>
               <span className={styles.playerCountLabel}>Players:</span>
-              {[2, 3, 4].map(n => (
+              {[1, 2, 3, 4].map(n => (
                 <button
                   key={n}
                   className={`${styles.playerCountBtn} ${playerCount === n ? styles.playerCountBtnActive : ''}`}
                   onClick={() => setPlayerCount(n)}
                 >
-                  {n}
+                  {n === 1 ? '1 (Solo)' : n}
                 </button>
               ))}
             </div>
