@@ -15,6 +15,38 @@ import {
   type TokenPosition,
   type TurnPhase,
 } from '../ludoFirebase';
+import {
+  MYSTERY_BOX_CELLS,
+  POWER_UPS,
+  type PowerUpId,
+  drawPowerUp,
+  deserializeInventory,
+  serializeInventory,
+  deserializeBoardEffects,
+  serializeBoardEffects,
+  deserializeBuffs,
+  serializeBuffs,
+  deserializeCoins,
+  serializeCoins,
+  addToInventory,
+  removeFromInventory,
+  discardSlot,
+  getInventoryForColor,
+  colorIndex,
+  tickBuffs,
+  hasActiveBuff,
+  hasLightningDebuff,
+  knockBack,
+  findFirstOpponentAhead,
+  findNearestOpponentBehind,
+  findLeaderLeadToken,
+  findNextSafeZone,
+  applyStarEffect,
+  type BoardEffect,
+  colorFromIndex,
+  type ActiveBuff,
+} from '../ludoPowerUps';
+import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal, BananaPeelPlacer } from './LudoPowerUpPanel';
 import styles from './LudoGame.module.css';
 
 // --- Constants ---
@@ -398,6 +430,15 @@ const DICE_PIPS: Record<number, [number, number][]> = {
 };
 
 function DiceFace({ value }: { value: number }) {
+  // For doubled values (Super Mushroom: 7-12), show the number with a mushroom boost indicator
+  if (value > 6) {
+    return (
+      <div className={styles.diceFace} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column' }}>
+        <span style={{ fontSize: '1.3rem', fontWeight: 800, color: '#e4521b', lineHeight: 1 }}>{value}</span>
+        <span style={{ fontSize: '0.45rem', color: '#e4521b', fontWeight: 600 }}>{'🍄'}x2</span>
+      </div>
+    );
+  }
   const pips = DICE_PIPS[value] || DICE_PIPS[1];
   return (
     <div className={styles.diceFace}>
@@ -509,6 +550,39 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const introTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [introTrigger, setIntroTrigger] = useState(0);
   const [, setRenderTick] = useState(0);
+
+  // Mario Mode power-up state
+  const [marioMode, setMarioMode] = useState(false);
+  const [powerUpsEnabled, setPowerUpsEnabled] = useState(false);
+  const [inventory, setInventory] = useState<(PowerUpId | null)[][]>(() =>
+    [[null, null], [null, null], [null, null], [null, null]]
+  );
+  const [boardEffects, setBoardEffects] = useState<BoardEffect[]>([]);
+  const [activeBuffs, setActiveBuffs] = useState<ActiveBuff[]>([]);
+  const [coins, setCoins] = useState<number[]>([0, 0, 0, 0]);
+  const [pendingDiscard, setPendingDiscard] = useState<PowerUpId | null>(null);
+  const [goldenMushroomRolls, setGoldenMushroomRolls] = useState<[number, number, number] | null>(null);
+  const [placingBanana, setPlacingBanana] = useState(false);
+  const [activePowerUp, setActivePowerUp] = useState<{ id: PowerUpId; slot: number } | null>(null);
+
+  const inventoryRef = useRef(inventory);
+  inventoryRef.current = inventory;
+  const boardEffectsRef = useRef(boardEffects);
+  boardEffectsRef.current = boardEffects;
+  const activeBuffsRef = useRef(activeBuffs);
+  activeBuffsRef.current = activeBuffs;
+  const coinsRef = useRef(coins);
+  coinsRef.current = coins;
+  const powerUpsEnabledRef = useRef(powerUpsEnabled);
+  powerUpsEnabledRef.current = powerUpsEnabled;
+  const activePowerUpRef = useRef(activePowerUp);
+  activePowerUpRef.current = activePowerUp;
+  const goldenMushroomRef = useRef(goldenMushroomRolls);
+  goldenMushroomRef.current = goldenMushroomRolls;
+  const placingBananaRef = useRef(placingBanana);
+  placingBananaRef.current = placingBanana;
+  const pendingDiscardRef = useRef(pendingDiscard);
+  pendingDiscardRef.current = pendingDiscard;
 
   const gameCodeRef = useRef(gameCode);
   gameCodeRef.current = gameCode;
@@ -810,6 +884,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         rolledThisTurnRef.current = false;
       }
 
+      // Clear active power-up when turn changes
+      if (state.currentTurn !== currentTurnRef.current) {
+        setActivePowerUp(null);
+      }
+
       setTokens(parsedTokens);
       setCurrentTurn(state.currentTurn);
       setTurnPhase(state.turnPhase);
@@ -817,6 +896,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setConsecutiveSixes(state.consecutiveSixes);
       setActivePlayerCount(state.playerCount);
       turnStartedAtRef.current = state.turnStartedAt;
+
+      // Mario Mode state
+      if (state.powerUpsEnabled) {
+        setPowerUpsEnabled(true);
+        if (state.powerUps) setInventory(deserializeInventory(state.powerUps));
+        if (state.boardEffects !== undefined) setBoardEffects(deserializeBoardEffects(state.boardEffects));
+        if (state.activeBuffs !== undefined) setActiveBuffs(deserializeBuffs(state.activeBuffs));
+        if (state.coins) setCoins(deserializeCoins(state.coins));
+      }
 
       if (state.winner) {
         setWinner(state.winner);
@@ -882,7 +970,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const executeMove = useCallback(async (
     tokenIndex: number,
     newPosition: TokenPosition,
-    roll: number
+    roll: number,
+    capeActive = false
   ) => {
     const gc = gameCodeRef.current;
     if (!gc) return;
@@ -893,7 +982,30 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const curFinishOrder = finishOrderRef.current;
     const curPlayerCount = activePlayerCountRef.current;
 
-    const { newTokens, captured, reachedHome } = applyMove(currentTokens, tokenIndex, newPosition);
+    let { newTokens, captured, reachedHome } = applyMove(currentTokens, tokenIndex, newPosition);
+
+    // Cape Feather: undo any captures that just happened
+    if (capeActive && captured) {
+      // Restore captured tokens — re-run without capture
+      newTokens = [...currentTokens] as TokenPosition[];
+      newTokens[tokenIndex] = newPosition;
+      captured = false;
+    }
+
+    // Star buff: send anyone passed back to their start
+    if (powerUpsEnabledRef.current) {
+      const curBuffs = activeBuffsRef.current;
+      const ci = colorIndex(curColor);
+      if (hasActiveBuff(curBuffs, ci, 'star') && newPosition.startsWith('track-')) {
+        const oldPos = currentTokens[tokenIndex];
+        if (oldPos.startsWith('track-')) {
+          const fromTrack = parseInt(oldPos.split('-')[1]);
+          const toTrack = parseInt(newPosition.split('-')[1]);
+          newTokens = applyStarEffect(newTokens, fromTrack, toTrack, curColor);
+          showHint('Star power! Opponents sent to start!');
+        }
+      }
+    }
 
     const moverColor = getTokenColor(tokenIndex);
     const updatedFinishOrder = [...curFinishOrder];
@@ -922,6 +1034,64 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     movedTimeoutRef.current = setTimeout(() => setLastMovedToken(null), 400);
     setValidMoves(new Map());
 
+    // --- Mario Mode: post-move effects ---
+    let updatedInv = inventoryRef.current;
+    let updatedEffects = boardEffectsRef.current;
+    let updatedBuffs = activeBuffsRef.current;
+    let updatedCoins = [...coinsRef.current];
+
+    if (powerUpsEnabledRef.current && newPosition.startsWith('track-')) {
+      const landedCell = parseInt(newPosition.split('-')[1]);
+
+      // Check for banana peel
+      const bananaIdx = updatedEffects.findIndex(e => e.type === 'banana' && e.cell === landedCell);
+      if (bananaIdx >= 0) {
+        // Slip back 3 spaces
+        updatedEffects = updatedEffects.filter((_, i) => i !== bananaIdx);
+        newTokens = knockBack(newTokens, tokenIndex, 3);
+        showHint('Banana peel! Slipped back 3!');
+      }
+      // Check for mystery box (only on voluntary moves, not forced)
+      else if (MYSTERY_BOX_CELLS.has(landedCell)) {
+        const drawnPowerUp = drawPowerUp(newTokens, curColor, curPlayerCount);
+
+        // Coin block: add coin immediately
+        if (drawnPowerUp === 'coin-block') {
+          const ci = colorIndex(curColor);
+          updatedCoins[ci] = (updatedCoins[ci] || 0) + 1;
+          if (updatedCoins[ci] >= 3) {
+            updatedCoins[ci] = 0;
+            // Deploy a token from base to start position for free
+            const myIndices = getColorTokenIndices(curColor);
+            const baseToken = myIndices.find(i => newTokens[i] === 'base');
+            if (baseToken !== undefined) {
+              const startPos: TokenPosition = `track-${START_POSITIONS[curColor]}`;
+              newTokens[baseToken] = startPos;
+              showHint('3 coins! Free deploy!');
+            } else {
+              showHint('3 coins! But no tokens in base');
+            }
+          } else {
+            showHint(`Coin! (${updatedCoins[ci]}/3)`);
+          }
+        } else {
+          // Try to add to inventory
+          const { inventory: newInv, added } = addToInventory(updatedInv, curColor, drawnPowerUp);
+          if (added) {
+            updatedInv = newInv;
+            showHint(`Got ${POWER_UPS[drawnPowerUp].emoji} ${POWER_UPS[drawnPowerUp].name}!`);
+          } else {
+            // Inventory full — trigger discard modal for the current player
+            setPendingDiscard(drawnPowerUp);
+          }
+        }
+      }
+
+      // Tick buffs for the current player (who just finished their move)
+      // This ensures buffs expire AFTER they've had their effect during this turn
+      updatedBuffs = tickBuffs(updatedBuffs, colorIndex(curColor));
+    }
+
     const update: LudoMoveUpdate = {
       tokens: serializeTokens(newTokens),
       currentTurn: gameWinner ? curColor : nextColor,
@@ -932,6 +1102,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       finishOrder: updatedFinishOrder.join(','),
       turnStartedAt: Date.now(),
     };
+
+    // Attach power-up state if enabled
+    if (powerUpsEnabledRef.current) {
+      update.powerUps = serializeInventory(updatedInv);
+      update.boardEffects = serializeBoardEffects(updatedEffects);
+      update.activeBuffs = serializeBuffs(updatedBuffs);
+      update.coins = serializeCoins(updatedCoins);
+    }
 
     try {
       await makeMove(gc, curColor, update);
@@ -992,6 +1170,103 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
     lastTwoRolls.current = [lastTwoRolls.current[1], roll];
 
+    // Super Mushroom: double the roll
+    if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'super-mushroom') {
+      roll = Math.min(roll * 2, 12);
+      setActivePowerUp(null);
+    }
+
+    // Lightning debuff: halve the roll
+    if (powerUpsEnabledRef.current) {
+      const ci = colorIndex(mc);
+      if (hasLightningDebuff(activeBuffsRef.current, ci)) {
+        roll = Math.max(1, Math.floor(roll / 2));
+        showHint('Lightning! Half speed!');
+      }
+    }
+
+    // Golden Mushroom: show pick modal instead of proceeding
+    if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'golden-mushroom') {
+      const r1 = roll;
+      // Apply lightning debuff to alt rolls too for fairness
+      const ci2 = colorIndex(mc);
+      const isLightning = hasLightningDebuff(activeBuffsRef.current, ci2);
+      let r2 = Math.floor(Math.random() * 6) + 1;
+      let r3 = Math.floor(Math.random() * 6) + 1;
+      if (isLightning) {
+        r2 = Math.max(1, Math.floor(r2 / 2));
+        r3 = Math.max(1, Math.floor(r3 / 2));
+      }
+      setActivePowerUp(null);
+      // Show modal after rolling animation
+      rollTimeoutRef.current = setTimeout(() => {
+        setIsRolling(false);
+        isRollingRef.current = false;
+        moveInFlightRef.current = false; // Allow interaction with modal
+        setGoldenMushroomRolls([r1, r2, r3]);
+      }, 800);
+      return;
+    }
+
+    // Bullet Bill: skip normal move, rocket forward 10
+    if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'bullet-bill') {
+      setActivePowerUp(null);
+      rollTimeoutRef.current = setTimeout(async () => {
+        setIsRolling(false);
+        isRollingRef.current = false;
+        setDiceValue(10);
+        diceAnimKeyRef.current += 1;
+        rolledThisTurnRef.current = true;
+
+        // Find the best token on the track to rocket
+        const currentTokens = tokensRef.current;
+        const myIndices2 = getColorTokenIndices(mc);
+        let bestToken: number | null = null;
+        for (const i of myIndices2) {
+          if (currentTokens[i].startsWith('track-')) {
+            bestToken = i;
+            break;
+          }
+        }
+        if (bestToken !== null) {
+          const newPos = calculateNewPosition(currentTokens[bestToken], 10, mc);
+          if (newPos) {
+            showHint('Bullet Bill! Rocket forward!');
+            executeMove(bestToken, newPos, 10);
+            return;
+          }
+        }
+        // Fallback: if no token on track, use original roll as normal dice
+        showHint('No token on track — normal roll instead');
+        setDiceValue(roll);
+        diceAnimKeyRef.current += 1;
+        rolledThisTurnRef.current = true;
+        // Fall through to normal move logic
+        const moves2 = getValidMoves(currentTokens, mc, roll);
+        if (moves2.length === 0) {
+          const finishedColors2 = getFinishedColors(currentTokens, activePlayerCountRef.current);
+          const nextColor2 = findNextActivePlayer(mc, activePlayerCountRef.current, finishedColors2);
+          const update2: LudoMoveUpdate = {
+            tokens: serializeTokens(currentTokens),
+            currentTurn: nextColor2,
+            turnPhase: 'roll',
+            diceValue: roll,
+            consecutiveSixes: 0,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: Date.now(),
+          };
+          makeMove(gc, mc, update2).catch(() => { moveInFlightRef.current = false; });
+        } else if (moves2.length === 1) {
+          executeMove(moves2[0].tokenIndex, moves2[0].newPosition, roll);
+        } else {
+          setValidMoves(new Map(moves2.map(m => [m.tokenIndex, m.newPosition])));
+          moveInFlightRef.current = false;
+        }
+      }, 800);
+      return;
+    }
+
     rollTimeoutRef.current = setTimeout(async () => {
       setIsRolling(false);
       isRollingRef.current = false;
@@ -1050,7 +1325,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (moves.length === 1) {
         const m = moves[0];
         autoMoveRef.current = setTimeout(() => {
-          executeMove(m.tokenIndex, m.newPosition, roll);
+          const capeOn = powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(curColor), 'cape');
+          executeMove(m.tokenIndex, m.newPosition, roll, capeOn);
         }, 600);
         return;
       }
@@ -1088,8 +1364,381 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
     clearTimeout(autoMoveRef.current);
     moveInFlightRef.current = true;
-    executeMove(move.tokenIndex, move.newPosition, dice);
+    // Check for cape feather buff
+    const capeActive = powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(mc), 'cape');
+    executeMove(move.tokenIndex, move.newPosition, dice, capeActive);
   }, [executeMove]);
+
+  // --- Power-up usage handler ---
+  const handleUsePowerUp = useCallback((slot: number, powerUpId: PowerUpId) => {
+    const mc = myColorRef.current;
+    if (!mc || !powerUpsEnabledRef.current) return;
+
+    const def = POWER_UPS[powerUpId];
+    if (!def) return;
+
+    // Remove from inventory immediately
+    const newInv = removeFromInventory(inventoryRef.current, mc, slot);
+
+    if (def.timing === 'before-roll') {
+      // These activate on the next roll
+      if (powerUpId === 'star') {
+        // Add star buff for 2 turns
+        const newBuffs = [...activeBuffsRef.current, { type: 'star' as const, playerColorIdx: colorIndex(mc), duration: 2 }];
+        // Write to firebase
+        const gc = gameCodeRef.current;
+        if (gc) {
+          makeMove(gc, mc, {
+            tokens: serializeTokens(tokensRef.current),
+            currentTurn: mc,
+            turnPhase: 'roll',
+            diceValue: null,
+            consecutiveSixes: consecutiveSixesRef.current,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: turnStartedAtRef.current,
+            powerUps: serializeInventory(newInv),
+            activeBuffs: serializeBuffs(newBuffs),
+            boardEffects: serializeBoardEffects(boardEffectsRef.current),
+            coins: serializeCoins(coinsRef.current),
+          });
+        }
+        showHint('Star activated! Send opponents to start!');
+        return;
+      }
+
+      if (powerUpId === 'lightning-bolt') {
+        // Add lightning debuff to all opponents
+        const newBuffs = [...activeBuffsRef.current];
+        const activePlayers = TURN_ORDER.slice(0, activePlayerCountRef.current);
+        for (const c of activePlayers) {
+          if (c !== mc) {
+            newBuffs.push({ type: 'lightning' as const, playerColorIdx: colorIndex(c), duration: 2 });
+          }
+        }
+        const gc = gameCodeRef.current;
+        if (gc) {
+          makeMove(gc, mc, {
+            tokens: serializeTokens(tokensRef.current),
+            currentTurn: mc,
+            turnPhase: 'roll',
+            diceValue: null,
+            consecutiveSixes: consecutiveSixesRef.current,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: turnStartedAtRef.current,
+            powerUps: serializeInventory(newInv),
+            activeBuffs: serializeBuffs(newBuffs),
+            boardEffects: serializeBoardEffects(boardEffectsRef.current),
+            coins: serializeCoins(coinsRef.current),
+          });
+        }
+        showHint('Lightning! Opponents slowed!');
+        return;
+      }
+
+      // Super Mushroom, Golden Mushroom, Bullet Bill — set active for the next roll
+      setActivePowerUp({ id: powerUpId, slot });
+      // Write inventory change
+      const gc = gameCodeRef.current;
+      if (gc) {
+        makeMove(gc, mc, {
+          tokens: serializeTokens(tokensRef.current),
+          currentTurn: mc,
+          turnPhase: 'roll',
+          diceValue: null,
+          consecutiveSixes: consecutiveSixesRef.current,
+          winner: null,
+          finishOrder: finishOrderRef.current.join(','),
+          turnStartedAt: turnStartedAtRef.current,
+          powerUps: serializeInventory(newInv),
+          activeBuffs: serializeBuffs(activeBuffsRef.current),
+          boardEffects: serializeBoardEffects(boardEffectsRef.current),
+          coins: serializeCoins(coinsRef.current),
+        });
+      }
+      showHint(`${def.emoji} ${def.name} ready!`);
+      return;
+    }
+
+    if (def.timing === 'after-roll') {
+      const currentTokens = tokensRef.current;
+
+      if (powerUpId === 'green-shell' || powerUpId === 'red-shell') {
+        // Find shooter's token on track
+        const myIndices = getColorTokenIndices(mc);
+        let shooterTrack: number | null = null;
+        for (const i of myIndices) {
+          if (currentTokens[i].startsWith('track-')) {
+            shooterTrack = parseInt(currentTokens[i].split('-')[1]);
+            break;
+          }
+        }
+        if (shooterTrack === null) {
+          showHint('No tokens on track to shoot from!');
+          return;
+        }
+
+        const target = powerUpId === 'green-shell'
+          ? findFirstOpponentAhead(currentTokens, shooterTrack, mc)
+          : findNearestOpponentBehind(currentTokens, shooterTrack, mc);
+
+        if (target === null) {
+          showHint('No target found!');
+          return;
+        }
+
+        const newTokens = knockBack(currentTokens, target, 3);
+        const gc = gameCodeRef.current;
+        if (gc) {
+          makeMove(gc, mc, {
+            tokens: serializeTokens(newTokens),
+            currentTurn: mc,
+            turnPhase: turnPhaseRef.current,
+            diceValue: diceValueRef.current,
+            consecutiveSixes: consecutiveSixesRef.current,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: turnStartedAtRef.current,
+            powerUps: serializeInventory(newInv),
+            activeBuffs: serializeBuffs(activeBuffsRef.current),
+            boardEffects: serializeBoardEffects(boardEffectsRef.current),
+            coins: serializeCoins(coinsRef.current),
+          });
+        }
+        showHint(`${def.emoji} Hit! Knocked back 3!`);
+        return;
+      }
+
+      if (powerUpId === 'blue-shell') {
+        const target = findLeaderLeadToken(currentTokens, activePlayerCountRef.current, mc);
+        if (target === null) {
+          showHint('No leader to target!');
+          return;
+        }
+        const newTokens = knockBack(currentTokens, target, 5);
+        const gc = gameCodeRef.current;
+        if (gc) {
+          makeMove(gc, mc, {
+            tokens: serializeTokens(newTokens),
+            currentTurn: mc,
+            turnPhase: turnPhaseRef.current,
+            diceValue: diceValueRef.current,
+            consecutiveSixes: consecutiveSixesRef.current,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: turnStartedAtRef.current,
+            powerUps: serializeInventory(newInv),
+            activeBuffs: serializeBuffs(activeBuffsRef.current),
+            boardEffects: serializeBoardEffects(boardEffectsRef.current),
+            coins: serializeCoins(coinsRef.current),
+          });
+        }
+        showHint('Blue Shell! Leader knocked back 5!');
+        return;
+      }
+
+      if (powerUpId === 'warp-pipe') {
+        // Find the best token on track and warp it
+        const myIndices = getColorTokenIndices(mc);
+        let bestToken: number | null = null;
+        for (const i of myIndices) {
+          if (currentTokens[i].startsWith('track-')) {
+            bestToken = i;
+            break;
+          }
+        }
+        if (bestToken === null) {
+          showHint('No tokens on track!');
+          return;
+        }
+        const trackPos = parseInt(currentTokens[bestToken].split('-')[1]);
+        const safeZone = findNextSafeZone(trackPos, mc);
+        const newTokens = [...currentTokens] as TokenPosition[];
+        newTokens[bestToken] = `track-${safeZone}`;
+        const gc = gameCodeRef.current;
+        if (gc) {
+          makeMove(gc, mc, {
+            tokens: serializeTokens(newTokens),
+            currentTurn: mc,
+            turnPhase: turnPhaseRef.current,
+            diceValue: diceValueRef.current,
+            consecutiveSixes: consecutiveSixesRef.current,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: turnStartedAtRef.current,
+            powerUps: serializeInventory(newInv),
+            activeBuffs: serializeBuffs(activeBuffsRef.current),
+            boardEffects: serializeBoardEffects(boardEffectsRef.current),
+            coins: serializeCoins(coinsRef.current),
+          });
+        }
+        showHint('Warp Pipe! Teleported to safe zone!');
+        return;
+      }
+
+      if (powerUpId === 'cape-feather') {
+        // Set cape active — will be used in the next move execution
+        const newBuffs = [...activeBuffsRef.current, { type: 'cape' as const, playerColorIdx: colorIndex(mc), duration: 1 }];
+        const gc = gameCodeRef.current;
+        if (gc) {
+          makeMove(gc, mc, {
+            tokens: serializeTokens(currentTokens),
+            currentTurn: mc,
+            turnPhase: turnPhaseRef.current,
+            diceValue: diceValueRef.current,
+            consecutiveSixes: consecutiveSixesRef.current,
+            winner: null,
+            finishOrder: finishOrderRef.current.join(','),
+            turnStartedAt: turnStartedAtRef.current,
+            powerUps: serializeInventory(newInv),
+            activeBuffs: serializeBuffs(newBuffs),
+            boardEffects: serializeBoardEffects(boardEffectsRef.current),
+            coins: serializeCoins(coinsRef.current),
+          });
+        }
+        showHint('Cape Feather! Fly over opponents!');
+        return;
+      }
+
+      if (powerUpId === 'banana-peel') {
+        // Show placement UI
+        setPlacingBanana(true);
+        // Store the updated inventory so we can use it when placement completes
+        setActivePowerUp({ id: powerUpId, slot });
+        return;
+      }
+    }
+  }, [showHint, executeMove]);
+
+  // Golden Mushroom pick handler
+  const handleGoldenMushroomPick = useCallback((pickedRoll: number) => {
+    setGoldenMushroomRolls(null);
+    setDiceValue(pickedRoll);
+    diceAnimKeyRef.current += 1;
+    rolledThisTurnRef.current = true;
+
+    const gc = gameCodeRef.current;
+    const mc = myColorRef.current;
+    if (!gc || !mc) return;
+
+    const currentTokens = tokensRef.current;
+    const curColor = currentTurnRef.current;
+    const curSixes = consecutiveSixesRef.current;
+    const curFinishOrder = finishOrderRef.current;
+    const curPlayerCount = activePlayerCountRef.current;
+    const finishedColors = getFinishedColors(currentTokens, curPlayerCount);
+
+    const moves = getValidMoves(currentTokens, curColor, pickedRoll);
+
+    if (moves.length === 0) {
+      const nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
+      showHint('No valid moves');
+      const update: LudoMoveUpdate = {
+        tokens: serializeTokens(currentTokens),
+        currentTurn: nextColor,
+        turnPhase: 'roll',
+        diceValue: pickedRoll,
+        consecutiveSixes: 0,
+        winner: null,
+        finishOrder: curFinishOrder.join(','),
+        turnStartedAt: Date.now(),
+        powerUps: serializeInventory(inventoryRef.current),
+        activeBuffs: serializeBuffs(activeBuffsRef.current),
+        boardEffects: serializeBoardEffects(boardEffectsRef.current),
+        coins: serializeCoins(coinsRef.current),
+      };
+      makeMove(gc, mc, update).catch(() => { moveInFlightRef.current = false; });
+      return;
+    }
+
+    if (moves.length === 1) {
+      const m = moves[0];
+      autoMoveRef.current = setTimeout(() => {
+        const mc2 = myColorRef.current;
+        const capeOn = mc2 && powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(mc2), 'cape');
+        executeMove(m.tokenIndex, m.newPosition, pickedRoll, !!capeOn);
+      }, 400);
+      return;
+    }
+
+    setValidMoves(new Map(moves.map(m => [m.tokenIndex, m.newPosition])));
+    const update: LudoMoveUpdate = {
+      tokens: serializeTokens(currentTokens),
+      currentTurn: curColor,
+      turnPhase: 'move',
+      diceValue: pickedRoll,
+      consecutiveSixes: curSixes,
+      winner: null,
+      finishOrder: curFinishOrder.join(','),
+      turnStartedAt: Date.now(),
+      powerUps: serializeInventory(inventoryRef.current),
+      activeBuffs: serializeBuffs(activeBuffsRef.current),
+      boardEffects: serializeBoardEffects(boardEffectsRef.current),
+      coins: serializeCoins(coinsRef.current),
+    };
+    makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
+  }, [executeMove, showHint]);
+
+  // Banana peel placement handler
+  const handleBananaPlace = useCallback((cell: number) => {
+    setPlacingBanana(false);
+    const mc = myColorRef.current;
+    const gc = gameCodeRef.current;
+    if (!mc || !gc) return;
+
+    // Validate: don't place on safe zones or start positions
+    if (SAFE_ZONES.has(cell)) {
+      showHint("Can't place on a safe zone!");
+      setActivePowerUp(null);
+      return;
+    }
+
+    const newEffects = [...boardEffectsRef.current, { type: 'banana' as const, cell, ownerColorIdx: colorIndex(mc) }];
+    const newInv = removeFromInventory(inventoryRef.current, mc, activePowerUpRef.current?.slot ?? 0);
+    setActivePowerUp(null);
+
+    makeMove(gc, mc, {
+      tokens: serializeTokens(tokensRef.current),
+      currentTurn: mc,
+      turnPhase: turnPhaseRef.current,
+      diceValue: diceValueRef.current,
+      consecutiveSixes: consecutiveSixesRef.current,
+      winner: null,
+      finishOrder: finishOrderRef.current.join(','),
+      turnStartedAt: turnStartedAtRef.current,
+      powerUps: serializeInventory(newInv),
+      activeBuffs: serializeBuffs(activeBuffsRef.current),
+      boardEffects: serializeBoardEffects(newEffects),
+      coins: serializeCoins(coinsRef.current),
+    }).catch(() => {});
+    showHint('Banana peel placed!');
+  }, [showHint]);
+
+  // Discard handler for full inventory
+  // Uses direct Firebase update (not makeMove) since the turn may have already advanced
+  const handleDiscard = useCallback(async (slot: number) => {
+    const mc = myColorRef.current;
+    if (!mc || !pendingDiscard) return;
+    const newInv = discardSlot(inventoryRef.current, mc, slot, pendingDiscard);
+    setPendingDiscard(null);
+    showHint(`Got ${POWER_UPS[pendingDiscard].emoji} ${POWER_UPS[pendingDiscard].name}!`);
+
+    // Write just the powerUps field directly — this is safe because only inventory changes
+    const gc = gameCodeRef.current;
+    if (gc) {
+      try {
+        const { ensureInitialized, getDbModule, getFirebaseDatabase } = await import('../firebase');
+        await ensureInitialized();
+        const { ref, update } = getDbModule();
+        const db = getFirebaseDatabase();
+        const gameRef = ref(db, `ludo/${gc}`);
+        await update(gameRef, { powerUps: serializeInventory(newInv) });
+      } catch {
+        // Silent failure — inventory will sync on next state update
+      }
+    }
+  }, [pendingDiscard, showHint]);
 
   // Refs for handler functions (timer uses these)
   const handleRollDiceRef = useRef(handleRollDice);
@@ -1123,11 +1772,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       const isCurrentPlayer = myColorRef.current === currentTurnRef.current;
 
       // Primary: current player auto-acts at 0s
+      // Don't auto-act while power-up modals are open
+      const hasModalOpen = !!goldenMushroomRef.current || placingBananaRef.current || !!pendingDiscardRef.current;
       if (
         remaining <= 0 &&
         isCurrentPlayer &&
         !moveInFlightRef.current &&
-        !isRollingRef.current
+        !isRollingRef.current &&
+        !hasModalOpen
       ) {
         if (turnPhaseRef.current === 'roll') {
           handleRollDiceRef.current();
@@ -1138,7 +1790,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (moves.length > 0) {
               moveInFlightRef.current = true;
               const randomMove = moves[Math.floor(Math.random() * moves.length)];
-              executeMoveRef.current(randomMove.tokenIndex, randomMove.newPosition, dice);
+              const timerCape = powerUpsEnabledRef.current && myColorRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(myColorRef.current), 'cape');
+              executeMoveRef.current(randomMove.tokenIndex, randomMove.newPosition, dice, !!timerCape);
             }
           }
         }
@@ -1251,7 +1904,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const code = await createGame(sessionId, userName, playerCount);
+      const code = await createGame(sessionId, userName, playerCount, marioMode);
       setGameCode(code);
       setMyColor('red');
       setGamePhase('waiting');
@@ -1261,7 +1914,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, userName, playerCount]);
+  }, [sessionId, userName, playerCount, marioMode]);
 
   const handleJoinGame = useCallback(async () => {
     const code = joinCode.trim().toUpperCase();
@@ -1353,6 +2006,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       homeStuckRolls.current = 0;
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
+      // Reset power-up state
+      setInventory([[null, null], [null, null], [null, null], [null, null]]);
+      setBoardEffects([]);
+      setActiveBuffs([]);
+      setCoins([0, 0, 0, 0]);
+      setPendingDiscard(null);
+      setGoldenMushroomRolls(null);
+      setPlacingBanana(false);
+      setActivePowerUp(null);
       await resetGame(gc, activePlayerCountRef.current);
     } catch {
       // Silent failure for easter egg
@@ -1409,6 +2071,16 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     lastTwoRolls.current = [0, 0];
     dragCleanupRef.current?.();
     dragCleanupRef.current = null;
+    // Reset power-up state
+    setPowerUpsEnabled(false);
+    setInventory([[null, null], [null, null], [null, null], [null, null]]);
+    setBoardEffects([]);
+    setActiveBuffs([]);
+    setCoins([0, 0, 0, 0]);
+    setPendingDiscard(null);
+    setGoldenMushroomRolls(null);
+    setPlacingBanana(false);
+    setActivePowerUp(null);
   }, []);
 
   // --- Drag ---
@@ -1467,6 +2139,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const isSafe = SAFE_ZONES.has(cellNum);
     const startColor = START_CELL_COLORS[cellNum];
     const entryColor = ENTRY_ARROW_COLORS[cellNum];
+    const isMysteryBox = powerUpsEnabled && MYSTERY_BOX_CELLS.has(cellNum);
+    const hasBanana = powerUpsEnabled && boardEffects.some(e => e.type === 'banana' && e.cell === cellNum);
 
     const classes = [
       styles.cell,
@@ -1479,6 +2153,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       entryColor === 'green' ? styles.entryGreen : '',
       entryColor === 'yellow' ? styles.entryYellow : '',
       entryColor === 'blue' ? styles.entryBlue : '',
+      isMysteryBox ? styles.mysteryBox : '',
+      startColor ? styles.checkeredStart : '',
     ].filter(Boolean).join(' ');
 
     return (
@@ -1486,7 +2162,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         key={`track-${cellNum}`}
         className={classes}
         style={{ gridRow: row, gridColumn: col }}
-      />
+      >
+        {hasBanana && <span className={styles.bananaOverlay}>{'🍌'}</span>}
+      </div>
     );
   }
 
@@ -1645,6 +2323,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 </button>
               ))}
             </div>
+            <button
+              className={`${styles.marioModeBtn} ${marioMode ? styles.marioModeBtnActive : ''}`}
+              onClick={() => setMarioMode(!marioMode)}
+            >
+              {/* Mario-inspired M logo — red M shape */}
+              <svg className={styles.marioModeIcon} viewBox="0 0 24 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2 18V6L7 2L12 10L17 2L22 6V18" stroke={marioMode ? '#fff' : '#e4521b'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+              </svg>
+              <span>Power-Up Mode</span>
+              {marioMode && (
+                <span className={styles.marioModeCheck}>
+                  <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2 6L5 9L10 3" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none" /></svg>
+                </span>
+              )}
+            </button>
             <button
               className={styles.createBtn}
               onClick={handleCreateGame}
@@ -1911,6 +2604,34 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 )}
               </div>
 
+              {/* Power-up inventory (Mario Mode) */}
+              {powerUpsEnabled && myColor && !isSpectating && (
+                <LudoPowerUpPanel
+                  inventory={getInventoryForColor(inventory, myColor)}
+                  canUseBefore={isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
+                  canUseAfter={isMyTurn && turnPhase === 'move' && !winner && !gamePaused}
+                  onUse={handleUsePowerUp}
+                  coins={myColor ? coins[colorIndex(myColor)] : 0}
+                  isMyTurn={isMyTurn}
+                />
+              )}
+
+              {/* Active buff indicators */}
+              {powerUpsEnabled && activeBuffs.length > 0 && (
+                <div className={styles.activeBuffsBar}>
+                  {activeBuffs.map((buff, i) => {
+                    const buffColor = colorFromIndex(buff.playerColorIdx);
+                    return (
+                      <span key={i} className={styles.buffIndicator}>
+                        <span className={styles.buffPlayerDot} style={{ background: COLOR_HEX[buffColor] }} />
+                        {buff.type === 'star' ? '⭐' : buff.type === 'lightning' ? '⚡' : '🪶'}
+                        <span className={styles.buffDuration}>{buff.duration}</span>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Player bar */}
               <div className={`${styles.playerBar} ${styles.playerBarVertical}`}>
                 {TURN_ORDER.slice(0, activePlayerCount).map(color => {
@@ -2042,6 +2763,28 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               </div>
             )}
           </div>
+        )}
+
+        {/* Power-up modals */}
+        {pendingDiscard && myColor && (
+          <PowerUpDiscardModal
+            inventory={getInventoryForColor(inventory, myColor)}
+            newPowerUp={pendingDiscard}
+            onDiscard={handleDiscard}
+            onKeep={() => setPendingDiscard(null)}
+          />
+        )}
+        {goldenMushroomRolls && (
+          <GoldenMushroomModal
+            rolls={goldenMushroomRolls}
+            onPick={handleGoldenMushroomPick}
+          />
+        )}
+        {placingBanana && (
+          <BananaPeelPlacer
+            onPlace={handleBananaPlace}
+            onCancel={() => { setPlacingBanana(false); setActivePowerUp(null); }}
+          />
         )}
       </div>
     </div>

@@ -1409,6 +1409,556 @@
   transform: scale(0.95);
 }
 
+/* ========== MARIO MODE ========== */
+
+/* Mario Mode toggle button in lobby */
+.marioModeBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 24px;
+  background: none;
+  color: var(--text-secondary);
+  border: 2px solid var(--border-light);
+  border-radius: var(--radius-full);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.marioModeBtn:hover {
+  border-color: #e4521b;
+  color: var(--text-primary);
+  background: rgba(228, 82, 27, 0.06);
+  transform: scale(1.03);
+}
+
+.marioModeBtn:active {
+  transform: scale(0.97);
+  transition-duration: 80ms;
+}
+
+.marioModeBtnActive {
+  border-color: #e4521b;
+  background: linear-gradient(145deg, #ff5722 0%, #e4521b 40%, #c62828 100%);
+  color: white;
+  box-shadow:
+    0 3px 12px rgba(228, 82, 27, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  animation: marioGlow 3s ease-in-out infinite, marioActivate 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
+  overflow: visible;
+}
+
+/* Celebration sparkles on activation */
+.marioModeBtnActive::before,
+.marioModeBtnActive::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  animation: marioSparkle 800ms ease-out forwards;
+  pointer-events: none;
+}
+
+.marioModeBtnActive::before {
+  background: #ffd700;
+  top: -4px;
+  left: 20%;
+  box-shadow:
+    12px -8px 0 #ff5722,
+    24px -2px 0 #34a853,
+    -6px -10px 0 #4285f4,
+    30px -12px 0 #ffd700;
+}
+
+.marioModeBtnActive::after {
+  background: #ff5722;
+  top: -6px;
+  right: 20%;
+  box-shadow:
+    -8px -10px 0 #34a853,
+    6px -14px 0 #fbbc05,
+    14px -6px 0 #4285f4,
+    -14px -4px 0 #ff5722;
+}
+
+@keyframes marioSparkle {
+  0% { transform: scale(0); opacity: 1; }
+  50% { transform: scale(1.5); opacity: 0.8; }
+  100% { transform: scale(2) translateY(-10px); opacity: 0; }
+}
+
+@keyframes marioActivate {
+  0% { transform: scale(0.9); }
+  40% { transform: scale(1.08); }
+  70% { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+
+.marioModeBtnActive:hover {
+  background: linear-gradient(145deg, #ff7043 0%, #ff5722 40%, #e4521b 100%);
+  color: white;
+  transform: scale(1.03);
+}
+
+@keyframes marioGlow {
+  0%, 100% { box-shadow: 0 3px 12px rgba(228, 82, 27, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+  50% { box-shadow: 0 3px 20px rgba(228, 82, 27, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+}
+
+.marioModeIcon {
+  width: 22px;
+  height: 18px;
+  flex-shrink: 0;
+  transition: transform 300ms ease;
+}
+
+.marioModeBtnActive .marioModeIcon {
+  animation: mLogoJump 2.5s ease-in-out infinite;
+}
+
+@keyframes mLogoJump {
+  0%, 100% { transform: translateY(0) scale(1); }
+  20% { transform: translateY(-4px) scale(1.1); }
+  40% { transform: translateY(0) scale(1); }
+  55% { transform: translateY(-2px) scale(1.05); }
+  70% { transform: translateY(0) scale(1); }
+}
+
+.marioModeCheck {
+  display: flex;
+  align-items: center;
+  opacity: 0.9;
+  animation: checkPop 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes checkPop {
+  from { transform: scale(0) rotate(-20deg); opacity: 0; }
+  to { transform: scale(1) rotate(0); opacity: 0.9; }
+}
+
+/* Mystery Box cells — golden ? block inspired */
+.mysteryBox {
+  background: linear-gradient(160deg, #ffd54f 0%, #f5c542 25%, #e5a80d 55%, #cc8800 85%, #a56a00 100%) !important;
+  border: 1.5px solid #8b6914 !important;
+  animation: mysteryBob 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  position: relative;
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.45),
+    inset -1px -1px 0 rgba(0, 0, 0, 0.2),
+    0 1px 3px rgba(139, 105, 20, 0.4) !important;
+}
+
+.mysteryBox::after {
+  content: '?' !important;
+  position: absolute !important;
+  color: #fff !important;
+  font-size: 0.85em !important;
+  font-weight: 900 !important;
+  text-shadow:
+    0 0.5px 0 #a57200,
+    0 1px 0 #8b6014,
+    0 1.5px 3px rgba(0, 0, 0, 0.3);
+  opacity: 1 !important;
+  font-family: 'Arial Black', 'Impact', sans-serif;
+  letter-spacing: -0.5px;
+}
+
+@keyframes mysteryBob {
+  0%, 100% { transform: translateY(0); }
+  35% { transform: translateY(-2px); }
+  65% { transform: translateY(-2px); }
+}
+
+/* Checkered flag pattern on start cells */
+.checkeredStart {
+  background-image:
+    linear-gradient(45deg, rgba(255,255,255,0.2) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(255,255,255,0.2) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.2) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.2) 75%) !important;
+  background-size: 6px 6px !important;
+  background-position: 0 0, 0 3px, 3px -3px, -3px 0px !important;
+}
+
+/* Banana peel overlay on board cells */
+.bananaOverlay {
+  position: absolute;
+  font-size: 0.6em;
+  z-index: 5;
+  animation: bananaWobble 4s ease-in-out infinite;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
+  pointer-events: none;
+  line-height: 1;
+}
+
+@keyframes bananaWobble {
+  0%, 100% { transform: rotate(-12deg) scale(1); }
+  25% { transform: rotate(2deg) scale(1.05); }
+  50% { transform: rotate(8deg) scale(1); }
+  75% { transform: rotate(-4deg) scale(1.03); }
+}
+
+/* Power-up inventory panel */
+.powerUpPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.powerUpLabel {
+  font-size: 0.55rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.coinCount {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #d4940a;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.powerUpSlots {
+  display: flex;
+  gap: 6px;
+}
+
+.powerUpSlot {
+  width: 38px;
+  height: 38px;
+  border: 2px solid var(--border-light);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: all 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  background: var(--bg-primary);
+}
+
+.powerUpSlotFilled {
+  border-color: #d4a017;
+  background: linear-gradient(155deg, #fffce8 0%, #fef3c0 50%, #fde68a 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6),
+    inset 0 -1px 0 rgba(180, 130, 0, 0.15),
+    0 1px 4px rgba(180, 130, 0, 0.15);
+}
+
+.powerUpSlotUsable {
+  cursor: pointer;
+  border-color: #e4521b;
+  animation: slotPulse 2s ease-in-out infinite;
+  box-shadow: 0 0 10px rgba(228, 82, 27, 0.3);
+}
+
+.powerUpSlotUsable:hover {
+  transform: scale(1.15) rotate(-3deg);
+  box-shadow: 0 0 18px rgba(228, 82, 27, 0.5);
+}
+
+.powerUpSlotUsable:active {
+  transform: scale(0.9);
+  transition-duration: 80ms;
+}
+
+@keyframes slotPulse {
+  0%, 100% { box-shadow: 0 0 6px rgba(228, 82, 27, 0.2); transform: scale(1); }
+  50% { box-shadow: 0 0 14px rgba(228, 82, 27, 0.45); transform: scale(1.04); }
+}
+
+.powerUpEmoji {
+  font-size: 1.15rem;
+  line-height: 1;
+  transition: transform 200ms ease;
+}
+
+.powerUpSlotUsable:hover .powerUpEmoji {
+  transform: scale(1.15);
+}
+
+.powerUpEmpty {
+  font-size: 0.85rem;
+  color: #d4a017;
+  opacity: 0.2;
+  font-weight: 900;
+  font-family: 'Arial Black', 'Impact', sans-serif;
+  text-shadow: 0 1px 0 rgba(180, 130, 0, 0.15);
+}
+
+/* Power-up acquisition flash */
+.powerUpSlotFilled {
+  animation: itemGet 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes itemGet {
+  0% { transform: scale(0.7); box-shadow: 0 0 0 0 rgba(245, 197, 66, 0); }
+  40% { transform: scale(1.15); box-shadow: 0 0 16px 4px rgba(245, 197, 66, 0.4); }
+  100% { transform: scale(1); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), inset 0 -1px 0 rgba(180, 130, 0, 0.15), 0 1px 4px rgba(180, 130, 0, 0.15); }
+}
+
+/* Power-up tooltip */
+.powerUpTooltip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  animation: tooltipIn 150ms ease-out;
+  pointer-events: none;
+}
+
+@keyframes tooltipIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.powerUpTooltipName {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.powerUpTooltipDesc {
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+}
+
+.powerUpTooltipUse {
+  font-size: 0.55rem;
+  color: #e4521b;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+/* Active buffs bar */
+.activeBuffsBar {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.buffIndicator {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 6px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  animation: buffGlow 2s ease-in-out infinite;
+}
+
+.buffPlayerDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.buffDuration {
+  font-size: 0.55rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+@keyframes buffGlow {
+  0%, 100% { box-shadow: 0 0 4px rgba(255, 215, 0, 0.15); }
+  50% { box-shadow: 0 0 10px rgba(255, 215, 0, 0.35); }
+}
+
+/* Discard / Golden Mushroom / Banana modal overlays */
+.discardOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(3px);
+  border-radius: inherit;
+  animation: overlayFadeIn 200ms ease-out;
+}
+
+.discardCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 24px 32px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-medium);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  animation: cardPopIn 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  text-align: center;
+  min-width: 180px;
+}
+
+.discardTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.discardNew {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.discardNewEmoji {
+  font-size: 1.8rem;
+  animation: newItemBounce 600ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes newItemBounce {
+  0% { transform: scale(0); }
+  60% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.discardNewName {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.discardPrompt {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.discardSlots {
+  display: flex;
+  gap: 10px;
+}
+
+.discardSlotBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 18px;
+  background: var(--bg-secondary);
+  border: 2px solid var(--border-light);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 1.6rem;
+  transition: all 250ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.discardSlotBtn:hover {
+  border-color: #e4521b;
+  background: rgba(228, 82, 27, 0.06);
+  transform: scale(1.1) translateY(-2px);
+  box-shadow: 0 4px 14px rgba(228, 82, 27, 0.2);
+}
+
+.discardSlotBtn:active {
+  transform: scale(0.95);
+  transition-duration: 80ms;
+}
+
+.discardSlotName {
+  font-size: 0.6rem;
+  color: var(--text-secondary);
+}
+
+.discardKeepBtn {
+  padding: 6px 16px;
+  background: none;
+  color: var(--text-muted);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.discardKeepBtn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-medium);
+}
+
+/* Golden Mushroom roll picker */
+.goldenRolls {
+  display: flex;
+  gap: 12px;
+}
+
+.goldenRollBtn {
+  width: 56px;
+  height: 56px;
+  border: 2.5px solid #d4a017;
+  border-radius: 12px;
+  background: linear-gradient(155deg, #fffce8 0%, #fef3c0 50%, #fde68a 100%);
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #7a5600;
+  cursor: pointer;
+  transition: all 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 3px 10px rgba(180, 130, 0, 0.2);
+  animation: goldenAppear 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes goldenAppear {
+  from { opacity: 0; transform: scale(0.5) rotate(-10deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+.goldenRollBtn:nth-child(2) { animation-delay: 80ms; }
+.goldenRollBtn:nth-child(3) { animation-delay: 160ms; }
+
+.goldenRollBtn:hover {
+  border-color: #f5c542;
+  transform: scale(1.15) translateY(-3px);
+  box-shadow:
+    0 6px 20px rgba(245, 197, 66, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  background: linear-gradient(155deg, #fff8dc 0%, #fde68a 50%, #f5c542 100%);
+  color: #5a3e00;
+}
+
+.goldenRollBtn:active {
+  transform: scale(0.95);
+  transition-duration: 80ms;
+}
+
+/* Banana placement input area */
+.bananaInput {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .popup,
   .token,
@@ -1440,7 +1990,15 @@
   .boardColumn,
   .gameOverOverlay,
   .gameOverCard,
-  .gameOverTrophy {
+  .gameOverTrophy,
+  .mysteryBox,
+  .bananaOverlay,
+  .powerUpSlotUsable,
+  .buffIndicator,
+  .discardOverlay,
+  .discardCard,
+  .discardNewEmoji,
+  .newItemBounce {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

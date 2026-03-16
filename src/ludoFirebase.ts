@@ -31,6 +31,12 @@ export interface LudoGameState {
   startedAt: number | null;
   turnStartedAt: number;
   playerCount: number;
+  // Mario Mode power-up fields (optional for backwards compat)
+  powerUpsEnabled?: boolean;
+  powerUps?: string;        // Serialized inventory (2-char codes, 4 players × 2 slots)
+  boardEffects?: string;    // Persistent board effects (banana peels, etc.)
+  activeBuffs?: string;     // Duration-based buffs (star, lightning, etc.)
+  coins?: string;           // Coin counts per player "R:G:Y:B"
 }
 
 export interface LudoMoveUpdate {
@@ -42,6 +48,11 @@ export interface LudoMoveUpdate {
   winner: LudoColor | null;
   finishOrder: string;
   turnStartedAt: number;
+  // Mario Mode fields (optional)
+  powerUps?: string;
+  boardEffects?: string;
+  activeBuffs?: string;
+  coins?: string;
 }
 
 // --- Serialization ---
@@ -87,7 +98,8 @@ const JOIN_ORDER: LudoColor[] = ['green', 'yellow', 'blue'];
 export async function createGame(
   sessionId: string,
   userName: string,
-  playerCount: number
+  playerCount: number,
+  powerUpsEnabled = false
 ): Promise<string> {
   await ensureInitialized();
   const { ref, get, set } = getDbModule();
@@ -114,6 +126,13 @@ export async function createGame(
         startedAt: null,
         turnStartedAt: Date.now(),
         playerCount,
+        ...(powerUpsEnabled ? {
+          powerUpsEnabled: true,
+          powerUps: '__'.repeat(8),
+          boardEffects: '',
+          activeBuffs: '',
+          coins: '0:0:0:0',
+        } : {}),
       };
       await set(gameRef, initialState);
       return code;
@@ -284,6 +303,12 @@ export async function resetGame(code: string, playerCount: number): Promise<void
   const randomFirst = activePlayers[arr[0] % activePlayers.length];
 
   const gameRef = ref(db, `ludo/${code}`);
+  // Read current state to check if power-ups are enabled
+  const { get: dbGet } = getDbModule();
+  const snap = await dbGet(gameRef);
+  const current = snap.val() as LudoGameState | null;
+  const hasPowerUps = current?.powerUpsEnabled === true;
+
   await update(gameRef, {
     tokens: INITIAL_TOKENS,
     currentTurn: randomFirst,
@@ -295,5 +320,11 @@ export async function resetGame(code: string, playerCount: number): Promise<void
     startedAt: Date.now(),
     turnStartedAt: Date.now(),
     playerCount,
+    ...(hasPowerUps ? {
+      powerUps: '__'.repeat(8),
+      boardEffects: '',
+      activeBuffs: '',
+      coins: '0:0:0:0',
+    } : {}),
   });
 }
