@@ -2,6 +2,13 @@ import { useState } from 'react';
 import { POWER_UPS, type PowerUpId } from '../ludoPowerUps';
 import styles from './LudoGame.module.css';
 
+// All power-ups in display order for the info popup
+const ALL_POWERUPS: PowerUpId[] = [
+  'super-mushroom', 'golden-mushroom', 'bullet-bill', 'star', 'lightning-bolt',
+  'green-shell', 'red-shell', 'blue-shell', 'banana-peel',
+  'warp-pipe', 'cape-feather', 'coin-block',
+];
+
 interface PowerUpPanelProps {
   inventory: (PowerUpId | null)[];
   canUseBefore: boolean;  // can use before-roll power-ups
@@ -13,6 +20,7 @@ interface PowerUpPanelProps {
 
 export function LudoPowerUpPanel({ inventory, canUseBefore, canUseAfter, onUse, coins, isMyTurn }: PowerUpPanelProps) {
   const [hoveredSlot, setHoveredSlot] = useState<number | null>(null);
+  const [showInfo, setShowInfo] = useState(false);
 
   return (
     <div className={styles.powerUpPanel}>
@@ -23,14 +31,57 @@ export function LudoPowerUpPanel({ inventory, canUseBefore, canUseAfter, onUse, 
             {'🪙'}{coins}/3
           </span>
         )}
+        <button
+          className={styles.powerUpInfoBtn}
+          onClick={() => setShowInfo(true)}
+          aria-label="Power-up info"
+        >
+          ?
+        </button>
       </div>
+
+      {/* Info popup */}
+      {showInfo && (
+        <div className={styles.discardOverlay} onClick={() => setShowInfo(false)}>
+          <div className={styles.powerUpInfoCard} onClick={e => e.stopPropagation()}>
+            <div className={styles.powerUpInfoHeader}>
+              <span className={styles.powerUpInfoTitle}>Power-Ups</span>
+              <button className={styles.powerUpInfoClose} onClick={() => setShowInfo(false)}>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                  <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              </button>
+            </div>
+            <div className={styles.powerUpInfoList}>
+              {ALL_POWERUPS.map(id => {
+                const def = POWER_UPS[id];
+                return (
+                  <div key={id} className={styles.powerUpInfoRow}>
+                    <span className={styles.powerUpInfoEmoji}>{def.emoji}</span>
+                    <div className={styles.powerUpInfoText}>
+                      <span className={styles.powerUpInfoName}>{def.name}</span>
+                      <span className={styles.powerUpInfoDesc}>{def.description}</span>
+                    </div>
+                    <span className={styles.powerUpInfoTiming}>
+                      {def.timing === 'before-roll' ? 'Pre-roll' : def.timing === 'after-roll' ? 'Post-roll' : 'Auto'}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className={styles.powerUpInfoFooter}>
+              Land on golden ? blocks to collect items. Hold up to 2.
+            </div>
+          </div>
+        </div>
+      )}
       <div className={styles.powerUpSlots}>
         {inventory.map((powerUp, slot) => {
           const def = powerUp ? POWER_UPS[powerUp] : null;
-          const canUse = isMyTurn && def && (
+          const canUse = !!(isMyTurn && def && (
             (def.timing === 'before-roll' && canUseBefore) ||
             (def.timing === 'after-roll' && canUseAfter)
-          );
+          ));
 
           return (
             <div
