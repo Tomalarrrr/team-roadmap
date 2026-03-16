@@ -47,34 +47,36 @@ export async function createGame(
   playerCount: number
 ): Promise<string> {
   await ensureInitialized();
-  const { ref, get, set } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateGameCode();
     const gameRef = ref(db, `snakes/${code}`);
-    const snapshot = await get(gameRef);
 
-    if (!snapshot.exists()) {
-      const initialPositions = serializePositions(new Array(playerCount).fill(0));
-      const initialState: SnakesGameState = {
-        players: {
-          p0: { sessionId, name: userName },
-        },
-        positions: initialPositions,
-        currentTurn: 0,
-        diceValue: null,
-        consecutiveSixes: 0,
-        winner: null,
-        createdAt: Date.now(),
-        startedAt: null,
-        turnStartedAt: Date.now(),
-        playerCount,
-        moveLog: '',
-      };
-      await set(gameRef, initialState);
-      return code;
-    }
+    const initialPositions = serializePositions(new Array(playerCount).fill(0));
+    const initialState: SnakesGameState = {
+      players: {
+        p0: { sessionId, name: userName },
+      },
+      positions: initialPositions,
+      currentTurn: 0,
+      diceValue: null,
+      consecutiveSixes: 0,
+      winner: null,
+      createdAt: Date.now(),
+      startedAt: null,
+      turnStartedAt: Date.now(),
+      playerCount,
+      moveLog: '',
+    };
+
+    // Atomic create: only succeeds if code doesn't already exist
+    const result = await runTransaction(gameRef, (current: SnakesGameState | null) => {
+      if (current !== null) return; // Abort — code already taken
+      return initialState;
+    });
+    if (result.committed) return code;
   }
 
   throw new Error('Failed to generate unique game code. Try again.');
@@ -104,19 +106,6 @@ export async function joinGame(
       if (players[`p${i}`]?.sessionId === sessionId) {
         assignedSlot = i;
         return current; // No change
-      }
-    }
-
-    // Reconnection by name
-    const normalName = userName.trim().toLowerCase();
-    for (let i = 0; i < current.playerCount; i++) {
-      const key = `p${i}`;
-      if (players[key]?.name?.trim().toLowerCase() === normalName) {
-        assignedSlot = i;
-        return {
-          ...current,
-          players: { ...players, [key]: { ...players[key], sessionId } },
-        };
       }
     }
 

@@ -185,18 +185,6 @@ export async function joinGame(
       }
     }
 
-    // Reconnection by name
-    const normalName = userName.trim().toLowerCase();
-    for (const color of allColors) {
-      const player = current.players[color];
-      if (player && player.name.trim().toLowerCase() === normalName) {
-        return {
-          ...current,
-          players: { ...current.players, [color]: { ...player, sessionId } },
-        };
-      }
-    }
-
     // Find empty slot
     const maxSlots = current.playerCount;
     const availableColors = JOIN_ORDER.slice(0, maxSlots - 1);

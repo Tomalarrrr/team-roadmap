@@ -43,7 +43,9 @@ function areMilestonePropsEqual(prevProps: MilestoneLineProps, nextProps: Milest
         prevProps.milestone?.startDate !== nextProps.milestone?.startDate ||
         prevProps.milestone?.endDate !== nextProps.milestone?.endDate ||
         prevProps.milestone?.title !== nextProps.milestone?.title ||
-        prevProps.milestone?.statusColor !== nextProps.milestone?.statusColor) {
+        prevProps.milestone?.statusColor !== nextProps.milestone?.statusColor ||
+        prevProps.milestone?.tags?.length !== nextProps.milestone?.tags?.length ||
+        prevProps.milestone?.tags?.some((t, i) => t !== nextProps.milestone?.tags?.[i])) {
       return false;
     }
 
@@ -641,6 +643,13 @@ const MilestoneLineComponent = memo(function MilestoneLine({
           {tooltipStatusLabel && (
             <div className={styles.tooltipStatus} style={!isPast ? { color: displayColor } : undefined}>
               {tooltipStatusLabel}
+            </div>
+          )}
+          {milestone.tags?.length > 0 && (
+            <div className={styles.tooltipTags}>
+              {milestone.tags.map((tag, i) => (
+                <span key={`${tag}-${i}`} className={styles.tag}>{tag}</span>
+              ))}
             </div>
           )}
           <div className={styles.tooltipHint}>

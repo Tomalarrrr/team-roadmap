@@ -125,6 +125,24 @@
             "sessionId": { ".validate": "newData.isString()" },
             "name": { ".validate": "newData.isString() && newData.val().length <= 50" }
           }
+        },
+        "powerUps": {
+          ".validate": "newData.isString() && newData.val().length <= 500"
+        },
+        "boardEffects": {
+          ".validate": "newData.isString() && newData.val().length <= 500"
+        },
+        "activeBuffs": {
+          ".validate": "newData.isString() && newData.val().length <= 500"
+        },
+        "coins": {
+          ".validate": "newData.isString() && newData.val().matches(/^[0-9,]+$/) && newData.val().length <= 20"
+        },
+        "mysteryBoxes": {
+          ".validate": "newData.isString() && newData.val().length <= 500"
+        },
+        "marioMode": {
+          ".validate": "newData.isBoolean()"
         }
       }
     },

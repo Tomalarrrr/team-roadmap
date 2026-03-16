@@ -51,7 +51,7 @@ import {
   type MysteryBoxState,
   type ActiveBuff,
 } from '../ludoPowerUps';
-import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal, BananaPeelPlacer } from './LudoPowerUpPanel';
+import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal } from './LudoPowerUpPanel';
 import styles from './LudoGame.module.css';
 
 // --- Constants ---
@@ -583,7 +583,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const [mysteryBoxes, setMysteryBoxes] = useState<MysteryBoxState[]>([]);
   const [pendingDiscard, setPendingDiscard] = useState<PowerUpId | null>(null);
   const [goldenMushroomRolls, setGoldenMushroomRolls] = useState<[number, number, number] | null>(null);
-  const [placingBanana, setPlacingBanana] = useState(false);
   const [activePowerUp, setActivePowerUp] = useState<{ id: PowerUpId; slot: number } | null>(null);
 
   const inventoryRef = useRef(inventory);
@@ -602,8 +601,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   activePowerUpRef.current = activePowerUp;
   const goldenMushroomRef = useRef(goldenMushroomRolls);
   goldenMushroomRef.current = goldenMushroomRolls;
-  const placingBananaRef = useRef(placingBanana);
-  placingBananaRef.current = placingBanana;
   const pendingDiscardRef = useRef(pendingDiscard);
   pendingDiscardRef.current = pendingDiscard;
 
@@ -1841,41 +1838,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
   }, [executeMove, showHint]);
 
-  // Banana peel placement handler
-  const handleBananaPlace = useCallback((cell: number) => {
-    setPlacingBanana(false);
-    const mc = myColorRef.current;
-    const gc = gameCodeRef.current;
-    if (!mc || !gc) return;
-
-    // Validate: don't place on safe zones or start positions
-    if (SAFE_ZONES.has(cell)) {
-      showHint("Can't place on a safe zone!");
-      setActivePowerUp(null);
-      return;
-    }
-
-    const newEffects = [...boardEffectsRef.current, { type: 'banana' as const, cell, ownerColorIdx: colorIndex(mc) }];
-    const newInv = removeFromInventory(inventoryRef.current, mc, activePowerUpRef.current?.slot ?? 0);
-    setActivePowerUp(null);
-
-    makeMove(gc, mc, {
-      tokens: serializeTokens(tokensRef.current),
-      currentTurn: mc,
-      turnPhase: turnPhaseRef.current,
-      diceValue: diceValueRef.current,
-      consecutiveSixes: consecutiveSixesRef.current,
-      winner: null,
-      finishOrder: finishOrderRef.current.join(','),
-      turnStartedAt: turnStartedAtRef.current,
-      powerUps: serializeInventory(newInv),
-      activeBuffs: serializeBuffs(activeBuffsRef.current),
-      boardEffects: serializeBoardEffects(newEffects),
-      coins: serializeCoins(coinsRef.current),
-    }).catch(() => {});
-    showHint('Banana peel placed!');
-  }, [showHint]);
-
   // Discard handler for full inventory
   // Uses a transaction to read-modify-write only this player's inventory slot,
   // preventing concurrent overwrites of other players' items.
@@ -1943,7 +1905,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
       // Primary: current player auto-acts at 0s
       // Don't auto-act while power-up modals are open
-      const hasModalOpen = !!goldenMushroomRef.current || placingBananaRef.current || !!pendingDiscardRef.current;
+      const hasModalOpen = !!goldenMushroomRef.current || !!pendingDiscardRef.current;
       if (
         remaining <= 0 &&
         isCurrentPlayer &&
@@ -2289,7 +2251,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setCoins([0, 0, 0, 0]);
       setPendingDiscard(null);
       setGoldenMushroomRolls(null);
-      setPlacingBanana(false);
       setActivePowerUp(null);
       await resetGame(gc, activePlayerCountRef.current);
     } catch {
@@ -2355,7 +2316,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setCoins([0, 0, 0, 0]);
     setPendingDiscard(null);
     setGoldenMushroomRolls(null);
-    setPlacingBanana(false);
     setActivePowerUp(null);
     setGamePaused(false);
     gamePausedRef.current = false;
@@ -3079,12 +3039,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           <GoldenMushroomModal
             rolls={goldenMushroomRolls}
             onPick={handleGoldenMushroomPick}
-          />
-        )}
-        {placingBanana && (
-          <BananaPeelPlacer
-            onPlace={handleBananaPlace}
-            onCancel={() => { setPlacingBanana(false); setActivePowerUp(null); }}
           />
         )}
       </div>

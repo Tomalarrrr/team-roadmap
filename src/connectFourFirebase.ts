@@ -23,31 +23,33 @@ export interface ConnectFourGameState {
 
 export async function createGame(sessionId: string, userName: string): Promise<string> {
   await ensureInitialized();
-  const { ref, get, set } = getDbModule();
+  const { ref, runTransaction } = getDbModule();
   const db = getFirebaseDatabase();
 
   // Try up to 5 codes to avoid collisions
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateGameCode();
     const gameRef = ref(db, `connectFour/${code}`);
-    const snapshot = await get(gameRef);
 
-    if (!snapshot.exists()) {
-      const initialState: ConnectFourGameState = {
-        board: '.'.repeat(48),
-        currentTurn: 'red',
-        winner: null,
-        winningCells: null,
-        startingColor: 'red',
-        turnStartedAt: Date.now(),
-        players: {
-          red: { sessionId, name: userName },
-        },
-        createdAt: Date.now(),
-      };
-      await set(gameRef, initialState);
-      return code;
-    }
+    const initialState: ConnectFourGameState = {
+      board: '.'.repeat(48),
+      currentTurn: 'red',
+      winner: null,
+      winningCells: null,
+      startingColor: 'red',
+      turnStartedAt: Date.now(),
+      players: {
+        red: { sessionId, name: userName },
+      },
+      createdAt: Date.now(),
+    };
+
+    // Atomic create: only succeeds if code doesn't already exist
+    const result = await runTransaction(gameRef, (current: ConnectFourGameState | null) => {
+      if (current !== null) return; // Abort — code already taken
+      return initialState;
+    });
+    if (result.committed) return code;
   }
 
   throw new Error('Failed to generate unique game code. Try again.');
@@ -84,17 +86,8 @@ export async function joinGame(
       return current; // No change
     }
 
-    // Reconnection by name (handles tab close → new sessionId)
-    const normalName = userName.trim().toLowerCase();
+    // If yellow slot is taken and sessionId didn't match, game is full
     if (players.yellow) {
-      if (players.yellow.name.trim().toLowerCase() === normalName) {
-        assignedColor = 'yellow';
-        return { ...current, players: { ...players, yellow: { ...players.yellow, sessionId } } };
-      }
-      if (players.red.name.trim().toLowerCase() === normalName) {
-        assignedColor = 'red';
-        return { ...current, players: { ...players, red: { ...players.red, sessionId } } };
-      }
       joinError = 'Game is full';
       return; // Abort transaction
     }
