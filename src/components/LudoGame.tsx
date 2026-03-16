@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useGamePause } from '../hooks/useGamePause';
 import {
   createGame,
   joinGame,
@@ -7,6 +6,7 @@ import {
   subscribeToGame,
   makeMove,
   resetGame,
+  toggleGamePause,
   serializeTokens,
   deserializeTokens,
   type LudoColor,
@@ -483,10 +483,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const sessionId = sessionStorage.getItem('roadmap-user-id') || 'anonymous';
   const userName = sessionStorage.getItem('roadmap-user-name') || 'Player';
 
-  // Multiplayer state
-  const { paused: gamePaused, togglePause: toggleGamePause } = useGamePause();
-  const gamePausedRef = useRef(gamePaused);
-  gamePausedRef.current = gamePaused;
+  // Per-game pause state (synced via Firebase game subscription)
+  const [gamePaused, setGamePaused] = useState(false);
+  const gamePausedRef = useRef(false);
 
   const [gamePhase, setGamePhase] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
   const [gameCode, setGameCode] = useState<string | null>(null);
@@ -929,6 +928,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (state.mysteryBoxes) setMysteryBoxes(deserializeMysteryBoxes(state.mysteryBoxes));
       }
 
+      // Per-game pause state
+      const isPaused = !!state.paused;
+      setGamePaused(isPaused);
+      gamePausedRef.current = isPaused;
+
       if (state.winner) {
         setWinner(state.winner);
         setShowBurst(true);
@@ -1216,6 +1220,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const gc = gameCodeRef.current;
     const mc = myColorRef.current;
     if (!gc || !mc) return;
+    if (gamePausedRef.current) return;
     if (introPhaseRef.current === 'running') return;
     if (currentTurnRef.current !== mc || turnPhaseRef.current !== 'roll') return;
     if (winnerRef.current || isRollingRef.current || moveInFlightRef.current) return;
@@ -1444,6 +1449,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const handleMoveToken = useCallback((tokenIndex: number) => {
     const mc = myColorRef.current;
     if (!mc) return;
+    if (gamePausedRef.current) return;
     if (currentTurnRef.current !== mc || turnPhaseRef.current !== 'move') return;
     if (winnerRef.current || moveInFlightRef.current) return;
     if (gamePausedRef.current) return;
@@ -2204,6 +2210,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setGoldenMushroomRolls(null);
     setPlacingBanana(false);
     setActivePowerUp(null);
+    setGamePaused(false);
+    gamePausedRef.current = false;
   }, []);
 
   // --- Drag ---
@@ -2404,18 +2412,20 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             <span className={styles.spectateBadge}>Spectating</span>
           )}
         </span>
-        <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={toggleGamePause} aria-label={gamePaused ? 'Resume all games' : 'Pause all games'}>
-          {gamePaused ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
-              <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
-            </svg>
-          )}
-        </button>
+        {gamePhase === 'playing' && !winner && (
+          <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={() => gameCode && toggleGamePause(gameCode)} aria-label={gamePaused ? 'Resume game' : 'Pause game'}>
+            {gamePaused ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+                <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+              </svg>
+            )}
+          </button>
+        )}
         <button className={styles.closeBtn} onClick={onClose} aria-label="Close Ludo">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -2424,9 +2434,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       </div>
 
       {gamePaused && gamePhase === 'playing' && (
-        <div className={styles.pauseOverlay}>
+        <div className={styles.pauseOverlay} onClick={() => gameCode && toggleGamePause(gameCode)} role="button">
+          <svg className={styles.pauseIcon} width="120" height="120" viewBox="0 0 120 120" fill="none">
+            <circle cx="60" cy="60" r="56" stroke="white" strokeWidth="4" opacity="0.3" />
+            <rect x="38" y="32" width="14" height="56" rx="4" fill="white" />
+            <rect x="68" y="32" width="14" height="56" rx="4" fill="white" />
+          </svg>
           <div className={styles.pauseText}>PAUSED</div>
-          <button className={styles.pauseResumeBtn} onClick={toggleGamePause}>Resume</button>
+          <div className={styles.pauseSubtext}>Tap anywhere to resume</div>
         </div>
       )}
 

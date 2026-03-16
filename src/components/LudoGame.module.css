@@ -86,36 +86,47 @@
 .pauseOverlay {
   position: absolute;
   inset: 0;
-  z-index: 100;
-  background: rgba(0, 0, 0, 0.75);
+  z-index: 200;
+  background: rgba(10, 10, 15, 0.92);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
+  gap: 20px;
   border-radius: inherit;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: pauseFadeIn 300ms ease-out;
+}
+
+@keyframes pauseFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.pauseIcon {
+  opacity: 0.9;
+  animation: pausePulse 2s ease-in-out infinite;
+}
+
+@keyframes pausePulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.05); opacity: 1; }
 }
 
 .pauseText {
-  font-size: 2rem;
+  font-size: 1.8rem;
   font-weight: 700;
   color: white;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
 }
 
-.pauseResumeBtn {
-  padding: 8px 24px;
-  background: white;
-  color: #111;
-  font-size: 0.9rem;
-  font-weight: 600;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: transform 100ms ease;
-}
-
-.pauseResumeBtn:hover {
-  transform: scale(1.05);
+.pauseSubtext {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+  letter-spacing: 0.05em;
 }
 
 /* Game area */

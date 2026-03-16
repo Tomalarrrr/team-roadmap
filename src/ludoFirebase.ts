@@ -39,6 +39,8 @@ export interface LudoGameState {
   activeBuffs?: string;     // Duration-based buffs (star, lightning, etc.)
   coins?: string;           // Coin counts per player "R:G:Y:B"
   mysteryBoxes?: string;    // Active mystery box cells + cooldowns "cell:cd,cell:cd,..."
+  paused?: boolean;         // Per-game pause state
+  pausedAt?: number;        // Timestamp when paused (to adjust turnStartedAt on resume)
 }
 
 export interface LudoMoveUpdate {
@@ -279,6 +281,31 @@ export async function makeMove(
   });
 
   return result.committed;
+}
+
+export async function toggleGamePause(code: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `ludo/${code}`);
+  await runTransaction(gameRef, (current: LudoGameState | null) => {
+    if (!current) return current;
+    const isPaused = !current.paused;
+    if (isPaused) {
+      // Pausing: record when we paused
+      return { ...current, paused: true, pausedAt: Date.now() };
+    } else {
+      // Resuming: adjust turnStartedAt by how long we were paused
+      const pauseDuration = current.pausedAt ? Date.now() - current.pausedAt : 0;
+      return {
+        ...current,
+        paused: false,
+        pausedAt: null,
+        turnStartedAt: (current.turnStartedAt || 0) + pauseDuration,
+      };
+    }
+  });
 }
 
 export async function spectateGame(code: string): Promise<LudoGameState> {
