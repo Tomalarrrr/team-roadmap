@@ -124,7 +124,11 @@ export function useRoadmap() {
 
   // Track pending optimistic updates for rollback
   const pendingUpdateRef = useRef<RoadmapData | null>(null);
-  const isLocalUpdateRef = useRef(false);
+  // Counter-based local update tracking: each save increments, each Firebase echo
+  // decrements. Only treat incoming data as a remote change when counter is 0.
+  // This prevents rapid sequential saves from having their echoes overwrite
+  // optimistic state (the old boolean flag could only track one save at a time).
+  const localUpdateCountRef = useRef(0);
 
   // Debounce connection state to prevent rapid state flapping
   const connectionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -167,12 +171,10 @@ export function useRoadmap() {
           resubscribeAttempts = 0; // Reset on successful data
           isRecoveringRef.current = false;
 
-          // If we have a pending local update, merge instead of discarding
-          if (isLocalUpdateRef.current) {
-            isLocalUpdateRef.current = false;
-            const normalized = normalizeData(newData);
-            dataRef.current = normalized;
-            setData(normalized);
+          // If local saves are in flight, this echo is from our own write — decrement
+          // the counter and keep the current optimistic state instead of overwriting it.
+          if (localUpdateCountRef.current > 0) {
+            localUpdateCountRef.current--;
             setLoading(false);
             return;
           }
@@ -319,18 +321,23 @@ export function useRoadmap() {
     };
   }, []);
 
+  // Tracks how many optimisticSave calls are currently in-flight.
+  // Only clear the rollback snapshot when ALL have resolved.
+  const pendingSaveCountRef = useRef(0);
+
   // Optimistic save: update UI immediately, save in background, rollback on failure
   const optimisticSave = useCallback(async (newData: RoadmapData) => {
     // Capture pre-save state for rollback. On first concurrent save, snapshot current data.
     // Subsequent concurrent saves keep the original pre-save snapshot.
     const rollbackData = pendingUpdateRef.current ?? dataRef.current;
     pendingUpdateRef.current = rollbackData;
+    pendingSaveCountRef.current++;
 
     // Sanitize data to remove undefined values (Firebase rejects them)
     const sanitizedData = sanitizeForFirebase(normalizeData(newData));
 
     // Update both state and ref immediately (optimistic)
-    isLocalUpdateRef.current = true;
+    localUpdateCountRef.current++;
     dataRef.current = sanitizedData;
     setData(sanitizedData);
     setSaveError(null);
@@ -338,17 +345,20 @@ export function useRoadmap() {
 
     try {
       await saveWithRetry(sanitizedData);
-      pendingUpdateRef.current = null;
       setLastSaved(new Date());
     } catch (error) {
       // Rollback on failure to pre-save snapshot
       console.error('Save failed, rolling back:', error);
       dataRef.current = rollbackData;
       setData(rollbackData);
-      pendingUpdateRef.current = null;
       setSaveError(error instanceof Error ? error.message : 'Failed to save');
       throw error;
     } finally {
+      pendingSaveCountRef.current--;
+      // Only clear rollback snapshot when ALL concurrent saves have finished
+      if (pendingSaveCountRef.current === 0) {
+        pendingUpdateRef.current = null;
+      }
       finishSaving();
     }
   }, [startSaving, finishSaving]);
@@ -374,7 +384,7 @@ export function useRoadmap() {
 
     // Optimistic update
     const newMembers = currentData.teamMembers.map(m => m.id === memberId ? updatedMember : m);
-    isLocalUpdateRef.current = true;
+    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, teamMembers: newMembers };
     setData(dataRef.current);
     startSaving();
@@ -466,7 +476,7 @@ export function useRoadmap() {
 
     // Optimistic update
     const newProjects = currentData.projects.map(p => p.id === projectId ? updatedProject : p);
-    isLocalUpdateRef.current = true;
+    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
     startSaving();
@@ -551,7 +561,7 @@ export function useRoadmap() {
     const newProjects = currentData.projects.map(p =>
       p.id === projectId ? { ...p, milestones: newMilestones } : p
     );
-    isLocalUpdateRef.current = true;
+    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
     startSaving();
@@ -657,7 +667,7 @@ export function useRoadmap() {
 
     // Optimistic update
     const newDependencies = dependencies.map(d => d.id === dependencyId ? updatedDependency : d);
-    isLocalUpdateRef.current = true;
+    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, dependencies: newDependencies };
     setData(dataRef.current);
     startSaving();
@@ -699,7 +709,7 @@ export function useRoadmap() {
 
     // Optimistic update
     const newLeaveBlocks = leaveBlocks.map(l => l.id === leaveId ? updatedLeaveBlock : l);
-    isLocalUpdateRef.current = true;
+    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, leaveBlocks: newLeaveBlocks };
     setData(dataRef.current);
     startSaving();
