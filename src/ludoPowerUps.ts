@@ -140,7 +140,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
     emoji: '🍌',
     description: 'Drop on your square — whoever lands on it slips back 3',
     tier: 'uncommon',
-    timing: 'after-roll',
+    timing: 'before-roll',
   },
   'blue-shell': {
     id: 'blue-shell',

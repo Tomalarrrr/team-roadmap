@@ -380,9 +380,21 @@ function computeMovePath(
     const path: [number, number][] = [];
     let cur = parseInt(from.split('-')[1]);
     const target = parseInt(to.split('-')[1]);
-    while (cur !== target && path.length < TRACK_SIZE) {
-      cur = (cur % TRACK_SIZE) + 1;
-      path.push(TRACK_COORDS[cur]);
+    // Determine shortest direction: forward or backward
+    const fwd = target >= cur ? target - cur : TRACK_SIZE - cur + target;
+    const bwd = cur >= target ? cur - target : TRACK_SIZE - target + cur;
+    if (fwd <= bwd) {
+      // Go forward
+      while (cur !== target && path.length < TRACK_SIZE) {
+        cur = (cur % TRACK_SIZE) + 1;
+        path.push(TRACK_COORDS[cur]);
+      }
+    } else {
+      // Go backward (for knockback)
+      while (cur !== target && path.length < TRACK_SIZE) {
+        cur = cur === 1 ? TRACK_SIZE : cur - 1;
+        path.push(TRACK_COORDS[cur]);
+      }
     }
     return path;
   }
@@ -406,8 +418,10 @@ function computeMovePath(
     const path: [number, number][] = [];
     const fromN = parseInt(from.split('-')[1]);
     const toN = parseInt(to.split('-')[1]);
-    for (let i = fromN + 1; i <= toN; i++) {
-      path.push(FINAL_COORDS[color][i - 1]);
+    if (toN > fromN) {
+      for (let i = fromN + 1; i <= toN; i++) path.push(FINAL_COORDS[color][i - 1]);
+    } else {
+      for (let i = fromN - 1; i >= toN; i--) path.push(FINAL_COORDS[color][i - 1]);
     }
     return path;
   }
@@ -1024,6 +1038,24 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }
     }
 
+    // Auto-deploy banked coins: if a captured player has 3+ coins, redeploy their token immediately
+    if (powerUpsEnabledRef.current && captured) {
+      const updCoins = [...coinsRef.current];
+      for (let i = 0; i < TOTAL_TOKENS; i++) {
+        if (newTokens[i] === 'base' && currentTokens[i] !== 'base') {
+          const victColor = getTokenColor(i);
+          const vci = colorIndex(victColor);
+          if (updCoins[vci] >= 3) {
+            updCoins[vci] = 0;
+            const startPos: TokenPosition = `track-${START_POSITIONS[victColor]}`;
+            newTokens[i] = startPos;
+            showHint(`${COLOR_LABELS[victColor]} auto-deployed with banked coins!`);
+          }
+        }
+      }
+      coinsRef.current = updCoins;
+    }
+
     // Star buff: send anyone passed back to their start
     if (powerUpsEnabledRef.current) {
       const curBuffs = activeBuffsRef.current;
@@ -1114,16 +1146,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             const ci = colorIndex(curColor);
             updatedCoins[ci] = (updatedCoins[ci] || 0) + 1;
             if (updatedCoins[ci] >= 3) {
-              updatedCoins[ci] = 0;
               // Deploy a token from base to start position for free
               const myIndices = getColorTokenIndices(curColor);
               const baseToken = myIndices.find(i => newTokens[i] === 'base');
               if (baseToken !== undefined) {
+                updatedCoins[ci] = 0;
                 const startPos: TokenPosition = `track-${START_POSITIONS[curColor]}`;
                 newTokens[baseToken] = startPos;
                 showHint('3 coins! Free deploy!');
               } else {
-                showHint('3 coins! But no tokens in base');
+                // Bank coins — keep at 3 until a token goes back to base
+                showHint('3 coins banked! Auto-deploy when a token returns to base');
               }
             } else {
               showHint(`Coin! (${updatedCoins[ci]}/3)`);
