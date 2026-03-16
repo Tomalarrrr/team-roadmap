@@ -4,10 +4,13 @@ import { ensureInitialized, getDbModule, getFirebaseDatabase } from '../firebase
 let cachedPaused: boolean | null = null;
 let listeners = new Set<(paused: boolean) => void>();
 let globalUnsub: (() => void) | null = null;
+let initPromise: Promise<void> | null = null; // prevents duplicate listener race
 
 function startGlobalListener() {
-  if (globalUnsub) return;
-  ensureInitialized().then(() => {
+  if (globalUnsub || initPromise) return;
+  initPromise = ensureInitialized().then(() => {
+    // Re-check after async — another caller may have stopped while we awaited
+    if (listeners.size === 0) { initPromise = null; return; }
     const { ref, onValue } = getDbModule();
     const db = getFirebaseDatabase();
     const pauseRef = ref(db, 'gamePaused');
@@ -16,7 +19,8 @@ function startGlobalListener() {
       cachedPaused = val;
       listeners.forEach(fn => fn(val));
     });
-  });
+    initPromise = null;
+  }).catch(() => { initPromise = null; });
 }
 
 function stopGlobalListener() {

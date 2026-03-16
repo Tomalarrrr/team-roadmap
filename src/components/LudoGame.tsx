@@ -2373,6 +2373,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         ? (turnPhase === 'roll' ? 'Your turn — Roll!' : `Rolled ${diceValue} — Pick a token`)
         : `${playerNames[currentTurn] || COLOR_LABELS[currentTurn]}'s turn`;
 
+  // --- Pre-computed render data (avoids recalculating per cell) ---
+
+  const activeMysteryBoxSet = powerUpsEnabled ? getActiveMysteryBoxCells(mysteryBoxes) : new Set<number>();
+  const bananaCellSet = powerUpsEnabled
+    ? new Set(boardEffects.filter(e => e.type === 'banana').map(e => e.cell))
+    : new Set<number>();
+
   // --- Render helpers ---
 
   function renderTrackCell(cellNum: number) {
@@ -2380,9 +2387,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const isSafe = SAFE_ZONES.has(cellNum);
     const startColor = START_CELL_COLORS[cellNum];
     const entryColor = ENTRY_ARROW_COLORS[cellNum];
-    const activeMysteryBoxes = powerUpsEnabled ? getActiveMysteryBoxCells(mysteryBoxes) : new Set<number>();
-    const isMysteryBox = activeMysteryBoxes.has(cellNum);
-    const hasBanana = powerUpsEnabled && boardEffects.some(e => e.type === 'banana' && e.cell === cellNum);
+    const isMysteryBox = activeMysteryBoxSet.has(cellNum);
+    const hasBanana = bananaCellSet.has(cellNum);
 
     const classes = [
       styles.cell,

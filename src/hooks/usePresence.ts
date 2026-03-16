@@ -111,6 +111,12 @@ export function usePresence({
           }
         });
 
+        // If unmounted while awaiting, clean up immediately
+        if (!mounted) {
+          unsubscribe();
+          return;
+        }
+
         cleanupRef.current = unsubscribe;
 
         // Set up heartbeat (every 30 seconds)

@@ -63,7 +63,7 @@ export function useConflictDetection(): ConflictDetectionResult {
     resetTimeoutRef.current = setTimeout(() => {
       isLocalOperationRef.current = false;
       resetTimeoutRef.current = null;
-    }, 500);
+    }, 5000); // Must exceed max save retry time (3 retries × 500ms base + jitter)
   }, []);
 
   const markRemoteChange = useCallback(() => {
@@ -104,15 +104,19 @@ export function useConflictDetection(): ConflictDetectionResult {
  * Used to detect if data has actually changed.
  */
 export function hashData(data: RoadmapData): string {
-  // Simple but fast hash for change detection
+  // Hash structural IDs AND content fields so field-level edits are detected
   const str = JSON.stringify({
-    projectCount: data.projects.length,
-    projectIds: data.projects.map(p => p.id).sort(),
-    memberCount: data.teamMembers.length,
-    memberIds: data.teamMembers.map(m => m.id).sort(),
-    depCount: (data.dependencies || []).length,
-    leaveCount: (data.leaveBlocks || []).length,
-    markerCount: (data.periodMarkers || []).length
+    projects: data.projects.map(p => ({
+      id: p.id, title: p.title, owner: p.owner, startDate: p.startDate, endDate: p.endDate,
+      statusColor: p.statusColor,
+      milestones: (p.milestones || []).map(m => ({
+        id: m.id, title: m.title, startDate: m.startDate, endDate: m.endDate, statusColor: m.statusColor,
+      })).sort((a, b) => a.id.localeCompare(b.id)),
+    })).sort((a, b) => a.id.localeCompare(b.id)),
+    members: data.teamMembers.map(m => ({ id: m.id, name: m.name })).sort((a, b) => a.id.localeCompare(b.id)),
+    deps: (data.dependencies || []).map(d => ({ id: d.id, from: d.fromProjectId, to: d.toProjectId, type: d.type })).sort((a, b) => a.id.localeCompare(b.id)),
+    leaves: (data.leaveBlocks || []).map(l => ({ id: l.id, memberId: l.memberId, start: l.startDate, end: l.endDate })).sort((a, b) => a.id.localeCompare(b.id)),
+    markerCount: (data.periodMarkers || []).length,
   });
 
   // Simple hash
