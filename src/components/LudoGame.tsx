@@ -96,32 +96,32 @@ const TURN_ORDER: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
 const TRACK_COORDS: Record<number, [number, number]> = {
   // Left arm top row → right (red start)
   1: [7, 2],   2: [7, 3],   3: [7, 4],   4: [7, 5],   5: [7, 6],
-  // Top-left corner
-  6: [6, 6],
+  // Top-left corner (mapped to next cell — no visible cell here, inside base)
+  6: [6, 7],
   // Top arm left col → up
   7: [6, 7],   8: [5, 7],   9: [4, 7],   10: [3, 7],  11: [2, 7],  12: [1, 7],
   // Top arm top row → right
   13: [1, 8],  14: [1, 9],
   // Top arm right col → down (green start)
   15: [2, 9],  16: [3, 9],  17: [4, 9],  18: [5, 9],  19: [6, 9],
-  // Top-right corner
-  20: [6, 10],
+  // Top-right corner (mapped to next cell — no visible cell here, inside base)
+  20: [7, 10],
   // Right arm top row → right
   21: [7, 10], 22: [7, 11], 23: [7, 12], 24: [7, 13], 25: [7, 14], 26: [7, 15],
   // Right arm right col → down
   27: [8, 15], 28: [9, 15],
   // Right arm bottom row → left (yellow start)
   29: [9, 14], 30: [9, 13], 31: [9, 12], 32: [9, 11], 33: [9, 10],
-  // Bottom-right corner
-  34: [10, 10],
+  // Bottom-right corner (mapped to next cell — no visible cell here, inside base)
+  34: [10, 9],
   // Bottom arm right col → down
   35: [10, 9], 36: [11, 9], 37: [12, 9], 38: [13, 9], 39: [14, 9], 40: [15, 9],
   // Bottom arm bottom row → left
   41: [15, 8], 42: [15, 7],
   // Bottom arm left col → up (blue start)
   43: [14, 7], 44: [13, 7], 45: [12, 7], 46: [11, 7], 47: [10, 7],
-  // Bottom-left corner
-  48: [10, 6],
+  // Bottom-left corner (mapped to next cell — no visible cell here, inside base)
+  48: [9, 6],
   // Left arm bottom row → left
   49: [9, 6],  50: [9, 5],  51: [9, 4],  52: [9, 3],  53: [9, 2],  54: [9, 1],
   // Left arm left col → up
@@ -807,17 +807,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }
       prevTokensRef.current = state.tokens;
 
-      // Roll stats: read from Firebase (synced across all clients)
-      // Only update from Firebase when we're not mid-roll (prevents overwriting
-      // local roll recording before executeMove commits the capture count)
-      if (state.rollStats && !isRollingRef.current && !moveInFlightRef.current) {
+      // Roll stats: always sync from Firebase (authoritative source)
+      if (state.rollStats) {
         const parsed = deserializeRollStats(state.rollStats);
         setRollStats(parsed);
         rollStatsRef.current = parsed;
-      } else if (state.rollStats) {
-        // Still update display state (UI), but don't overwrite the ref
-        // so executeMove can build on the locally-recorded roll
-        setRollStats(deserializeRollStats(state.rollStats));
       }
 
       // Reset dice display when a new roll phase arrives (avoids showing stale value)
@@ -3035,12 +3029,46 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     );
   }
 
+  // Positions for finished tokens in the home center area (piled up per color quadrant)
+  const HOME_TOKEN_OFFSETS: [number, number][] = [
+    [-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25],
+  ];
+  const HOME_COLOR_CENTER: Record<LudoColor, [number, number]> = {
+    red: [7.7, 7.7], green: [7.7, 8.3], yellow: [8.3, 8.3], blue: [8.3, 7.7],
+  };
+
   function renderToken(idx: number) {
     const pos = tokens[idx];
     const animCoords = tokenAnimPos.current.get(idx);
 
-    // Keep rendering during animation even if token reached final-6
-    if ((pos === 'base' || pos === 'final-6') && !animCoords) return null;
+    // Tokens at base are rendered in renderBaseQuadrant; skip here unless animating
+    if (pos === 'base' && !animCoords) return null;
+
+    // Finished tokens (final-6): render as actual counters piled in home area
+    if (pos === 'final-6' && !animCoords) {
+      const color = getTokenColor(idx);
+      const indices = getColorTokenIndices(color);
+      const finishedBefore = indices.filter(i => i < idx && tokens[i] === 'final-6').length;
+      const center = HOME_COLOR_CENTER[color];
+      const offset = HOME_TOKEN_OFFSETS[finishedBefore % HOME_TOKEN_OFFSETS.length];
+      const row = center[0] + offset[0];
+      const col = center[1] + offset[1];
+      return (
+        <div
+          key={`token-${idx}`}
+          className={[
+            styles.token,
+            TOKEN_STYLE[color],
+            powerUpsEnabled ? styles.marioToken : '',
+            styles.tokenFinished,
+          ].filter(Boolean).join(' ')}
+          style={{
+            left: `${(col - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+            top: `${(row - 1) * CELL_PCT + TOKEN_PAD_PCT}%`,
+          }}
+        />
+      );
+    }
 
     const color = getTokenColor(idx);
     const localIdx = idx % TOKENS_PER_PLAYER;
@@ -3120,20 +3148,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     );
   }
 
-  function renderHomeCount(color: LudoColor) {
-    const indices = getColorTokenIndices(color);
-    const count = indices.filter(i => tokens[i] === 'final-6').length;
-    if (count === 0) return null;
-    return (
-      <span
-        key={`home-${color}`}
-        className={styles.homeCount}
-        style={{ background: COLOR_HEX[color] }}
-      >
-        {count}
-      </span>
-    );
-  }
+  // Home counts removed — finished tokens now render as actual counters in the home area
 
   // --- Render ---
 
@@ -3351,9 +3366,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   {TURN_ORDER.map(color => renderBaseQuadrant(color))}
 
                   {/* Center home */}
-                  <div className={styles.home}>
-                    {TURN_ORDER.map(color => renderHomeCount(color))}
-                  </div>
+                  <div className={styles.home} />
 
                   {/* Home corridors */}
                   <div className={`${styles.redFinal} ${activePlayerCount < 1 ? styles.corridorInactive : ''}`}>
