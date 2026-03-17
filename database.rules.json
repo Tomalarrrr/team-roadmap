@@ -199,6 +199,9 @@
         "flag": {
           ".validate": "newData.isString() && newData.val().length <= 30"
         },
+        "rollStats": {
+          ".validate": "newData.isString() && newData.val().length <= 200"
+        },
         "$other": { ".validate": false }
       }
     },
