@@ -199,9 +199,6 @@
         "flag": {
           ".validate": "newData.isString() && newData.val().length <= 30"
         },
-        "marioMode": {
-          ".validate": "newData.isBoolean()"
-        },
         "$other": { ".validate": false }
       }
     },

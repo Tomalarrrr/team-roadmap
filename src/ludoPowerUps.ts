@@ -589,16 +589,26 @@ export function findLeaderLeadToken(
 }
 
 /**
- * Get the best track position owned by a color (for shell targeting).
+ * Get the furthest-ahead track position owned by a color (for shell targeting).
  * Returns null if no tokens on track.
  */
 export function getBestTrackPosition(tokens: TokenPosition[], color: LudoColor): number | null {
   const indices = getColorTokenIndices(color);
+  const start = START_POSITIONS[color];
+  let best: number | null = null;
+  let bestDist = -1;
   for (const i of indices) {
     const pos = tokens[i];
-    if (pos.startsWith('track-')) return parseInt(pos.split('-')[1]);
+    if (pos.startsWith('track-')) {
+      const track = parseInt(pos.split('-')[1]);
+      const dist = track >= start ? track - start : (TRACK_SIZE - start) + track;
+      if (dist > bestDist) {
+        bestDist = dist;
+        best = track;
+      }
+    }
   }
-  return null;
+  return best;
 }
 
 /**

@@ -923,7 +923,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setTokens(parsedTokens);
       setCurrentTurn(state.currentTurn);
       setTurnPhase(state.turnPhase);
-      setDiceValue(state.diceValue);
+      setDiceValue(state.diceValue ?? null);
       setConsecutiveSixes(state.consecutiveSixes);
       setActivePlayerCount(state.playerCount);
       turnStartedAtRef.current = state.turnStartedAt;
@@ -1620,6 +1620,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
+            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+            flag: serializeFlag(flagStateRef.current),
           });
         }
         showHint('Star activated! Send opponents to start!');
@@ -1651,6 +1653,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
+            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+            flag: serializeFlag(flagStateRef.current),
           });
         }
         showHint('Lightning! Opponents slowed!');
@@ -1676,6 +1680,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           activeBuffs: serializeBuffs(activeBuffsRef.current),
           boardEffects: serializeBoardEffects(boardEffectsRef.current),
           coins: serializeCoins(coinsRef.current),
+          mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+          flag: serializeFlag(flagStateRef.current),
         });
       }
       showHint(`${def.emoji} ${def.name} ready!`);
@@ -1827,6 +1833,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(activeBuffsRef.current),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
+            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+            flag: serializeFlag(flagStateRef.current),
           });
         }
         showHint('Warp Pipe! Teleported to safe zone!');
@@ -1851,6 +1859,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
+            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+            flag: serializeFlag(flagStateRef.current),
           });
         }
         showHint('Cape Feather! Fly over opponents!');
@@ -1888,6 +1898,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(activeBuffsRef.current),
             boardEffects: serializeBoardEffects(newEffects),
             coins: serializeCoins(coinsRef.current),
+            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+            flag: serializeFlag(flagStateRef.current),
           });
         }
         showHint(`Banana peel placed on cell ${placedCell}!`);
@@ -1946,6 +1958,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         activeBuffs: serializeBuffs(activeBuffsRef.current),
         boardEffects: serializeBoardEffects(boardEffectsRef.current),
         coins: serializeCoins(coinsRef.current),
+        mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+        flag: serializeFlag(flagStateRef.current),
       };
       makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
       return;
@@ -1975,6 +1989,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       activeBuffs: serializeBuffs(activeBuffsRef.current),
       boardEffects: serializeBoardEffects(boardEffectsRef.current),
       coins: serializeCoins(coinsRef.current),
+      mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+      flag: serializeFlag(flagStateRef.current),
     };
     makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
   }, [executeMove, showHint]);
@@ -2096,6 +2112,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             winner: null,
             finishOrder: curFinishOrder.join(','),
             turnStartedAt: Date.now(),
+            ...(powerUpsEnabledRef.current ? {
+              powerUps: serializeInventory(inventoryRef.current),
+              activeBuffs: serializeBuffs(activeBuffsRef.current),
+              boardEffects: serializeBoardEffects(boardEffectsRef.current),
+              coins: serializeCoins(coinsRef.current),
+              mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+              flag: serializeFlag(flagStateRef.current),
+            } : {}),
           };
           makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
         }
