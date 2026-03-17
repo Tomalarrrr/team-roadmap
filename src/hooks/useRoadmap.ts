@@ -203,6 +203,7 @@ export function useRoadmap() {
           } else {
             isRecoveringRef.current = false;
             setSaveError('Connection lost. Please refresh the page.');
+            setLoading(false);
           }
         }
       ).then((unsub) => {
