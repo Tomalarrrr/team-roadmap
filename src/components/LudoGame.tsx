@@ -808,10 +808,16 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       prevTokensRef.current = state.tokens;
 
       // Roll stats: read from Firebase (synced across all clients)
-      if (state.rollStats) {
+      // Only update from Firebase when we're not mid-roll (prevents overwriting
+      // local roll recording before executeMove commits the capture count)
+      if (state.rollStats && !isRollingRef.current && !moveInFlightRef.current) {
         const parsed = deserializeRollStats(state.rollStats);
         setRollStats(parsed);
         rollStatsRef.current = parsed;
+      } else if (state.rollStats) {
+        // Still update display state (UI), but don't overwrite the ref
+        // so executeMove can build on the locally-recorded roll
+        setRollStats(deserializeRollStats(state.rollStats));
       }
 
       // Reset dice display when a new roll phase arrives (avoids showing stale value)
@@ -2183,13 +2189,22 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (moveInFlightRef.current || isRollingRef.current) return;
 
         // --- Bot before-roll power-up usage ---
+        // Skip power-ups when all tokens are at base — bot needs a clean 6 to deploy,
+        // and power-ups like bullet-bill (needs track token), golden-mushroom (risky),
+        // and super-mushroom (may not produce effective 6) would waste the turn.
         if (powerUpsEnabledRef.current) {
+          const botTokenIndices = getColorTokenIndices(currentTurn);
+          const allAtBase = botTokenIndices.every(i => tokensRef.current[i] === 'base');
+
           const botInv = getInventoryForColor(inventoryRef.current, currentTurn);
           for (let slot = 0; slot < botInv.length; slot++) {
             const puId = botInv[slot];
             if (!puId) continue;
             const def = POWER_UPS[puId];
             if (def.timing !== 'before-roll') continue;
+
+            // Don't waste power-ups when all tokens are stuck at base
+            if (allAtBase && (puId === 'super-mushroom' || puId === 'golden-mushroom' || puId === 'bullet-bill')) continue;
 
             // star and lightning-bolt: activate buff via makeMove, then return
             // (the state update will re-trigger this useEffect for the actual roll)
@@ -3374,8 +3389,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                     ))}
                   </div>
 
-                  {/* Track cells */}
-                  {TRACK_INDICES.map(n => renderTrackCell(n))}
+                  {/* Track cells (skip corner cells 6,20,34,48 that overlap base quadrants) */}
+                  {TRACK_INDICES.map(n => (n === 6 || n === 20 || n === 34 || n === 48) ? null : renderTrackCell(n))}
 
                   {/* Tokens on track and final corridor */}
                   {TOKEN_INDICES.map(i => renderToken(i))}
