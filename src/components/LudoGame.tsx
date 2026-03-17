@@ -1035,7 +1035,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       // 1b. Star effect: if the flag carrier was relocated by star power, drop the flag
       //     IMPORTANT: must run AFTER step 1 (kill-transfer) — if the carrier was captured
       //     AND auto-deployed by coins, step 1 already transferred the flag to the killer.
-      //     This step only fires for non-capture relocations (e.g., star sending to start).
+      //     This step only fires for non-capture relocations (e.g., star sending to base).
       if (updatedFlag.carrier !== null && updatedFlag.carrier !== tokenIndex) {
         const carrierOldPos = currentTokens[updatedFlag.carrier];
         const carrierNewPos = newTokens[updatedFlag.carrier];
@@ -1606,7 +1606,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             flag: serializeFlag(flagStateRef.current),
           });
         }
-        showHint('Star activated! Send opponents to start!');
+        showHint('Star activated! Send opponents home!');
         return;
       }
 
