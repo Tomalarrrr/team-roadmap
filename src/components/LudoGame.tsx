@@ -2518,9 +2518,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
 
     return () => clearTimeout(botTimerRef.current);
-  // tokens included so bot re-triggers after power-up writes that change board state
+  // tokens: re-triggers after moves / power-up writes that change board state
+  // inventory: re-triggers after bot consumes a power-up (star/lightning don't change tokens/turnPhase)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSinglePlayer, gamePhase, winner, gamePaused, currentTurn, turnPhase, myColor, introPhase, tokens]);
+  }, [isSinglePlayer, gamePhase, winner, gamePaused, currentTurn, turnPhase, myColor, introPhase, tokens, inventory]);
 
   // --- Bot auto-pick for Golden Mushroom modal ---
   useEffect(() => {
