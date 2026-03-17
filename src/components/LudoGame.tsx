@@ -1647,6 +1647,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (def.timing === 'after-roll' && turnPhaseRef.current !== 'move') return;
 
     // Remove from inventory immediately
+    moveInFlightRef.current = true;
     const newInv = removeFromInventory(inventoryRef.current, mc, slot);
 
     if (def.timing === 'before-roll') {
@@ -1665,14 +1666,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: turnStartedAtRef.current,
+            turnStartedAt: Date.now(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
             mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
             flag: serializeFlag(flagStateRef.current),
-          });
+          }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint('Star activated! Send opponents home!');
         return;
@@ -1698,14 +1699,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: turnStartedAtRef.current,
+            turnStartedAt: Date.now(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
             mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
             flag: serializeFlag(flagStateRef.current),
-          });
+          }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint('Lightning! Opponents slowed!');
         return;
@@ -1725,14 +1726,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           consecutiveSixes: consecutiveSixesRef.current,
           winner: null,
           finishOrder: finishOrderRef.current.join(','),
-          turnStartedAt: turnStartedAtRef.current,
+          turnStartedAt: Date.now(),
           powerUps: serializeInventory(newInv),
           activeBuffs: serializeBuffs(activeBuffsRef.current),
           boardEffects: serializeBoardEffects(boardEffectsRef.current),
           coins: serializeCoins(coinsRef.current),
           mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
           flag: serializeFlag(flagStateRef.current),
-        });
+        }).catch(() => { moveInFlightRef.current = false; });
       }
       showHint(`${def.emoji} ${def.name} ready!`);
       return;
@@ -1748,6 +1749,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           ? parseInt(currentTokens[shooterIdx].split('-')[1])
           : null;
         if (shooterTrack === null) {
+          moveInFlightRef.current = false;
           showHint('No tokens on track to shoot from!');
           return;
         }
@@ -1757,6 +1759,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           : findNearestOpponentBehind(currentTokens, shooterTrack, mc);
 
         if (target === null) {
+          moveInFlightRef.current = false;
           showHint('No target found!');
           return;
         }
@@ -1794,7 +1797,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             coins: serializeCoins(coinsRef.current),
             mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
             flag: serializeFlag(shellFlag),
-          });
+          }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint(shellDroppedFlag
           ? `${def.emoji} Hit! Flag dropped!`
@@ -1805,6 +1808,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (powerUpId === 'blue-shell') {
         const target = findLeaderLeadToken(currentTokens, activePlayerCountRef.current, mc);
         if (target === null) {
+          moveInFlightRef.current = false;
           showHint('No leader to target!');
           return;
         }
@@ -1840,7 +1844,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             coins: serializeCoins(coinsRef.current),
             mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
             flag: serializeFlag(blueShellFlag),
-          });
+          }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint(blueDroppedFlag
           ? 'Blue Shell! Flag dropped!'
@@ -1852,6 +1856,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         // Find the best token on track and warp it
         const warpToken = findFurthestTrackToken(currentTokens, mc);
         if (warpToken === null) {
+          moveInFlightRef.current = false;
           showHint('No tokens on track!');
           return;
         }
@@ -1876,7 +1881,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             coins: serializeCoins(coinsRef.current),
             mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
             flag: serializeFlag(flagStateRef.current),
-          });
+          }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint('Warp Pipe! Teleported to safe zone!');
         return;
@@ -1895,14 +1900,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: turnStartedAtRef.current,
+            turnStartedAt: Date.now(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
             mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
             flag: serializeFlag(flagStateRef.current),
-          });
+          }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint('Cape Feather! Fly over opponents!');
         return;
@@ -1915,6 +1920,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           ? parseInt(currentTokens[bananaTokenIdx].split('-')[1])
           : null;
         if (placedCell === null || SAFE_ZONES.has(placedCell)) {
+          moveInFlightRef.current = false;
           showHint("Can't place banana here!");
           return;
         }
@@ -1930,19 +1936,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: turnStartedAtRef.current,
+            turnStartedAt: Date.now(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(activeBuffsRef.current),
             boardEffects: serializeBoardEffects(newEffects),
             coins: serializeCoins(coinsRef.current),
             mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
             flag: serializeFlag(flagStateRef.current),
-          });
+          }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint(`Banana peel placed on cell ${placedCell}!`);
         return;
       }
     }
+    // Unknown power-up — reset guard
+    moveInFlightRef.current = false;
   }, [showHint, executeMove]);
 
   // Golden Mushroom pick handler
@@ -2834,6 +2842,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (!gc) return;
     try {
       moveInFlightRef.current = false;
+      clearTimeout(rollTimeoutRef.current);
+      clearTimeout(autoMoveRef.current);
       // Set prevTokens BEFORE resetGame so the intro effect sees fresh state
       prevTokensRef.current = 'bas'.repeat(16);
       setIntroPhase('idle');
