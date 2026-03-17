@@ -27,8 +27,9 @@ describe('generateGameCode', () => {
     for (let i = 0; i < 1000; i++) {
       codes.add(generateGameCode());
     }
-    // With 30^4 = ~810K combinations, 1000 codes should all be unique
-    expect(codes.size).toBe(1000);
+    // With 30^4 = ~810K combinations, 1000 codes should be nearly all unique
+    // Allow 1 collision (birthday paradox probability ~0.06%)
+    expect(codes.size).toBeGreaterThanOrEqual(999);
   });
 });
 

@@ -144,7 +144,7 @@
       ".read": true,
       "$gameCode": {
         ".write": true,
-        ".validate": "newData.hasChildren(['players', 'tokens', 'currentTurn', 'createdAt', 'playerCount'])",
+        ".validate": "newData.hasChildren(['players', 'tokens', 'currentTurn', 'createdAt', 'playerCount']) && newData.child('playerCount').val() >= 1 && newData.child('playerCount').val() <= 4 && newData.child('tokens').val().length == 48",
         "tokens": {
           ".validate": "newData.isString() && newData.val().length == 48 && newData.val().matches(/^(bas|t[0-9]{2}|f[0-9]{2})+$/)"
         },
@@ -182,7 +182,7 @@
         },
         "powerUpsEnabled": { ".validate": "newData.isBoolean()" },
         "powerUps": {
-          ".validate": "newData.isString() && newData.val().length <= 500"
+          ".validate": "newData.isString() && newData.val().length >= 8 && newData.val().length <= 500 && newData.val().matches(/^[A-Z_]{8,}$/)"
         },
         "boardEffects": {
           ".validate": "newData.isString() && newData.val().length <= 500"

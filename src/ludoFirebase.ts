@@ -147,10 +147,46 @@ export async function createGame(
       if (current !== null) return; // Abort — code already taken
       return initialState;
     });
-    if (result.committed) return code;
+    if (result.committed) {
+      // Fire-and-forget: clean up stale games (best-effort, non-blocking)
+      cleanupStaleGames();
+      return code;
+    }
   }
 
   throw new Error('Failed to generate unique game code. Try again.');
+}
+
+const STALE_GAME_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export async function cleanupStaleGames(): Promise<void> {
+  try {
+    const { ref, get, remove } = getDbModule();
+    const db = getFirebaseDatabase();
+
+    const ludoRef = ref(db, 'ludo');
+    const snapshot = await get(ludoRef);
+    if (!snapshot.exists()) return;
+
+    const games = snapshot.val() as Record<string, LudoGameState>;
+    const now = Date.now();
+
+    const removals: Promise<void>[] = [];
+    for (const [code, game] of Object.entries(games)) {
+      if (game.createdAt && now - game.createdAt > STALE_GAME_AGE_MS) {
+        const gameRef = ref(db, `ludo/${code}`);
+        removals.push(remove(gameRef));
+      }
+    }
+
+    if (removals.length > 0) {
+      await Promise.all(removals);
+      console.log(`[Ludo] Cleaned up ${removals.length} stale game(s)`);
+    }
+  } catch (err) {
+    // Best-effort cleanup — silently ignore errors
+    console.warn('[Ludo] Stale game cleanup failed:', err);
+  }
 }
 
 const BOT_NAMES: Record<LudoColor, string> = {
@@ -261,6 +297,9 @@ export async function joinGame(
   let joinError: string | null = null;
 
   await runTransaction(gameRef, (current: LudoGameState | null) => {
+    // Reset error on each retry — prevents stale error from previous attempt
+    joinError = null;
+
     if (!current) return current; // Retry with real data
 
     const allColors: LudoColor[] = ['red', ...JOIN_ORDER];

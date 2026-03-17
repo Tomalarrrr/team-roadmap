@@ -25,17 +25,17 @@ export interface PowerUpDef {
 
 // --- Constants ---
 
-export const TRACK_SIZE = 52;
+export const TRACK_SIZE = 56;
 
 export const START_POSITIONS: Record<LudoColor, number> = {
-  red: 1, green: 14, yellow: 27, blue: 40,
+  red: 1, green: 15, yellow: 29, blue: 43,
 };
 
 export const ENTRY_CELLS: Record<LudoColor, number> = {
-  red: 51, green: 12, yellow: 25, blue: 38,
+  red: 55, green: 13, yellow: 27, blue: 41,
 };
 
-export const SAFE_ZONES = new Set([1, 9, 14, 22, 27, 35, 40, 48]);
+export const SAFE_ZONES = new Set([1, 10, 15, 24, 29, 38, 43, 52]);
 
 export const COLOR_OFFSET: Record<LudoColor, number> = {
   red: 0, green: 4, yellow: 8, blue: 12,
@@ -140,7 +140,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
     emoji: '🍌',
     description: 'Drop on your square — whoever lands on it slips back 3',
     tier: 'uncommon',
-    timing: 'before-roll',
+    timing: 'after-roll',
   },
   'blue-shell': {
     id: 'blue-shell',
@@ -206,8 +206,8 @@ export function getPlayerScore(tokens: TokenPosition[], color: LudoColor): numbe
   return getColorTokenIndices(color).reduce((sum, i) => {
     const pos = tokens[i];
     if (pos === 'base') return sum;
-    if (pos === 'final-6') return sum + 58;
-    if (pos.startsWith('final-')) return sum + 52 + parseInt(pos.split('-')[1]);
+    if (pos === 'final-6') return sum + TRACK_SIZE + 6;
+    if (pos.startsWith('final-')) return sum + TRACK_SIZE + parseInt(pos.split('-')[1]);
     if (pos.startsWith('track-')) {
       const track = parseInt(pos.split('-')[1]);
       const start = START_POSITIONS[color];
@@ -297,7 +297,7 @@ export function serializeInventory(inv: (PowerUpId | null)[][]): string {
 }
 
 export function deserializeInventory(str: string): (PowerUpId | null)[][] {
-  if (!str || str.length < 4) {
+  if (!str || str.length < 4 * INVENTORY_SIZE * 2) {
     return [[null], [null], [null], [null]];
   }
   const result: (PowerUpId | null)[][] = [];
@@ -572,8 +572,8 @@ export function findLeaderLeadToken(
     const pos = tokens[i];
     if (pos === 'base') continue;
     let score = 0;
-    if (pos === 'final-6') score = 58;
-    else if (pos.startsWith('final-')) score = 52 + parseInt(pos.split('-')[1]);
+    if (pos === 'final-6') score = TRACK_SIZE + 6;
+    else if (pos.startsWith('final-')) score = TRACK_SIZE + parseInt(pos.split('-')[1]);
     else if (pos.startsWith('track-')) {
       const track = parseInt(pos.split('-')[1]);
       const start = START_POSITIONS[leader];
@@ -585,6 +585,37 @@ export function findLeaderLeadToken(
     }
   }
 
+  return bestIdx;
+}
+
+/**
+ * Check if a dice value counts as a "six" for base exit and bonus turn logic.
+ * Covers normal 6 and Super Mushroom doubled 6 (12).
+ */
+export function isEffectiveSix(diceValue: number): boolean {
+  return diceValue === 6 || diceValue === 12;
+}
+
+/**
+ * Find the token index of the furthest-ahead token on the track for a color.
+ * Returns null if no tokens are on the track.
+ */
+export function findFurthestTrackToken(tokens: TokenPosition[], color: LudoColor): number | null {
+  const indices = getColorTokenIndices(color);
+  const start = START_POSITIONS[color];
+  let bestIdx: number | null = null;
+  let bestDist = -1;
+  for (const i of indices) {
+    const pos = tokens[i];
+    if (pos.startsWith('track-')) {
+      const track = parseInt(pos.split('-')[1]);
+      const dist = track >= start ? track - start : (TRACK_SIZE - start) + track;
+      if (dist > bestDist) {
+        bestDist = dist;
+        bestIdx = i;
+      }
+    }
+  }
   return bestIdx;
 }
 
