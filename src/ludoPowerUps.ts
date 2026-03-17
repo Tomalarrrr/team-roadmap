@@ -818,10 +818,21 @@ export function serializeRollStats(stats: RollStats): string {
 
 export function deserializeRollStats(str: string): RollStats {
   if (!str) return EMPTY_ROLL_STATS.map(s => ({ rolls: [...s.rolls], captures: s.captures }));
-  return str.split('|').map(part => {
-    const nums = part.split(',').map(Number);
-    return { rolls: nums.slice(0, 6), captures: nums[6] || 0 };
-  });
+  const parts = str.split('|');
+  // Ensure exactly 4 color entries, pad with empty stats if needed
+  const result: RollStats = [];
+  for (let i = 0; i < 4; i++) {
+    if (i < parts.length && parts[i]) {
+      const nums = parts[i].split(',').map(Number);
+      // Ensure exactly 6 roll counts, pad with 0 if short
+      const rolls = [0, 0, 0, 0, 0, 0];
+      for (let j = 0; j < 6; j++) rolls[j] = nums[j] || 0;
+      result.push({ rolls, captures: nums[6] || 0 });
+    } else {
+      result.push({ rolls: [0, 0, 0, 0, 0, 0], captures: 0 });
+    }
+  }
+  return result;
 }
 
 export function recordRoll(stats: RollStats, colorIdx: number, diceValue: number): RollStats {

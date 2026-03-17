@@ -570,9 +570,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
   // --- Cell-by-cell token animation ---
 
-  const startTokenAnimation = useCallback((tokenIdx: number, waypoints: [number, number][]) => {
+  const startTokenAnimation = useCallback((tokenIdx: number, rawWaypoints: [number, number][]) => {
     const existing = tokenAnimTimers.current.get(tokenIdx);
     if (existing) clearTimeout(existing);
+
+    // Deduplicate adjacent waypoints (corner cells share coords with next cell)
+    const waypoints = rawWaypoints.filter((wp, i) =>
+      i === 0 || wp[0] !== rawWaypoints[i - 1][0] || wp[1] !== rawWaypoints[i - 1][1]
+    );
 
     if (waypoints.length === 0) return;
 
@@ -2141,6 +2146,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             winner: null,
             finishOrder: curFinishOrder.join(','),
             turnStartedAt: Date.now(),
+            rollStats: serializeRollStats(rollStatsRef.current),
             ...(powerUpsEnabledRef.current ? {
               powerUps: serializeInventory(inventoryRef.current),
               activeBuffs: serializeBuffs(backupBuffs),
@@ -2499,6 +2505,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               winner: null,
               finishOrder: finishOrderRef.current.join(','),
               turnStartedAt: Date.now(),
+              rollStats: serializeRollStats(rollStatsRef.current),
               ...(powerUpsEnabledRef.current ? {
                 powerUps: serializeInventory(inventoryRef.current),
                 activeBuffs: serializeBuffs(activeBuffsRef.current),
