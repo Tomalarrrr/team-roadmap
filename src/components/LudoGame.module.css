@@ -462,6 +462,12 @@
   font-weight: 700;
   color: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  animation: homeCountPulse 1.5s ease-in-out infinite alternate;
+}
+
+@keyframes homeCountPulse {
+  from { transform: scale(1); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); }
+  to { transform: scale(1.25); box-shadow: 0 0 8px 3px rgba(255, 255, 255, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3); }
 }
 
 /* Track cells */
@@ -608,8 +614,8 @@
 .tokenClickable {
   cursor: pointer;
   pointer-events: auto;
-  animation: tokenPulse 1s ease-in-out infinite alternate;
-  box-shadow: 0 0 8px 3px rgba(255, 255, 255, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3);
+  animation: tokenPulse 0.8s ease-in-out infinite alternate;
+  box-shadow: 0 0 12px 5px rgba(255, 255, 255, 0.7), 0 2px 4px rgba(0, 0, 0, 0.3);
   /* Preserve position transitions alongside hover effects */
   transition: left 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
               top 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
@@ -617,22 +623,22 @@
 }
 
 /* Color-matched glow for clickable tokens */
-.tokenClickable.tokenRed { box-shadow: 0 0 10px 4px rgba(234, 67, 48, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenGreen { box-shadow: 0 0 10px 4px rgba(52, 168, 83, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenYellow { box-shadow: 0 0 10px 4px rgba(251, 188, 5, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenBlue { box-shadow: 0 0 10px 4px rgba(66, 133, 244, 0.5), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenRed { box-shadow: 0 0 14px 6px rgba(234, 67, 48, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenGreen { box-shadow: 0 0 14px 6px rgba(52, 168, 83, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenYellow { box-shadow: 0 0 14px 6px rgba(251, 188, 5, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenBlue { box-shadow: 0 0 14px 6px rgba(66, 133, 244, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
 
 .tokenClickable:hover {
-  filter: brightness(1.2);
+  filter: brightness(1.25);
 }
-.tokenClickable.tokenRed:hover { box-shadow: 0 0 14px 6px rgba(234, 67, 48, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenGreen:hover { box-shadow: 0 0 14px 6px rgba(52, 168, 83, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenYellow:hover { box-shadow: 0 0 14px 6px rgba(251, 188, 5, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenBlue:hover { box-shadow: 0 0 14px 6px rgba(66, 133, 244, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenRed:hover { box-shadow: 0 0 18px 8px rgba(234, 67, 48, 0.7), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenGreen:hover { box-shadow: 0 0 18px 8px rgba(52, 168, 83, 0.7), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenYellow:hover { box-shadow: 0 0 18px 8px rgba(251, 188, 5, 0.7), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable.tokenBlue:hover { box-shadow: 0 0 18px 8px rgba(66, 133, 244, 0.7), 0 2px 4px rgba(0, 0, 0, 0.3); }
 
 @keyframes tokenPulse {
-  from { transform: scale(1); }
-  to { transform: scale(1.12); }
+  from { transform: scale(1); filter: brightness(1); }
+  to { transform: scale(1.3); filter: brightness(1.15); }
 }
 
 .tokenArriving {
@@ -740,13 +746,13 @@
 
 .baseTokenClickable {
   cursor: pointer;
-  animation: tokenPulse 1s ease-in-out infinite alternate;
+  animation: tokenPulse 0.8s ease-in-out infinite alternate;
 }
 
-.baseTokenClickable.tokenRed { box-shadow: 0 0 10px 4px rgba(234, 67, 48, 0.5), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
-.baseTokenClickable.tokenGreen { box-shadow: 0 0 10px 4px rgba(52, 168, 83, 0.5), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
-.baseTokenClickable.tokenYellow { box-shadow: 0 0 10px 4px rgba(251, 188, 5, 0.5), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
-.baseTokenClickable.tokenBlue { box-shadow: 0 0 10px 4px rgba(66, 133, 244, 0.5), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
+.baseTokenClickable.tokenRed { box-shadow: 0 0 14px 6px rgba(234, 67, 48, 0.6), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
+.baseTokenClickable.tokenGreen { box-shadow: 0 0 14px 6px rgba(52, 168, 83, 0.6), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
+.baseTokenClickable.tokenYellow { box-shadow: 0 0 14px 6px rgba(251, 188, 5, 0.6), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
+.baseTokenClickable.tokenBlue { box-shadow: 0 0 14px 6px rgba(66, 133, 244, 0.6), inset 0 -2px 4px rgba(0,0,0,0.25), inset 0 2px 4px rgba(255,255,255,0.2); }
 
 /* Empty slot placeholder in base */
 .baseSlotEmpty {
@@ -1300,12 +1306,12 @@
 
 @keyframes baseGlow {
   0%, 100% {
-    box-shadow: inset 0 0 12px rgba(255, 255, 255, 0.1),
-                0 0 15px rgba(255, 255, 255, 0.04);
+    box-shadow: inset 0 0 15px rgba(255, 255, 255, 0.15),
+                0 0 18px rgba(255, 255, 255, 0.06);
   }
   50% {
-    box-shadow: inset 0 0 22px rgba(255, 255, 255, 0.3),
-                0 0 25px rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 0 30px rgba(255, 255, 255, 0.4),
+                0 0 35px rgba(255, 255, 255, 0.15);
   }
 }
 
@@ -2707,7 +2713,8 @@
   .newItemBounce,
   .transitionOverlay,
   .boardEntering,
-  .bananaOverlay {
+  .bananaOverlay,
+  .homeCount {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

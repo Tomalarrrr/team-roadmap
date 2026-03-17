@@ -64,6 +64,12 @@ import {
   getColorTokenIndices,
   isEffectiveSix,
   findFurthestTrackToken,
+  type RollStats,
+  deserializeRollStats,
+  serializeRollStats,
+  recordRoll,
+  recordCapture,
+  initRollStats,
 } from '../ludoPowerUps';
 import {
   calculateNewPosition,
@@ -219,11 +225,37 @@ function computeMovePath(
   if (from === 'final-6') return [];
   if (to === 'base') return [];
 
-  // Base → start cell: animate from base position to start cell
+  // Base → track: animate from base through start cell to destination
+  // (handles batched Firebase updates where deploy + bonus move merge)
   if (from === 'base' && to.startsWith('track-')) {
     const trackNum = parseInt(to.split('-')[1]);
-    // tokenIndex not available here — caller provides base coords when needed
-    return [TRACK_COORDS[trackNum]];
+    const startCell = START_POSITIONS[color];
+    // If destination IS the start cell, just animate there directly
+    if (trackNum === startCell) return [TRACK_COORDS[trackNum]];
+    // Otherwise, walk from start cell forward to the destination
+    const path: [number, number][] = [TRACK_COORDS[startCell]];
+    let cur = startCell;
+    while (cur !== trackNum && path.length < TRACK_SIZE) {
+      cur = (cur % TRACK_SIZE) + 1;
+      path.push(TRACK_COORDS[cur]);
+    }
+    return path;
+  }
+  // Base → final: animate through start cell and track to home corridor
+  if (from === 'base' && to.startsWith('final-')) {
+    const startCell = START_POSITIONS[color];
+    const entry = ENTRY_CELLS[color];
+    const path: [number, number][] = [TRACK_COORDS[startCell]];
+    let cur = startCell;
+    while (cur !== entry && path.length < TRACK_SIZE) {
+      cur = (cur % TRACK_SIZE) + 1;
+      path.push(TRACK_COORDS[cur]);
+    }
+    const finalTarget = parseInt(to.split('-')[1]);
+    for (let i = 1; i <= finalTarget; i++) {
+      path.push(FINAL_COORDS[color][i - 1]);
+    }
+    return path;
   }
   if (from === 'base') return [];
 
@@ -423,10 +455,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const gameEffects = useRef<{ type: 'deploy' | 'home' | 'starPoof'; color: LudoColor; coords?: [number, number]; ts: number }[]>([]);
   const effectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Stats tracking (dice roll distribution + captures)
-  const [gameStats, setGameStats] = useState<Partial<Record<LudoColor, { rolls: number[]; captures: number }>>>({});
-  const statsInitRef = useRef(false);
-  const prevTurnPhaseRef = useRef<TurnPhase>('roll');
+  // Stats tracking (synced via Firebase rollStats field)
+  const [rollStats, setRollStats] = useState<RollStats>(() => deserializeRollStats(initRollStats()));
+  const rollStatsRef = useRef<RollStats>(rollStats);
+  rollStatsRef.current = rollStats;
 
   // Intro animation state
   const [introPhase, setIntroPhase] = useState<'idle' | 'running' | 'done'>('idle');
@@ -546,6 +578,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
     let step = 0;
     let lastStepTime = performance.now();
+    let rapidCount = 0;
     const advance = () => {
       if (step >= waypoints.length) {
         tokenAnimPos.current.delete(tokenIdx);
@@ -554,14 +587,26 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         scheduleRenderTick();
         return;
       }
-      // If steps are firing too rapidly (tab was backgrounded), skip to end
+      // If steps fire too rapidly (tab was backgrounded), skip to final waypoint
+      // instead of silently dropping the animation
       const now = performance.now();
-      if (step > 0 && now - lastStepTime < STEP_MS * 0.3) {
-        tokenAnimPos.current.delete(tokenIdx);
-        tokenAnimParity.current.delete(tokenIdx);
-        tokenAnimTimers.current.delete(tokenIdx);
-        scheduleRenderTick();
-        return;
+      if (step > 0 && now - lastStepTime < STEP_MS * 0.15) {
+        rapidCount++;
+        if (rapidCount >= 2) {
+          // Jump to last waypoint, then clean up after one more step
+          tokenAnimPos.current.set(tokenIdx, waypoints[waypoints.length - 1]);
+          tokenAnimParity.current.set(tokenIdx, step % 2);
+          scheduleRenderTick();
+          tokenAnimTimers.current.set(tokenIdx, setTimeout(() => {
+            tokenAnimPos.current.delete(tokenIdx);
+            tokenAnimParity.current.delete(tokenIdx);
+            tokenAnimTimers.current.delete(tokenIdx);
+            scheduleRenderTick();
+          }, STEP_MS));
+          return;
+        }
+      } else {
+        rapidCount = 0;
       }
       lastStepTime = now;
       tokenAnimPos.current.set(tokenIdx, waypoints[step]);
@@ -739,12 +784,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (parsedTokens[j] === oldTokens[i] && oldTokens[j] !== parsedTokens[j]) {
               const path = animPaths.get(j);
               if (path) capturerDelay = (path.length - 1) * STEP_MS;
-              // Track capture in stats
-              const capturerColor = getTokenColor(j);
-              setGameStats(prev => {
-                const entry = prev[capturerColor] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
-                return { ...prev, [capturerColor]: { ...entry, captures: entry.captures + 1 } };
-              });
               break;
             }
           }
@@ -768,29 +807,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }
       prevTokensRef.current = state.tokens;
 
-      // Track dice rolls for stats table
-      if (!statsInitRef.current) {
-        statsInitRef.current = true;
-      } else if (
-        state.diceValue !== null &&
-        prevTurnPhaseRef.current === 'roll' &&
-        (state.turnPhase === 'move' || state.turnStartedAt !== turnStartedAtRef.current)
-      ) {
-        const roller = state.currentTurn !== currentTurnRef.current
-          ? currentTurnRef.current
-          : state.currentTurn;
-        setGameStats(prev => {
-          const entry = prev[roller] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
-          const newRolls = [...entry.rolls];
-          // Derive original face: Super Mushroom doubles produce 2,4,6,8,10,12
-          const dv = state.diceValue!;
-          const originalFace = dv > 6 ? Math.round(dv / 2) : dv;
-          const statIdx = Math.min(originalFace, 6) - 1;
-          newRolls[statIdx]++;
-          return { ...prev, [roller]: { ...entry, rolls: newRolls } };
-        });
+      // Roll stats: read from Firebase (synced across all clients)
+      if (state.rollStats) {
+        const parsed = deserializeRollStats(state.rollStats);
+        setRollStats(parsed);
+        rollStatsRef.current = parsed;
       }
-      prevTurnPhaseRef.current = state.turnPhase;
 
       // Reset dice display when a new roll phase arrives (avoids showing stale value)
       if (state.turnPhase === 'roll' && !isRollingRef.current) {
@@ -1214,6 +1236,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setCoins(updatedCoins);
     }
 
+    // Record captures in synced roll stats
+    let moveRollStats = rollStatsRef.current;
+    if (captured) {
+      moveRollStats = recordCapture(moveRollStats, colorIndex(curColor));
+      rollStatsRef.current = moveRollStats;
+    }
+
     const update: LudoMoveUpdate = {
       tokens: serializeTokens(newTokens),
       currentTurn: gameWinner ? curColor : nextColor,
@@ -1223,6 +1252,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       winner: gameWinner,
       finishOrder: updatedFinishOrder.join(','),
       turnStartedAt: Date.now(),
+      rollStats: serializeRollStats(moveRollStats),
     };
 
     // Attach power-up state if enabled
@@ -1373,6 +1403,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         diceAnimKeyRef.current += 1;
         rolledThisTurnRef.current = true;
 
+        // Record this roll in synced stats (Bullet Bill uses roll=10, maps to face 5)
+        const bbRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), 10);
+        rollStatsRef.current = bbRollStats;
+
         // Find the furthest-ahead token on the track to rocket
         const currentTokens = tokensRef.current;
         const bestToken = findFurthestTrackToken(currentTokens, activeColor);
@@ -1418,6 +1452,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
             turnStartedAt: Date.now(),
+            rollStats: serializeRollStats(bbRollStats),
             ...(powerUpsEnabledRef.current ? {
               powerUps: serializeInventory(inventoryRef.current),
               activeBuffs: serializeBuffs(bbSkipBuffs),
@@ -1444,6 +1479,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setDiceValue(roll);
       diceAnimKeyRef.current += 1;
       rolledThisTurnRef.current = true;
+
+      // Record this roll in synced stats
+      const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), roll);
+      rollStatsRef.current = updatedRollStats;
 
       const currentTokens = tokensRef.current;
       const curColor = currentTurnRef.current;
@@ -1492,6 +1531,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           winner: null,
           finishOrder: curFinishOrder.join(','),
           turnStartedAt: Date.now(),
+          rollStats: serializeRollStats(updatedRollStats),
           ...(powerUpsEnabledRef.current ? {
             powerUps: serializeInventory(inventoryRef.current),
             activeBuffs: serializeBuffs(skipBuffs),
@@ -1526,6 +1566,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         winner: null,
         finishOrder: curFinishOrder.join(','),
         turnStartedAt: Date.now(),
+        rollStats: serializeRollStats(updatedRollStats),
         ...(powerUpsEnabledRef.current ? {
           powerUps: serializeInventory(inventoryRef.current),
           activeBuffs: serializeBuffs(activeBuffsRef.current),
@@ -1886,6 +1927,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     diceAnimKeyRef.current += 1;
     rolledThisTurnRef.current = true;
 
+    // Record this roll in synced stats
+    const gmRollStats = recordRoll(rollStatsRef.current, colorIndex(currentTurnRef.current), pickedRoll);
+    rollStatsRef.current = gmRollStats;
+
     const gc = gameCodeRef.current;
     const mc = myColorRef.current;
     if (!gc || !mc) return;
@@ -1930,6 +1975,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         winner: null,
         finishOrder: curFinishOrder.join(','),
         turnStartedAt: Date.now(),
+        rollStats: serializeRollStats(gmRollStats),
         powerUps: serializeInventory(inventoryRef.current),
         activeBuffs: serializeBuffs(gmSkipBuffs),
         boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -1961,6 +2007,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       winner: null,
       finishOrder: curFinishOrder.join(','),
       turnStartedAt: Date.now(),
+      rollStats: serializeRollStats(gmRollStats),
       powerUps: serializeInventory(inventoryRef.current),
       activeBuffs: serializeBuffs(activeBuffsRef.current),
       boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2743,8 +2790,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       effectTimers.current = [];
       capturedTokens.current = [];
       gameEffects.current = [];
-      setGameStats({});
-      statsInitRef.current = false;
+      setRollStats(deserializeRollStats(initRollStats()));
+      rollStatsRef.current = deserializeRollStats(initRollStats());
       homeStuckRolls.current = {};
       pityThreshold.current = {};
       lastTwoRolls.current = {};
@@ -2788,8 +2835,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     tokenAnimPos.current.clear();
     capturedTokens.current = [];
     gameEffects.current = [];
-    setGameStats({});
-    statsInitRef.current = false;
+    setRollStats(deserializeRollStats(initRollStats()));
+    rollStatsRef.current = deserializeRollStats(initRollStats());
     setGamePhase('lobby'); gamePhaseRef.current = 'lobby';
     setGameCode(null);
     setMyColor(null);
@@ -3507,8 +3554,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                       </tr>
                     </thead>
                     <tbody>
-                      {TURN_ORDER.slice(0, activePlayerCount).map(color => {
-                        const s = gameStats[color] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
+                      {TURN_ORDER.slice(0, activePlayerCount).map((color, ci) => {
+                        const s = rollStats[ci] || { rolls: [0, 0, 0, 0, 0, 0], captures: 0 };
                         return (
                           <tr key={color}>
                             <td>

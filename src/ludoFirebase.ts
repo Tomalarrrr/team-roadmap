@@ -1,7 +1,7 @@
 import type { Unsubscribe } from 'firebase/database';
 import { ensureInitialized, getDbModule, getFirebaseDatabase, markFirebaseActivity } from './firebase';
 import { generateGameCode } from './utils/gameUtils';
-import { initMysteryBoxes, serializeMysteryBoxes, generateFlagCell, serializeFlag } from './ludoPowerUps';
+import { initMysteryBoxes, serializeMysteryBoxes, generateFlagCell, serializeFlag, initRollStats } from './ludoPowerUps';
 
 // --- Types ---
 
@@ -43,6 +43,7 @@ export interface LudoGameState {
   paused?: boolean;         // Per-game pause state
   pausedAt?: number;        // Timestamp when paused (to adjust turnStartedAt on resume)
   singlePlayer?: boolean;   // 1-player mode with AI bots
+  rollStats?: string;       // Cumulative roll distribution per color: "r1,r2,r3,r4,r5,r6,c|g...|y...|b..."
 }
 
 export interface LudoMoveUpdate {
@@ -61,6 +62,7 @@ export interface LudoMoveUpdate {
   coins?: string;
   mysteryBoxes?: string;
   flag?: string;
+  rollStats?: string;
 }
 
 // --- Serialization ---
@@ -131,6 +133,7 @@ export async function createGame(
       startedAt: null,
       turnStartedAt: Date.now(),
       playerCount: 4,
+      rollStats: initRollStats(),
       ...(powerUpsEnabled ? {
         powerUpsEnabled: true,
         powerUps: '__'.repeat(4),
@@ -499,6 +502,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       playerCount,
       paused: false,
       pausedAt: null,
+      rollStats: initRollStats(),
       ...(hasBots ? { singlePlayer: true } : { singlePlayer: false }),
       ...(hasPowerUps ? {
         powerUps: '__'.repeat(4),

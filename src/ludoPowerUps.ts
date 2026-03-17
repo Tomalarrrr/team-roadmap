@@ -796,3 +796,45 @@ export function generateFlagCell(): number {
   }
   return candidates[Math.floor(Math.random() * candidates.length)];
 }
+
+// --- Roll Stats (synced via Firebase for consistent display) ---
+
+export type RollStats = { rolls: number[]; captures: number }[];
+
+const EMPTY_ROLL_STATS: RollStats = [
+  { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+  { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+  { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+  { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+];
+
+export function initRollStats(): string {
+  return serializeRollStats(EMPTY_ROLL_STATS);
+}
+
+export function serializeRollStats(stats: RollStats): string {
+  return stats.map(s => [...s.rolls, s.captures].join(',')).join('|');
+}
+
+export function deserializeRollStats(str: string): RollStats {
+  if (!str) return EMPTY_ROLL_STATS.map(s => ({ rolls: [...s.rolls], captures: s.captures }));
+  return str.split('|').map(part => {
+    const nums = part.split(',').map(Number);
+    return { rolls: nums.slice(0, 6), captures: nums[6] || 0 };
+  });
+}
+
+export function recordRoll(stats: RollStats, colorIdx: number, diceValue: number): RollStats {
+  const result = stats.map(s => ({ rolls: [...s.rolls], captures: s.captures }));
+  // Map doubled rolls (Super Mushroom: 7-12) back to original face
+  const face = diceValue > 6 ? Math.round(diceValue / 2) : diceValue;
+  const idx = Math.min(face, 6) - 1;
+  result[colorIdx].rolls[idx]++;
+  return result;
+}
+
+export function recordCapture(stats: RollStats, colorIdx: number): RollStats {
+  const result = stats.map(s => ({ rolls: [...s.rolls], captures: s.captures }));
+  result[colorIdx].captures++;
+  return result;
+}
