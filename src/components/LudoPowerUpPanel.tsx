@@ -9,18 +9,32 @@ const ALL_POWERUPS: PowerUpId[] = [
   'warp-pipe', 'cape-feather', 'coin-block',
 ];
 
-// CSS tint class for power-ups that need color filtering
-const EMOJI_TINT: Partial<Record<PowerUpId, string>> = {
-  'golden-mushroom': styles.emojiGoldenMushroom,
-  'green-shell': styles.emojiGreenShell,
-  'red-shell': styles.emojiRedShell,
-  'blue-shell': styles.emojiBlueShell,
+// Per-powerup CSS classes: tint (color filter) + idle animation
+const EMOJI_STYLE: Record<PowerUpId, string> = {
+  'super-mushroom': styles.animMushroom,
+  'golden-mushroom': `${styles.emojiGoldenMushroom} ${styles.animGoldenMushroom}`,
+  'bullet-bill': styles.animBulletBill,
+  'star': styles.animStar,
+  'lightning-bolt': styles.animLightning,
+  'green-shell': `${styles.emojiGreenShell} ${styles.animGreenShell}`,
+  'red-shell': `${styles.emojiRedShell} ${styles.animRedShell}`,
+  'blue-shell': `${styles.emojiBlueShell} ${styles.animBlueShell}`,
+  'banana-peel': styles.animBanana,
+  'warp-pipe': styles.animWarpPipe,
+  'cape-feather': styles.animFeather,
+  'coin-block': styles.animCoinBlock,
 };
 
-function PowerUpIcon({ id, className }: { id: PowerUpId; className?: string }) {
+function PowerUpIcon({ id, className, animate = true }: { id: PowerUpId; className?: string; animate?: boolean }) {
   const def = POWER_UPS[id];
-  const tint = EMOJI_TINT[id] || '';
-  return <span className={`${className || ''} ${tint}`.trim()}>{def.emoji}</span>;
+  const extra = animate ? (EMOJI_STYLE[id] || '') : (
+    // Still apply tint even without animation
+    id === 'golden-mushroom' ? styles.emojiGoldenMushroom :
+    id === 'green-shell' ? styles.emojiGreenShell :
+    id === 'red-shell' ? styles.emojiRedShell :
+    id === 'blue-shell' ? styles.emojiBlueShell : ''
+  );
+  return <span className={`${className || ''} ${extra}`.trim()}>{def.emoji}</span>;
 }
 
 interface PowerUpPanelProps {
@@ -70,7 +84,7 @@ export function LudoPowerUpPanel({ inventory, canUseBefore, canUseAfter, onUse, 
                 const def = POWER_UPS[id];
                 return (
                   <div key={id} className={styles.powerUpInfoRow}>
-                    <PowerUpIcon id={id} className={styles.powerUpInfoEmoji} />
+                    <PowerUpIcon id={id} className={styles.powerUpInfoEmoji} animate={false} />
                     <div className={styles.powerUpInfoText}>
                       <span className={styles.powerUpInfoName}>{def.name}</span>
                       <span className={styles.powerUpInfoDesc}>{def.description}</span>
@@ -146,7 +160,7 @@ export function PowerUpDiscardModal({ inventory, newPowerUp, onDiscard, onKeep }
       <div className={styles.discardCard}>
         <div className={styles.discardTitle}>Inventory Full!</div>
         <div className={styles.discardNew}>
-          <PowerUpIcon id={newPowerUp} className={styles.discardNewEmoji} />
+          <PowerUpIcon id={newPowerUp} className={styles.discardNewEmoji} animate={false} />
           <span className={styles.discardNewName}>{newDef.name}</span>
         </div>
         <div className={styles.discardPrompt}>Replace your current item?</div>
@@ -160,7 +174,7 @@ export function PowerUpDiscardModal({ inventory, newPowerUp, onDiscard, onKeep }
                 className={styles.discardSlotBtn}
                 onClick={() => onDiscard(slot)}
               >
-                <PowerUpIcon id={powerUp} />
+                <PowerUpIcon id={powerUp} animate={false} />
                 <span className={styles.discardSlotName}>Replace {def.name}</span>
               </button>
             );
