@@ -7,7 +7,6 @@ import styles from './SearchFilter.module.css';
 
 const ConnectFourGame = lazy(() => import('./ConnectFourGame').then(m => ({ default: m.ConnectFourGame })));
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
-const SnakesGame = lazy(() => import('./SnakesGame').then(m => ({ default: m.SnakesGame })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 
 interface SearchFilterProps {
@@ -84,7 +83,6 @@ export const SearchFilter = memo(function SearchFilter({
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
   const [showConnectFour, setShowConnectFour] = useState(false);
   const [showLudo, setShowLudo] = useState(false);
-  const [showSnakes, setShowSnakes] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -132,12 +130,11 @@ export const SearchFilter = memo(function SearchFilter({
   // Auto-open games from shareable URL parameters (bypass lock for external players)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('snakes')) setShowSnakes(true);
     if (params.get('c4')) setShowConnectFour(true);
     if (params.get('ludo')) setShowLudo(true);
   }, []);
 
-  // Easter egg: Connect Four, Ludo & Snakes (only when site is unlocked)
+  // Easter egg: Connect Four & Ludo (only when site is unlocked)
   useEffect(() => {
     if (isLocked) return;
     if (filters.search.trim().toLowerCase() === 'connect four') {
@@ -147,11 +144,6 @@ export const SearchFilter = memo(function SearchFilter({
     }
     if (filters.search.trim().toLowerCase() === 'ludo') {
       setShowLudo(true);
-      setFilters(f => ({ ...f, search: '' }));
-      setIsOpen(false);
-    }
-    if (filters.search.trim().toLowerCase() === 'snakes') {
-      setShowSnakes(true);
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
     }
@@ -430,14 +422,6 @@ export const SearchFilter = memo(function SearchFilter({
         <GameErrorBoundary gameName="Ludo" onClose={() => setShowLudo(false)}>
           <Suspense fallback={null}>
             <LudoGame onClose={() => setShowLudo(false)} isSearchOpen={isOpen} />
-          </Suspense>
-        </GameErrorBoundary>,
-        document.body
-      )}
-      {showSnakes && createPortal(
-        <GameErrorBoundary gameName="Snakes" onClose={() => setShowSnakes(false)}>
-          <Suspense fallback={null}>
-            <SnakesGame onClose={() => setShowSnakes(false)} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
         document.body

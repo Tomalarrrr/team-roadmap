@@ -159,12 +159,6 @@
   flex: 1;
   min-height: 0;
   position: relative;
-  animation: layoutFadeIn 350ms ease-out;
-}
-
-@keyframes layoutFadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 
 /* Enhanced entrance: circular reveal + fade */
@@ -214,8 +208,8 @@
 .boardEntering .baseBlue   { animation: baseReveal 400ms ease-out 400ms both; }
 
 @keyframes baseReveal {
-  from { opacity: 0; transform: scale(0.8); }
-  to   { opacity: 1; transform: scale(1); }
+  from { transform: scale(0.8); }
+  to   { transform: scale(1); }
 }
 
 .sidePanel {
@@ -1759,6 +1753,57 @@
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
   pointer-events: none;
   line-height: 1;
+}
+
+/* Capture the Flag */
+.flagCell {
+  background: rgba(255, 215, 0, 0.25) !important;
+  animation: flagPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes flagPulse {
+  0%, 100% { box-shadow: inset 0 0 4px rgba(255, 215, 0, 0.3); }
+  50% { box-shadow: inset 0 0 10px rgba(255, 215, 0, 0.6); }
+}
+
+.flagOverlay {
+  position: absolute;
+  font-size: 1.1em;
+  z-index: 6;
+  filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+  pointer-events: none;
+  line-height: 1;
+  animation: flagBob 2s ease-in-out infinite;
+}
+
+@keyframes flagBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+.tokenCarryingFlag {
+  box-shadow:
+    0 0 8px 3px rgba(255, 215, 0, 0.6),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.25),
+    inset 0 2px 4px rgba(255, 255, 255, 0.2),
+    0 2px 6px rgba(0, 0, 0, 0.3) !important;
+}
+
+.tokenFlagIndicator {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  font-size: 0.55em;
+  z-index: 11;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  pointer-events: none;
+  line-height: 1;
+  animation: flagWave 1s ease-in-out infinite;
+}
+
+@keyframes flagWave {
+  0%, 100% { transform: rotate(-5deg); }
+  50% { transform: rotate(5deg); }
 }
 
 /* Power-up inventory panel — single slot with description */

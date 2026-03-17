@@ -720,3 +720,39 @@ export function discardSlot(
   newInv[ci][slot] = newPowerUp;
   return newInv;
 }
+
+// --- Capture the Flag ---
+
+export interface FlagState {
+  cell: number | null;     // Track cell where flag sits (null if carried or used)
+  carrier: number | null;  // Token index (0-15) carrying the flag (null if on ground or used)
+  used: boolean;           // Once carried home, flag disappears permanently
+}
+
+export function serializeFlag(flag: FlagState): string {
+  return `${flag.cell ?? -1}|${flag.carrier ?? -1}|${flag.used ? 1 : 0}`;
+}
+
+export function deserializeFlag(str: string): FlagState {
+  if (!str) return { cell: null, carrier: null, used: true }; // no flag string = treat as used
+  const [cellStr, carrierStr, usedStr] = str.split('|');
+  const cell = parseInt(cellStr);
+  const carrier = parseInt(carrierStr);
+  return {
+    cell: cell >= 0 ? cell : null,
+    carrier: carrier >= 0 ? carrier : null,
+    used: usedStr === '1',
+  };
+}
+
+/**
+ * Generate a random track cell for the flag at game start.
+ * Avoids safe zones, start positions, and entry cells.
+ */
+export function generateFlagCell(): number {
+  const candidates: number[] = [];
+  for (let i = 1; i <= TRACK_SIZE; i++) {
+    if (!EXCLUDED_CELLS.has(i)) candidates.push(i);
+  }
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}

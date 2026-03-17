@@ -99,7 +99,7 @@ export function getFirebaseDatabase() {
 // ============================================
 // GLOBAL FIREBASE ACTIVITY TRACKING
 // ============================================
-// Tracks when *any* Firebase listener (roadmap, snakes, ludo, etc.) last
+// Tracks when *any* Firebase listener (roadmap, ludo, etc.) last
 // received data.  The stale-connection detector in useRoadmap checks this so
 // it won't force-reconnect when the connection is actually alive (e.g. a game
 // is running but the roadmap path is quiet).

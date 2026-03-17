@@ -1,7 +1,7 @@
 import type { Unsubscribe } from 'firebase/database';
 import { ensureInitialized, getDbModule, getFirebaseDatabase, markFirebaseActivity } from './firebase';
 import { generateGameCode } from './utils/gameUtils';
-import { initMysteryBoxes, serializeMysteryBoxes } from './ludoPowerUps';
+import { initMysteryBoxes, serializeMysteryBoxes, generateFlagCell, serializeFlag } from './ludoPowerUps';
 
 // --- Types ---
 
@@ -39,6 +39,7 @@ export interface LudoGameState {
   activeBuffs?: string;     // Duration-based buffs (star, lightning, etc.)
   coins?: string;           // Coin counts per player "R:G:Y:B"
   mysteryBoxes?: string;    // Active mystery box cells + cooldowns "cell:cd,cell:cd,..."
+  flag?: string;            // Capture-the-flag state: "cell|carrier|used" (Mario mode)
   paused?: boolean;         // Per-game pause state
   pausedAt?: number;        // Timestamp when paused (to adjust turnStartedAt on resume)
   singlePlayer?: boolean;   // 1-player mode with AI bots
@@ -59,6 +60,7 @@ export interface LudoMoveUpdate {
   activeBuffs?: string;
   coins?: string;
   mysteryBoxes?: string;
+  flag?: string;
 }
 
 // --- Serialization ---
@@ -146,6 +148,7 @@ export async function createGame(
         activeBuffs: '',
         coins: '0:0:0:0',
         mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
+        flag: serializeFlag({ cell: generateFlagCell(), carrier: null, used: false }),
       } : {}),
     };
 
@@ -370,6 +373,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
         activeBuffs: '',
         coins: '0:0:0:0',
         mysteryBoxes: serializeMysteryBoxes(initMysteryBoxes()),
+        flag: serializeFlag({ cell: generateFlagCell(), carrier: null, used: false }),
       } : {}),
     };
   });

@@ -50,6 +50,9 @@ import {
   getActiveMysteryBoxCells,
   type MysteryBoxState,
   type ActiveBuff,
+  type FlagState,
+  deserializeFlag,
+  serializeFlag,
 } from '../ludoPowerUps';
 import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal } from './LudoPowerUpPanel';
 import styles from './LudoGame.module.css';
@@ -488,6 +491,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const gamePausedRef = useRef(false);
 
   const [gamePhase, setGamePhase] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
+  const gamePhaseRef = useRef<'lobby' | 'waiting' | 'playing'>('lobby');
+  const [boardTransition, setBoardTransition] = useState<'exiting' | 'entering' | null>(null);
+  const boardTransitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
   const [myColor, setMyColor] = useState<LudoColor | null>(null);
@@ -585,6 +591,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const [goldenMushroomRolls, setGoldenMushroomRolls] = useState<[number, number, number] | null>(null);
   const [activePowerUp, setActivePowerUp] = useState<{ id: PowerUpId; slot: number } | null>(null);
 
+  // Capture the Flag state (Mario mode)
+  const [flagState, setFlagState] = useState<FlagState>({ cell: null, carrier: null, used: true });
+
   const inventoryRef = useRef(inventory);
   inventoryRef.current = inventory;
   const boardEffectsRef = useRef(boardEffects);
@@ -603,6 +612,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   goldenMushroomRef.current = goldenMushroomRolls;
   const pendingDiscardRef = useRef(pendingDiscard);
   pendingDiscardRef.current = pendingDiscard;
+  const flagStateRef = useRef(flagState);
+  flagStateRef.current = flagState;
 
   const gameCodeRef = useRef(gameCode);
   gameCodeRef.current = gameCode;
@@ -640,6 +651,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         clearTimeout(timer);
       }
       dragCleanupRef.current?.();
+      if (boardTransitionTimer.current) clearTimeout(boardTransitionTimer.current);
     };
   }, []);
 
@@ -926,6 +938,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (state.activeBuffs !== undefined) setActiveBuffs(deserializeBuffs(state.activeBuffs));
         if (state.coins) setCoins(deserializeCoins(state.coins));
         if (state.mysteryBoxes) setMysteryBoxes(deserializeMysteryBoxes(state.mysteryBoxes));
+        if (state.flag) { const f = deserializeFlag(state.flag); setFlagState(f); flagStateRef.current = f; }
       }
 
       // Per-game pause state
@@ -979,7 +992,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       // Transition waiting → playing
       const joinedCount = Object.values(state.players).filter(Boolean).length;
       if (joinedCount >= state.playerCount && state.startedAt) {
-        setGamePhase(prev => prev === 'waiting' ? 'playing' : prev);
+        if (gamePhaseRef.current === 'waiting') {
+          transitionToPlaying();
+        }
       }
     }).then(unsub => {
       if (cancelled) {
@@ -1023,6 +1038,16 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       newTokens = [...currentTokens] as TokenPosition[];
       newTokens[tokenIndex] = newPosition;
       captured = false;
+    }
+
+    // Track which tokens were captured (before auto-deploy might change them)
+    const capturedIndices: number[] = [];
+    if (captured) {
+      const mvrColor = getTokenColor(tokenIndex);
+      for (let i = 0; i < TOTAL_TOKENS; i++) {
+        if (i === tokenIndex || getTokenColor(i) === mvrColor) continue;
+        if (newTokens[i] === 'base' && currentTokens[i] !== 'base') capturedIndices.push(i);
+      }
     }
 
     // Drop items when a token is captured — find who was captured and clear their inventory
@@ -1098,6 +1123,55 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }
     }
 
+    // --- Capture the Flag logic ---
+    let updatedFlag = { ...flagStateRef.current };
+    if (powerUpsEnabledRef.current && !updatedFlag.used) {
+      // 1. Kill transfer: if captured token was carrying the flag, transfer to the killer
+      if (captured && updatedFlag.carrier !== null && capturedIndices.includes(updatedFlag.carrier)) {
+        updatedFlag = { cell: null, carrier: tokenIndex, used: false };
+        showHint('Flag captured! Stolen by the killer!');
+      }
+
+      // 1b. Star effect: if the flag carrier was relocated by star power, drop the flag
+      if (updatedFlag.carrier !== null && updatedFlag.carrier !== tokenIndex) {
+        const carrierOldPos = currentTokens[updatedFlag.carrier];
+        const carrierNewPos = newTokens[updatedFlag.carrier];
+        if (carrierOldPos !== carrierNewPos && carrierNewPos.startsWith('track-')) {
+          updatedFlag = { cell: parseInt(carrierNewPos.split('-')[1]), carrier: null, used: false };
+          showHint('Star power knocked the flag loose!');
+        }
+      }
+
+      // 2. Flag pickup: if mover lands on flagCell and nobody is carrying it
+      if (updatedFlag.cell !== null && updatedFlag.carrier === null && newPosition.startsWith('track-')) {
+        const landedCell = parseInt(newPosition.split('-')[1]);
+        if (landedCell === updatedFlag.cell) {
+          updatedFlag = { cell: null, carrier: tokenIndex, used: false };
+          showHint('Flag picked up! Carry it home!');
+        }
+      }
+
+      // 3. Carry home: if flag carrier reaches final-6, release all base tokens
+      if (updatedFlag.carrier === tokenIndex && reachedHome) {
+        const carrierColor = getTokenColor(tokenIndex);
+        const myIndices = getColorTokenIndices(carrierColor);
+        let released = 0;
+        for (const idx of myIndices) {
+          if (newTokens[idx] === 'base') {
+            const startPos: TokenPosition = `track-${START_POSITIONS[carrierColor]}`;
+            newTokens[idx] = startPos;
+            released++;
+          }
+        }
+        updatedFlag = { cell: null, carrier: null, used: true };
+        if (released > 0) {
+          showHint(`Flag home! ${released} counter${released > 1 ? 's' : ''} released!`);
+        } else {
+          showHint('Flag carried home!');
+        }
+      }
+    }
+
     const moverColor = getTokenColor(tokenIndex);
     const updatedFinishOrder = [...curFinishOrder];
     if (checkPlayerFinished(newTokens, moverColor) && !curFinishOrder.includes(moverColor)) {
@@ -1143,7 +1217,18 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           // Slip back 3 spaces
           updatedEffects = updatedEffects.filter((_, i) => i !== bananaIdx);
           newTokens = knockBack(newTokens, tokenIndex, 3);
-          showHint('Banana peel! Slipped back 3!');
+          // Flag drop on banana slip
+          if (updatedFlag.carrier === tokenIndex) {
+            const slipPos = newTokens[tokenIndex];
+            if (slipPos.startsWith('track-')) {
+              updatedFlag = { cell: parseInt(slipPos.split('-')[1]), carrier: null, used: false };
+              showHint('Banana peel! Flag dropped!');
+            } else {
+              showHint('Banana peel! Slipped back 3!');
+            }
+          } else {
+            showHint('Banana peel! Slipped back 3!');
+          }
         }
         // Check for mystery box (only on voluntary moves, not forced)
         else if (getActiveMysteryBoxCells(updatedMysteryBoxes).has(landedCell)) {
@@ -1213,6 +1298,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       update.activeBuffs = serializeBuffs(updatedBuffs);
       update.coins = serializeCoins(updatedCoins);
       update.mysteryBoxes = serializeMysteryBoxes(updatedMysteryBoxes);
+      update.flag = serializeFlag(updatedFlag);
     }
 
     try {
@@ -1604,6 +1690,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         }
 
         const newTokens = knockBack(currentTokens, target, 3);
+        // Flag drop: if target was carrying flag, drop at new position
+        let shellFlag = flagStateRef.current;
+        if (!shellFlag.used && shellFlag.carrier === target) {
+          const newPos = newTokens[target];
+          if (newPos.startsWith('track-')) {
+            shellFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
+          }
+        }
         const gc = gameCodeRef.current;
         if (gc) {
           makeMove(gc, mc, {
@@ -1619,9 +1713,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(activeBuffsRef.current),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
+            flag: serializeFlag(shellFlag),
           });
         }
-        showHint(`${def.emoji} Hit! Knocked back 3!`);
+        showHint(shellFlag.carrier === null && !shellFlag.used && shellFlag.cell !== null
+          ? `${def.emoji} Hit! Flag dropped!`
+          : `${def.emoji} Hit! Knocked back 3!`);
         return;
       }
 
@@ -1632,6 +1729,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           return;
         }
         const newTokens = knockBack(currentTokens, target, 5);
+        // Flag drop: if target was carrying flag, drop at new position
+        let blueShellFlag = flagStateRef.current;
+        if (!blueShellFlag.used && blueShellFlag.carrier === target) {
+          const newPos = newTokens[target];
+          if (newPos.startsWith('track-')) {
+            blueShellFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
+          }
+        }
         const gc = gameCodeRef.current;
         if (gc) {
           makeMove(gc, mc, {
@@ -1647,9 +1752,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(activeBuffsRef.current),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
+            flag: serializeFlag(blueShellFlag),
           });
         }
-        showHint('Blue Shell! Leader knocked back 5!');
+        showHint(blueShellFlag.carrier === null && !blueShellFlag.used && blueShellFlag.cell !== null
+          ? 'Blue Shell! Flag dropped!'
+          : 'Blue Shell! Leader knocked back 5!');
         return;
       }
 
@@ -2053,6 +2161,20 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               ? targetCell - start
               : (TRACK_SIZE - start) + targetCell;
             score += dist;
+
+            // Flag pickup: high priority
+            const fs = flagStateRef.current;
+            if (!fs.used && fs.cell === targetCell && fs.carrier === null) {
+              score += 150;
+            }
+          }
+
+          // Flag carrier heading home: boost final corridor moves
+          {
+            const fs = flagStateRef.current;
+            if (!fs.used && fs.carrier === tokenIdx && targetPos.startsWith('final-')) {
+              score += 200;
+            }
           }
 
           if (score > bestScore) {
@@ -2142,14 +2264,18 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       const code = await createGame(sessionId, userName, playerCount, marioMode);
       setGameCode(code);
       setMyColor('red');
-      setGamePhase(playerCount === 1 ? 'playing' : 'waiting');
+      if (playerCount === 1) {
+        transitionToPlaying();
+      } else {
+        setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
+      }
       prevTokensRef.current = 'bas'.repeat(16);
     } catch {
       setError('Failed to create game. Try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, userName, playerCount, marioMode]);
+  }, [sessionId, userName, playerCount, marioMode, transitionToPlaying]);
 
   const handleJoinGame = useCallback(async () => {
     const code = joinCode.trim().toUpperCase();
@@ -2173,13 +2299,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       } else {
         prevTokensRef.current = 'bas'.repeat(16);
       }
-      setGamePhase(joinedCount >= state.playerCount ? 'playing' : 'waiting');
+      if (joinedCount >= state.playerCount) {
+        transitionToPlaying();
+      } else {
+        setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Game not found');
     } finally {
       setIsLoading(false);
     }
-  }, [joinCode, sessionId, userName]);
+  }, [joinCode, sessionId, userName, transitionToPlaying]);
 
   const handleSpectateGame = useCallback(async () => {
     const code = joinCode.trim().toUpperCase();
@@ -2204,13 +2334,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       } else {
         prevTokensRef.current = 'bas'.repeat(16);
       }
-      setGamePhase(state.startedAt ? 'playing' : 'waiting');
+      if (state.startedAt) {
+        transitionToPlaying();
+      } else {
+        setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Game not found');
     } finally {
       setIsLoading(false);
     }
-  }, [joinCode]);
+  }, [joinCode, transitionToPlaying]);
 
   const handleNewGame = useCallback(async () => {
     const gc = gameCodeRef.current;
@@ -2252,6 +2386,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setPendingDiscard(null);
       setGoldenMushroomRolls(null);
       setActivePowerUp(null);
+      setFlagState({ cell: null, carrier: null, used: true }); // Will be re-set from Firebase on reset
       await resetGame(gc, activePlayerCountRef.current);
     } catch {
       // Silent failure for easter egg
@@ -2280,7 +2415,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     gameEffects.current = [];
     setGameStats({});
     statsInitRef.current = false;
-    setGamePhase('lobby');
+    setGamePhase('lobby'); gamePhaseRef.current = 'lobby';
     setGameCode(null);
     setMyColor(null);
     setIsSpectating(false);
@@ -2317,11 +2452,45 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setPendingDiscard(null);
     setGoldenMushroomRolls(null);
     setActivePowerUp(null);
+    setFlagState({ cell: null, carrier: null, used: true });
     setGamePaused(false);
     gamePausedRef.current = false;
     setIsSinglePlayer(false);
     isSinglePlayerRef.current = false;
     clearTimeout(botTimerRef.current);
+    // Clear any in-flight board transition
+    if (boardTransitionTimer.current) {
+      clearTimeout(boardTransitionTimer.current);
+      boardTransitionTimer.current = null;
+    }
+    setBoardTransition(null);
+  }, []);
+
+  // Animated transition from lobby/waiting → playing
+  const transitionToPlaying = useCallback(() => {
+    if (boardTransitionTimer.current) return; // already transitioning
+    if (gamePhaseRef.current === 'playing') return; // already playing
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const exitMs = reducedMotion ? 0 : 450;
+    const enterMs = reducedMotion ? 0 : 800;
+
+    if (reducedMotion) {
+      setGamePhase('playing');
+      gamePhaseRef.current = 'playing';
+      return;
+    }
+
+    setBoardTransition('exiting');
+    boardTransitionTimer.current = setTimeout(() => {
+      setGamePhase('playing');
+      gamePhaseRef.current = 'playing';
+      setBoardTransition('entering');
+      boardTransitionTimer.current = setTimeout(() => {
+        setBoardTransition(null);
+        boardTransitionTimer.current = null;
+      }, enterMs);
+    }, exitMs);
   }, []);
 
   // --- Drag ---
@@ -2389,6 +2558,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const entryColor = ENTRY_ARROW_COLORS[cellNum];
     const isMysteryBox = activeMysteryBoxSet.has(cellNum);
     const hasBanana = bananaCellSet.has(cellNum);
+    const hasFlag = powerUpsEnabled && !flagState.used && flagState.cell === cellNum && flagState.carrier === null;
 
     const classes = [
       styles.cell,
@@ -2403,6 +2573,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       entryColor === 'blue' ? styles.entryBlue : '',
       isMysteryBox ? styles.mysteryBox : '',
       startColor ? styles.checkeredStart : '',
+      hasFlag ? styles.flagCell : '',
     ].filter(Boolean).join(' ');
 
     return (
@@ -2412,6 +2583,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         style={{ gridRow: row, gridColumn: col }}
       >
         {hasBanana && <span className={styles.bananaOverlay}>{'🍌'}</span>}
+        {hasFlag && <span className={styles.flagOverlay}>{'🏁'}</span>}
       </div>
     );
   }
@@ -2430,6 +2602,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const isClickable = validMoves.has(idx) && isMyTurn && turnPhase === 'move' && !isStepping;
     const isArriving = lastMovedToken === idx && !isStepping;
     const inCorridor = pos.startsWith('final-') && pos !== 'final-6';
+    const carryingFlag = powerUpsEnabled && !flagState.used && flagState.carrier === idx;
 
     const coords = animCoords || getTokenCoords(pos, idx);
     if (!coords) return null;
@@ -2442,10 +2615,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         className={[
           styles.token,
           TOKEN_STYLE[color],
+          powerUpsEnabled ? styles.marioToken : '',
           isClickable ? styles.tokenClickable : '',
           isArriving ? styles.tokenArriving : '',
           isStepping ? (stepParity ? styles.tokenSteppingB : styles.tokenSteppingA) : '',
           inCorridor && !isStepping ? styles.tokenInCorridor : '',
+          carryingFlag ? styles.tokenCarryingFlag : '',
         ].filter(Boolean).join(' ')}
         style={{
           left: `${(coords[1] - 1) * CELL_PCT + TOKEN_PAD_PCT + dx}%`,
@@ -2453,8 +2628,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         }}
         onClick={() => isClickable && handleMoveToken(idx)}
         role="button"
-        aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1}`}
-      />
+        aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1}${carryingFlag ? ' (carrying flag)' : ''}`}
+      >
+        {carryingFlag && <span className={styles.tokenFlagIndicator}>{'🏁'}</span>}
+      </div>
     );
   }
 
@@ -2482,6 +2659,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 className={[
                   styles.baseToken,
                   TOKEN_STYLE[color],
+                  powerUpsEnabled ? styles.marioToken : '',
                   isClickable ? styles.baseTokenClickable : '',
                 ].filter(Boolean).join(' ')}
                 onClick={() => isClickable && handleMoveToken(idx)}
@@ -2565,7 +2743,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
         {/* === LOBBY === */}
         {gamePhase === 'lobby' && (
-          <div className={styles.lobby}>
+          <div className={`${styles.lobby} ${boardTransition === 'exiting' ? styles.lobbyExiting : ''}`}>
             <div className={styles.playerCountSelector}>
               <span className={styles.playerCountLabel}>Players:</span>
               {[1, 2, 3, 4].map(n => (
@@ -2631,7 +2809,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
         {/* === WAITING === */}
         {gamePhase === 'waiting' && (
-          <div className={styles.lobby}>
+          <div className={`${styles.lobby} ${boardTransition === 'exiting' ? styles.lobbyExiting : ''}`}>
             <div className={styles.waitingText}>
               Waiting for {playerCount - Object.keys(playerNames).length} more player{playerCount - Object.keys(playerNames).length !== 1 ? 's' : ''}...
             </div>
@@ -2681,7 +2859,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
         {/* === PLAYING === */}
         {gamePhase === 'playing' && (
-          <div className={styles.playingLayout}>
+          <div className={`${styles.playingLayout} ${boardTransition === 'entering' ? styles.boardEntering : ''}`}>
             {/* Board column */}
             <div className={styles.boardColumn}>
               <div className={styles.boardWrapper}>
