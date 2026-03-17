@@ -8,6 +8,13 @@ self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
+// Listen for skip-waiting message from sw-register.js
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 // Activate: clean ALL old caches, take control immediately
 self.addEventListener('activate', (event) => {
   event.waitUntil(

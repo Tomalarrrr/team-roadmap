@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import styles from './Skeleton.module.css';
 
 interface SkeletonProps {
@@ -19,7 +20,33 @@ export function Skeleton({ width, height, borderRadius }: SkeletonProps) {
   );
 }
 
+const STALE_LOAD_MS = 8000;
+
+function clearCacheAndReload() {
+  // Unregister all service workers
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(r => r.unregister());
+    });
+  }
+  // Clear all Cache API caches
+  if ('caches' in window) {
+    caches.keys().then(keys => Promise.all(keys.map(k => caches.delete(k))));
+  }
+  // Small delay to let unregister/cache-clear settle, then hard reload
+  setTimeout(() => {
+    window.location.reload();
+  }, 300);
+}
+
 export function TimelineSkeleton() {
+  const [showRecovery, setShowRecovery] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setShowRecovery(true), STALE_LOAD_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <div className={styles.timelineSkeleton}>
       <div className={styles.sidebarSkeleton}>
@@ -44,6 +71,14 @@ export function TimelineSkeleton() {
             </div>
           ))}
         </div>
+        {showRecovery && (
+          <div className={styles.recoveryBanner}>
+            <p>Taking longer than expected to load.</p>
+            <button className={styles.recoveryButton} onClick={clearCacheAndReload}>
+              Clear cache &amp; reload
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
