@@ -218,7 +218,7 @@
 }
 
 .sidePanel {
-  width: 190px;
+  width: 210px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -249,7 +249,7 @@
 }
 
 .statsLabel {
-  font-size: 0.5rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -264,7 +264,7 @@
 .statsTable table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
   text-align: center;
 }
@@ -273,7 +273,7 @@
   color: var(--text-secondary);
   font-weight: 500;
   padding: 2px 0;
-  font-size: 0.55rem;
+  font-size: 0.7rem;
 }
 
 .statsTable td {
@@ -360,7 +360,7 @@
 }
 
 .statusHint {
-  font-size: 0.65rem;
+  font-size: 0.8rem;
   font-weight: 500;
   color: var(--text-secondary);
   white-space: nowrap;
@@ -437,8 +437,8 @@
 .home {
   grid-row: 7 / 10;
   grid-column: 7 / 10;
-  z-index: 1;
-  border: 0;
+  z-index: 2;
+  border: 1px solid #ccc;
   position: relative;
   overflow: hidden;
   display: flex;
@@ -446,19 +446,7 @@
   justify-content: center;
   gap: 4px;
   flex-wrap: wrap;
-}
-
-.home::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background:
-    linear-gradient(135deg, #ea4330 25%, transparent 25%) top left,
-    linear-gradient(225deg, #34a853 25%, transparent 25%) top right,
-    linear-gradient(315deg, #fbbc05 25%, transparent 25%) bottom right,
-    linear-gradient(45deg, #4285f4 25%, transparent 25%) bottom left;
-  background-size: 50% 50%;
-  background-repeat: no-repeat;
+  background: #fff;
 }
 
 .homeCount {
@@ -843,7 +831,7 @@
 }
 
 .rollReminder {
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #e4002b;
   animation: rollNudge 1s ease-in-out infinite;
@@ -1052,8 +1040,49 @@
 }
 
 .playerSlotEmpty {
-  opacity: 0.4;
+  opacity: 0.5;
   font-style: italic;
+}
+
+.playerSlotClickable {
+  cursor: pointer;
+  border-style: dashed;
+  opacity: 0.7;
+  transition: opacity 150ms ease, border-color 150ms ease;
+}
+
+.playerSlotClickable:hover {
+  opacity: 1;
+  border-color: var(--text-muted);
+}
+
+.playerSlotName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeBotBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.removeBotBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 .playerDot {
@@ -1179,7 +1208,7 @@
   gap: 5px;
   padding: 3px 10px;
   border-radius: var(--radius-full);
-  font-size: 0.75rem;
+  font-size: 0.85rem;
   color: var(--text-muted);
   background: var(--bg-primary);
   border: 1px solid transparent;
@@ -1218,7 +1247,7 @@
 }
 
 .youBadge {
-  font-size: 0.55rem;
+  font-size: 0.7rem;
   opacity: 0.5;
   margin-left: 2px;
 }
@@ -1634,6 +1663,7 @@
 .mysteryBox::after {
   content: '?' !important;
   position: absolute !important;
+  box-sizing: border-box;
   width: 72%;
   height: 72%;
   top: 14%;
@@ -1677,96 +1707,89 @@
 
 /* --- Mario mode character tokens --- */
 /*
- * ::before = character initial (M/L/W/T) on the token face.
- *   - inset:0 fills the token circle, letter is centered inside.
- *   - 10px for track tokens (~17px), 18px for base tokens (~38px).
+ * ::before — display:none (no letter on token face).
  *
- * ::after = decorative cap dome seated on top of the token.
- *   - MUCH darker shade than the token to avoid same-hue blending.
- *   - white border-bottom separates cap from token visually.
- *   - 75% wide, 36% tall, centered, overlapping top edge.
+ * ::after — cap dome seated on top of the token, with character
+ *   initial letter (M/L/W/T) inside the white circle emblem.
+ *   Letter color = the counter's own color for authenticity.
+ *   90% wide, 48% tall, centered, overlapping top 30% of token.
+ *   Base tokens get font-size:11px vs 5.5px for track tokens.
  *
- * No conflict with tokenCaptured::after (different elements).
+ * tokenCaptured::after lives on separate elements — no conflict.
  */
 
-/* Character initial — white letter on the token face */
+/* No letter on the token face in Mario mode */
 .marioToken::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  font-family: Arial, Helvetica, sans-serif;
-  font-weight: 900;
-  font-size: 10px;
-  line-height: 1;
-  color: rgba(255, 255, 255, 0.95);
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.5),
-    0 0 4px rgba(0, 0, 0, 0.2);
-  z-index: 5;
-  pointer-events: none;
+  display: none;
 }
 
-/* Cap dome — sits on top of the token like a hat */
+/* Cap with character emblem — sits on top of the token like a hat */
 .marioToken::after {
-  content: '';
   position: absolute;
-  width: 80%;
-  height: 38%;
-  top: -15%;
-  left: 10%;
+  /* Centered: (100% - 90%) / 2 = 5% each side */
+  width: 90%;
+  height: 48%;
+  top: -18%;
+  left: 5%;
   border-radius: 50% 50% 10% 10%;
-  border: 1.5px solid rgba(255, 255, 255, 0.85);
-  border-top-color: rgba(255, 255, 255, 0.5);
+  border: 1.5px solid rgba(255, 255, 255, 0.8);
+  border-top-color: rgba(255, 255, 255, 0.45);
   z-index: 4;
   pointer-events: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  /* Letter sits inside the white circle emblem */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 900;
+  font-size: 5.5px;
+  line-height: 1;
+  text-shadow: 0 0.3px 0.5px rgba(0, 0, 0, 0.12);
 }
 
-/* Larger letter for base tokens (~38px) */
-.baseToken.marioToken::before {
-  font-size: 18px;
+/* Scale up cap letter for base tokens (~38px) */
+.baseToken.marioToken::after {
+  font-size: 11px;
 }
 
-/* Mario — bright red cap with white circle emblem */
-.marioToken.tokenRed::before { content: 'M'; }
+/* Mario — red cap, red M on white circle emblem */
 .marioToken.tokenRed::after {
+  content: 'M';
+  color: #c62020;
   background:
-    radial-gradient(circle at 50% 60%, rgba(255, 255, 255, 0.85) 20%, transparent 22%),
+    radial-gradient(circle at 50% 55%, #fff 28%, transparent 30%),
     linear-gradient(180deg, #e84030 0%, #d02018 100%);
 }
 
-/* Luigi — bright green cap with white circle emblem */
-.marioToken.tokenGreen::before { content: 'L'; }
+/* Luigi — green cap, green L on white circle emblem */
 .marioToken.tokenGreen::after {
+  content: 'L';
+  color: #1a7a2e;
   background:
-    radial-gradient(circle at 50% 60%, rgba(255, 255, 255, 0.85) 20%, transparent 22%),
+    radial-gradient(circle at 50% 55%, #fff 28%, transparent 30%),
     linear-gradient(180deg, #38b44a 0%, #28943a 100%);
 }
 
-/* Wario — bright yellow cap, blue W on token face */
-.marioToken.tokenYellow::before {
-  content: 'W';
-  color: rgba(60, 50, 160, 0.9);
-  text-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 0 3px rgba(60, 50, 160, 0.15);
-}
+/* Wario — yellow cap, blue W (matches character design) */
 .marioToken.tokenYellow::after {
-  background: linear-gradient(180deg, #f5d020 0%, #e0b800 100%);
+  content: 'W';
+  color: #3830a0;
+  background:
+    linear-gradient(180deg, #f5d020 0%, #e0b800 100%);
+  text-shadow: none;
 }
 
-/* Toad — white mushroom dome with blue spot */
-.marioToken.tokenBlue::before { content: 'T'; }
+/* Toad — white mushroom dome, blue T */
 .marioToken.tokenBlue::after {
+  content: 'T';
+  color: #2060c8;
   border-radius: 50%;
   background:
-    radial-gradient(circle at 50% 45%, #3070e0 26%, transparent 28%),
+    radial-gradient(circle at 50% 12%, #3070e0 14%, transparent 16%),
     linear-gradient(180deg, #ffffff 0%, #e0eaf5 100%);
   border-color: rgba(160, 185, 220, 0.7);
+  text-shadow: none;
 }
 
 /* Checkered flag pattern on start cells */
@@ -1783,11 +1806,20 @@
 /* Banana peel overlay on board cells */
 .bananaOverlay {
   position: absolute;
-  font-size: 1em;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.3em;
   z-index: 5;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.35));
   pointer-events: none;
   line-height: 1;
+  animation: bananaPlace 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes bananaPlace {
+  from { transform: translate(-50%, -50%) scale(0) rotate(-90deg); opacity: 0; }
+  to { transform: translate(-50%, -50%) scale(1) rotate(0deg); opacity: 1; }
 }
 
 /* Capture the Flag */
@@ -1803,6 +1835,9 @@
 
 .flagOverlay {
   position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   font-size: 1.1em;
   z-index: 6;
   filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
@@ -1812,8 +1847,8 @@
 }
 
 @keyframes flagBob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
+  0%, 100% { transform: translate(-50%, -50%) translateY(0); }
+  50% { transform: translate(-50%, -50%) translateY(-2px); }
 }
 
 .tokenCarryingFlag {
@@ -1934,33 +1969,33 @@
 }
 
 .powerUpSingleName {
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: var(--text-primary);
   line-height: 1.2;
 }
 
 .powerUpSingleDesc {
-  font-size: 0.55rem;
+  font-size: 0.7rem;
   color: var(--text-secondary);
   line-height: 1.3;
 }
 
 .powerUpSingleUse {
-  font-size: 0.5rem;
+  font-size: 0.65rem;
   color: #e4521b;
   font-weight: 600;
   margin-top: 1px;
 }
 
 .powerUpSingleEmpty {
-  font-size: 0.65rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
   opacity: 0.5;
 }
 
 .powerUpLabel {
-  font-size: 0.55rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -1970,7 +2005,7 @@
 }
 
 .coinCount {
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   font-weight: 600;
   color: #d4940a;
   display: flex;
@@ -2273,7 +2308,7 @@
 }
 
 .buffDuration {
-  font-size: 0.55rem;
+  font-size: 0.7rem;
   font-weight: 700;
   color: var(--text-muted);
 }
@@ -2671,9 +2706,16 @@
   .discardNewEmoji,
   .newItemBounce,
   .transitionOverlay,
-  .boardEntering {
+  .boardEntering,
+  .bananaOverlay {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
+
+
+
+
+
+

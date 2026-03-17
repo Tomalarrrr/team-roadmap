@@ -106,7 +106,6 @@ const JOIN_ORDER: LudoColor[] = ['green', 'yellow', 'blue'];
 export async function createGame(
   sessionId: string,
   userName: string,
-  playerCount: number,
   powerUpsEnabled = false
 ): Promise<string> {
   await ensureInitialized();
@@ -117,17 +116,9 @@ export async function createGame(
     const code = generateGameCode();
     const gameRef = ref(db, `ludo/${code}`);
 
-    const isSolo = playerCount === 1;
-    const actualPlayerCount = isSolo ? 4 : playerCount;
-    const botNames = ['Bot Green', 'Bot Yellow', 'Bot Blue'];
     const initialState: LudoGameState = {
       players: {
         red: { sessionId, name: userName },
-        ...(isSolo ? {
-          green: { sessionId: 'bot-green', name: botNames[0] },
-          yellow: { sessionId: 'bot-yellow', name: botNames[1] },
-          blue: { sessionId: 'bot-blue', name: botNames[2] },
-        } : {}),
       },
       tokens: INITIAL_TOKENS,
       currentTurn: 'red',
@@ -137,10 +128,9 @@ export async function createGame(
       winner: null,
       finishOrder: '',
       createdAt: Date.now(),
-      startedAt: isSolo ? Date.now() : null,
+      startedAt: null,
       turnStartedAt: Date.now(),
-      playerCount: actualPlayerCount,
-      ...(isSolo ? { singlePlayer: true } : {}),
+      playerCount: 4,
       ...(powerUpsEnabled ? {
         powerUpsEnabled: true,
         powerUps: '__'.repeat(4),
@@ -161,6 +151,101 @@ export async function createGame(
   }
 
   throw new Error('Failed to generate unique game code. Try again.');
+}
+
+const BOT_NAMES: Record<LudoColor, string> = {
+  red: 'Bot Red',
+  green: 'Bot Green',
+  yellow: 'Bot Yellow',
+  blue: 'Bot Blue',
+};
+
+export async function addBot(code: string, color: LudoColor): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `ludo/${code}`);
+  await runTransaction(gameRef, (current: LudoGameState | null) => {
+    if (!current) return current;
+    if (current.startedAt) return; // Can't modify after game started
+    if (current.players[color]) return; // Slot already taken
+    return {
+      ...current,
+      players: {
+        ...current.players,
+        [color]: { sessionId: `bot-${color}`, name: BOT_NAMES[color] },
+      },
+    };
+  });
+}
+
+export async function removeBot(code: string, color: LudoColor): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `ludo/${code}`);
+  await runTransaction(gameRef, (current: LudoGameState | null) => {
+    if (!current) return current;
+    if (current.startedAt) return; // Can't modify after game started
+    const player = current.players[color];
+    if (!player || !player.sessionId.startsWith('bot-')) return; // Can only remove bots
+    const newPlayers = { ...current.players };
+    delete newPlayers[color];
+    return { ...current, players: newPlayers };
+  });
+}
+
+export async function startGame(code: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `ludo/${code}`);
+  await runTransaction(gameRef, (current: LudoGameState | null) => {
+    if (!current) return current;
+    if (current.startedAt) return; // Already started
+
+    // Determine active players and compact: find highest occupied slot
+    const allColors: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
+    const filledColors = allColors.filter(c => !!current.players[c]);
+    if (filledColors.length < 2) return; // Need at least 2 players
+
+    // playerCount = index of last filled color + 1
+    const lastFilledIdx = Math.max(...filledColors.map(c => allColors.indexOf(c)));
+    const playerCount = lastFilledIdx + 1;
+
+    // Auto-fill any gaps with bots
+    const newPlayers = { ...current.players };
+    for (let i = 0; i < playerCount; i++) {
+      const c = allColors[i];
+      if (!newPlayers[c]) {
+        newPlayers[c] = { sessionId: `bot-${c}`, name: BOT_NAMES[c] };
+      }
+    }
+
+    // Check if any bots are present
+    const hasBots = Object.entries(newPlayers)
+      .filter(([c]) => allColors.indexOf(c as LudoColor) < playerCount)
+      .some(([, p]) => p && (p as LudoPlayer).sessionId.startsWith('bot-'));
+
+    // Pick random first player from active colors
+    const activePlayers = allColors.slice(0, playerCount);
+    const arr = new Uint8Array(1);
+    crypto.getRandomValues(arr);
+    const randomFirst = activePlayers[arr[0] % activePlayers.length];
+
+    return {
+      ...current,
+      players: newPlayers,
+      playerCount,
+      startedAt: Date.now(),
+      turnStartedAt: Date.now(),
+      currentTurn: randomFirst,
+      ...(hasBots ? { singlePlayer: true } : {}),
+    };
+  });
 }
 
 export async function joinGame(
@@ -188,11 +273,29 @@ export async function joinGame(
       }
     }
 
-    // Find empty slot
-    const maxSlots = current.playerCount;
-    const availableColors = JOIN_ORDER.slice(0, maxSlots - 1);
+    // If game already started, try to rejoin an empty slot within playerCount
+    if (current.startedAt) {
+      const availableColors = JOIN_ORDER.slice(0, current.playerCount - 1);
+      let foundColor: LudoColor | null = null;
+      for (const color of availableColors) {
+        if (!current.players[color]) {
+          foundColor = color;
+          break;
+        }
+      }
+      if (!foundColor) {
+        joinError = 'Game is full';
+        return;
+      }
+      return {
+        ...current,
+        players: { ...current.players, [foundColor]: { sessionId, name: userName } },
+      };
+    }
+
+    // Game not started yet — find any empty slot (all 4 available in lobby)
     let foundColor: LudoColor | null = null;
-    for (const color of availableColors) {
+    for (const color of JOIN_ORDER) {
       if (!current.players[color]) {
         foundColor = color;
         break;
@@ -204,24 +307,10 @@ export async function joinGame(
       return; // Abort
     }
 
-    const updated: LudoGameState = {
+    return {
       ...current,
       players: { ...current.players, [foundColor]: { sessionId, name: userName } },
     };
-
-    // Start game if all players joined
-    const joinedCount = Object.values(current.players).filter(Boolean).length + 1;
-    if (joinedCount >= maxSlots) {
-      const activePlayers: LudoColor[] = (['red', 'green', 'yellow', 'blue'] as LudoColor[]).slice(0, maxSlots);
-      const arr = new Uint8Array(1);
-      crypto.getRandomValues(arr);
-      const randomFirst = activePlayers[arr[0] % activePlayers.length];
-      updated.startedAt = Date.now();
-      updated.turnStartedAt = Date.now();
-      updated.currentTurn = randomFirst;
-    }
-
-    return updated;
   });
 
   if (joinError) throw new Error(joinError);
@@ -350,7 +439,12 @@ export async function resetGame(code: string, playerCount: number): Promise<void
   await runTransaction(gameRef, (current: LudoGameState | null) => {
     if (!current) return current;
     const hasPowerUps = current.powerUpsEnabled === true;
-    const isSolo = current.singlePlayer === true;
+    // Detect bots: any player with sessionId starting with 'bot-'
+    const allColors: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
+    const hasBots = allColors.slice(0, playerCount).some(c => {
+      const p = current.players[c];
+      return p && p.sessionId.startsWith('bot-');
+    });
 
     return {
       ...current,
@@ -366,7 +460,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       playerCount,
       paused: false,
       pausedAt: null,
-      ...(isSolo ? { singlePlayer: true } : {}),
+      ...(hasBots ? { singlePlayer: true } : { singlePlayer: false }),
       ...(hasPowerUps ? {
         powerUps: '__'.repeat(4),
         boardEffects: '',

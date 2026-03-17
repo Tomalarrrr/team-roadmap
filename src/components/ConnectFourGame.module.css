@@ -562,6 +562,80 @@
   50% { opacity: 0.5; }
 }
 
+/* Player list for waiting room */
+.playerList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 240px;
+}
+
+.playerSlot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+}
+
+.playerSlotEmpty {
+  opacity: 0.5;
+  font-style: italic;
+}
+
+.playerSlotClickable {
+  cursor: pointer;
+  border-style: dashed;
+  opacity: 0.7;
+  transition: opacity 150ms ease, border-color 150ms ease;
+}
+
+.playerSlotClickable:hover {
+  opacity: 1;
+  border-color: var(--text-muted);
+}
+
+.playerSlotName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.removeBotBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.removeBotBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.playerDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .errorText {
   font-size: 0.8rem;
   color: #e4002b;

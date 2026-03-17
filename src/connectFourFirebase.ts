@@ -19,6 +19,8 @@ export interface ConnectFourGameState {
     yellow?: ConnectFourPlayer | null;
   };
   createdAt: number;
+  startedAt?: number | null;
+  singlePlayer?: boolean;
 }
 
 export async function createGame(sessionId: string, userName: string): Promise<string> {
@@ -42,6 +44,7 @@ export async function createGame(sessionId: string, userName: string): Promise<s
         red: { sessionId, name: userName },
       },
       createdAt: Date.now(),
+      startedAt: null,
     };
 
     // Atomic create: only succeeds if code doesn't already exist
@@ -97,7 +100,6 @@ export async function joinGame(
     return {
       ...current,
       players: { ...players, yellow: { sessionId, name: userName } },
-      turnStartedAt: Date.now(),
     };
   });
 
@@ -163,11 +165,11 @@ function validateMove(
   expectedTurn: 'red' | 'yellow'
 ): boolean {
   if (newBoard.length !== 48) return false;
-  if (!/^[.RY]+$/.test(newBoard)) return false;
+  if (!/^[.ry]+$/.test(newBoard)) return false;
 
   const ROWS = 6;
   const COLS = 8;
-  const piece = expectedTurn === 'red' ? 'R' : 'Y';
+  const piece = expectedTurn === 'red' ? 'r' : 'y';
 
   // Find exactly one new piece
   let diffCount = 0;
@@ -217,6 +219,64 @@ export async function makeMove(
   });
 
   return result.committed;
+}
+
+export async function addBot(code: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `connectFour/${code}`);
+  await runTransaction(gameRef, (current: ConnectFourGameState | null) => {
+    if (!current) return current;
+    if (current.startedAt) return; // Can't modify after game started
+    if (current.players.yellow) return; // Slot already taken
+    return {
+      ...current,
+      players: {
+        ...current.players,
+        yellow: { sessionId: 'bot-yellow', name: 'Bot' },
+      },
+    };
+  });
+}
+
+export async function removeBot(code: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `connectFour/${code}`);
+  await runTransaction(gameRef, (current: ConnectFourGameState | null) => {
+    if (!current) return current;
+    if (current.startedAt) return; // Can't modify after game started
+    const yellow = current.players.yellow;
+    if (!yellow || !yellow.sessionId.startsWith('bot-')) return; // Can only remove bots
+    const newPlayers = { ...current.players };
+    delete newPlayers.yellow;
+    return { ...current, players: newPlayers };
+  });
+}
+
+export async function startGame(code: string): Promise<void> {
+  await ensureInitialized();
+  const { ref, runTransaction } = getDbModule();
+  const db = getFirebaseDatabase();
+
+  const gameRef = ref(db, `connectFour/${code}`);
+  await runTransaction(gameRef, (current: ConnectFourGameState | null) => {
+    if (!current) return current;
+    if (current.startedAt) return; // Already started
+    if (!current.players.yellow) return; // Need 2 players
+
+    const hasBot = current.players.yellow.sessionId.startsWith('bot-');
+    return {
+      ...current,
+      startedAt: Date.now(),
+      turnStartedAt: Date.now(),
+      ...(hasBot ? { singlePlayer: true } : {}),
+    };
+  });
 }
 
 export async function resetGame(code: string, nextStarter: 'red' | 'yellow'): Promise<void> {

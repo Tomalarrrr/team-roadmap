@@ -7,6 +7,9 @@ import {
   makeMove,
   resetGame,
   toggleGamePause,
+  addBot,
+  removeBot,
+  startGame,
   serializeTokens,
   deserializeTokens,
   type LudoColor,
@@ -117,6 +120,10 @@ const COLOR_LABELS: Record<LudoColor, string> = {
 
 const COLOR_HEX: Record<LudoColor, string> = {
   red: '#ea4330', green: '#34a853', yellow: '#fbbc05', blue: '#4285f4',
+};
+
+const MARIO_NAMES: Record<LudoColor, string> = {
+  red: 'Mario', green: 'Luigi', yellow: 'Peach', blue: 'Toad',
 };
 
 // Absolute-positioning constants (percentages of board size)
@@ -479,7 +486,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const [myColor, setMyColor] = useState<LudoColor | null>(null);
   const [isSpectating, setIsSpectating] = useState(false);
   const [playerNames, setPlayerNames] = useState<Partial<Record<LudoColor, string>>>({});
-  const [playerCount, setPlayerCount] = useState(4);
+  // playerCount is tracked via activePlayerCount (set from Firebase state)
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSinglePlayer, setIsSinglePlayer] = useState(false);
@@ -532,6 +539,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const homeStuckRolls = useRef<Record<string, number>>({}); // per-color consecutive non-6 rolls
   const pityThreshold = useRef<Record<string, number>>({}); // per-color random 3-6 threshold
   const lastTwoRolls = useRef<Record<string, [number, number]>>({}); // per-color anti-streak tracking
+  const sixCounts = useRef<Record<string, number>>({}); // per-color total 6s rolled (for fairness balancing)
+  const totalRollCounts = useRef<Record<string, number>>({}); // per-color total rolls
 
   // Cell-by-cell animation state
   const tokenAnimPos = useRef<Map<number, [number, number]>>(new Map());
@@ -725,7 +734,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             setGameCode(code.toUpperCase());
             setMyColor(assignedColor);
             setActivePlayerCount(state.playerCount);
-            const joinedCount = Object.values(state.players).filter(Boolean).length;
             const gameInProgress = state.startedAt && state.tokens !== 'bas'.repeat(16);
             if (gameInProgress) {
               prevTokensRef.current = state.tokens;
@@ -734,7 +742,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             } else {
               prevTokensRef.current = 'bas'.repeat(16);
             }
-            if (joinedCount >= state.playerCount) {
+            if (state.startedAt) {
               transitionToPlaying();
             } else {
               setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
@@ -944,10 +952,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setGamePaused(isPaused);
       gamePausedRef.current = isPaused;
 
-      // Single player mode
+      // Single player mode (bots present)
       if (state.singlePlayer) {
         setIsSinglePlayer(true);
         isSinglePlayerRef.current = true;
+      } else {
+        setIsSinglePlayer(false);
+        isSinglePlayerRef.current = false;
       }
 
       if (state.winner) {
@@ -987,9 +998,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         setValidMoves(new Map());
       }
 
-      // Transition waiting → playing
-      const joinedCount = Object.values(state.players).filter(Boolean).length;
-      if (joinedCount >= state.playerCount && state.startedAt) {
+      // Transition waiting → playing when host starts the game
+      if (state.startedAt) {
+        setActivePlayerCount(state.playerCount);
+        activePlayerCountRef.current = state.playerCount;
         if (gamePhaseRef.current === 'waiting') {
           transitionToPlaying();
         }
@@ -1354,6 +1366,25 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         r = Math.floor(Math.random() * 5) + 1;
         if (r >= prev1) r++;
       }
+
+      // Balance 6s across players: if this player has significantly more 6s
+      // than the average, re-roll 6s with increasing probability
+      if (r === 6) {
+        const mySixes = sixCounts.current[colorKey] || 0;
+        const myTotal = totalRollCounts.current[colorKey] || 0;
+        const allColors = Object.keys(totalRollCounts.current);
+        if (allColors.length > 1 && myTotal >= 4) {
+          const avgSixes = allColors.reduce((sum, c) => sum + (sixCounts.current[c] || 0), 0) / allColors.length;
+          const excess = mySixes - avgSixes;
+          // If 2+ more 6s than average, 50% chance to re-roll; 3+ → 70%; 4+ → 85%
+          if (excess >= 2) {
+            const rerollChance = Math.min(0.85, 0.3 + (excess - 2) * 0.2);
+            if (Math.random() < rerollChance) {
+              r = Math.floor(Math.random() * 5) + 1; // 1-5 only
+            }
+          }
+        }
+      }
       return r;
     };
 
@@ -1366,11 +1397,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     });
     const needsSix = hasTokenAtHome && noneOnTrack;
     let roll = fairRoll();
+    let pityForced = false;
     const stuckCount = homeStuckRolls.current[colorKey] || 0;
     const threshold = pityThreshold.current[colorKey] ?? (3 + Math.floor(Math.random() * 4));
     if (!(colorKey in pityThreshold.current)) pityThreshold.current[colorKey] = threshold;
     if (needsSix && stuckCount >= threshold) {
       roll = 6;
+      pityForced = true;
     }
     if (needsSix) {
       if (roll === 6) {
@@ -1384,6 +1417,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
     const prevRolls = lastTwoRolls.current[colorKey] || [0, 0];
     lastTwoRolls.current[colorKey] = [prevRolls[1], roll];
+    // Track totals for 6-balancing (don't count pity-forced 6s against the player)
+    totalRollCounts.current[colorKey] = (totalRollCounts.current[colorKey] || 0) + 1;
+    if (roll === 6 && !pityForced) sixCounts.current[colorKey] = (sixCounts.current[colorKey] || 0) + 1;
 
     // Super Mushroom: double the roll
     if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'super-mushroom') {
@@ -2352,21 +2388,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const code = await createGame(sessionId, userName, playerCount, marioMode);
+      const code = await createGame(sessionId, userName, marioMode);
       setGameCode(code);
       setMyColor('red');
-      if (playerCount === 1) {
-        transitionToPlaying();
-      } else {
-        setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
-      }
+      setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
       prevTokensRef.current = 'bas'.repeat(16);
     } catch {
       setError('Failed to create game. Try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [sessionId, userName, playerCount, marioMode, transitionToPlaying]);
+  }, [sessionId, userName, marioMode]);
 
   const handleJoinGame = useCallback(async () => {
     const code = joinCode.trim().toUpperCase();
@@ -2381,7 +2413,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setGameCode(code);
       setMyColor(assignedColor);
       setActivePlayerCount(state.playerCount);
-      const joinedCount = Object.values(state.players).filter(Boolean).length;
       const gameInProgress = state.startedAt && state.tokens !== 'bas'.repeat(16);
       if (gameInProgress) {
         prevTokensRef.current = state.tokens;
@@ -2390,7 +2421,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       } else {
         prevTokensRef.current = 'bas'.repeat(16);
       }
-      if (joinedCount >= state.playerCount) {
+      if (state.startedAt) {
         transitionToPlaying();
       } else {
         setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
@@ -2415,7 +2446,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       setGameCode(code);
       setMyColor(null);
       setIsSpectating(true);
-      setPlayerCount(state.playerCount);
       setActivePlayerCount(state.playerCount);
       const gameInProgress = state.startedAt && state.tokens !== 'bas'.repeat(16);
       if (gameInProgress) {
@@ -2466,6 +2496,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       homeStuckRolls.current = {};
       pityThreshold.current = {};
       lastTwoRolls.current = {};
+      sixCounts.current = {};
+      totalRollCounts.current = {};
       clearTimeout(botTimerRef.current);
       setShowGameOver(false);
       clearTimeout(gameOverTimerRef.current);
@@ -2532,6 +2564,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     homeStuckRolls.current = {};
     pityThreshold.current = {};
     lastTwoRolls.current = {};
+    sixCounts.current = {};
+    totalRollCounts.current = {};
     dragCleanupRef.current?.();
     dragCleanupRef.current = null;
     // Reset power-up state
@@ -2557,6 +2591,28 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setBoardTransition(null);
     setTransitionFromPhase(null);
   }, []);
+
+  const handleAddBot = useCallback(async (color: LudoColor) => {
+    if (!gameCode) return;
+    try { await addBot(gameCode, color); } catch { /* silent */ }
+  }, [gameCode]);
+
+  const handleRemoveBot = useCallback(async (color: LudoColor) => {
+    if (!gameCode) return;
+    try { await removeBot(gameCode, color); } catch { /* silent */ }
+  }, [gameCode]);
+
+  const handleStartGame = useCallback(async () => {
+    if (!gameCode) return;
+    setIsLoading(true);
+    try {
+      await startGame(gameCode);
+    } catch {
+      setError('Failed to start game.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [gameCode]);
 
   // --- Drag ---
 
@@ -2597,15 +2653,19 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const diceCanRoll = isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused;
   const showRollReminder = diceCanRoll && timeLeft <= TURN_SECONDS - 5;
 
+  const isMarioNaming = powerUpsEnabled || marioMode;
+  const displayName = (color: LudoColor) =>
+    isMarioNaming ? MARIO_NAMES[color] : (playerNames[color] || COLOR_LABELS[color]);
+
   const statusMessage = isSpectating
     ? winner
-      ? `${playerNames[winner] || COLOR_LABELS[winner]} wins!`
-      : `${playerNames[currentTurn] || COLOR_LABELS[currentTurn]}'s turn`
+      ? `${displayName(winner)} wins!`
+      : `${displayName(currentTurn)}'s turn`
     : winner
-      ? (winner === myColor ? 'You win!' : `${playerNames[winner] || COLOR_LABELS[winner]} wins!`)
+      ? (winner === myColor ? 'You win!' : `${displayName(winner)} wins!`)
       : isMyTurn
         ? (turnPhase === 'roll' ? 'Your turn — Roll!' : `Rolled ${diceValue} — Pick a token`)
-        : `${playerNames[currentTurn] || COLOR_LABELS[currentTurn]}'s turn`;
+        : `${displayName(currentTurn)}'s turn`;
 
   // --- Pre-computed render data (avoids recalculating per cell) ---
 
@@ -2815,23 +2875,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         {/* === LOBBY === */}
         {gamePhase === 'lobby' && (
           <div className={styles.lobby}>
-            <div className={styles.playerCountSelector}>
-              <span className={styles.playerCountLabel}>Players:</span>
-              {[1, 2, 3, 4].map(n => (
-                <button
-                  key={n}
-                  className={`${styles.playerCountBtn} ${playerCount === n ? styles.playerCountBtnActive : ''}`}
-                  onClick={() => setPlayerCount(n)}
-                >
-                  {n === 1 ? '1 (Solo)' : n}
-                </button>
-              ))}
-            </div>
             <button
               className={`${styles.marioModeBtn} ${marioMode ? styles.marioModeBtnActive : ''}`}
               onClick={() => setMarioMode(!marioMode)}
             >
-              {/* Mario-inspired M logo — red M shape */}
               <svg className={styles.marioModeIcon} viewBox="0 0 24 20" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M2 18V6L7 2L12 10L17 2L22 6V18" stroke={marioMode ? '#fff' : '#e4521b'} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" fill="none" />
               </svg>
@@ -2878,12 +2925,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           </div>
         )}
 
-        {/* === WAITING === */}
+        {/* === WAITING ROOM === */}
         {gamePhase === 'waiting' && (
           <div className={styles.lobby}>
-            <div className={styles.waitingText}>
-              Waiting for {playerCount - Object.keys(playerNames).length} more player{playerCount - Object.keys(playerNames).length !== 1 ? 's' : ''}...
-            </div>
             <div
               className={styles.gameCodeDisplay}
               onClick={() => {
@@ -2911,20 +2955,66 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               </button>
             )}
             <div className={styles.playerList}>
-              {TURN_ORDER.slice(0, playerCount).map(color => (
-                <div
-                  key={color}
-                  className={`${styles.playerSlot} ${!playerNames[color] ? styles.playerSlotEmpty : ''}`}
-                >
-                  <span className={styles.playerDot} style={{ background: COLOR_HEX[color] }} />
-                  {playerNames[color] || 'Waiting...'}
-                  {color === myColor && ' (you)'}
-                </div>
-              ))}
+              {TURN_ORDER.map(color => {
+                const isMe = color === myColor;
+                const player = playerNames[color];
+                const isBot = player && player.startsWith('Bot ');
+                const isEmpty = !player;
+                const isHost = myColor === 'red';
+
+                return (
+                  <div
+                    key={color}
+                    className={[
+                      styles.playerSlot,
+                      isEmpty ? styles.playerSlotEmpty : '',
+                      isEmpty && isHost ? styles.playerSlotClickable : '',
+                    ].filter(Boolean).join(' ')}
+                    onClick={() => {
+                      if (isEmpty && isHost) handleAddBot(color);
+                    }}
+                    role={isEmpty && isHost ? 'button' : undefined}
+                  >
+                    <span className={styles.playerDot} style={{ background: COLOR_HEX[color] }} />
+                    <span className={styles.playerSlotName}>
+                      {isEmpty
+                        ? (isHost ? 'Click to add bot' : 'Empty')
+                        : displayName(color)}
+                      {isMe && ' (you)'}
+                    </span>
+                    {isBot && isHost && (
+                      <button
+                        className={styles.removeBotBtn}
+                        onClick={(e) => { e.stopPropagation(); handleRemoveBot(color); }}
+                        aria-label={`Remove ${color} bot`}
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                          <path d="M9 3L3 9M3 3L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-            <button className={styles.resetBtn} onClick={handleBackToLobby} style={{ marginTop: 8 }}>
+            {(() => {
+              const filledCount = TURN_ORDER.filter(c => !!playerNames[c]).length;
+              const canStart = myColor === 'red' && filledCount >= 2;
+              return (
+                <button
+                  className={styles.createBtn}
+                  onClick={handleStartGame}
+                  disabled={!canStart || isLoading}
+                  style={{ marginTop: 4 }}
+                >
+                  {isLoading ? 'Starting...' : filledCount < 2 ? 'Need 2+ players' : 'Start Game'}
+                </button>
+              );
+            })()}
+            <button className={styles.resetBtn} onClick={handleBackToLobby} style={{ marginTop: 4 }}>
               Back
             </button>
+            {error && <div className={styles.errorText}>{error}</div>}
           </div>
         )}
 
@@ -3143,7 +3233,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                       style={isMe ? { color: COLOR_HEX[color] } : undefined}
                     >
                       <span className={styles.playerChipDot} style={{ background: COLOR_HEX[color] }} />
-                      {playerNames[color] || COLOR_LABELS[color]}
+                      {displayName(color)}
                       {isMe && <span className={styles.youBadge}>you</span>}
                     </div>
                   );
@@ -3224,7 +3314,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                     <span key={c}>
                       {i > 0 && ', '}
                       <span className={styles.finishDot} style={{ background: COLOR_HEX[c] }} />
-                      {playerNames[c] || COLOR_LABELS[c]}
+                      {displayName(c)}
                     </span>
                   ))}
                 </div>
@@ -3248,10 +3338,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   <div className={styles.gameOverTitle}>
                     <span className={styles.gameOverDot} style={{ background: COLOR_HEX[winner] }} />
                     {isSpectating
-                      ? `${playerNames[winner] || COLOR_LABELS[winner]} wins!`
+                      ? `${displayName(winner)} wins!`
                       : winner === myColor
                         ? 'You win!'
-                        : `${playerNames[winner] || COLOR_LABELS[winner]} wins!`}
+                        : `${displayName(winner)} wins!`}
                   </div>
                   {finishOrder.length > 1 && (
                     <div className={styles.gameOverFinishOrder}>
@@ -3259,7 +3349,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                         <span key={c} className={styles.gameOverPlace}>
                           <span className={styles.gameOverPlaceNum}>{i === 0 ? '1st' : i === 1 ? '2nd' : i === 2 ? '3rd' : '4th'}</span>
                           <span className={styles.gameOverPlaceDot} style={{ background: COLOR_HEX[c] }} />
-                          {playerNames[c] || COLOR_LABELS[c]}
+                          {displayName(c)}
                         </span>
                       ))}
                     </div>

@@ -7,6 +7,9 @@ import {
   subscribeToGame,
   makeMove,
   resetGame,
+  addBot,
+  removeBot,
+  startGame,
   type ConnectFourGameState,
 } from '../connectFourFirebase';
 import styles from './ConnectFourGame.module.css';
@@ -94,6 +97,82 @@ function deserializeWinningCells(str: string | null): [number, number][] {
   });
 }
 
+// --- Bot AI for Connect Four ---
+
+function scoreBotMove(board: Board, col: number, botColor: Color): number {
+  const oppColor: Color = botColor === 'yellow' ? 'red' : 'yellow';
+
+  // Find target row
+  let targetRow = -1;
+  for (let r = ROWS - 1; r >= 0; r--) {
+    if (!board[r][col]) { targetRow = r; break; }
+  }
+  if (targetRow === -1) return -Infinity;
+
+  const testBoard = board.map(row => [...row]);
+  testBoard[targetRow][col] = botColor;
+
+  // Win: highest priority
+  if (checkWin(testBoard, targetRow, col, botColor)) return 10000;
+
+  // Block opponent win
+  const blockBoard = board.map(row => [...row]);
+  blockBoard[targetRow][col] = oppColor;
+  if (checkWin(blockBoard, targetRow, col, oppColor)) return 5000;
+
+  // Count aligned pieces in each direction for scoring
+  let score = 0;
+  const directions = [[0, 1], [1, 0], [1, 1], [-1, 1]];
+
+  for (const [dr, dc] of directions) {
+    let count = 1;
+    let open = 0;
+    for (const dir of [1, -1]) {
+      for (let i = 1; i <= 3; i++) {
+        const r = targetRow + dr * i * dir;
+        const c = col + dc * i * dir;
+        if (r < 0 || r >= ROWS || c < 0 || c >= COLS) break;
+        if (testBoard[r][c] === botColor) count++;
+        else { if (!testBoard[r][c]) open++; break; }
+      }
+    }
+    if (count >= 3 && open > 0) score += 100;
+    else if (count >= 2 && open > 0) score += 10;
+  }
+
+  // Prefer center columns
+  score += Math.max(0, 4 - Math.abs(col - 3.5)) * 3;
+
+  // Avoid giving opponent a winning move above
+  if (targetRow > 0) {
+    const aboveBoard = board.map(row => [...row]);
+    aboveBoard[targetRow][col] = botColor;
+    aboveBoard[targetRow - 1][col] = oppColor;
+    if (checkWin(aboveBoard, targetRow - 1, col, oppColor)) score -= 2000;
+  }
+
+  return score;
+}
+
+function getBotMove(board: Board, botColor: Color): number {
+  const validCols: number[] = [];
+  for (let c = 0; c < COLS; c++) {
+    if (!board[0][c]) validCols.push(c);
+  }
+  if (validCols.length === 0) return -1;
+
+  let bestScore = -Infinity;
+  const scores: { col: number; score: number }[] = [];
+  for (const col of validCols) {
+    const score = scoreBotMove(board, col, botColor);
+    scores.push({ col, score });
+    if (score > bestScore) bestScore = score;
+  }
+  // Randomize among tied best moves
+  const bestMoves = scores.filter(s => s.score === bestScore);
+  return bestMoves[Math.floor(Math.random() * bestMoves.length)].col;
+}
+
 // --- Component ---
 
 export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps) {
@@ -111,6 +190,7 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   const [joinCode, setJoinCode] = useState('');
   const [myColor, setMyColor] = useState<Color | null>(null);
   const [isSpectating, setIsSpectating] = useState(false);
+  const [isSinglePlayer, setIsSinglePlayer] = useState(false);
   const [opponentName, setOpponentName] = useState<string | null>(null);
   const [redName, setRedName] = useState<string | null>(null);
   const [yellowName, setYellowName] = useState<string | null>(null);
@@ -153,6 +233,9 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   currentPlayerRef.current = currentPlayer;
   const winnerRef = useRef(winner);
   winnerRef.current = winner;
+  const isSinglePlayerRef = useRef(isSinglePlayer);
+  isSinglePlayerRef.current = isSinglePlayer;
+  const botTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Auto-join from URL parameter (?c4=CODE)
   useEffect(() => {
@@ -165,7 +248,11 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
           .then(({ assignedColor, state }) => {
             setGameCode(code.toUpperCase());
             setMyColor(assignedColor);
-            setGamePhase(state.players.yellow ? 'playing' : 'waiting');
+            if (state.startedAt) {
+              setGamePhase('playing');
+            } else {
+              setGamePhase('waiting');
+            }
             prevBoardRef.current = '.'.repeat(48);
             const url = new URL(window.location.href);
             url.searchParams.delete('c4');
@@ -190,6 +277,7 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
   useEffect(() => {
     return () => {
       clearTimeout(droppingTimeoutRef.current);
+      clearTimeout(botTimerRef.current);
       dragCleanupRef.current?.();
     };
   }, []);
@@ -240,9 +328,19 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       // Track player names
       setRedName(state.players.red.name);
       if (state.players.yellow) setYellowName(state.players.yellow.name);
+      else setYellowName(null);
 
-      // Check if opponent joined (transition from waiting → playing)
-      if (state.players.yellow) {
+      // Single player mode (bots present)
+      if (state.singlePlayer) {
+        setIsSinglePlayer(true);
+        isSinglePlayerRef.current = true;
+      } else {
+        setIsSinglePlayer(false);
+        isSinglePlayerRef.current = false;
+      }
+
+      // Check if game started (transition from waiting → playing)
+      if (state.startedAt) {
         setGamePhase(prev => prev === 'waiting' ? 'playing' : prev);
         if (!isSpectating) {
           const otherColor = myColor === 'red' ? 'yellow' : 'red';
@@ -294,7 +392,11 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       const { assignedColor, state } = await joinGame(code, sessionId, userName);
       setGameCode(code);
       setMyColor(assignedColor);
-      setGamePhase(state.players.yellow ? 'playing' : 'waiting');
+      if (state.startedAt) {
+        setGamePhase('playing');
+      } else {
+        setGamePhase('waiting');
+      }
       prevBoardRef.current = '.'.repeat(48);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Game not found');
@@ -324,6 +426,28 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       setIsLoading(false);
     }
   }, [joinCode]);
+
+  const handleAddBot = useCallback(async () => {
+    if (!gameCode) return;
+    try { await addBot(gameCode); } catch { /* silent */ }
+  }, [gameCode]);
+
+  const handleRemoveBot = useCallback(async () => {
+    if (!gameCode) return;
+    try { await removeBot(gameCode); } catch { /* silent */ }
+  }, [gameCode]);
+
+  const handleStartGame = useCallback(async () => {
+    if (!gameCode) return;
+    setIsLoading(true);
+    try {
+      await startGame(gameCode);
+    } catch {
+      setError('Failed to start game.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [gameCode]);
 
   const dropPiece = useCallback((col: number) => {
     if (!gameCode || !myColor) return;
@@ -385,8 +509,13 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
       const remaining = Math.max(0, TURN_SECONDS - elapsed);
       setTimeLeft(remaining);
 
-      // Auto-move: only the current player's client enforces the timer
-      if (remaining <= 0 && myColorRef.current === currentPlayerRef.current && !moveInFlightRef.current) {
+      // Auto-move: only the current player's client enforces the timer (skip if bot handles it)
+      if (
+        remaining <= 0 &&
+        myColorRef.current === currentPlayerRef.current &&
+        !moveInFlightRef.current &&
+        !isSinglePlayerRef.current
+      ) {
         const currentBoard = boardRef.current;
         const validCols: number[] = [];
         for (let c = 0; c < COLS; c++) {
@@ -403,6 +532,58 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [gamePhase]);
+
+  // --- Bot AI ---
+  useEffect(() => {
+    if (!isSinglePlayer || gamePhase !== 'playing' || winner) return;
+    if (gamePausedRef.current) return;
+
+    const isBotTurn = currentPlayer !== myColor;
+    if (!isBotTurn) return;
+
+    clearTimeout(botTimerRef.current);
+    const botDelay = 600 + Math.random() * 600; // 600-1200ms
+
+    botTimerRef.current = setTimeout(() => {
+      if (currentPlayerRef.current !== currentPlayer) return;
+      if (winnerRef.current || moveInFlightRef.current) return;
+      if (gamePausedRef.current) return;
+
+      const currentBoard = boardRef.current;
+      const botCol = getBotMove(currentBoard, currentPlayer);
+      if (botCol === -1) return;
+
+      // Execute bot move directly via Firebase (same logic as dropPiece)
+      let targetRow = -1;
+      for (let r = ROWS - 1; r >= 0; r--) {
+        if (!currentBoard[r][botCol]) { targetRow = r; break; }
+      }
+      if (targetRow === -1) return;
+
+      moveInFlightRef.current = true;
+      const newBoard = currentBoard.map(row => [...row]);
+      newBoard[targetRow][botCol] = currentPlayer;
+
+      const nextTurn: Color = currentPlayer === 'red' ? 'yellow' : 'red';
+      const winCells = checkWin(newBoard, targetRow, botCol, currentPlayer);
+      const newWinner = winCells ? currentPlayer : isBoardFull(newBoard) ? 'draw' : null;
+
+      const gc = gameCode;
+      if (!gc) { moveInFlightRef.current = false; return; }
+
+      makeMove(
+        gc,
+        serializeBoard(newBoard),
+        newWinner ? currentPlayer : nextTurn,
+        newWinner,
+        winCells ? serializeWinningCells(winCells) : null
+      ).catch(() => {
+        moveInFlightRef.current = false;
+      });
+    }, botDelay);
+
+    return () => clearTimeout(botTimerRef.current);
+  }, [isSinglePlayer, gamePhase, winner, currentPlayer, myColor, gameCode]);
 
   const handleNewGame = useCallback(async () => {
     if (!gameCode) return;
@@ -421,6 +602,7 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     setGameCode(null);
     setMyColor(null);
     setIsSpectating(false);
+    setIsSinglePlayer(false);
     setOpponentName(null);
     setError(null);
     setBoard(createEmptyBoard());
@@ -430,7 +612,9 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
     setShowBurst(false);
     prevBoardRef.current = '.'.repeat(48);
     moveInFlightRef.current = false;
+    isSinglePlayerRef.current = false;
     clearTimeout(droppingTimeoutRef.current);
+    clearTimeout(botTimerRef.current);
     dragCleanupRef.current?.();
     dragCleanupRef.current = null;
   }, []);
@@ -580,10 +764,9 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
           </div>
         )}
 
-        {/* === WAITING === */}
+        {/* === WAITING ROOM === */}
         {gamePhase === 'waiting' && (
           <div className={styles.lobby}>
-            <div className={styles.waitingText}>Waiting for opponent...</div>
             <div className={styles.gameCodeDisplay}>{gameCode}</div>
             <div className={styles.shareHint}>Share this code with your opponent</div>
             {gameCode && (
@@ -591,17 +774,81 @@ export function ConnectFourGame({ onClose, isSearchOpen }: ConnectFourGameProps)
                 className={styles.spectateBtn}
                 style={{ marginTop: 4 }}
                 onClick={() => {
-                  const url = new URL(window.location.href);
-                  url.searchParams.set('c4', gameCode);
-                  navigator.clipboard.writeText(url.toString());
+                  if (gameCode) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('c4', gameCode);
+                    navigator.clipboard.writeText(url.toString());
+                  }
                 }}
               >
                 Copy Link
               </button>
             )}
-            <button className={styles.resetBtn} onClick={handleBackToLobby} style={{ marginTop: 8 }}>
+            <div className={styles.playerList}>
+              {/* Red slot */}
+              <div className={styles.playerSlot}>
+                <span className={styles.playerDot} style={{ background: '#ea4330' }} />
+                <span className={styles.playerSlotName}>
+                  {redName || userName}
+                  {myColor === 'red' && ' (you)'}
+                </span>
+              </div>
+              {/* Yellow slot */}
+              {(() => {
+                const isHost = myColor === 'red';
+                const isBot = yellowName && yellowName === 'Bot';
+                const isEmpty = !yellowName;
+                return (
+                  <div
+                    className={[
+                      styles.playerSlot,
+                      isEmpty ? styles.playerSlotEmpty : '',
+                      isEmpty && isHost ? styles.playerSlotClickable : '',
+                    ].filter(Boolean).join(' ')}
+                    onClick={() => {
+                      if (isEmpty && isHost) handleAddBot();
+                    }}
+                    role={isEmpty && isHost ? 'button' : undefined}
+                  >
+                    <span className={styles.playerDot} style={{ background: '#fbbc05' }} />
+                    <span className={styles.playerSlotName}>
+                      {isEmpty
+                        ? (isHost ? 'Click to add bot' : 'Waiting...')
+                        : yellowName}
+                      {myColor === 'yellow' && ' (you)'}
+                    </span>
+                    {isBot && isHost && (
+                      <button
+                        className={styles.removeBotBtn}
+                        onClick={(e) => { e.stopPropagation(); handleRemoveBot(); }}
+                        aria-label="Remove bot"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 12 12">
+                          <path d="M9 3L3 9M3 3L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+            {(() => {
+              const canStart = myColor === 'red' && !!yellowName;
+              return (
+                <button
+                  className={styles.createBtn}
+                  onClick={handleStartGame}
+                  disabled={!canStart || isLoading}
+                  style={{ marginTop: 4 }}
+                >
+                  {isLoading ? 'Starting...' : !yellowName ? 'Need opponent' : 'Start Game'}
+                </button>
+              );
+            })()}
+            <button className={styles.resetBtn} onClick={handleBackToLobby} style={{ marginTop: 4 }}>
               Back
             </button>
+            {error && <div className={styles.errorText}>{error}</div>}
           </div>
         )}
 
