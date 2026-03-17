@@ -170,7 +170,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
     id: 'star',
     name: 'Star',
     emoji: '🌟',
-    description: 'Next 2 rolls — anyone you pass gets sent to start',
+    description: 'Next 2 rolls — anyone you pass gets sent home',
     tier: 'rare',
     timing: 'before-roll',
   },
