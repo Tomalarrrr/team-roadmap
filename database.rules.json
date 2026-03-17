@@ -196,6 +196,9 @@
         "mysteryBoxes": {
           ".validate": "newData.isString() && newData.val().length <= 500"
         },
+        "flag": {
+          ".validate": "newData.isString() && newData.val().length <= 30"
+        },
         "marioMode": {
           ".validate": "newData.isBoolean()"
         },

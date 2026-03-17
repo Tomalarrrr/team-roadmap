@@ -53,32 +53,24 @@ import {
   type FlagState,
   deserializeFlag,
   serializeFlag,
+  TRACK_SIZE,
+  START_POSITIONS,
+  ENTRY_CELLS,
+  SAFE_ZONES,
+  COLOR_OFFSET,
+  getTokenColor,
+  getColorTokenIndices,
 } from '../ludoPowerUps';
 import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal } from './LudoPowerUpPanel';
 import styles from './LudoGame.module.css';
 
-// --- Constants ---
+// --- Constants (TRACK_SIZE, START_POSITIONS, ENTRY_CELLS, SAFE_ZONES, COLOR_OFFSET imported from ludoPowerUps) ---
 
-const TRACK_SIZE = 52;
 const TOKENS_PER_PLAYER = 4;
 const TOTAL_TOKENS = 16;
 const TURN_SECONDS = 30;
 
 const TURN_ORDER: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
-
-const START_POSITIONS: Record<LudoColor, number> = {
-  red: 1, green: 14, yellow: 27, blue: 40,
-};
-
-const SAFE_ZONES = new Set([1, 9, 14, 22, 27, 35, 40, 48]);
-
-const ENTRY_CELLS: Record<LudoColor, number> = {
-  red: 51, green: 12, yellow: 25, blue: 38,
-};
-
-const COLOR_OFFSET: Record<LudoColor, number> = {
-  red: 0, green: 4, yellow: 8, blue: 12,
-};
 
 // Track cell → [gridRow, gridCol] (1-indexed for CSS grid)
 const TRACK_COORDS: Record<number, [number, number]> = {
@@ -138,19 +130,7 @@ const BACKUP_GRACE = 15;
 const TRACK_INDICES = Array.from({ length: TRACK_SIZE }, (_, i) => i + 1);
 const TOKEN_INDICES = Array.from({ length: TOTAL_TOKENS }, (_, i) => i);
 
-// --- Pure game logic ---
-
-function getTokenColor(index: number): LudoColor {
-  if (index < 4) return 'red';
-  if (index < 8) return 'green';
-  if (index < 12) return 'yellow';
-  return 'blue';
-}
-
-function getColorTokenIndices(color: LudoColor): number[] {
-  const offset = COLOR_OFFSET[color];
-  return [offset, offset + 1, offset + 2, offset + 3];
-}
+// --- Pure game logic (getTokenColor, getColorTokenIndices imported from ludoPowerUps) ---
 
 function calculateNewPosition(
   current: TokenPosition,
@@ -2146,6 +2126,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
     if (turnPhase === 'roll') {
       // Bot rolls dice
+      // NOTE: Bot power-up usage would require refactoring handleUsePowerUp to accept
+      // an arbitrary color parameter (it currently hardcodes myColorRef.current).
       botTimerRef.current = setTimeout(() => {
         if (currentTurnRef.current !== currentTurn || turnPhaseRef.current !== 'roll') return;
         if (moveInFlightRef.current || isRollingRef.current) return;
