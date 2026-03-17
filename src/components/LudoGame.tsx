@@ -57,14 +57,13 @@ import {
   START_POSITIONS,
   ENTRY_CELLS,
   SAFE_ZONES,
-  COLOR_OFFSET,
   getTokenColor,
   getColorTokenIndices,
 } from '../ludoPowerUps';
 import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal } from './LudoPowerUpPanel';
 import styles from './LudoGame.module.css';
 
-// --- Constants (TRACK_SIZE, START_POSITIONS, ENTRY_CELLS, SAFE_ZONES, COLOR_OFFSET imported from ludoPowerUps) ---
+// --- Constants (TRACK_SIZE, START_POSITIONS, ENTRY_CELLS, SAFE_ZONES imported from ludoPowerUps) ---
 
 const TOKENS_PER_PLAYER = 4;
 const TOTAL_TOKENS = 16;
@@ -2291,6 +2290,38 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     };
   }, [gamePhase, introTrigger]);
 
+  // Animated transition from lobby/waiting → playing
+  const transitionToPlaying = useCallback(() => {
+    if (boardTransitionTimer.current) return; // already transitioning
+    if (gamePhaseRef.current === 'playing') return; // already playing
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (reducedMotion) {
+      setGamePhase('playing');
+      gamePhaseRef.current = 'playing';
+      return;
+    }
+
+    // Capture which phase we're leaving, then switch to playing immediately
+    // Both the exit overlay and board entrance render simultaneously
+    setTransitionFromPhase(gamePhaseRef.current as 'lobby' | 'waiting');
+    setBoardTransition('entering');
+    setGamePhase('playing');
+    gamePhaseRef.current = 'playing';
+
+    // Remove the exit overlay after it fades out (matches 600ms CSS animation)
+    boardTransitionTimer.current = setTimeout(() => {
+      setTransitionFromPhase(null);
+      // Clear entering class after remaining entrance animations finish
+      // (baseBlue is the last: 400ms delay + 400ms duration = 800ms from start)
+      boardTransitionTimer.current = setTimeout(() => {
+        setBoardTransition(null);
+        boardTransitionTimer.current = null;
+      }, 300);
+    }, 600);
+  }, []);
+
   // --- Lobby handlers ---
 
   const handleCreateGame = useCallback(async () => {
@@ -2501,38 +2532,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
     setBoardTransition(null);
     setTransitionFromPhase(null);
-  }, []);
-
-  // Animated transition from lobby/waiting → playing
-  const transitionToPlaying = useCallback(() => {
-    if (boardTransitionTimer.current) return; // already transitioning
-    if (gamePhaseRef.current === 'playing') return; // already playing
-
-    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-    if (reducedMotion) {
-      setGamePhase('playing');
-      gamePhaseRef.current = 'playing';
-      return;
-    }
-
-    // Capture which phase we're leaving, then switch to playing immediately
-    // Both the exit overlay and board entrance render simultaneously
-    setTransitionFromPhase(gamePhaseRef.current as 'lobby' | 'waiting');
-    setBoardTransition('entering');
-    setGamePhase('playing');
-    gamePhaseRef.current = 'playing';
-
-    // Remove the exit overlay after it fades out (matches 600ms CSS animation)
-    boardTransitionTimer.current = setTimeout(() => {
-      setTransitionFromPhase(null);
-      // Clear entering class after remaining entrance animations finish
-      // (baseBlue is the last: 400ms delay + 400ms duration = 800ms from start)
-      boardTransitionTimer.current = setTimeout(() => {
-        setBoardTransition(null);
-        boardTransitionTimer.current = null;
-      }, 300);
-    }, 600);
   }, []);
 
   // --- Drag ---
