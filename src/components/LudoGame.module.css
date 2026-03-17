@@ -159,6 +159,12 @@
   flex: 1;
   min-height: 0;
   position: relative;
+  animation: layoutFadeIn 350ms ease-out;
+}
+
+@keyframes layoutFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* Enhanced entrance: circular reveal + fade */
@@ -1661,143 +1667,77 @@
 }
 
 /* --- Mario mode character caps on tokens --- */
-.marioToken {
-  overflow: visible;
-}
+/*
+ * Single ::before pseudo-element per token draws a cap dome flush on top
+ * of the circle. The brim is a darker border-bottom on the dome itself,
+ * not a separate element. This keeps it clean at ~17px track-token sizes.
+ * ::after is left untouched so .tokenCaptured::after particles still work.
+ */
 
 .marioToken::before {
+  content: '';
   position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: 'Arial Black', 'Arial', sans-serif;
-  font-weight: 900;
-  font-size: 50%;
+  /* Dome sits so its bottom edge overlaps the top ~25% of the token */
+  width: 110%;
+  height: 44%;
+  top: -16%;
+  left: -5%;
+  border-radius: 50% 50% 8% 8%;
+  /* Brim: darker bottom edge integrated into the dome */
+  border-bottom: 2px solid rgba(0, 0, 0, 0.18);
+  z-index: 2;
+  pointer-events: none;
+  font-family: Arial, Helvetica, sans-serif;
+  font-weight: 800;
+  font-size: 40%;
   line-height: 1;
   color: #fff;
-  z-index: 2;
-  /* Cap shape: dome sitting on top of the token */
-  width: 100%;
-  height: 50%;
-  top: -28%;
-  left: 0;
-  border-radius: 50% 50% 12% 12%;
-  text-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.4);
-  pointer-events: none;
+  text-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.5);
 }
 
-/* Mario - red cap with M */
+/* Mario — red cap, white M */
 .marioToken.tokenRed::before {
   content: 'M';
-  background: linear-gradient(180deg, #e83929 0%, #c62020 60%, #a01818 100%);
+  background: linear-gradient(180deg, #e83929 0%, #c41a1a 100%);
+  border-bottom-color: #8e1212;
   box-shadow:
-    inset 0 1px 2px rgba(255, 120, 100, 0.5),
-    0 1px 2px rgba(0, 0, 0, 0.3);
+    inset 0 1px 2px rgba(255, 150, 130, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-/* Cap brim for Mario */
-.marioToken.tokenRed::after {
-  content: '';
-  position: absolute;
-  width: 120%;
-  height: 14%;
-  top: 8%;
-  left: -10%;
-  background: linear-gradient(180deg, #c62020 0%, #a01818 100%);
-  border-radius: 50%;
-  z-index: 3;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-}
-
-/* Luigi - green cap with L */
+/* Luigi — green cap, white L */
 .marioToken.tokenGreen::before {
   content: 'L';
-  background: linear-gradient(180deg, #2e9e47 0%, #1e7e34 60%, #156025 100%);
+  background: linear-gradient(180deg, #2e9e47 0%, #18742d 100%);
+  border-bottom-color: #0f5a1e;
   box-shadow:
-    inset 0 1px 2px rgba(100, 210, 130, 0.5),
-    0 1px 2px rgba(0, 0, 0, 0.3);
+    inset 0 1px 2px rgba(120, 220, 150, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-.marioToken.tokenGreen::after {
-  content: '';
-  position: absolute;
-  width: 120%;
-  height: 14%;
-  top: 8%;
-  left: -10%;
-  background: linear-gradient(180deg, #1e7e34 0%, #156025 100%);
-  border-radius: 50%;
-  z-index: 3;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-}
-
-/* Wario - yellow cap with W */
+/* Wario — yellow cap, white W */
 .marioToken.tokenYellow::before {
   content: 'W';
-  background: linear-gradient(180deg, #f0c000 0%, #d4a800 60%, #b89000 100%);
+  background: linear-gradient(180deg, #f0c800 0%, #d4a800 100%);
+  border-bottom-color: #a07800;
   box-shadow:
-    inset 0 1px 2px rgba(255, 230, 120, 0.5),
-    0 1px 2px rgba(0, 0, 0, 0.3);
-  color: #4a2c8a;
-  text-shadow: 0 0.5px 1px rgba(0, 0, 0, 0.2);
+    inset 0 1px 2px rgba(255, 235, 140, 0.5),
+    0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
-.marioToken.tokenYellow::after {
-  content: '';
-  position: absolute;
-  width: 120%;
-  height: 14%;
-  top: 8%;
-  left: -10%;
-  background: linear-gradient(180deg, #d4a800 0%, #b89000 100%);
-  border-radius: 50%;
-  z-index: 3;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-}
-
-/* Toad - white/blue mushroom cap with T */
+/* Toad — white cap, blue T */
 .marioToken.tokenBlue::before {
   content: 'T';
-  background: linear-gradient(180deg, #ffffff 0%, #e8eef8 40%, #c8d8f0 100%);
-  color: #1a56c4;
+  background: linear-gradient(180deg, #ffffff 0%, #dde6f4 100%);
+  border-bottom-color: #a0b4d0;
+  color: #2060c8;
   text-shadow: none;
   box-shadow:
-    inset 0 1px 2px rgba(255, 255, 255, 0.8),
-    0 1px 2px rgba(0, 0, 0, 0.3);
-  /* Blue spots on Toad's cap via radial gradients */
-  background:
-    radial-gradient(circle at 20% 40%, #3a7af5 22%, transparent 23%),
-    radial-gradient(circle at 80% 40%, #3a7af5 22%, transparent 23%),
-    radial-gradient(circle at 50% 15%, #3a7af5 18%, transparent 19%),
-    linear-gradient(180deg, #ffffff 0%, #e8eef8 40%, #d0ddf0 100%);
-}
-
-.marioToken.tokenBlue::after {
-  content: '';
-  position: absolute;
-  width: 120%;
-  height: 14%;
-  top: 8%;
-  left: -10%;
-  background: linear-gradient(180deg, #d0ddf0 0%, #b8c8e8 100%);
-  border-radius: 50%;
-  z-index: 3;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  pointer-events: none;
-}
-
-/* Prevent capture animation ::after from conflicting with cap brim */
-.marioToken.tokenCaptured::after {
-  /* Override cap brim with capture particles */
-  width: auto;
-  height: auto;
-  top: auto;
-  left: auto;
-  background: none;
-  border-radius: 50%;
+    inset 0 1px 2px rgba(255, 255, 255, 0.6),
+    0 1px 2px rgba(0, 0, 0, 0.2);
 }
 
 /* Checkered flag pattern on start cells */
@@ -2013,34 +1953,34 @@
 
 /* ─── Per-powerup idle animations (loop while held in inventory) ─── */
 
-/* 🍄 Super Mushroom — elastic pop-grow */
-.animMushroom { animation: puMushroom 2s cubic-bezier(0.34, 1.56, 0.64, 1) infinite; }
+/* 🍄 Super Mushroom — elastic pop-grow with breathing rest */
+.animMushroom { animation: puMushroom 2.2s ease-in-out infinite; }
 @keyframes puMushroom {
-  0%, 100% { transform: scale(1); }
-  15% { transform: scale(1.18); }
-  30% { transform: scale(0.97); }
-  45% { transform: scale(1); }
+  0%, 50%, 100% { transform: scale(1); }
+  12% { transform: scale(1.2); }
+  22% { transform: scale(0.95); }
+  30% { transform: scale(1.03); }
+  38% { transform: scale(1); }
 }
 
-/* 🍄 Golden Mushroom — brightness shimmer pulse */
-.animGoldenMushroom { animation: puGoldenMushroom 1.5s ease-in-out infinite; }
+/* 🍄 Golden Mushroom — warm brightness shimmer */
+.animGoldenMushroom { animation: puGoldenMushroom 2s ease-in-out infinite; }
 @keyframes puGoldenMushroom {
   0%, 100% { filter: sepia(1) saturate(4) hue-rotate(5deg) brightness(1.05); }
-  50% { filter: sepia(1) saturate(4) hue-rotate(5deg) brightness(1.4); }
+  50% { filter: sepia(1) saturate(4) hue-rotate(5deg) brightness(1.25); }
 }
 
-/* 🚀 Bullet Bill — tilt forward + micro-vibrate */
-.animBulletBill { animation: puBulletBill 0.8s linear infinite; }
+/* 🚀 Bullet Bill — lean forward with organic tremor */
+.animBulletBill { animation: puBulletBill 1.2s ease-in-out infinite; }
 @keyframes puBulletBill {
-  0%, 90%, 100% { transform: rotate(0deg) translateX(0); }
-  10% { transform: rotate(-8deg) translateX(0); }
-  20% { transform: rotate(-8deg) translateX(0.6px); }
-  30% { transform: rotate(-8deg) translateX(-0.6px); }
-  40% { transform: rotate(-8deg) translateX(0.6px); }
-  50% { transform: rotate(-8deg) translateX(-0.6px); }
-  60% { transform: rotate(-8deg) translateX(0.6px); }
-  70% { transform: rotate(-8deg) translateX(-0.6px); }
-  80% { transform: rotate(-8deg) translateX(0); }
+  0%, 100% { transform: rotate(0deg) translateX(0); }
+  15% { transform: rotate(-6deg) translateX(0); }
+  25% { transform: rotate(-6deg) translateX(0.5px); }
+  35% { transform: rotate(-6deg) translateX(-0.7px); }
+  45% { transform: rotate(-6deg) translateX(0.4px); }
+  55% { transform: rotate(-6deg) translateX(-0.3px); }
+  70% { transform: rotate(-6deg) translateX(0); }
+  85% { transform: rotate(0deg) translateX(0); }
 }
 
 /* 🌟 Star — steady continuous spin */
@@ -2051,61 +1991,62 @@
 }
 
 /* ⚡ Lightning Bolt — staccato electrical flicker */
-.animLightning { animation: puLightning 1.2s steps(1) infinite; }
+.animLightning { animation: puLightning 1.4s steps(1) infinite; }
 @keyframes puLightning {
   0%, 100% { opacity: 1; }
-  8% { opacity: 0.12; }
-  12% { opacity: 1; }
-  20% { opacity: 0.12; }
-  24% { opacity: 1; }
-  60% { opacity: 1; }
-  64% { opacity: 0.15; }
-  68% { opacity: 1; }
+  7% { opacity: 0.15; }
+  11% { opacity: 1; }
+  18% { opacity: 0.15; }
+  22% { opacity: 1; }
+  55% { opacity: 1; }
+  59% { opacity: 0.15; }
+  63% { opacity: 1; }
 }
 
 /* 🐚 Green Shell — tight horizontal roll */
-.animGreenShell { animation: puGreenShell 1s ease-in-out infinite; }
+.animGreenShell { animation: puGreenShell 1.2s ease-in-out infinite; }
 @keyframes puGreenShell {
   0%, 100% { transform: translateX(0); }
   25% { transform: translateX(2px); }
   75% { transform: translateX(-2px); }
 }
 
-/* 🐚 Red Shell — orbiting wobble (rotation + drift) */
-.animRedShell { animation: puRedShell 1.6s ease-in-out infinite; }
+/* 🐚 Red Shell — seeking orbit (circular path) */
+.animRedShell { animation: puRedShell 1.8s ease-in-out infinite; }
 @keyframes puRedShell {
-  0%, 100% { transform: rotate(0deg) translateX(0); }
-  25% { transform: rotate(12deg) translateX(1.5px); }
-  50% { transform: rotate(0deg) translateX(0); }
-  75% { transform: rotate(-12deg) translateX(-1.5px); }
+  0%, 100% { transform: translate(0, 0) rotate(0deg); }
+  25% { transform: translate(1.5px, -1px) rotate(8deg); }
+  50% { transform: translate(0, -1.5px) rotate(0deg); }
+  75% { transform: translate(-1.5px, -1px) rotate(-8deg); }
 }
 
 /* 🐚 Blue Shell — menacing hover float */
-.animBlueShell { animation: puBlueShell 2s ease-in-out infinite; }
+.animBlueShell { animation: puBlueShell 2.2s ease-in-out infinite; }
 @keyframes puBlueShell {
   0%, 100% { transform: translateY(0); filter: hue-rotate(185deg) saturate(2) brightness(0.95); }
   50% { transform: translateY(-3px); filter: hue-rotate(185deg) saturate(2) brightness(1.08); }
 }
 
 /* 🍌 Banana Peel — teeter rock from base */
-.animBanana { animation: puBanana 1.8s ease-in-out infinite; transform-origin: center bottom; }
+.animBanana { animation: puBanana 2s ease-in-out infinite; transform-origin: center bottom; }
 @keyframes puBanana {
   0%, 100% { transform: rotate(0deg); }
-  25% { transform: rotate(12deg); }
-  75% { transform: rotate(-12deg); }
+  30% { transform: rotate(10deg); }
+  70% { transform: rotate(-10deg); }
 }
 
 /* 🕳️ Warp Pipe — squish down then spring up */
-.animWarpPipe { animation: puWarpPipe 2.5s cubic-bezier(0.34, 1.56, 0.64, 1) infinite; }
+.animWarpPipe { animation: puWarpPipe 2.5s ease-in-out infinite; }
 @keyframes puWarpPipe {
-  0%, 80%, 100% { transform: scaleY(1) scaleX(1); }
-  30% { transform: scaleY(0.55) scaleX(1.1); }
-  50% { transform: scaleY(1.1) scaleX(0.95); }
-  65% { transform: scaleY(0.98) scaleX(1.01); }
+  0%, 75%, 100% { transform: scaleY(1) scaleX(1); }
+  25% { transform: scaleY(0.7) scaleX(1.08); }
+  42% { transform: scaleY(1.08) scaleX(0.96); }
+  55% { transform: scaleY(0.98) scaleX(1.01); }
+  65% { transform: scaleY(1) scaleX(1); }
 }
 
 /* 🪶 Cape Feather — two-axis gentle drift */
-.animFeather { animation: puFeather 3s ease-in-out infinite; }
+.animFeather { animation: puFeather 3.5s ease-in-out infinite; }
 @keyframes puFeather {
   0%, 100% { transform: translate(0, 0) rotate(0deg); }
   25% { transform: translate(2.5px, -1.5px) rotate(3deg); }
@@ -2114,11 +2055,30 @@
 }
 
 /* 🪙 Coin Block — sharp bounce-up then soft settle */
-.animCoinBlock { animation: puCoinBlock 1.5s cubic-bezier(0.34, 1.56, 0.64, 1) infinite; }
+.animCoinBlock { animation: puCoinBlock 1.8s ease-out infinite; }
 @keyframes puCoinBlock {
-  0%, 55%, 100% { transform: translateY(0); }
-  20% { transform: translateY(-4px); }
-  40% { transform: translateY(0.5px); }
+  0%, 100% { transform: translateY(0); }
+  12% { transform: translateY(-4px); }
+  28% { transform: translateY(1px); }
+  38% { transform: translateY(0); }
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .animMushroom,
+  .animGoldenMushroom,
+  .animBulletBill,
+  .animStar,
+  .animLightning,
+  .animGreenShell,
+  .animRedShell,
+  .animBlueShell,
+  .animBanana,
+  .animWarpPipe,
+  .animFeather,
+  .animCoinBlock {
+    animation: none;
+  }
 }
 
 .powerUpEmpty {
@@ -2598,7 +2558,9 @@
   .discardOverlay,
   .discardCard,
   .discardNewEmoji,
-  .newItemBounce {
+  .newItemBounce,
+  .lobbyExiting,
+  .boardEntering {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
