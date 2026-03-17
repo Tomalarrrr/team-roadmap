@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   createGame,
   joinGame,
@@ -492,7 +492,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
   const [gamePhase, setGamePhase] = useState<'lobby' | 'waiting' | 'playing'>('lobby');
   const gamePhaseRef = useRef<'lobby' | 'waiting' | 'playing'>('lobby');
-  const [boardTransition, setBoardTransition] = useState<'exiting' | 'entering' | null>(null);
+  const [boardTransition, setBoardTransition] = useState<'entering' | null>(null);
+  const [transitionFromPhase, setTransitionFromPhase] = useState<'lobby' | 'waiting' | null>(null);
   const boardTransitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [joinCode, setJoinCode] = useState('');
@@ -576,6 +577,20 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const introTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [introTrigger, setIntroTrigger] = useState(0);
   const [, setRenderTick] = useState(0);
+
+  // Batched render-tick: coalesces multiple animation updates into a single
+  // React re-render per frame via requestAnimationFrame. This prevents the
+  // component from re-rendering 4-6x per frame during multi-token animations.
+  const pendingRenderRef = useRef(false);
+  const scheduleRenderTick = useCallback(() => {
+    if (!pendingRenderRef.current) {
+      pendingRenderRef.current = true;
+      requestAnimationFrame(() => {
+        pendingRenderRef.current = false;
+        setRenderTick(t => t + 1);
+      });
+    }
+  }, []);
 
   // Mario Mode power-up state
   const [marioMode, setMarioMode] = useState(false);
@@ -678,7 +693,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         tokenAnimPos.current.delete(tokenIdx);
         tokenAnimParity.current.delete(tokenIdx);
         tokenAnimTimers.current.delete(tokenIdx);
-        setRenderTick(n => n + 1);
+        scheduleRenderTick();
         return;
       }
       // If steps are firing too rapidly (tab was backgrounded), skip to end
@@ -687,19 +702,19 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         tokenAnimPos.current.delete(tokenIdx);
         tokenAnimParity.current.delete(tokenIdx);
         tokenAnimTimers.current.delete(tokenIdx);
-        setRenderTick(n => n + 1);
+        scheduleRenderTick();
         return;
       }
       lastStepTime = now;
       tokenAnimPos.current.set(tokenIdx, waypoints[step]);
       tokenAnimParity.current.set(tokenIdx, step % 2);
       step++;
-      setRenderTick(n => n + 1);
+      scheduleRenderTick();
       tokenAnimTimers.current.set(tokenIdx, setTimeout(advance, STEP_MS));
     };
 
     advance();
-  }, []);
+  }, [scheduleRenderTick]);
 
   // --- Dice rolling animation (rapid face cycling) ---
 
@@ -740,7 +755,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             } else {
               prevTokensRef.current = 'bas'.repeat(16);
             }
-            setGamePhase(joinedCount >= state.playerCount ? 'playing' : 'waiting');
+            if (joinedCount >= state.playerCount) {
+              transitionToPlaying();
+            } else {
+              setGamePhase('waiting'); gamePhaseRef.current = 'waiting';
+            }
             const url = new URL(window.location.href);
             url.searchParams.delete('ludo');
             window.history.replaceState({}, '', url.toString());
@@ -821,10 +840,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (baseCoords) {
               const effect = { type: 'deploy' as const, color, coords: baseCoords, ts: Date.now() };
               gameEffects.current.push(effect);
-              setRenderTick(n => n + 1);
+              scheduleRenderTick();
               const timer = setTimeout(() => {
                 gameEffects.current = gameEffects.current.filter(e => e !== effect);
-                setRenderTick(n => n + 1);
+                scheduleRenderTick();
               }, 600);
               effectTimers.current.push(timer);
             }
@@ -836,10 +855,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             const effect = { type: 'home' as const, color, ts: Date.now() + delay };
             const showTimer = setTimeout(() => {
               gameEffects.current.push(effect);
-              setRenderTick(n => n + 1);
+              scheduleRenderTick();
               const cleanupTimer = setTimeout(() => {
                 gameEffects.current = gameEffects.current.filter(e => e !== effect);
-                setRenderTick(n => n + 1);
+                scheduleRenderTick();
               }, 800);
               effectTimers.current.push(cleanupTimer);
             }, delay);
@@ -877,11 +896,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             const captureData = { index: i, coords, color: getTokenColor(i), ts: Date.now() + capturerDelay };
             const showTimer = setTimeout(() => {
               capturedTokens.current.push(captureData);
-              setRenderTick(n => n + 1);
+              scheduleRenderTick();
               // Each capture independently cleans itself up after 500ms
               const cleanupTimer = setTimeout(() => {
                 capturedTokens.current = capturedTokens.current.filter(t => t !== captureData);
-                setRenderTick(n => n + 1);
+                scheduleRenderTick();
               }, 500);
               captureShowTimers.current.push(cleanupTimer);
             }, capturerDelay);
@@ -1111,13 +1130,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 gameEffects.current.push(effect);
                 const timer = setTimeout(() => {
                   gameEffects.current = gameEffects.current.filter(e => e !== effect);
-                  setRenderTick(n => n + 1);
+                  scheduleRenderTick();
                 }, 700);
                 effectTimers.current.push(timer);
               }
             }
           }
-          setRenderTick(n => n + 1);
+          scheduleRenderTick();
           showHint('Star power! Opponents sent to start!');
         }
       }
@@ -1133,6 +1152,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       }
 
       // 1b. Star effect: if the flag carrier was relocated by star power, drop the flag
+      //     IMPORTANT: must run AFTER step 1 (kill-transfer) — if the carrier was captured
+      //     AND auto-deployed by coins, step 1 already transferred the flag to the killer.
+      //     This step only fires for non-capture relocations (e.g., star sending to start).
       if (updatedFlag.carrier !== null && updatedFlag.carrier !== tokenIndex) {
         const carrierOldPos = currentTokens[updatedFlag.carrier];
         const carrierNewPos = newTokens[updatedFlag.carrier];
@@ -1155,12 +1177,22 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (updatedFlag.carrier === tokenIndex && reachedHome) {
         const carrierColor = getTokenColor(tokenIndex);
         const myIndices = getColorTokenIndices(carrierColor);
+        const startCell = START_POSITIONS[carrierColor];
+        const startPos: TokenPosition = `track-${startCell}`;
         let released = 0;
         for (const idx of myIndices) {
           if (newTokens[idx] === 'base') {
-            const startPos: TokenPosition = `track-${START_POSITIONS[carrierColor]}`;
             newTokens[idx] = startPos;
             released++;
+          }
+        }
+        // Capture opponents on our start cell — flag-release overrides safe zone protection
+        if (released > 0) {
+          for (let i = 0; i < TOTAL_TOKENS; i++) {
+            if (getTokenColor(i) === carrierColor) continue;
+            if (newTokens[i] === startPos) {
+              newTokens[i] = 'base';
+            }
           }
         }
         updatedFlag = { cell: null, carrier: null, used: true };
@@ -1278,6 +1310,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (nextColor === activePlayers[0]) {
         updatedMysteryBoxes = tickMysteryBoxCooldowns(updatedMysteryBoxes);
       }
+
+      // Optimistic local update: push power-up state to UI immediately
+      // (don't wait for Firebase round-trip to reflect mystery box/inventory changes)
+      mysteryBoxesRef.current = updatedMysteryBoxes;
+      setMysteryBoxes(updatedMysteryBoxes);
+      inventoryRef.current = updatedInv;
+      setInventory(updatedInv);
+      setCoins(updatedCoins);
     }
 
     const update: LudoMoveUpdate = {
@@ -1552,7 +1592,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (!isBotTurn && currentTurnRef.current !== mc) return;
     if (turnPhaseRef.current !== 'move') return;
     if (winnerRef.current || moveInFlightRef.current) return;
-    if (gamePausedRef.current) return;
 
     const dice = diceValueRef.current;
     if (dice === null) return;
@@ -1586,7 +1625,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (powerUpId === 'star') {
         // Add star buff for 2 turns
         const newBuffs = [...activeBuffsRef.current, { type: 'star' as const, playerColorIdx: colorIndex(mc), duration: 2 }];
-        // Write to firebase
+        setValidMoves(new Map()); // Clear move highlights (phase resets to roll)
         const gc = gameCodeRef.current;
         if (gc) {
           makeMove(gc, mc, {
@@ -1617,6 +1656,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             newBuffs.push({ type: 'lightning' as const, playerColorIdx: colorIndex(c), duration: 2 });
           }
         }
+        setValidMoves(new Map());
         const gc = gameCodeRef.current;
         if (gc) {
           makeMove(gc, mc, {
@@ -1640,6 +1680,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
       // Super Mushroom, Golden Mushroom, Bullet Bill — set active for the next roll
       setActivePowerUp({ id: powerUpId, slot });
+      setValidMoves(new Map()); // Clear move highlights (phase resets to roll)
       // Write inventory change
       const gc = gameCodeRef.current;
       if (gc) {
@@ -1692,10 +1733,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         const newTokens = knockBack(currentTokens, target, 3);
         // Flag drop: if target was carrying flag, drop at new position
         let shellFlag = flagStateRef.current;
+        let shellDroppedFlag = false;
         if (!shellFlag.used && shellFlag.carrier === target) {
           const newPos = newTokens[target];
           if (newPos.startsWith('track-')) {
             shellFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
+            shellDroppedFlag = true;
+          } else if (newPos.startsWith('final-')) {
+            // Knocked back within corridor — drop flag at corridor entrance on track
+            const targetColor = getTokenColor(target);
+            shellFlag = { cell: ENTRY_CELLS[targetColor], carrier: null, used: false };
+            shellDroppedFlag = true;
           }
         }
         const gc = gameCodeRef.current;
@@ -1716,7 +1764,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             flag: serializeFlag(shellFlag),
           });
         }
-        showHint(shellFlag.carrier === null && !shellFlag.used && shellFlag.cell !== null
+        showHint(shellDroppedFlag
           ? `${def.emoji} Hit! Flag dropped!`
           : `${def.emoji} Hit! Knocked back 3!`);
         return;
@@ -1731,10 +1779,16 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         const newTokens = knockBack(currentTokens, target, 5);
         // Flag drop: if target was carrying flag, drop at new position
         let blueShellFlag = flagStateRef.current;
+        let blueDroppedFlag = false;
         if (!blueShellFlag.used && blueShellFlag.carrier === target) {
           const newPos = newTokens[target];
           if (newPos.startsWith('track-')) {
             blueShellFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
+            blueDroppedFlag = true;
+          } else if (newPos.startsWith('final-')) {
+            const targetColor = getTokenColor(target);
+            blueShellFlag = { cell: ENTRY_CELLS[targetColor], carrier: null, used: false };
+            blueDroppedFlag = true;
           }
         }
         const gc = gameCodeRef.current;
@@ -1755,7 +1809,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             flag: serializeFlag(blueShellFlag),
           });
         }
-        showHint(blueShellFlag.carrier === null && !blueShellFlag.used && blueShellFlag.cell !== null
+        showHint(blueDroppedFlag
           ? 'Blue Shell! Flag dropped!'
           : 'Blue Shell! Leader knocked back 5!');
         return;
@@ -2228,7 +2282,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       for (let step = 0; step < path.length; step++) {
         const timer = setTimeout(() => {
           introTokenPositions.current.set(color, path[step]);
-          setRenderTick(n => n + 1);
+          scheduleRenderTick();
         }, staggerDelay + step * INTRO_STEP_MS);
         introTimersRef.current.push(timer);
       }
@@ -2238,7 +2292,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       const doneTimer = setTimeout(() => {
         introTokenPositions.current.delete(color);
         completedColors++;
-        setRenderTick(n => n + 1);
+        scheduleRenderTick();
         if (completedColors === activeColors.length) {
           setIntroPhase('done');
           introPhaseRef.current = 'done';
@@ -2464,6 +2518,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       boardTransitionTimer.current = null;
     }
     setBoardTransition(null);
+    setTransitionFromPhase(null);
   }, []);
 
   // Animated transition from lobby/waiting → playing
@@ -2472,8 +2527,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (gamePhaseRef.current === 'playing') return; // already playing
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const exitMs = reducedMotion ? 0 : 450;
-    const enterMs = reducedMotion ? 0 : 800;
 
     if (reducedMotion) {
       setGamePhase('playing');
@@ -2481,16 +2534,23 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       return;
     }
 
-    setBoardTransition('exiting');
+    // Capture which phase we're leaving, then switch to playing immediately
+    // Both the exit overlay and board entrance render simultaneously
+    setTransitionFromPhase(gamePhaseRef.current as 'lobby' | 'waiting');
+    setBoardTransition('entering');
+    setGamePhase('playing');
+    gamePhaseRef.current = 'playing';
+
+    // Remove the exit overlay after it fades out (matches 600ms CSS animation)
     boardTransitionTimer.current = setTimeout(() => {
-      setGamePhase('playing');
-      gamePhaseRef.current = 'playing';
-      setBoardTransition('entering');
+      setTransitionFromPhase(null);
+      // Clear entering class after remaining entrance animations finish
+      // (baseBlue is the last: 400ms delay + 400ms duration = 800ms from start)
       boardTransitionTimer.current = setTimeout(() => {
         setBoardTransition(null);
         boardTransitionTimer.current = null;
-      }, enterMs);
-    }, exitMs);
+      }, 300);
+    }, 600);
   }, []);
 
   // --- Drag ---
@@ -2544,10 +2604,16 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
   // --- Pre-computed render data (avoids recalculating per cell) ---
 
-  const activeMysteryBoxSet = powerUpsEnabled ? getActiveMysteryBoxCells(mysteryBoxes) : new Set<number>();
-  const bananaCellSet = powerUpsEnabled
-    ? new Set(boardEffects.filter(e => e.type === 'banana').map(e => e.cell))
-    : new Set<number>();
+  const activeMysteryBoxSet = useMemo(
+    () => powerUpsEnabled ? getActiveMysteryBoxCells(mysteryBoxes) : new Set<number>(),
+    [powerUpsEnabled, mysteryBoxes]
+  );
+  const bananaCellSet = useMemo(
+    () => powerUpsEnabled
+      ? new Set(boardEffects.filter(e => e.type === 'banana').map(e => e.cell))
+      : new Set<number>(),
+    [powerUpsEnabled, boardEffects]
+  );
 
   // --- Render helpers ---
 
@@ -2743,7 +2809,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
         {/* === LOBBY === */}
         {gamePhase === 'lobby' && (
-          <div className={`${styles.lobby} ${boardTransition === 'exiting' ? styles.lobbyExiting : ''}`}>
+          <div className={styles.lobby}>
             <div className={styles.playerCountSelector}>
               <span className={styles.playerCountLabel}>Players:</span>
               {[1, 2, 3, 4].map(n => (
@@ -2809,7 +2875,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
         {/* === WAITING === */}
         {gamePhase === 'waiting' && (
-          <div className={`${styles.lobby} ${boardTransition === 'exiting' ? styles.lobbyExiting : ''}`}>
+          <div className={styles.lobby}>
             <div className={styles.waitingText}>
               Waiting for {playerCount - Object.keys(playerNames).length} more player{playerCount - Object.keys(playerNames).length !== 1 ? 's' : ''}...
             </div>
@@ -2855,6 +2921,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               Back
             </button>
           </div>
+        )}
+
+        {/* === TRANSITION EXIT OVERLAY === */}
+        {/* Transition overlay: covers the game area while board reveals underneath */}
+        {transitionFromPhase && (
+          <div className={styles.transitionOverlay} />
         )}
 
         {/* === PLAYING === */}
@@ -3109,8 +3181,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               {powerUpsEnabled && myColor && !isSpectating && (
                 <LudoPowerUpPanel
                   inventory={getInventoryForColor(inventory, myColor)}
-                  canUseBefore={isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
-                  canUseAfter={isMyTurn && turnPhase === 'move' && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
+                  canUseBefore={isMyTurn && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
+                  canUseAfter={isMyTurn && !isRolling && !winner && introPhase !== 'running' && !gamePaused}
                   onUse={handleUsePowerUp}
                   coins={myColor ? coins[colorIndex(myColor)] : 0}
                   isMyTurn={isMyTurn}
