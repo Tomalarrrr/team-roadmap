@@ -97,7 +97,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'warp-pipe': {
     id: 'warp-pipe',
     name: 'Warp Pipe',
-    emoji: '🚇',
+    emoji: '🕳️',
     description: 'Teleport to the nearest safe zone ahead',
     tier: 'common',
     timing: 'after-roll',
@@ -121,7 +121,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'green-shell': {
     id: 'green-shell',
     name: 'Green Shell',
-    emoji: '🐢',
+    emoji: '🐚',
     description: 'Hits the first opponent ahead — knocks them back 3',
     tier: 'uncommon',
     timing: 'after-roll',
@@ -129,7 +129,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'red-shell': {
     id: 'red-shell',
     name: 'Red Shell',
-    emoji: '🔴',
+    emoji: '🐚',
     description: 'Homing! Hits nearest opponent behind — knocks back 3',
     tier: 'uncommon',
     timing: 'after-roll',
@@ -145,7 +145,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'blue-shell': {
     id: 'blue-shell',
     name: 'Blue Shell',
-    emoji: '💙',
+    emoji: '🐚',
     description: 'Targets the player in 1st place — knocks back 5',
     tier: 'rare',
     timing: 'after-roll',
@@ -169,7 +169,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'star': {
     id: 'star',
     name: 'Star',
-    emoji: '⭐',
+    emoji: '🌟',
     description: 'Next 2 rolls — anyone you pass gets sent to start',
     tier: 'rare',
     timing: 'before-roll',
@@ -177,7 +177,7 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
   'golden-mushroom': {
     id: 'golden-mushroom',
     name: 'Golden Mushroom',
-    emoji: '✨',
+    emoji: '🍄',
     description: 'Roll 3 times — pick which result to use',
     tier: 'rare',
     timing: 'before-roll',

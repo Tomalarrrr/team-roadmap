@@ -1551,23 +1551,22 @@
   to { transform: scale(1) rotate(0); opacity: 0.9; }
 }
 
-/* Mystery Box cells — 3D angled golden ? block with floating shadow */
+/* Mystery Box cells — flat 2D golden ? block (Mario-style) */
 .mysteryBox {
   position: relative;
   overflow: visible;
 }
 
-/* Shadow beneath the block */
+/* Drop shadow — offset bottom-right, clean edge */
 .mysteryBox::before {
   content: '' !important;
   position: absolute !important;
-  width: 55%;
-  height: 12%;
-  bottom: 6%;
-  left: 50%;
-  transform: translateX(-50%);
-  background: radial-gradient(ellipse, rgba(180, 180, 180, 0.6) 0%, transparent 70%);
-  border-radius: 50%;
+  width: 72%;
+  height: 72%;
+  top: 18%;
+  left: 18%;
+  background: rgba(100, 70, 0, 0.28) !important;
+  border-radius: 16% !important;
   pointer-events: none;
   z-index: 0;
   opacity: 1 !important;
@@ -1575,45 +1574,49 @@
   font-size: 0 !important;
 }
 
-/* The 3D block itself */
+/* The flat block — beveled border + inner highlight frame */
 .mysteryBox::after {
   content: '?' !important;
   position: absolute !important;
-  width: 60%;
-  height: 60%;
-  top: 10%;
-  left: 20%;
-  background:
-    linear-gradient(135deg, #ffe082 0%, #ffd54f 20%, #f5c542 40%, #e5a80d 70%, #cc8800 100%);
-  border: 1.5px solid #8b6914;
-  border-radius: 3px;
+  width: 72%;
+  height: 72%;
+  top: 12%;
+  left: 14%;
+  background: #f5c31a !important;
+  /* Beveled border: lighter top/left, darker bottom/right */
+  border-width: 2px;
+  border-style: solid;
+  border-color: #c9a415 #8a6500 #7a5800 #c9a415;
+  border-radius: 16%;
   color: #fff !important;
-  font-size: 0.65em !important;
+  font-size: 0.75em !important;
   font-weight: 900 !important;
+  /* Dark outline behind the white ?, then a stepped shadow beneath */
   text-shadow:
-    0 0.5px 0 #a57200,
-    0 1px 0 #8b6014,
-    0 1.5px 2px rgba(0, 0, 0, 0.25);
+    -0.5px -0.5px 0 #9a7000,
+    0.5px -0.5px 0 #9a7000,
+    -0.5px 0.5px 0 #9a7000,
+    0.5px 0.5px 0 #9a7000,
+    0 1.5px 0 #8a6000,
+    0 2px 0 #7a5200;
   opacity: 1 !important;
   font-family: 'Arial Black', 'Impact', sans-serif;
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Inner highlight frame (lighter yellow band inside the border) + subtle depth */
   box-shadow:
-    inset 1px 1px 0 rgba(255, 255, 255, 0.5),
-    inset -1px -1px 0 rgba(0, 0, 0, 0.2),
-    2px 2px 0 #a56a00,
-    2px 3px 0 #8b5a00,
-    0 4px 6px rgba(100, 70, 0, 0.3);
+    inset 0 0 0 1.5px #ffe070,
+    inset 2px 2px 0 1px rgba(255, 245, 170, 0.45),
+    inset -1px -1px 0 1px rgba(140, 100, 0, 0.15);
   pointer-events: none;
   z-index: 1;
-  transform: perspective(80px) rotateY(-8deg) rotateX(5deg);
   animation: mysteryFloat 3s ease-in-out infinite;
 }
 
 @keyframes mysteryFloat {
-  0%, 100% { transform: perspective(80px) rotateY(-8deg) rotateX(5deg) translateY(0); }
-  50% { transform: perspective(80px) rotateY(-8deg) rotateX(5deg) translateY(-2px); }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
 }
 
 /* Checkered flag pattern on start cells */
@@ -1812,6 +1815,23 @@
 
 .powerUpSlotUsable:hover .powerUpEmoji {
   transform: scale(1.15);
+}
+
+/* Per-powerup emoji tints — CSS filters to recolor base emoji */
+.emojiGoldenMushroom {
+  filter: sepia(1) saturate(4) hue-rotate(5deg) brightness(1.05);
+}
+
+.emojiGreenShell {
+  filter: hue-rotate(95deg) saturate(1.6) brightness(0.95);
+}
+
+.emojiRedShell {
+  filter: hue-rotate(320deg) saturate(2.2) brightness(0.95);
+}
+
+.emojiBlueShell {
+  filter: hue-rotate(185deg) saturate(2) brightness(0.95);
 }
 
 .powerUpEmpty {

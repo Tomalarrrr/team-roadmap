@@ -9,6 +9,20 @@ const ALL_POWERUPS: PowerUpId[] = [
   'warp-pipe', 'cape-feather', 'coin-block',
 ];
 
+// CSS tint class for power-ups that need color filtering
+const EMOJI_TINT: Partial<Record<PowerUpId, string>> = {
+  'golden-mushroom': styles.emojiGoldenMushroom,
+  'green-shell': styles.emojiGreenShell,
+  'red-shell': styles.emojiRedShell,
+  'blue-shell': styles.emojiBlueShell,
+};
+
+function PowerUpIcon({ id, className }: { id: PowerUpId; className?: string }) {
+  const def = POWER_UPS[id];
+  const tint = EMOJI_TINT[id] || '';
+  return <span className={`${className || ''} ${tint}`.trim()}>{def.emoji}</span>;
+}
+
 interface PowerUpPanelProps {
   inventory: (PowerUpId | null)[];
   canUseBefore: boolean;  // can use before-roll power-ups
@@ -56,7 +70,7 @@ export function LudoPowerUpPanel({ inventory, canUseBefore, canUseAfter, onUse, 
                 const def = POWER_UPS[id];
                 return (
                   <div key={id} className={styles.powerUpInfoRow}>
-                    <span className={styles.powerUpInfoEmoji}>{def.emoji}</span>
+                    <PowerUpIcon id={id} className={styles.powerUpInfoEmoji} />
                     <div className={styles.powerUpInfoText}>
                       <span className={styles.powerUpInfoName}>{def.name}</span>
                       <span className={styles.powerUpInfoDesc}>{def.description}</span>
@@ -94,7 +108,7 @@ export function LudoPowerUpPanel({ inventory, canUseBefore, canUseAfter, onUse, 
           >
             <div className={styles.powerUpSingleIcon}>
               {def ? (
-                <span className={styles.powerUpEmoji}>{def.emoji}</span>
+                <PowerUpIcon id={powerUp!} className={styles.powerUpEmoji} />
               ) : (
                 <span className={styles.powerUpEmpty}>?</span>
               )}
@@ -132,7 +146,7 @@ export function PowerUpDiscardModal({ inventory, newPowerUp, onDiscard, onKeep }
       <div className={styles.discardCard}>
         <div className={styles.discardTitle}>Inventory Full!</div>
         <div className={styles.discardNew}>
-          <span className={styles.discardNewEmoji}>{newDef.emoji}</span>
+          <PowerUpIcon id={newPowerUp} className={styles.discardNewEmoji} />
           <span className={styles.discardNewName}>{newDef.name}</span>
         </div>
         <div className={styles.discardPrompt}>Replace your current item?</div>
@@ -146,7 +160,7 @@ export function PowerUpDiscardModal({ inventory, newPowerUp, onDiscard, onKeep }
                 className={styles.discardSlotBtn}
                 onClick={() => onDiscard(slot)}
               >
-                <span>{def.emoji}</span>
+                <PowerUpIcon id={powerUp} />
                 <span className={styles.discardSlotName}>Replace {def.name}</span>
               </button>
             );
@@ -169,7 +183,7 @@ export function GoldenMushroomModal({ rolls, onPick }: GoldenMushroomModalProps)
   return (
     <div className={styles.discardOverlay}>
       <div className={styles.discardCard}>
-        <div className={styles.discardTitle}>{'✨'} Golden Mushroom {'✨'}</div>
+        <div className={styles.discardTitle}><span className={styles.emojiGoldenMushroom}>{'🍄'}</span> Golden Mushroom <span className={styles.emojiGoldenMushroom}>{'🍄'}</span></div>
         <div className={styles.discardPrompt}>Pick your roll!</div>
         <div className={styles.goldenRolls}>
           {rolls.map((roll, i) => (
