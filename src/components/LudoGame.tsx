@@ -1039,9 +1039,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (updatedFlag.carrier !== null && updatedFlag.carrier !== tokenIndex) {
         const carrierOldPos = currentTokens[updatedFlag.carrier];
         const carrierNewPos = newTokens[updatedFlag.carrier];
-        if (carrierOldPos !== carrierNewPos && carrierNewPos.startsWith('track-')) {
-          updatedFlag = { cell: parseInt(carrierNewPos.split('-')[1]), carrier: null, used: false };
-          showHint('Star power knocked the flag loose!');
+        if (carrierOldPos !== carrierNewPos) {
+          if (carrierNewPos.startsWith('track-')) {
+            updatedFlag = { cell: parseInt(carrierNewPos.split('-')[1]), carrier: null, used: false };
+            showHint('Star power knocked the flag loose!');
+          } else if (carrierNewPos === 'base' && carrierOldPos.startsWith('track-')) {
+            // Star sent carrier to base — drop flag at their old track position
+            updatedFlag = { cell: parseInt(carrierOldPos.split('-')[1]), carrier: null, used: false };
+            showHint('Star power knocked the flag loose!');
+          }
         }
       }
 
@@ -1388,13 +1394,22 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         const moves2 = getValidMoves(currentTokens, curColor2, roll);
         if (moves2.length === 0) {
           const finishedColors2 = getFinishedColors(currentTokens, activePlayerCountRef.current);
-          const nextColor2 = findNextActivePlayer(curColor2, activePlayerCountRef.current, finishedColors2);
+          const curSixes2 = consecutiveSixesRef.current;
+          let nextColor2: LudoColor;
+          let nextSixes2: number;
+          if (isEffectiveSix(roll) && curSixes2 < 2) {
+            nextColor2 = curColor2;
+            nextSixes2 = curSixes2 + 1;
+          } else {
+            nextColor2 = findNextActivePlayer(curColor2, activePlayerCountRef.current, finishedColors2);
+            nextSixes2 = 0;
+          }
           const update2: LudoMoveUpdate = {
             tokens: serializeTokens(currentTokens),
             currentTurn: nextColor2,
             turnPhase: 'roll',
             diceValue: roll,
-            consecutiveSixes: 0,
+            consecutiveSixes: nextSixes2,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
             turnStartedAt: Date.now(),
@@ -1458,6 +1473,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           showHint(hasTokensInCorridor ? 'Need exact roll to finish' : 'No valid moves');
         }
 
+        // Tick buffs on skipped turns when the turn actually advances
+        let skipBuffs = activeBuffsRef.current;
+        if (powerUpsEnabledRef.current && nextColor !== curColor) {
+          skipBuffs = tickBuffs(skipBuffs, colorIndex(curColor));
+        }
         const update: LudoMoveUpdate = {
           tokens: serializeTokens(currentTokens),
           currentTurn: nextColor,
@@ -1467,6 +1487,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           winner: null,
           finishOrder: curFinishOrder.join(','),
           turnStartedAt: Date.now(),
+          ...(powerUpsEnabledRef.current ? {
+            powerUps: serializeInventory(inventoryRef.current),
+            activeBuffs: serializeBuffs(skipBuffs),
+            boardEffects: serializeBoardEffects(boardEffectsRef.current),
+            coins: serializeCoins(coinsRef.current),
+            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+            flag: serializeFlag(flagStateRef.current),
+          } : {}),
         };
         try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
         return;
@@ -1493,6 +1521,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         winner: null,
         finishOrder: curFinishOrder.join(','),
         turnStartedAt: Date.now(),
+        ...(powerUpsEnabledRef.current ? {
+          powerUps: serializeInventory(inventoryRef.current),
+          activeBuffs: serializeBuffs(activeBuffsRef.current),
+          boardEffects: serializeBoardEffects(boardEffectsRef.current),
+          coins: serializeCoins(coinsRef.current),
+          mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+          flag: serializeFlag(flagStateRef.current),
+        } : {}),
       };
       try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
     }, 800);
@@ -1838,6 +1874,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
   // Golden Mushroom pick handler
   const handleGoldenMushroomPick = useCallback((pickedRoll: number) => {
+    if (moveInFlightRef.current) return; // Guard against double-click
+    moveInFlightRef.current = true;
     setGoldenMushroomRolls(null);
     setDiceValue(pickedRoll);
     diceAnimKeyRef.current += 1;
@@ -2465,7 +2503,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
 
     return () => clearTimeout(botTimerRef.current);
-  }, [isSinglePlayer, gamePhase, winner, gamePaused, currentTurn, turnPhase, myColor, introPhase]);
+  // tokens included so bot re-triggers after power-up writes that change board state
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSinglePlayer, gamePhase, winner, gamePaused, currentTurn, turnPhase, myColor, introPhase, tokens]);
 
   // --- Bot auto-pick for Golden Mushroom modal ---
   useEffect(() => {
