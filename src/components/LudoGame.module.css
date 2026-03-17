@@ -1582,8 +1582,7 @@
   width: 60%;
   height: 60%;
   top: 10%;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 20%;
   background:
     linear-gradient(135deg, #ffe082 0%, #ffd54f 20%, #f5c542 40%, #e5a80d 70%, #cc8800 100%);
   border: 1.5px solid #8b6914;
