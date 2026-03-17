@@ -424,8 +424,8 @@ export function deserializeBuffs(str: string): ActiveBuff[] {
     const [typeCode, playerStr, durStr] = part.split(':');
     return {
       type: codeMap[typeCode] || 'star',
-      playerColorIdx: parseInt(playerStr),
-      duration: parseInt(durStr),
+      playerColorIdx: parseInt(playerStr) || 0,
+      duration: parseInt(durStr) || 0,
     };
   });
 }

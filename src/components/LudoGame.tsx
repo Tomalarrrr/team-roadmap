@@ -62,6 +62,7 @@ import {
   SAFE_ZONES,
   getTokenColor,
   getColorTokenIndices,
+  getPlayerScore,
   isEffectiveSix,
   findFurthestTrackToken,
   type RollStats,
@@ -1106,6 +1107,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (getTokenColor(i) === carrierColor) continue;
             if (newTokens[i] === startPos) {
               newTokens[i] = 'base';
+              captured = true;
+              capturedIndices.push(i);
+              // Clear captured victim's inventory
+              if (powerUpsEnabledRef.current) {
+                const victimColor = getTokenColor(i);
+                const ci = colorIndex(victimColor);
+                const inv = inventoryRef.current;
+                if (inv[ci][0] !== null) {
+                  const clearedInv = inv.map((slots, idx) =>
+                    idx === ci ? [null] as (PowerUpId | null)[] : [...slots]
+                  );
+                  inventoryRef.current = clearedInv;
+                  setInventory(clearedInv);
+                }
+              }
             }
           }
         }
@@ -1170,8 +1186,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (slipPos.startsWith('track-')) {
               updatedFlag = { cell: parseInt(slipPos.split('-')[1]), carrier: null, used: false };
               showHint('🍌 Banana peel! Flag dropped — slid back 3!');
+            } else if (slipPos.startsWith('final-')) {
+              // Knocked into corridor — drop flag at entry cell
+              updatedFlag = { cell: ENTRY_CELLS[curColor], carrier: null, used: false };
+              showHint('🍌 Banana peel! Flag dropped — slid back 3!');
             } else {
-              showHint('🍌 Banana peel! Slid back 3 spaces!');
+              // Knocked back to base — drop flag at start position
+              updatedFlag = { cell: START_POSITIONS[curColor], carrier: null, used: false };
+              showHint('🍌 Banana peel! Flag dropped — slid back to base!');
             }
           } else {
             showHint('🍌 Banana peel! Slid back 3 spaces!');
@@ -2324,11 +2346,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (puId === 'green-shell' || puId === 'red-shell') {
               const shooterIdx = findFurthestTrackToken(currentTokens, currentTurn);
               const shooterTrack = shooterIdx !== null ? parseInt(currentTokens[shooterIdx].split('-')[1]) : null;
-              if (shooterTrack === null) break; // no token on track, skip power-up
+              if (shooterTrack === null) continue; // no token on track, try next power-up
               const target = puId === 'green-shell'
                 ? findFirstOpponentAhead(currentTokens, shooterTrack, currentTurn)
                 : findNearestOpponentBehind(currentTokens, shooterTrack, currentTurn);
-              if (target === null) break; // no target, skip
+              if (target === null) continue; // no target, try next power-up
               const newTokens = knockBack(currentTokens, target, 3);
               let shellFlag = flagStateRef.current;
               if (!shellFlag.used && shellFlag.carrier === target) {
@@ -2365,7 +2387,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
             if (puId === 'blue-shell') {
               const target = findLeaderLeadToken(currentTokens, activePlayerCountRef.current, currentTurn);
-              if (target === null) break; // no leader target, skip
+              if (target === null) continue; // no leader target, try next power-up
               const newTokens = knockBack(currentTokens, target, 5);
               let bsFlag = flagStateRef.current;
               if (!bsFlag.used && bsFlag.carrier === target) {
@@ -2402,7 +2424,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
             if (puId === 'warp-pipe') {
               const warpToken = findFurthestTrackToken(currentTokens, currentTurn);
-              if (warpToken === null) break; // no token on track, skip
+              if (warpToken === null) continue; // no token on track, try next power-up
               const trackPos = parseInt(currentTokens[warpToken].split('-')[1]);
               const safeZone = findNextSafeZone(trackPos, currentTurn);
               const newTokens = [...currentTokens] as TokenPosition[];
@@ -2443,7 +2465,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: turnStartedAtRef.current,
+                  turnStartedAt: Date.now(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(newBuffs),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2458,7 +2480,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (puId === 'banana-peel') {
               const bananaTokenIdx = findFurthestTrackToken(currentTokens, currentTurn);
               const placedCell = bananaTokenIdx !== null ? parseInt(currentTokens[bananaTokenIdx].split('-')[1]) : null;
-              if (placedCell === null || SAFE_ZONES.has(placedCell)) break; // can't place, skip
+              if (placedCell === null || SAFE_ZONES.has(placedCell)) continue; // can't place, try next power-up
               const newEffects = [...boardEffectsRef.current, { type: 'banana' as const, cell: placedCell, ownerColorIdx: colorIndex(currentTurn) }];
               const gc = gameCodeRef.current;
               if (gc) {
@@ -2471,7 +2493,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: turnStartedAtRef.current,
+                  turnStartedAt: Date.now(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(activeBuffsRef.current),
                   boardEffects: serializeBoardEffects(newEffects),
@@ -2491,30 +2513,46 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (dice === null) return;
         const computedMoves = getValidMoves(tokensRef.current, currentTurn, dice);
         if (computedMoves.length === 0) {
-          // Force skip to prevent deadlock — shouldn't happen but is a safety net
+          // Force skip to prevent deadlock — safety net for post-power-up board changes
           const gc = gameCodeRef.current;
           if (gc) {
+            moveInFlightRef.current = true;
             const finished = getFinishedColors(tokensRef.current, activePlayerCountRef.current);
-            const next = findNextActivePlayer(currentTurn, activePlayerCountRef.current, finished);
+            const curSixes = consecutiveSixesRef.current;
+            let next: LudoColor;
+            let nextSixes: number;
+            // Respect bonus turn on effective 6 (same logic as handleRollDice no-moves path)
+            if (isEffectiveSix(dice) && curSixes < 2) {
+              next = currentTurn;
+              nextSixes = curSixes + 1;
+            } else {
+              next = findNextActivePlayer(currentTurn, activePlayerCountRef.current, finished);
+              nextSixes = 0;
+            }
+            // Tick buffs when turn actually advances
+            let skipBuffs = activeBuffsRef.current;
+            if (powerUpsEnabledRef.current && next !== currentTurn) {
+              skipBuffs = tickBuffs(skipBuffs, colorIndex(currentTurn));
+            }
             makeMove(gc, currentTurn, {
               tokens: serializeTokens(tokensRef.current),
               currentTurn: next,
               turnPhase: 'roll',
               diceValue: dice,
-              consecutiveSixes: 0,
+              consecutiveSixes: nextSixes,
               winner: null,
               finishOrder: finishOrderRef.current.join(','),
               turnStartedAt: Date.now(),
               rollStats: serializeRollStats(rollStatsRef.current),
               ...(powerUpsEnabledRef.current ? {
                 powerUps: serializeInventory(inventoryRef.current),
-                activeBuffs: serializeBuffs(activeBuffsRef.current),
+                activeBuffs: serializeBuffs(skipBuffs),
                 boardEffects: serializeBoardEffects(boardEffectsRef.current),
                 coins: serializeCoins(coinsRef.current),
                 mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
                 flag: serializeFlag(flagStateRef.current),
               } : {}),
-            }).catch(() => {});
+            }).catch(() => { moveInFlightRef.current = false; });
           }
           return;
         }
@@ -2523,6 +2561,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         const entries = computedMoves.map(m => [m.tokenIndex, m.newPosition] as const);
         let bestIdx = entries[0][0];
         let bestScore = -Infinity;
+
+        // Pre-compute leader among opponents so bots target the winner
+        let leaderColor: LudoColor | null = null;
+        let leaderScore = -1;
+        for (const c of TURN_ORDER.slice(0, activePlayerCountRef.current)) {
+          if (c === currentTurn) continue;
+          const s = getPlayerScore(tokensRef.current, c);
+          if (s > leaderScore) { leaderScore = s; leaderColor = c; }
+        }
 
         for (const [tokenIdx, targetPos] of entries) {
           let score = 0;
@@ -2537,13 +2584,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             score += 100 + finalNum * 20;
           }
 
-          // Check if this move captures an opponent
+          // Check if this move captures an opponent — prioritize the leader
           if (targetPos.startsWith('track-')) {
             const targetCell = parseInt(targetPos.split('-')[1]);
             for (let i = 0; i < TOTAL_TOKENS; i++) {
               if (getTokenColor(i) === currentTurn) continue;
               if (tokensRef.current[i] === targetPos && !SAFE_ZONES.has(targetCell)) {
-                score += 80; // Capture!
+                score += getTokenColor(i) === leaderColor ? 160 : 80; // Target the winner!
               }
             }
             // Prefer moving to safe zones
