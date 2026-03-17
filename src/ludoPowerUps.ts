@@ -691,9 +691,8 @@ export function applyStarEffect(
     for (let i = 0; i < 16; i++) {
       if (getTokenColor(i) === moverColor) continue;
       if (result[i] === `track-${cell}`) {
-        // Send to start position of their color, not base — more fun, less punishing
-        const victimColor = getTokenColor(i);
-        result[i] = `track-${START_POSITIONS[victimColor]}`;
+        // Send captured token back to base (standard Ludo capture behavior)
+        result[i] = 'base';
       }
     }
   }

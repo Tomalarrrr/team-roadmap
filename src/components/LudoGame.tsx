@@ -632,7 +632,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isSearchOpen) onClose();
-      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing' && introPhaseRef.current !== 'running') {
+      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing' && introPhaseRef.current !== 'running' && myColorRef.current) {
         e.preventDefault();
         handleRollDiceRef.current();
       }
@@ -1136,12 +1136,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             const slipPos = newTokens[tokenIndex];
             if (slipPos.startsWith('track-')) {
               updatedFlag = { cell: parseInt(slipPos.split('-')[1]), carrier: null, used: false };
-              showHint('Banana peel! Flag dropped!');
+              showHint('🍌 Banana peel! Flag dropped — slid back 3!');
             } else {
-              showHint('Banana peel! Slipped back 3!');
+              showHint('🍌 Banana peel! Slid back 3 spaces!');
             }
           } else {
-            showHint('Banana peel! Slipped back 3!');
+            showHint('🍌 Banana peel! Slid back 3 spaces!');
           }
         }
         // Check for mystery box (only on voluntary moves, not forced)
@@ -1350,8 +1350,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       rollTimeoutRef.current = setTimeout(() => {
         setIsRolling(false);
         isRollingRef.current = false;
-        moveInFlightRef.current = false; // Allow interaction with modal
+        goldenMushroomRef.current = [r1, r2, r3]; // Sync ref immediately before clearing moveInFlight
         setGoldenMushroomRolls([r1, r2, r3]);
+        moveInFlightRef.current = false; // Allow interaction with modal (after ref is synced)
       }, 800);
       return;
     }
@@ -1397,6 +1398,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
             turnStartedAt: Date.now(),
+            ...(powerUpsEnabledRef.current ? {
+              powerUps: serializeInventory(inventoryRef.current),
+              activeBuffs: serializeBuffs(activeBuffsRef.current),
+              boardEffects: serializeBoardEffects(boardEffectsRef.current),
+              coins: serializeCoins(coinsRef.current),
+              mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+              flag: serializeFlag(flagStateRef.current),
+            } : {}),
           };
           makeMove(gc, curColor2, update2).catch(() => { moveInFlightRef.current = false; });
         } else if (moves2.length === 1) {
@@ -1518,9 +1527,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const handleUsePowerUp = useCallback((slot: number, powerUpId: PowerUpId) => {
     const mc = myColorRef.current;
     if (!mc || !powerUpsEnabledRef.current) return;
+    if (currentTurnRef.current !== mc) return; // Not your turn
+    if (moveInFlightRef.current) return; // Prevent double-fire
 
     const def = POWER_UPS[powerUpId];
     if (!def) return;
+
+    // Validate timing matches current phase
+    if (def.timing === 'before-roll' && turnPhaseRef.current !== 'roll') return;
+    if (def.timing === 'after-roll' && turnPhaseRef.current !== 'move') return;
 
     // Remove from inventory immediately
     const newInv = removeFromInventory(inventoryRef.current, mc, slot);
@@ -1975,9 +1990,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
       // Primary: current player auto-acts at 0s
       // Don't auto-act while power-up modals are open
+      // Don't auto-act if elapsed < 2s (prevents stale turnStartedAt from triggering on turn transition)
       const hasModalOpen = !!goldenMushroomRef.current || !!pendingDiscardRef.current;
       if (
         remaining <= 0 &&
+        elapsed >= 2 &&
         isCurrentPlayer &&
         !moveInFlightRef.current &&
         !isRollingRef.current &&
@@ -2090,7 +2107,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: turnStartedAtRef.current,
+                  turnStartedAt: Date.now(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(newBuffs),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2122,7 +2139,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: turnStartedAtRef.current,
+                  turnStartedAt: Date.now(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(newBuffs),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2139,6 +2156,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (puId === 'super-mushroom' || puId === 'golden-mushroom' || puId === 'bullet-bill') {
               const newInv = removeFromInventory(inventoryRef.current, currentTurn, slot);
               setActivePowerUp({ id: puId, slot });
+              activePowerUpRef.current = { id: puId, slot }; // Sync ref immediately for handleRollDice
               const gc = gameCodeRef.current;
               if (gc) {
                 moveInFlightRef.current = true;
@@ -2150,7 +2168,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: turnStartedAtRef.current,
+                  turnStartedAt: Date.now(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(activeBuffsRef.current),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2372,6 +2390,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               winner: null,
               finishOrder: finishOrderRef.current.join(','),
               turnStartedAt: Date.now(),
+              ...(powerUpsEnabledRef.current ? {
+                powerUps: serializeInventory(inventoryRef.current),
+                activeBuffs: serializeBuffs(activeBuffsRef.current),
+                boardEffects: serializeBoardEffects(boardEffectsRef.current),
+                coins: serializeCoins(coinsRef.current),
+                mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+                flag: serializeFlag(flagStateRef.current),
+              } : {}),
             }).catch(() => {});
           }
           return;
@@ -3009,7 +3035,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             <span className={styles.spectateBadge}>Spectating</span>
           )}
         </span>
-        {gamePhase === 'playing' && !winner && (
+        {gamePhase === 'playing' && !winner && !isSpectating && (
           <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={() => gameCode && toggleGamePause(gameCode)} aria-label={gamePaused ? 'Resume game' : 'Pause game'}>
             {gamePaused ? (
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -3367,7 +3393,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                     diceCanRoll ? styles.diceActive : '',
                   ].filter(Boolean).join(' ')}
                   onClick={handleRollDice}
-                  disabled={!isMyTurn || turnPhase !== 'roll' || isRolling || !!winner || introPhase === 'running'}
+                  disabled={!isMyTurn || turnPhase !== 'roll' || isRolling || !!winner || introPhase === 'running' || gamePaused}
                   aria-label="Roll dice"
                 >
                   {isRolling ? (

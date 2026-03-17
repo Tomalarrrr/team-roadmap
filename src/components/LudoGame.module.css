@@ -1701,8 +1701,8 @@
 }
 
 @keyframes mysteryFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1.5px); }
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(2px); }
 }
 
 /* --- Mario mode character tokens --- */
