@@ -89,7 +89,6 @@ describe('Buffs serialization', () => {
     const buffs = [
       { type: 'star' as const, playerColorIdx: 0, duration: 2 },
       { type: 'lightning' as const, playerColorIdx: 1, duration: 1 },
-      { type: 'cape' as const, playerColorIdx: 3, duration: 1 },
     ];
     expect(deserializeBuffs(serializeBuffs(buffs))).toEqual(buffs);
   });

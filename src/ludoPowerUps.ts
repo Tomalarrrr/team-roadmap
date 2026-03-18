@@ -6,7 +6,7 @@ import type { LudoColor, TokenPosition } from './ludoFirebase';
 // --- Types ---
 
 export type PowerUpId =
-  | 'super-mushroom' | 'bullet-bill' | 'warp-pipe' | 'cape-feather'
+  | 'super-mushroom' | 'bullet-bill' | 'warp-pipe'
   | 'star' | 'golden-mushroom' | 'lightning-bolt'
   | 'banana-peel' | 'green-shell' | 'red-shell' | 'blue-shell'
   | 'coin-block';
@@ -100,14 +100,6 @@ export const POWER_UPS: Record<PowerUpId, PowerUpDef> = {
     name: 'Warp Pipe',
     emoji: '🕳️',
     description: 'Teleport to the nearest safe zone ahead',
-    tier: 'common',
-    timing: 'after-roll',
-  },
-  'cape-feather': {
-    id: 'cape-feather',
-    name: 'Cape Feather',
-    emoji: '🪶',
-    description: 'Fly over opponents — you won\'t capture anyone this move',
     tier: 'common',
     timing: 'after-roll',
   },
@@ -245,7 +237,7 @@ export function getLeaderColor(
  * Blue Shell only available if drawing player is NOT in 1st place.
  */
 const ALL_POWERUP_IDS: PowerUpId[] = [
-  'super-mushroom', 'warp-pipe', 'cape-feather', 'coin-block',
+  'super-mushroom', 'warp-pipe', 'coin-block',
   'green-shell', 'red-shell', 'banana-peel',
   'blue-shell', 'bullet-bill', 'lightning-bolt', 'star', 'golden-mushroom',
 ];
@@ -272,7 +264,6 @@ export function drawPowerUp(
 const POWERUP_CODES: Record<PowerUpId, string> = {
   'super-mushroom': 'SM',
   'warp-pipe': 'WP',
-  'cape-feather': 'CF',
   'coin-block': 'CB',
   'green-shell': 'GS',
   'red-shell': 'RS',
@@ -407,20 +398,20 @@ export function deserializeBoardEffects(str: string): BoardEffect[] {
 
 // Active buffs: "type:playerIdx:duration,..."
 export interface ActiveBuff {
-  type: 'star' | 'lightning' | 'cape';
+  type: 'star' | 'lightning';
   playerColorIdx: number;
   duration: number; // turns remaining
 }
 
 export function serializeBuffs(buffs: ActiveBuff[]): string {
   if (buffs.length === 0) return '';
-  const typeMap: Record<string, string> = { star: 'ST', lightning: 'LB', cape: 'CF' };
+  const typeMap: Record<string, string> = { star: 'ST', lightning: 'LB' };
   return buffs.map(b => `${typeMap[b.type]}:${b.playerColorIdx}:${b.duration}`).join(',');
 }
 
 export function deserializeBuffs(str: string): ActiveBuff[] {
   if (!str) return [];
-  const codeMap: Record<string, ActiveBuff['type']> = { ST: 'star', LB: 'lightning', CF: 'cape' };
+  const codeMap: Record<string, ActiveBuff['type']> = { ST: 'star', LB: 'lightning' };
   return str.split(',').filter(Boolean).map(part => {
     const [typeCode, playerStr, durStr] = part.split(':');
     return {

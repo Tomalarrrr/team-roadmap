@@ -6,7 +6,7 @@ import styles from './LudoGame.module.css';
 const ALL_POWERUPS: PowerUpId[] = [
   'super-mushroom', 'golden-mushroom', 'bullet-bill', 'star', 'lightning-bolt',
   'green-shell', 'red-shell', 'blue-shell', 'banana-peel',
-  'warp-pipe', 'cape-feather', 'coin-block',
+  'warp-pipe', 'coin-block',
 ];
 
 // Per-powerup CSS classes: tint (color filter) + idle animation
@@ -21,7 +21,6 @@ const EMOJI_STYLE: Record<PowerUpId, string> = {
   'blue-shell': `${styles.emojiBlueShell} ${styles.animBlueShell}`,
   'banana-peel': styles.animBanana,
   'warp-pipe': styles.animWarpPipe,
-  'cape-feather': styles.animFeather,
   'coin-block': styles.animCoinBlock,
 };
 

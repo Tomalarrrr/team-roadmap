@@ -2290,15 +2290,6 @@
   65% { transform: scaleY(1) scaleX(1); }
 }
 
-/* 🪶 Cape Feather — two-axis gentle drift */
-.animFeather { animation: puFeather 3.5s ease-in-out infinite; }
-@keyframes puFeather {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  25% { transform: translate(2.5px, -1.5px) rotate(3deg); }
-  50% { transform: translate(0, -3px) rotate(0deg); }
-  75% { transform: translate(-2.5px, -1.5px) rotate(-3deg); }
-}
-
 /* 🪙 Coin Block — sharp bounce-up then soft settle */
 .animCoinBlock { animation: puCoinBlock 1.8s ease-out infinite; }
 @keyframes puCoinBlock {
@@ -2320,7 +2311,6 @@
   .animBlueShell,
   .animBanana,
   .animWarpPipe,
-  .animFeather,
   .animCoinBlock {
     animation: none;
   }

@@ -918,8 +918,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 pushEffect({ type: 'puLightning', color: bufColor, emoji: '⚡', ts: Date.now() }, 800);
               } else if (nb.type === 'star') {
                 pushEffect({ type: 'puBuff', color: bufColor, emoji: '🌟', ts: Date.now() }, 900);
-              } else if (nb.type === 'cape') {
-                pushEffect({ type: 'puBuff', color: bufColor, emoji: '🪶', ts: Date.now() }, 700);
               }
             }
           }
@@ -1023,7 +1021,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     tokenIndex: number,
     newPosition: TokenPosition,
     roll: number,
-    capeActive = false
   ) => {
     const gc = gameCodeRef.current;
     if (!gc) return;
@@ -1035,14 +1032,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const curPlayerCount = activePlayerCountRef.current;
 
     let { newTokens, captured, reachedHome } = applyMove(currentTokens, tokenIndex, newPosition);
-
-    // Cape Feather: undo any captures that just happened
-    if (capeActive && captured) {
-      // Restore captured tokens — re-run without capture
-      newTokens = [...currentTokens] as TokenPosition[];
-      newTokens[tokenIndex] = newPosition;
-      captured = false;
-    }
 
     // Track which tokens were captured (before auto-deploy might change them)
     const capturedIndices: number[] = [];
@@ -1688,8 +1677,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (moves.length === 1) {
         const m = moves[0];
         autoMoveRef.current = setTimeout(() => {
-          const capeOn = powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(curColor), 'cape');
-          executeMove(m.tokenIndex, m.newPosition, roll, capeOn);
+          executeMove(m.tokenIndex, m.newPosition, roll);
         }, 600);
         return;
       }
@@ -1738,10 +1726,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
     clearTimeout(autoMoveRef.current);
     moveInFlightRef.current = true;
-    // Check for cape feather buff
-    const turnColor = currentTurnRef.current;
-    const capeActive = powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(turnColor), 'cape');
-    executeMove(move.tokenIndex, move.newPosition, dice, capeActive);
+    executeMove(move.tokenIndex, move.newPosition, dice);
   }, [executeMove]);
 
   // --- Power-up usage handler ---
@@ -2031,32 +2016,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         return;
       }
 
-      if (powerUpId === 'cape-feather') {
-        // Set cape active — will be used in the next move execution
-        const newBuffs = [...activeBuffsRef.current, { type: 'cape' as const, playerColorIdx: colorIndex(mc), duration: 1 }];
-        const gc = gameCodeRef.current;
-        if (gc) {
-          makeMove(gc, mc, {
-            tokens: serializeTokens(currentTokens),
-            currentTurn: mc,
-            turnPhase: turnPhaseRef.current,
-            diceValue: diceValueRef.current,
-            consecutiveSixes: consecutiveSixesRef.current,
-            winner: null,
-            finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: getServerTimestamp(),
-            powerUps: serializeInventory(newInv),
-            activeBuffs: serializeBuffs(newBuffs),
-            boardEffects: serializeBoardEffects(boardEffectsRef.current),
-            coins: serializeCoins(coinsRef.current),
-            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
-            flag: serializeFlag(flagStateRef.current),
-          }).catch(() => { moveInFlightRef.current = false; });
-        }
-        showHint('Cape Feather! Fly over opponents!');
-        return;
-      }
-
       if (powerUpId === 'banana-peel') {
         // Auto-place banana on the furthest-ahead token's position
         const bananaTokenIdx = findFurthestTrackToken(currentTokens, mc);
@@ -2173,9 +2132,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (moves.length === 1) {
       const m = moves[0];
       autoMoveRef.current = setTimeout(() => {
-        const mc2 = myColorRef.current;
-        const capeOn = mc2 && powerUpsEnabledRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(mc2), 'cape');
-        executeMove(m.tokenIndex, m.newPosition, pickedRoll, !!capeOn);
+        executeMove(m.tokenIndex, m.newPosition, pickedRoll);
       }, 400);
       return;
     }
@@ -2287,8 +2244,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (moves.length > 0) {
               moveInFlightRef.current = true;
               const randomMove = moves[Math.floor(Math.random() * moves.length)];
-              const timerCape = powerUpsEnabledRef.current && myColorRef.current && hasActiveBuff(activeBuffsRef.current, colorIndex(myColorRef.current), 'cape');
-              executeMoveRef.current(randomMove.tokenIndex, randomMove.newPosition, dice, !!timerCape);
+              executeMoveRef.current(randomMove.tokenIndex, randomMove.newPosition, dice);
             }
           }
         }
@@ -2615,31 +2571,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   turnStartedAt: turnStartedAtRef.current,
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(activeBuffsRef.current),
-                  boardEffects: serializeBoardEffects(boardEffectsRef.current),
-                  coins: serializeCoins(coinsRef.current),
-                  mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
-                  flag: serializeFlag(flagStateRef.current),
-                }).catch(() => { moveInFlightRef.current = false; });
-              }
-              return;
-            }
-
-            if (puId === 'cape-feather') {
-              const newBuffs = [...activeBuffsRef.current, { type: 'cape' as const, playerColorIdx: colorIndex(currentTurn), duration: 1 }];
-              const gc = gameCodeRef.current;
-              if (gc) {
-                moveInFlightRef.current = true;
-                makeMove(gc, currentTurn, {
-                  tokens: serializeTokens(currentTokens),
-                  currentTurn: currentTurn,
-                  turnPhase: 'move',
-                  diceValue: diceValueRef.current,
-                  consecutiveSixes: consecutiveSixesRef.current,
-                  winner: null,
-                  finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: getServerTimestamp(),
-                  powerUps: serializeInventory(newInv),
-                  activeBuffs: serializeBuffs(newBuffs),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
                   coins: serializeCoins(coinsRef.current),
                   mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
