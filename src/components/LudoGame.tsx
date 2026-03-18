@@ -735,7 +735,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isSearchOpen) onClose();
-      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing' && introPhaseRef.current !== 'running' && myColorRef.current
+      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat && gamePhase === 'playing' && introPhaseRef.current !== 'running' && myColorRef.current
         && !isRollingRef.current && !moveInFlightRef.current && !gamePausedRef.current
         && turnPhaseRef.current === 'roll' && currentTurnRef.current === myColorRef.current && !winnerRef.current) {
         e.preventDefault();
@@ -904,12 +904,18 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         setActivePowerUp(null);
       }
 
-      setTokens(parsedTokens);
-      setCurrentTurn(state.currentTurn);
-      setTurnPhase(state.turnPhase);
-      setDiceValue(state.diceValue ?? null);
-      setConsecutiveSixes(state.consecutiveSixes);
-      setActivePlayerCount(state.playerCount);
+      // Only update state when values actually changed — avoids unnecessary re-renders
+      // that would cancel pending bot AI timeouts via effect cleanup.
+      // Note: prevTokensRef was already updated above (for animation tracking),
+      // so compare against the serialized string we parsed at the top.
+      const tokensChanged = parsedTokens.some((t, i) => t !== tokensRef.current[i]);
+      if (tokensChanged) setTokens(parsedTokens);
+      if (state.currentTurn !== currentTurnRef.current) setCurrentTurn(state.currentTurn);
+      if (state.turnPhase !== turnPhaseRef.current) setTurnPhase(state.turnPhase);
+      const newDice = state.diceValue ?? null;
+      if (newDice !== diceValueRef.current) setDiceValue(newDice);
+      if (state.consecutiveSixes !== consecutiveSixesRef.current) setConsecutiveSixes(state.consecutiveSixes);
+      if (state.playerCount !== activePlayerCountRef.current) setActivePlayerCount(state.playerCount);
       turnStartedAtRef.current = state.turnStartedAt;
 
       // Mario Mode state

@@ -227,8 +227,9 @@ export function scoreBotMove(
   let score = 0;
   const curPos = currentTokens[tokenIdx];
 
-  // Deploy from base is valuable
-  if (curPos === 'base') score += 50;
+  // Deploy from base is highly valuable — getting tokens into play is critical in Ludo.
+  // Rolling a 6 is rare, so bots should almost always take the opportunity to deploy.
+  if (curPos === 'base') score += 90;
 
   // Moving into final corridor is very valuable (safe from all threats)
   if (targetPos.startsWith('final-')) {
