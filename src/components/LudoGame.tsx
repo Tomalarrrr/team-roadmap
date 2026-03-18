@@ -435,6 +435,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const moveInFlightRef = useRef(false);
   const isRollingRef = useRef(false);
   const turnStartedAtRef = useRef<number>(Date.now());
+  const turnLocalStartRef = useRef<number>(Date.now()); // client-side turn start (immune to clock skew)
   const prevTokensRef = useRef('bas'.repeat(16));
   const hintTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -899,9 +900,19 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         rolledThisTurnRef.current = false;
       }
 
-      // Clear active power-up when turn changes
+      // Clear active power-up and reset rolling state when turn changes
       if (state.currentTurn !== currentTurnRef.current) {
         setActivePowerUp(null);
+        // Safety net: clear rolling flag if turn changed mid-animation
+        isRollingRef.current = false;
+        setIsRolling(false);
+        // Track local turn start for clock-skew-resistant timer
+        turnLocalStartRef.current = Date.now();
+      }
+      // Also reset local timer when turnStartedAt changes within the same player's turn
+      // (e.g. bonus turns, power-up usage)
+      if (state.turnStartedAt !== turnStartedAtRef.current) {
+        turnLocalStartRef.current = Date.now();
       }
 
       // Only update state when values actually changed — avoids unnecessary re-renders
@@ -957,6 +968,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
       // Per-game pause state
       const isPaused = !!state.paused;
+      // Reset local timer on unpause so turn timer doesn't fire immediately
+      if (gamePausedRef.current && !isPaused) {
+        turnLocalStartRef.current = Date.now();
+      }
       setGamePaused(isPaused);
       gamePausedRef.current = isPaused;
 
@@ -1410,7 +1425,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       tokens: serializeTokens(newTokens),
       currentTurn: gameWinner ? curColor : nextColor,
       turnPhase: 'roll',
-      diceValue: roll,
+      diceValue: null, // Clear stale dice — next turn starts fresh
       consecutiveSixes: nextSixes,
       winner: gameWinner,
       finishOrder: updatedFinishOrder.join(','),
@@ -1599,7 +1614,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             tokens: serializeTokens(currentTokens),
             currentTurn: nextColor2,
             turnPhase: 'roll',
-            diceValue: roll,
+            diceValue: null, // Clear stale dice — next turn starts fresh
             consecutiveSixes: nextSixes2,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
@@ -1681,7 +1696,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           tokens: serializeTokens(currentTokens),
           currentTurn: nextColor,
           turnPhase: 'roll',
-          diceValue: roll,
+          diceValue: null, // Clear stale dice — next turn starts fresh
           consecutiveSixes: nextSixes,
           winner: null,
           finishOrder: curFinishOrder.join(','),
@@ -1709,7 +1724,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           );
         if (!hasAfterRollPowerUp) {
           const m = moves[0];
+          const expectedColor = curColor; // Guard against stale closure
           autoMoveRef.current = setTimeout(() => {
+            if (currentTurnRef.current !== expectedColor) return; // Turn changed — abort
             executeMove(m.tokenIndex, m.newPosition, roll);
           }, 600);
           return;
@@ -2148,7 +2165,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         tokens: serializeTokens(currentTokens),
         currentTurn: nextColor,
         turnPhase: 'roll',
-        diceValue: pickedRoll,
+        diceValue: null, // Clear stale dice — next turn starts fresh
         consecutiveSixes: nextSixes,
         winner: null,
         finishOrder: curFinishOrder.join(','),
@@ -2253,7 +2270,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         return; // Don't touch turnStartedAtRef — Firebase adjusts on resume
       }
 
-      const elapsed = Math.floor((Date.now() - turnStartedAtRef.current) / 1000);
+      // Use local timestamp (immune to server clock skew) for auto-roll decisions
+      const elapsed = Math.floor((Date.now() - turnLocalStartRef.current) / 1000);
       const remaining = TURN_SECONDS - elapsed;
       setTimeLeft(Math.max(0, remaining));
 
@@ -2713,7 +2731,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               tokens: serializeTokens(tokensRef.current),
               currentTurn: next,
               turnPhase: 'roll',
-              diceValue: dice,
+              diceValue: null, // Clear stale dice — next turn starts fresh
               consecutiveSixes: nextSixes,
               winner: null,
               finishOrder: finishOrderRef.current.join(','),
@@ -2836,6 +2854,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           introPhaseRef.current = 'done';
           // Reset turn timer so the first player gets a full 30 seconds
           turnStartedAtRef.current = Date.now();
+          turnLocalStartRef.current = Date.now();
         }
       }, totalDuration);
       introTimersRef.current.push(doneTimer);
@@ -3060,6 +3079,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     moveInFlightRef.current = false;
     isRollingRef.current = false;
     rolledThisTurnRef.current = false;
+    turnLocalStartRef.current = Date.now();
     homeStuckRolls.current = {};
     pityThreshold.current = {};
     lastTwoRolls.current = {};
