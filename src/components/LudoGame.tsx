@@ -65,7 +65,6 @@ import {
   SAFE_ZONES,
   getTokenColor,
   getColorTokenIndices,
-  getPlayerScore,
   getLeaderColor,
   isEffectiveSix,
   findFurthestTrackToken,
@@ -3814,12 +3813,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               {/* Active buff indicators */}
               {powerUpsEnabled && activeBuffs.length > 0 && (
                 <div className={styles.activeBuffsBar}>
-                  {activeBuffs.map((buff, i) => {
+                  {activeBuffs.map((buff, _i) => {
                     const buffColor = colorFromIndex(buff.playerColorIdx);
                     return (
                       <span key={`${buff.type}-${buff.playerColorIdx}-${buff.duration}`} className={styles.buffIndicator}>
                         <span className={styles.buffPlayerDot} style={{ background: COLOR_HEX[buffColor] }} />
-                        {buff.type === 'star' ? '⭐' : buff.type === 'lightning' ? '⚡' : '🪶'}
+                        {buff.type === 'star' ? '⭐' : '⚡'}
                         <span className={styles.buffDuration}>{buff.duration}</span>
                       </span>
                     );

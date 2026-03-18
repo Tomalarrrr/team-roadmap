@@ -143,7 +143,7 @@ export async function createGame(
       finishOrder: '',
       createdAt: Date.now(),
       startedAt: null,
-      turnStartedAt: getServerTimestamp(),
+      turnStartedAt: getServerTimestamp() as unknown as number,
       playerCount: 4,
       rollStats: initRollStats(),
       ...(powerUpsEnabled ? {
