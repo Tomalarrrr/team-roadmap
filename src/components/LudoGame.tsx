@@ -18,6 +18,7 @@ import {
   type TokenPosition,
   type TurnPhase,
   getServerTimestamp,
+  requestDiceRoll,
 } from '../ludoFirebase';
 import {
   POWER_UPS,
@@ -1442,39 +1443,25 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     setIsRolling(true);
     const rollAnimMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : 800;
 
-    // Anti-streak: if last 2 rolls were the same value, avoid a third in a row (per-color)
+    // Determine how many rolls we need (3 for Golden Mushroom, 1 otherwise)
+    const isGoldenMushroom = powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'golden-mushroom';
+    const rollCount: 1 | 3 = isGoldenMushroom ? 3 : 1;
+
+    // Request dice roll from server (falls back to client-side if unavailable)
+    const sid = sessionId;
+    const { rolls: serverRolls } = await requestDiceRoll(gc, sid, rollCount);
+
+    // If the game state changed while waiting for the server, abort
+    if (currentTurnRef.current !== activeColor || turnPhaseRef.current !== 'roll' || winnerRef.current) {
+      moveInFlightRef.current = false;
+      isRollingRef.current = false;
+      setIsRolling(false);
+      return;
+    }
+
+    // Apply pity-timer: guarantee a 6 after N consecutive non-6 rolls (per-color)
     const colorKey = activeColor;
-    const fairRoll = (): number => {
-      let r = Math.floor(Math.random() * 6) + 1;
-      const playerRolls = lastTwoRolls.current[colorKey] || [0, 0];
-      const [prev2, prev1] = playerRolls;
-      if (prev2 === prev1 && prev1 === r && prev1 !== 0) {
-        r = Math.floor(Math.random() * 5) + 1;
-        if (r >= prev1) r++;
-      }
-
-      // Balance 6s across players: if this player has significantly more 6s
-      // than the average, re-roll 6s with increasing probability
-      if (r === 6) {
-        const mySixes = sixCounts.current[colorKey] || 0;
-        const myTotal = totalRollCounts.current[colorKey] || 0;
-        const allColors = Object.keys(totalRollCounts.current);
-        if (allColors.length > 1 && myTotal >= 4) {
-          const avgSixes = allColors.reduce((sum, c) => sum + (sixCounts.current[c] || 0), 0) / allColors.length;
-          const excess = mySixes - avgSixes;
-          // If 2+ more 6s than average, 50% chance to re-roll; 3+ → 70%; 4+ → 85%
-          if (excess >= 2) {
-            const rerollChance = Math.min(0.85, 0.3 + (excess - 2) * 0.2);
-            if (Math.random() < rerollChance) {
-              r = Math.floor(Math.random() * 5) + 1; // 1-5 only
-            }
-          }
-        }
-      }
-      return r;
-    };
-
-    // Pity-timer: guarantee a 6 after N consecutive non-6 rolls (per-color)
+    let roll = serverRolls[0];
     const rollIndices = getColorTokenIndices(activeColor);
     const hasTokenAtHome = rollIndices.some(i => tokensRef.current[i] === 'base');
     const noneOnTrack = rollIndices.every(i => {
@@ -1482,7 +1469,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       return t === 'base' || t === 'final-6' || t.startsWith('final-');
     });
     const needsSix = hasTokenAtHome && noneOnTrack;
-    let roll = fairRoll();
     let pityForced = false;
     const stuckCount = homeStuckRolls.current[colorKey] || 0;
     const threshold = pityThreshold.current[colorKey] ?? (3 + Math.floor(Math.random() * 4));
@@ -1503,7 +1489,6 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
     const prevRolls = lastTwoRolls.current[colorKey] || [0, 0];
     lastTwoRolls.current[colorKey] = [prevRolls[1], roll];
-    // Track totals for 6-balancing (don't count pity-forced 6s against the player)
     totalRollCounts.current[colorKey] = (totalRollCounts.current[colorKey] || 0) + 1;
     if (roll === 6 && !pityForced) sixCounts.current[colorKey] = (sixCounts.current[colorKey] || 0) + 1;
 
@@ -1523,14 +1508,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
 
     // Golden Mushroom: show pick modal instead of proceeding
-    if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'golden-mushroom') {
+    if (isGoldenMushroom) {
       clearTimeout(autoMoveRef.current); // Cancel any pending auto-move
       const r1 = roll;
       // Apply lightning debuff to alt rolls too for fairness
       const ci2 = colorIndex(activeColor);
       const isLightning = hasLightningDebuff(activeBuffsRef.current, ci2);
-      let r2 = Math.floor(Math.random() * 6) + 1;
-      let r3 = Math.floor(Math.random() * 6) + 1;
+      let r2 = serverRolls[1] ?? (Math.floor(Math.random() * 6) + 1);
+      let r3 = serverRolls[2] ?? (Math.floor(Math.random() * 6) + 1);
       if (isLightning) {
         r2 = Math.max(1, Math.floor(r2 / 2));
         r3 = Math.max(1, Math.floor(r3 / 2));
@@ -3821,7 +3806,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 {statusHint && (
                   <span className={styles.statusHint}>{statusHint}</span>
                 )}
-                <span aria-live="polite" aria-atomic="true" className={styles.srOnly}>{statusHint || statusMessage}</span>
+                <div aria-live="polite" aria-atomic="true" className={styles.srOnly}>{statusHint ?? ''}</div>
                 {showRollReminder && (
                   <span className={styles.rollReminder}>Roll!</span>
                 )}

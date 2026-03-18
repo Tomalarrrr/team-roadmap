@@ -143,7 +143,7 @@ export async function createGame(
       finishOrder: '',
       createdAt: Date.now(),
       startedAt: null,
-      turnStartedAt: Date.now(),
+      turnStartedAt: getServerTimestamp(),
       playerCount: 4,
       rollStats: initRollStats(),
       ...(powerUpsEnabled ? {
@@ -292,7 +292,7 @@ export async function startGame(code: string): Promise<void> {
       players: newPlayers,
       playerCount,
       startedAt: Date.now(),
-      turnStartedAt: Date.now(),
+      turnStartedAt: getServerTimestamp(),
       currentTurn: randomFirst,
       ...(hasBots ? { singlePlayer: true } : {}),
     };
@@ -510,7 +510,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       winner: null,
       finishOrder: '',
       startedAt: Date.now(),
-      turnStartedAt: Date.now(),
+      turnStartedAt: getServerTimestamp(),
       playerCount,
       paused: false,
       pausedAt: null,
@@ -526,4 +526,38 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       } : {}),
     };
   });
+}
+
+/**
+ * Request a server-generated dice roll via Cloud Function.
+ * Returns array of 1-6 values (length 1 for normal roll, 3 for Golden Mushroom).
+ * Falls back to client-side generation if the function is unavailable.
+ */
+export async function requestDiceRoll(
+  gameCode: string,
+  sessionId: string,
+  count: 1 | 3 = 1
+): Promise<{ rolls: number[]; serverGenerated: boolean }> {
+  try {
+    await ensureInitialized();
+    const firebaseFunctions = await import('firebase/functions');
+    const { getApp } = await import('firebase/app');
+    const app = getApp();
+    const functions = firebaseFunctions.getFunctions(app);
+    const rollDiceFn = firebaseFunctions.httpsCallable<
+      { gameCode: string; sessionId: string; count: number },
+      { rolls: number[] }
+    >(functions, 'rollDice');
+
+    const result = await rollDiceFn({ gameCode, sessionId, count });
+    return { rolls: result.data.rolls, serverGenerated: true };
+  } catch {
+    // Fallback to client-side roll if Cloud Function unavailable
+    // (e.g., functions not deployed yet, network error, free-tier Firebase)
+    const rolls: number[] = [];
+    for (let i = 0; i < count; i++) {
+      rolls.push(Math.floor(Math.random() * 6) + 1);
+    }
+    return { rolls, serverGenerated: false };
+  }
 }
