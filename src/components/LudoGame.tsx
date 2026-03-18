@@ -585,6 +585,28 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     hintTimeoutRef.current = setTimeout(() => setStatusHint(null), 2000);
   }, []);
 
+  // Helper: tick mystery box cooldowns if this turn transition completes a full round.
+  // Called from every path that advances the turn (move handler + all skip paths).
+  const tickMysteryBoxesOnRoundEnd = useCallback((
+    curColor: LudoColor,
+    nextColor: LudoColor,
+    playerCount: number,
+    finished: Set<LudoColor>,
+    boxes: MysteryBoxState[],
+  ): MysteryBoxState[] => {
+    if (curColor === nextColor) return boxes;
+    const active = TURN_ORDER.slice(0, playerCount).filter(c => !finished.has(c));
+    const first = active[0];
+    const last = active[active.length - 1];
+    if (first && last && curColor === last && nextColor === first) {
+      const ticked = tickMysteryBoxCooldowns(boxes);
+      mysteryBoxesRef.current = ticked;
+      setMysteryBoxes(ticked);
+      return ticked;
+    }
+    return boxes;
+  }, []);
+
   // --- Cell-by-cell token animation ---
 
   const startTokenAnimation = useCallback((tokenIdx: number, rawWaypoints: [number, number][]) => {
@@ -1359,14 +1381,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         updatedBuffs = tickBuffs(updatedBuffs, colorIndex(curColor));
       }
 
-      // Tick mystery box cooldowns once per full round: only when turn transitions
-      // from last active player to first active player (skip bonus turns)
-      const activePlayersForRound = TURN_ORDER.slice(0, curPlayerCount).filter(c => !finishedColors.has(c));
-      const firstActive = activePlayersForRound[0];
-      const lastActive = activePlayersForRound[activePlayersForRound.length - 1];
-      if (firstActive && lastActive && curColor === lastActive && nextColor === firstActive && curColor !== nextColor) {
-        updatedMysteryBoxes = tickMysteryBoxCooldowns(updatedMysteryBoxes);
-      }
+      // Tick mystery box cooldowns once per full round
+      updatedMysteryBoxes = tickMysteryBoxesOnRoundEnd(curColor, nextColor, curPlayerCount, finishedColors, updatedMysteryBoxes);
 
       // Optimistic local update: push power-up state to UI immediately
       // (don't wait for Firebase round-trip to reflect mystery box/inventory changes)
@@ -1570,6 +1586,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           if (powerUpsEnabledRef.current && nextColor2 !== curColor2) {
             bbSkipBuffs = tickBuffs(bbSkipBuffs, colorIndex(curColor2));
           }
+          const bbSkipBoxes = powerUpsEnabledRef.current
+            ? tickMysteryBoxesOnRoundEnd(curColor2, nextColor2, activePlayerCountRef.current, finishedColors2, mysteryBoxesRef.current)
+            : mysteryBoxesRef.current;
           const update2: LudoMoveUpdate = {
             tokens: serializeTokens(currentTokens),
             currentTurn: nextColor2,
@@ -1585,7 +1604,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               activeBuffs: serializeBuffs(bbSkipBuffs),
               boardEffects: serializeBoardEffects(boardEffectsRef.current),
               coins: serializeCoins(coinsRef.current),
-              mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+              mysteryBoxes: serializeMysteryBoxes(bbSkipBoxes),
               flag: serializeFlag(flagStateRef.current),
             } : {}),
           };
@@ -1649,6 +1668,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         if (powerUpsEnabledRef.current && nextColor !== curColor) {
           skipBuffs = tickBuffs(skipBuffs, colorIndex(curColor));
         }
+        const skipBoxes = powerUpsEnabledRef.current
+          ? tickMysteryBoxesOnRoundEnd(curColor, nextColor, curPlayerCount, finishedColors, mysteryBoxesRef.current)
+          : mysteryBoxesRef.current;
         const update: LudoMoveUpdate = {
           tokens: serializeTokens(currentTokens),
           currentTurn: nextColor,
@@ -1664,7 +1686,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             activeBuffs: serializeBuffs(skipBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
             coins: serializeCoins(coinsRef.current),
-            mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+            mysteryBoxes: serializeMysteryBoxes(skipBoxes),
             flag: serializeFlag(flagStateRef.current),
           } : {}),
         };
@@ -1672,16 +1694,24 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         return;
       }
 
-      // Single valid move: auto-select with brief delay so player sees the roll
+      // Single valid move: auto-select UNLESS player has an after-roll power-up
+      // (they need the 'move' phase to use it)
       if (moves.length === 1) {
-        const m = moves[0];
-        autoMoveRef.current = setTimeout(() => {
-          executeMove(m.tokenIndex, m.newPosition, roll);
-        }, 600);
-        return;
+        const hasAfterRollPowerUp = powerUpsEnabledRef.current &&
+          getInventoryForColor(inventoryRef.current, curColor).some(p =>
+            p !== null && POWER_UPS[p]?.timing === 'after-roll'
+          );
+        if (!hasAfterRollPowerUp) {
+          const m = moves[0];
+          autoMoveRef.current = setTimeout(() => {
+            executeMove(m.tokenIndex, m.newPosition, roll);
+          }, 600);
+          return;
+        }
+        // Fall through to 'move' phase so the player can choose to use their power-up
       }
 
-      // Multiple valid moves: let player choose
+      // Multiple valid moves (or single move with after-roll power-up): let player choose
       setValidMoves(new Map(moves.map(m => [m.tokenIndex, m.newPosition])));
       const update: LudoMoveUpdate = {
         tokens: serializeTokens(currentTokens),
@@ -2107,6 +2137,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (powerUpsEnabledRef.current && nextColor !== curColor) {
         gmSkipBuffs = tickBuffs(gmSkipBuffs, colorIndex(curColor));
       }
+      const gmSkipBoxes = tickMysteryBoxesOnRoundEnd(curColor, nextColor, curPlayerCount, finishedColors, mysteryBoxesRef.current);
       const update: LudoMoveUpdate = {
         tokens: serializeTokens(currentTokens),
         currentTurn: nextColor,
@@ -2121,7 +2152,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         activeBuffs: serializeBuffs(gmSkipBuffs),
         boardEffects: serializeBoardEffects(boardEffectsRef.current),
         coins: serializeCoins(coinsRef.current),
-        mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+        mysteryBoxes: serializeMysteryBoxes(gmSkipBoxes),
         flag: serializeFlag(flagStateRef.current),
       };
       makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
@@ -2270,6 +2301,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           if (powerUpsEnabledRef.current) {
             backupBuffs = tickBuffs(backupBuffs, colorIndex(curColor));
           }
+          const backupBoxes = powerUpsEnabledRef.current
+            ? tickMysteryBoxesOnRoundEnd(curColor, nextColor, curPlayerCount, finishedColors, mysteryBoxesRef.current)
+            : mysteryBoxesRef.current;
           const update: LudoMoveUpdate = {
             tokens: serializeTokens(currentTokens),
             currentTurn: nextColor,
@@ -2285,7 +2319,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               activeBuffs: serializeBuffs(backupBuffs),
               boardEffects: serializeBoardEffects(boardEffectsRef.current),
               coins: serializeCoins(coinsRef.current),
-              mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+              mysteryBoxes: serializeMysteryBoxes(backupBoxes),
               flag: serializeFlag(flagStateRef.current),
             } : {}),
           };
@@ -2666,6 +2700,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (powerUpsEnabledRef.current && next !== currentTurn) {
               skipBuffs = tickBuffs(skipBuffs, colorIndex(currentTurn));
             }
+            const botSkipBoxes = powerUpsEnabledRef.current
+              ? tickMysteryBoxesOnRoundEnd(currentTurn, next, activePlayerCountRef.current, finished, mysteryBoxesRef.current)
+              : mysteryBoxesRef.current;
             makeMove(gc, currentTurn, {
               tokens: serializeTokens(tokensRef.current),
               currentTurn: next,
@@ -2681,7 +2718,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 activeBuffs: serializeBuffs(skipBuffs),
                 boardEffects: serializeBoardEffects(boardEffectsRef.current),
                 coins: serializeCoins(coinsRef.current),
-                mysteryBoxes: serializeMysteryBoxes(mysteryBoxesRef.current),
+                mysteryBoxes: serializeMysteryBoxes(botSkipBoxes),
                 flag: serializeFlag(flagStateRef.current),
               } : {}),
             }).catch(() => { moveInFlightRef.current = false; });
