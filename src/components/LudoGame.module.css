@@ -1,3 +1,16 @@
+/* Screen-reader only (visually hidden but accessible) */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Popup container */
 .popup {
   position: fixed;
@@ -433,11 +446,11 @@
   justify-items: center;
 }
 
-/* Center home */
+/* Center home — z-index 1 so corner track cells (z-index 2) render on top */
 .home {
   grid-row: 7 / 10;
   grid-column: 7 / 10;
-  z-index: 2;
+  z-index: 1;
   border: 2px solid rgba(0, 0, 0, 0.12);
   position: relative;
   overflow: hidden;
@@ -1665,7 +1678,7 @@
   height: 72%;
   top: 18%;
   left: 18%;
-  background: rgba(100, 70, 0, 0.28) !important;
+  background: rgba(60, 20, 90, 0.28) !important;
   border-radius: 16% !important;
   pointer-events: none;
   z-index: 0;
@@ -1674,7 +1687,7 @@
   font-size: 0 !important;
 }
 
-/* The flat block — beveled border + inner highlight frame */
+/* The flat block — beveled border + inner highlight frame (purple/white) */
 .mysteryBox::after {
   content: '?' !important;
   position: absolute !important;
@@ -1683,33 +1696,33 @@
   height: 72%;
   top: 14%;
   left: 14%;
-  background: #f5c31a !important;
+  background: #7C3AED !important;
   /* Beveled border: lighter top/left, darker bottom/right */
   border-width: 2px;
   border-style: solid;
-  border-color: #c9a415 #8a6500 #7a5800 #c9a415;
+  border-color: #9F67FF #5B21B6 #4C1D95 #9F67FF;
   border-radius: 16%;
   color: #fff !important;
   font-size: 0.75em !important;
   font-weight: 900 !important;
-  /* Dark outline behind the white ?, then a stepped shadow beneath */
+  /* White outline behind the ?, then a stepped shadow beneath */
   text-shadow:
-    -0.5px -0.5px 0 #9a7000,
-    0.5px -0.5px 0 #9a7000,
-    -0.5px 0.5px 0 #9a7000,
-    0.5px 0.5px 0 #9a7000,
-    0 1.5px 0 #8a6000,
-    0 2px 0 #7a5200;
+    -0.5px -0.5px 0 #4C1D95,
+    0.5px -0.5px 0 #4C1D95,
+    -0.5px 0.5px 0 #4C1D95,
+    0.5px 0.5px 0 #4C1D95,
+    0 1.5px 0 #3B0764,
+    0 2px 0 #2E0650;
   opacity: 1 !important;
   font-family: 'Arial Black', 'Impact', sans-serif;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Inner highlight frame (lighter yellow band inside the border) + subtle depth */
+  /* Inner highlight frame (lighter purple/lavender band inside the border) + subtle depth */
   box-shadow:
-    inset 0 0 0 1.5px #ffe070,
-    inset 2px 2px 0 1px rgba(255, 245, 170, 0.45),
-    inset -1px -1px 0 1px rgba(140, 100, 0, 0.15);
+    inset 0 0 0 1.5px #C4B5FD,
+    inset 2px 2px 0 1px rgba(221, 214, 254, 0.45),
+    inset -1px -1px 0 1px rgba(76, 29, 149, 0.15);
   pointer-events: none;
   z-index: 1;
   animation: mysteryFloat 3s ease-in-out infinite;
@@ -1718,6 +1731,84 @@
 @keyframes mysteryFloat {
   0%, 100% { transform: translateX(0); }
   50% { transform: translateX(2px); }
+}
+
+/* --- Power-up activation effects (visible to all players) --- */
+
+/* Lightning bolt: brief full-board flash */
+.puLightningFlash {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(255, 240, 100, 0.35) 0%, rgba(180, 140, 255, 0.12) 60%, transparent 100%);
+  animation: lightningFlash 800ms ease-out forwards;
+}
+@keyframes lightningFlash {
+  0% { opacity: 0; }
+  8% { opacity: 1; }
+  16% { opacity: 0.2; }
+  24% { opacity: 0.9; }
+  40% { opacity: 0.1; }
+  50% { opacity: 0.6; }
+  100% { opacity: 0; }
+}
+
+/* Shell hit / banana impact: emoji burst at cell */
+.puShellHit {
+  position: absolute;
+  width: 6.667%;
+  height: 6.667%;
+  z-index: 15;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4em;
+  animation: shellHitBurst 700ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+@keyframes shellHitBurst {
+  0% { transform: scale(0.3) rotate(-20deg); opacity: 0; }
+  25% { transform: scale(1.5) rotate(8deg); opacity: 1; }
+  50% { transform: scale(1.1) rotate(-3deg); opacity: 0.9; }
+  100% { transform: scale(0.4) rotate(0deg); opacity: 0; }
+}
+
+/* Warp pipe: swirl ring at cell */
+.puWarpSwirl {
+  position: absolute;
+  width: 6.667%;
+  height: 6.667%;
+  z-index: 15;
+  pointer-events: none;
+  border-radius: 50%;
+  border: 2.5px solid #34a853;
+  animation: warpSwirl 800ms ease-out forwards;
+}
+@keyframes warpSwirl {
+  0% { transform: scale(0.2) rotate(0deg); opacity: 0; border-width: 3px; }
+  30% { transform: scale(1.2) rotate(180deg); opacity: 0.9; border-width: 2px; }
+  60% { transform: scale(1.8) rotate(360deg); opacity: 0.5; border-width: 1px; }
+  100% { transform: scale(2.5) rotate(540deg); opacity: 0; border-width: 0.5px; }
+}
+
+/* Buff activation: centered emoji pulse */
+.puBuffActivate {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 20;
+  pointer-events: none;
+  font-size: 2.5em;
+  animation: buffActivate 900ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+@keyframes buffActivate {
+  0% { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
+  30% { transform: translate(-50%, -50%) scale(1.4); opacity: 1; }
+  60% { transform: translate(-50%, -50%) scale(1.0); opacity: 0.8; }
+  100% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
 }
 
 /* --- Mario mode character tokens --- */
@@ -2724,7 +2815,11 @@
   .newItemBounce,
   .transitionOverlay,
   .boardEntering,
-  .bananaOverlay {
+  .bananaOverlay,
+  .puLightningFlash,
+  .puShellHit,
+  .puWarpSwirl,
+  .puBuffActivate {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;

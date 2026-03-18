@@ -4,15 +4,18 @@
 import type { LudoColor, TokenPosition } from './ludoFirebase';
 import {
   TRACK_SIZE,
+  TOTAL_TOKENS,
   START_POSITIONS,
   ENTRY_CELLS,
   SAFE_ZONES,
   getTokenColor,
   getColorTokenIndices,
+  getPlayerScore,
   isEffectiveSix,
+  type BoardEffect,
+  type FlagState,
+  colorIndex,
 } from './ludoPowerUps';
-
-const TOTAL_TOKENS = 16;
 const TURN_ORDER: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
 
 /**
@@ -205,4 +208,95 @@ export function getNextTurn(
     nextColor: findNextActivePlayer(currentColor, playerCount, finishedColors),
     nextSixes: 0,
   };
+}
+
+/**
+ * Score a bot move for AI decision-making.
+ * Higher score = better move. Pure function, no side effects.
+ */
+export function scoreBotMove(
+  tokenIdx: number,
+  targetPos: TokenPosition,
+  currentTokens: TokenPosition[],
+  botColor: LudoColor,
+  playerCount: number,
+  boardEffects: BoardEffect[],
+  flagState: FlagState,
+  leaderColor?: LudoColor | null,
+): number {
+  let score = 0;
+  const curPos = currentTokens[tokenIdx];
+
+  // Deploy from base is valuable
+  if (curPos === 'base') score += 50;
+
+  // Moving into final corridor is very valuable (safe from all threats)
+  if (targetPos.startsWith('final-')) {
+    const finalNum = parseInt(targetPos.split('-')[1]);
+    score += 100 + finalNum * 20;
+  }
+
+  if (targetPos.startsWith('track-')) {
+    const targetCell = parseInt(targetPos.split('-')[1]);
+
+    // Compute leader if not provided by caller
+    let leader = leaderColor;
+    if (leader === undefined) {
+      let leaderScore = -1;
+      for (const c of TURN_ORDER.slice(0, playerCount)) {
+        if (c === botColor) continue;
+        const s = getPlayerScore(currentTokens, c);
+        if (s > leaderScore) { leaderScore = s; leader = c; }
+      }
+    }
+
+    // Capture opponent — prioritize the leader
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
+      if (getTokenColor(i) === botColor) continue;
+      if (currentTokens[i] === targetPos && !SAFE_ZONES.has(targetCell)) {
+        score += getTokenColor(i) === leader ? 160 : 80;
+      }
+    }
+
+    // Prefer safe zones (immune to capture)
+    if (SAFE_ZONES.has(targetCell)) score += 15;
+
+    // Avoid banana peels from opponents
+    const bananaCells = new Set(boardEffects.filter(e => e.type === 'banana' && e.ownerColorIdx !== colorIndex(botColor)).map(e => e.cell));
+    if (bananaCells.has(targetCell)) score -= 40;
+
+    // Danger assessment: penalize landing near opponents who could capture next turn
+    if (!SAFE_ZONES.has(targetCell)) {
+      for (let i = 0; i < TOTAL_TOKENS; i++) {
+        if (getTokenColor(i) === botColor) continue;
+        const p = currentTokens[i];
+        if (p.startsWith('track-')) {
+          const oppCell = parseInt(p.split('-')[1]);
+          const fwdDist = targetCell >= oppCell
+            ? targetCell - oppCell
+            : (TRACK_SIZE - oppCell) + targetCell;
+          if (fwdDist >= 1 && fwdDist <= 6) score -= 15;
+        }
+      }
+    }
+
+    // Advance further along the track
+    const start = START_POSITIONS[botColor];
+    const dist = targetCell >= start
+      ? targetCell - start
+      : (TRACK_SIZE - start) + targetCell;
+    score += dist;
+
+    // Flag pickup: high priority
+    if (!flagState.used && flagState.cell === targetCell && flagState.carrier === null) {
+      score += 150;
+    }
+  }
+
+  // Flag carrier heading home: boost final corridor moves
+  if (!flagState.used && flagState.carrier === tokenIdx && targetPos.startsWith('final-')) {
+    score += 200;
+  }
+
+  return score;
 }

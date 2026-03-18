@@ -26,6 +26,7 @@ export interface PowerUpDef {
 // --- Constants ---
 
 export const TRACK_SIZE = 56;
+export const TOTAL_TOKENS = 16;
 
 export const START_POSITIONS: Record<LudoColor, number> = {
   red: 1, green: 15, yellow: 29, blue: 43,
@@ -516,6 +517,37 @@ export function knockBack(
 }
 
 /**
+ * After knockback, check if the knocked-back token landed on an opponent
+ * on a non-safe-zone track cell. If so, send that opponent to base.
+ * Returns the updated tokens and indices of any captured tokens.
+ */
+export function captureAfterKnockback(
+  tokens: TokenPosition[],
+  knockedIdx: number,
+): { tokens: TokenPosition[]; capturedIndices: number[] } {
+  const result = [...tokens] as TokenPosition[];
+  const pos = result[knockedIdx];
+  const capturedIndices: number[] = [];
+
+  if (pos.startsWith('track-')) {
+    const trackNum = parseInt(pos.split('-')[1]);
+    if (!SAFE_ZONES.has(trackNum)) {
+      const knockedColor = getTokenColor(knockedIdx);
+      for (let i = 0; i < TOTAL_TOKENS; i++) {
+        if (i === knockedIdx) continue;
+        if (getTokenColor(i) === knockedColor) continue;
+        if (result[i] === pos) {
+          result[i] = 'base';
+          capturedIndices.push(i);
+        }
+      }
+    }
+  }
+
+  return { tokens: result, capturedIndices };
+}
+
+/**
  * Find the first opponent token ahead on the track (for Green Shell).
  */
 export function findFirstOpponentAhead(
@@ -525,7 +557,7 @@ export function findFirstOpponentAhead(
 ): number | null {
   for (let step = 1; step <= TRACK_SIZE; step++) {
     const checkCell = ((fromTrack - 1 + step) % TRACK_SIZE) + 1;
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
       if (getTokenColor(i) === shooterColor) continue;
       const pos = tokens[i];
       if (pos === `track-${checkCell}`) return i;
@@ -544,7 +576,7 @@ export function findNearestOpponentBehind(
 ): number | null {
   for (let step = 1; step <= TRACK_SIZE; step++) {
     const checkCell = ((fromTrack - 1 - step + TRACK_SIZE * 10) % TRACK_SIZE) + 1;
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
       if (getTokenColor(i) === shooterColor) continue;
       const pos = tokens[i];
       if (pos === `track-${checkCell}`) return i;
@@ -688,10 +720,10 @@ export function applyStarEffect(
 
   for (let s = 1; s <= steps; s++) {
     const cell = ((fromTrack - 1 + s) % TRACK_SIZE) + 1;
-    for (let i = 0; i < 16; i++) {
+    if (SAFE_ZONES.has(cell)) continue; // Star respects safe zone immunity
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
       if (getTokenColor(i) === moverColor) continue;
       if (result[i] === `track-${cell}`) {
-        // Send captured token back to base (standard Ludo capture behavior)
         result[i] = 'base';
       }
     }

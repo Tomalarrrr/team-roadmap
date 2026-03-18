@@ -17,6 +17,7 @@ import {
   type LudoMoveUpdate,
   type TokenPosition,
   type TurnPhase,
+  getServerTimestamp,
 } from '../ludoFirebase';
 import {
   POWER_UPS,
@@ -39,6 +40,7 @@ import {
   hasActiveBuff,
   hasLightningDebuff,
   knockBack,
+  captureAfterKnockback,
   findFirstOpponentAhead,
   findNearestOpponentBehind,
   findLeaderLeadToken,
@@ -63,6 +65,7 @@ import {
   getTokenColor,
   getColorTokenIndices,
   getPlayerScore,
+  getLeaderColor,
   isEffectiveSix,
   findFurthestTrackToken,
   type RollStats,
@@ -80,6 +83,7 @@ import {
   getFinishedColors,
   findNextActivePlayer,
   getNextTurn,
+  scoreBotMove,
 } from '../ludoGameLogic';
 import { LudoPowerUpPanel, PowerUpDiscardModal, GoldenMushroomModal } from './LudoPowerUpPanel';
 import styles from './LudoGame.module.css';
@@ -93,36 +97,36 @@ const TURN_SECONDS = 30;
 const TURN_ORDER: LudoColor[] = ['red', 'green', 'yellow', 'blue'];
 
 // Track cell → [gridRow, gridCol] (1-indexed for CSS grid)
-// 56 cells: 4 arms × 13 cells + 4 corner cells at inner junctions
+// 56 cells: 4 arms × 13 cells + 4 corner cells at arm junctions
 const TRACK_COORDS: Record<number, [number, number]> = {
   // Left arm top row → right (red start)
   1: [7, 2],   2: [7, 3],   3: [7, 4],   4: [7, 5],   5: [7, 6],
-  // Top-left corner (mapped to next cell — no visible cell here, inside base)
-  6: [6, 7],
+  // Top-left corner (L-turn: right → up)
+  6: [7, 7],
   // Top arm left col → up
   7: [6, 7],   8: [5, 7],   9: [4, 7],   10: [3, 7],  11: [2, 7],  12: [1, 7],
   // Top arm top row → right
   13: [1, 8],  14: [1, 9],
   // Top arm right col → down (green start)
   15: [2, 9],  16: [3, 9],  17: [4, 9],  18: [5, 9],  19: [6, 9],
-  // Top-right corner (mapped to next cell — no visible cell here, inside base)
-  20: [7, 10],
+  // Top-right corner (L-turn: down → right)
+  20: [7, 9],
   // Right arm top row → right
   21: [7, 10], 22: [7, 11], 23: [7, 12], 24: [7, 13], 25: [7, 14], 26: [7, 15],
   // Right arm right col → down
   27: [8, 15], 28: [9, 15],
   // Right arm bottom row → left (yellow start)
   29: [9, 14], 30: [9, 13], 31: [9, 12], 32: [9, 11], 33: [9, 10],
-  // Bottom-right corner (mapped to next cell — no visible cell here, inside base)
-  34: [10, 9],
+  // Bottom-right corner (L-turn: left → down)
+  34: [9, 9],
   // Bottom arm right col → down
   35: [10, 9], 36: [11, 9], 37: [12, 9], 38: [13, 9], 39: [14, 9], 40: [15, 9],
   // Bottom arm bottom row → left
   41: [15, 8], 42: [15, 7],
   // Bottom arm left col → up (blue start)
   43: [14, 7], 44: [13, 7], 45: [12, 7], 46: [11, 7], 47: [10, 7],
-  // Bottom-left corner (mapped to next cell — no visible cell here, inside base)
-  48: [9, 6],
+  // Bottom-left corner (L-turn: up → left)
+  48: [9, 7],
   // Left arm bottom row → left
   49: [9, 6],  50: [9, 5],  51: [9, 4],  52: [9, 3],  53: [9, 2],  54: [9, 1],
   // Left arm left col → up
@@ -452,8 +456,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const capturedTokens = useRef<{ index: number; coords: [number, number]; color: LudoColor; ts: number }[]>([]);
   const captureShowTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
-  // Game effects (deploy sparkle, home celebration)
-  const gameEffects = useRef<{ type: 'deploy' | 'home' | 'starPoof'; color: LudoColor; coords?: [number, number]; ts: number }[]>([]);
+  // Game effects (deploy sparkle, home celebration, power-up activations)
+  type GameEffectType = 'deploy' | 'home' | 'starPoof' | 'puLightning' | 'puShellHit' | 'puWarp' | 'puBuff';
+  const gameEffects = useRef<{ type: GameEffectType; color: LudoColor; coords?: [number, number]; emoji?: string; ts: number }[]>([]);
   const effectTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Stats tracking (synced via Firebase rollStats field)
@@ -482,6 +487,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       });
     }
   }, []);
+
+  // Helper to push a game effect with auto-cleanup
+  const pushEffect = useCallback((effect: { type: GameEffectType; color: LudoColor; coords?: [number, number]; emoji?: string; ts: number }, duration: number) => {
+    gameEffects.current.push(effect);
+    scheduleRenderTick();
+    const timer = setTimeout(() => {
+      gameEffects.current = gameEffects.current.filter(e => e !== effect);
+      scheduleRenderTick();
+    }, duration);
+    effectTimers.current.push(timer);
+  }, [scheduleRenderTick]);
 
   // Mario Mode power-up state
   const [marioMode, setMarioMode] = useState(false);
@@ -575,12 +591,26 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const existing = tokenAnimTimers.current.get(tokenIdx);
     if (existing) clearTimeout(existing);
 
-    // Deduplicate adjacent waypoints (corner cells share coords with next cell)
+    // Deduplicate adjacent waypoints with identical coords (safety measure)
     const waypoints = rawWaypoints.filter((wp, i) =>
       i === 0 || wp[0] !== rawWaypoints[i - 1][0] || wp[1] !== rawWaypoints[i - 1][1]
     );
 
     if (waypoints.length === 0) return;
+
+    // Respect reduced-motion preference: jump directly to final position
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      tokenAnimPos.current.set(tokenIdx, waypoints[waypoints.length - 1]);
+      scheduleRenderTick();
+      const timer = setTimeout(() => {
+        tokenAnimPos.current.delete(tokenIdx);
+        tokenAnimParity.current.delete(tokenIdx);
+        tokenAnimTimers.current.delete(tokenIdx);
+        scheduleRenderTick();
+      }, 50); // Brief pause so React can register the position
+      tokenAnimTimers.current.set(tokenIdx, timer);
+      return;
+    }
 
     let step = 0;
     let lastStepTime = performance.now();
@@ -683,7 +713,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isSearchOpen) onClose();
-      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing' && introPhaseRef.current !== 'running' && myColorRef.current) {
+      if ((e.key === ' ' || e.key === 'Enter') && gamePhase === 'playing' && introPhaseRef.current !== 'running' && myColorRef.current
+        && !isRollingRef.current && !moveInFlightRef.current && !gamePausedRef.current
+        && turnPhaseRef.current === 'roll' && currentTurnRef.current === myColorRef.current && !winnerRef.current) {
         e.preventDefault();
         handleRollDiceRef.current();
       }
@@ -707,9 +739,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
       const parsedTokens = deserializeTokens(state.tokens);
 
-      // Reset moveInFlight on any state change (token or turn change)
-      if (state.tokens !== prevTokensRef.current || state.turnStartedAt !== turnStartedAtRef.current) {
+      // Reset moveInFlight on any state change (token, turn, or phase change)
+      if (state.tokens !== prevTokensRef.current || state.turnStartedAt !== turnStartedAtRef.current
+        || state.currentTurn !== currentTurnRef.current || state.turnPhase !== turnPhaseRef.current) {
         moveInFlightRef.current = false;
+        clearTimeout(autoMoveRef.current);
       }
 
       // Detect token moves and start cell-by-cell animations + capture effects
@@ -734,6 +768,24 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               animPaths.set(i, path);
               startTokenAnimation(i, path);
             }
+          }
+        }
+
+        // Power-up effects: detect knockbacks (token moved backward on track)
+        for (let i = 0; i < TOTAL_TOKENS; i++) {
+          if (oldTokens[i] === parsedTokens[i]) continue;
+          if (!oldTokens[i].startsWith('track-') || !parsedTokens[i].startsWith('track-')) continue;
+          if (parsedTokens[i] === 'base') continue; // capture, not knockback
+          const oldTrack = parseInt(oldTokens[i].split('-')[1]);
+          const newTrack = parseInt(parsedTokens[i].split('-')[1]);
+          const color = getTokenColor(i);
+          const start = START_POSITIONS[color];
+          const oldDist = oldTrack >= start ? oldTrack - start : (TRACK_SIZE - start) + oldTrack;
+          const newDist = newTrack >= start ? newTrack - start : (TRACK_SIZE - start) + newTrack;
+          if (newDist < oldDist) {
+            // Token moved backward = knockback. Show hit effect at old position
+            const coords = TRACK_COORDS[oldTrack];
+            if (coords) pushEffect({ type: 'puShellHit', color, coords, emoji: '💥', ts: Date.now() }, 700);
           }
         }
 
@@ -842,8 +894,36 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       if (state.powerUpsEnabled) {
         setPowerUpsEnabled(true);
         if (state.powerUps) setInventory(deserializeInventory(state.powerUps));
-        if (state.boardEffects !== undefined) setBoardEffects(deserializeBoardEffects(state.boardEffects));
-        if (state.activeBuffs !== undefined) setActiveBuffs(deserializeBuffs(state.activeBuffs));
+        if (state.boardEffects !== undefined) {
+          // Detect new banana placements for visual effect
+          const newEffects = deserializeBoardEffects(state.boardEffects);
+          const oldEffects = boardEffectsRef.current;
+          for (const ne of newEffects) {
+            if (!oldEffects.some(oe => oe.cell === ne.cell && oe.ownerColorIdx === ne.ownerColorIdx)) {
+              const coords = TRACK_COORDS[ne.cell];
+              if (coords) pushEffect({ type: 'puShellHit', color: colorFromIndex(ne.ownerColorIdx), coords, emoji: '🍌', ts: Date.now() }, 700);
+            }
+          }
+          setBoardEffects(newEffects);
+        }
+        if (state.activeBuffs !== undefined) {
+          // Detect new buff activations for visual effect
+          const newBuffs = deserializeBuffs(state.activeBuffs);
+          const oldBuffs = activeBuffsRef.current;
+          for (const nb of newBuffs) {
+            if (!oldBuffs.some(ob => ob.type === nb.type && ob.playerColorIdx === nb.playerColorIdx)) {
+              const bufColor = colorFromIndex(nb.playerColorIdx);
+              if (nb.type === 'lightning') {
+                pushEffect({ type: 'puLightning', color: bufColor, emoji: '⚡', ts: Date.now() }, 800);
+              } else if (nb.type === 'star') {
+                pushEffect({ type: 'puBuff', color: bufColor, emoji: '🌟', ts: Date.now() }, 900);
+              } else if (nb.type === 'cape') {
+                pushEffect({ type: 'puBuff', color: bufColor, emoji: '🪶', ts: Date.now() }, 700);
+              }
+            }
+          }
+          setActiveBuffs(newBuffs);
+        }
         if (state.coins) setCoins(deserializeCoins(state.coins));
         if (state.mysteryBoxes) setMysteryBoxes(deserializeMysteryBoxes(state.mysteryBoxes));
         if (state.flag) { const f = deserializeFlag(state.flag); setFlagState(f); flagStateRef.current = f; }
@@ -1019,6 +1099,31 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       coinsRef.current = updCoins;
     }
 
+    // Auto-deploy banked coins: check ALL players with 3+ coins and a token in base
+    // (handles the case where start position was previously occupied but is now free)
+    if (powerUpsEnabledRef.current) {
+      const bankCoins = [...coinsRef.current];
+      let bankChanged = false;
+      for (let ci2 = 0; ci2 < 4; ci2++) {
+        if (bankCoins[ci2] >= 3) {
+          const bankColor = (['red', 'green', 'yellow', 'blue'] as const)[ci2];
+          const bankIndices = getColorTokenIndices(bankColor);
+          const startPos: TokenPosition = `track-${START_POSITIONS[bankColor]}`;
+          const startFree = !newTokens.some((t, j) => t === startPos && getTokenColor(j) !== bankColor);
+          if (startFree) {
+            const baseToken = bankIndices.find(idx => newTokens[idx] === 'base');
+            if (baseToken !== undefined) {
+              bankCoins[ci2] = 0;
+              newTokens[baseToken] = startPos;
+              bankChanged = true;
+              showHint(`${COLOR_LABELS[bankColor]} auto-deployed with banked coins!`);
+            }
+          }
+        }
+      }
+      if (bankChanged) coinsRef.current = bankCoins;
+    }
+
     // Star buff: send anyone passed back to their start
     if (powerUpsEnabledRef.current) {
       const curBuffs = activeBuffsRef.current;
@@ -1046,7 +1151,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             }
           }
           scheduleRenderTick();
-          showHint('Star power! Opponents sent home!');
+          showHint('🌟 Star power! Swept opponents home!');
         }
       }
     }
@@ -1180,6 +1285,26 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           // Slip back 3 spaces
           updatedEffects = updatedEffects.filter((_, i) => i !== bananaIdx);
           newTokens = knockBack(newTokens, tokenIndex, 3);
+          // Capture any opponent at the knockback landing position
+          const bananaCapture = captureAfterKnockback(newTokens, tokenIndex);
+          newTokens = bananaCapture.tokens;
+          if (bananaCapture.capturedIndices.length > 0) {
+            captured = true;
+            // Flag transfer: if a banana-knockback capture killed a flag carrier, transfer flag
+            if (!updatedFlag.used && updatedFlag.carrier !== null && bananaCapture.capturedIndices.includes(updatedFlag.carrier)) {
+              updatedFlag = { cell: null, carrier: tokenIndex, used: false };
+            }
+            // Clear captured victim's inventory
+            for (const ci2 of bananaCapture.capturedIndices) {
+              const victColor = getTokenColor(ci2);
+              const vci = colorIndex(victColor);
+              if (updatedInv[vci][0] !== null) {
+                updatedInv = updatedInv.map((slots, idx) =>
+                  idx === vci ? [null] as (PowerUpId | null)[] : [...slots]
+                );
+              }
+            }
+          }
           // Flag drop on banana slip
           if (updatedFlag.carrier === tokenIndex) {
             const slipPos = newTokens[tokenIndex];
@@ -1278,7 +1403,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       consecutiveSixes: nextSixes,
       winner: gameWinner,
       finishOrder: updatedFinishOrder.join(','),
-      turnStartedAt: Date.now(),
+      turnStartedAt: getServerTimestamp(),
       rollStats: serializeRollStats(moveRollStats),
     };
 
@@ -1315,6 +1440,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     moveInFlightRef.current = true;
     isRollingRef.current = true;
     setIsRolling(true);
+    const rollAnimMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : 800;
 
     // Anti-streak: if last 2 rolls were the same value, avoid a third in a row (per-color)
     const colorKey = activeColor;
@@ -1392,12 +1518,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       const ci = colorIndex(activeColor);
       if (hasLightningDebuff(activeBuffsRef.current, ci)) {
         roll = Math.max(1, Math.floor(roll / 2));
-        showHint('Lightning! Half speed!');
+        showHint('⚡ Lightning debuff! Your roll was halved!');
       }
     }
 
     // Golden Mushroom: show pick modal instead of proceeding
     if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'golden-mushroom') {
+      clearTimeout(autoMoveRef.current); // Cancel any pending auto-move
       const r1 = roll;
       // Apply lightning debuff to alt rolls too for fairness
       const ci2 = colorIndex(activeColor);
@@ -1416,7 +1543,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         goldenMushroomRef.current = [r1, r2, r3]; // Sync ref immediately before clearing moveInFlight
         setGoldenMushroomRolls([r1, r2, r3]);
         moveInFlightRef.current = false; // Allow interaction with modal (after ref is synced)
-      }, 800);
+      }, rollAnimMs);
       return;
     }
 
@@ -1478,7 +1605,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: nextSixes2,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: Date.now(),
+            turnStartedAt: getServerTimestamp(),
             rollStats: serializeRollStats(bbRollStats),
             ...(powerUpsEnabledRef.current ? {
               powerUps: serializeInventory(inventoryRef.current),
@@ -1496,7 +1623,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           setValidMoves(new Map(moves2.map(m => [m.tokenIndex, m.newPosition])));
           moveInFlightRef.current = false;
         }
-      }, 800);
+      }, rollAnimMs);
       return;
     }
 
@@ -1557,7 +1684,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           consecutiveSixes: nextSixes,
           winner: null,
           finishOrder: curFinishOrder.join(','),
-          turnStartedAt: Date.now(),
+          turnStartedAt: getServerTimestamp(),
           rollStats: serializeRollStats(updatedRollStats),
           ...(powerUpsEnabledRef.current ? {
             powerUps: serializeInventory(inventoryRef.current),
@@ -1592,7 +1719,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         consecutiveSixes: curSixes,
         winner: null,
         finishOrder: curFinishOrder.join(','),
-        turnStartedAt: Date.now(),
+        turnStartedAt: getServerTimestamp(),
         rollStats: serializeRollStats(updatedRollStats),
         ...(powerUpsEnabledRef.current ? {
           powerUps: serializeInventory(inventoryRef.current),
@@ -1604,7 +1731,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         } : {}),
       };
       try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
-    }, 800);
+    }, rollAnimMs);
   }, [executeMove, showHint]);
 
   const handleMoveToken = useCallback((tokenIndex: number) => {
@@ -1646,8 +1773,14 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     if (def.timing === 'before-roll' && turnPhaseRef.current !== 'roll') return;
     if (def.timing === 'after-roll' && turnPhaseRef.current !== 'move') return;
 
+    // Validate the power-up actually exists in the claimed slot
+    const currentSlotItem = inventoryRef.current[colorIndex(mc)]?.[slot];
+    if (currentSlotItem !== powerUpId) return;
+
     // Remove from inventory immediately
     moveInFlightRef.current = true;
+
+    try {
     const newInv = removeFromInventory(inventoryRef.current, mc, slot);
 
     if (def.timing === 'before-roll') {
@@ -1666,7 +1799,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: Date.now(),
+            turnStartedAt: getServerTimestamp(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -1675,7 +1808,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             flag: serializeFlag(flagStateRef.current),
           }).catch(() => { moveInFlightRef.current = false; });
         }
-        showHint('Star activated! Send opponents home!');
+        showHint('🌟 Star activated! Anyone you pass gets sent home for 2 turns!');
         return;
       }
 
@@ -1699,7 +1832,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: Date.now(),
+            turnStartedAt: getServerTimestamp(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -1708,7 +1841,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             flag: serializeFlag(flagStateRef.current),
           }).catch(() => { moveInFlightRef.current = false; });
         }
-        showHint('Lightning! Opponents slowed!');
+        showHint('⚡ Lightning! All opponents half speed for 2 turns!');
         return;
       }
 
@@ -1726,7 +1859,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           consecutiveSixes: consecutiveSixesRef.current,
           winner: null,
           finishOrder: finishOrderRef.current.join(','),
-          turnStartedAt: Date.now(),
+          turnStartedAt: getServerTimestamp(),
           powerUps: serializeInventory(newInv),
           activeBuffs: serializeBuffs(activeBuffsRef.current),
           boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -1764,11 +1897,22 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           return;
         }
 
-        const newTokens = knockBack(currentTokens, target, 3);
+        let newTokens = knockBack(currentTokens, target, 3);
+        // Capture any opponent at the knockback landing position
+        const shellCapture = captureAfterKnockback(newTokens, target);
+        newTokens = shellCapture.tokens;
         // Flag drop: if target was carrying flag, drop at new position
+        // Also check if a secondary capture (from knockback landing) killed a flag carrier
         let shellFlag = flagStateRef.current;
         let shellDroppedFlag = false;
-        if (!shellFlag.used && shellFlag.carrier === target) {
+        if (!shellFlag.used && shellFlag.carrier !== null && shellCapture.capturedIndices.includes(shellFlag.carrier)) {
+          // Secondary knockback capture killed the flag carrier — drop flag at capture location
+          const knockPos = newTokens[target];
+          if (knockPos.startsWith('track-')) {
+            shellFlag = { cell: parseInt(knockPos.split('-')[1]), carrier: null, used: false };
+            shellDroppedFlag = true;
+          }
+        } else if (!shellFlag.used && shellFlag.carrier === target) {
           const newPos = newTokens[target];
           if (newPos.startsWith('track-')) {
             shellFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
@@ -1812,11 +1956,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           showHint('No leader to target!');
           return;
         }
-        const newTokens = knockBack(currentTokens, target, 5);
+        let newTokens = knockBack(currentTokens, target, 5);
+        // Capture any opponent at the knockback landing position
+        const blueCapture = captureAfterKnockback(newTokens, target);
+        newTokens = blueCapture.tokens;
         // Flag drop: if target was carrying flag, drop at new position
+        // Also check if a secondary capture (from knockback landing) killed a flag carrier
         let blueShellFlag = flagStateRef.current;
         let blueDroppedFlag = false;
-        if (!blueShellFlag.used && blueShellFlag.carrier === target) {
+        if (!blueShellFlag.used && blueShellFlag.carrier !== null && blueCapture.capturedIndices.includes(blueShellFlag.carrier)) {
+          const knockPos = newTokens[target];
+          if (knockPos.startsWith('track-')) {
+            blueShellFlag = { cell: parseInt(knockPos.split('-')[1]), carrier: null, used: false };
+            blueDroppedFlag = true;
+          }
+        } else if (!blueShellFlag.used && blueShellFlag.carrier === target) {
           const newPos = newTokens[target];
           if (newPos.startsWith('track-')) {
             blueShellFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
@@ -1884,6 +2038,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           }).catch(() => { moveInFlightRef.current = false; });
         }
         showHint('Warp Pipe! Teleported to safe zone!');
+        // Warp visual: swirl at departure and arrival
+        const departCoords = TRACK_COORDS[trackPos];
+        const arriveCoords = TRACK_COORDS[safeZone];
+        if (departCoords) pushEffect({ type: 'puWarp', color: mc, coords: departCoords, emoji: '🕳️', ts: Date.now() }, 800);
+        if (arriveCoords) setTimeout(() => pushEffect({ type: 'puWarp', color: mc, coords: arriveCoords, emoji: '🕳️', ts: Date.now() }, 800), 300);
         return;
       }
 
@@ -1900,7 +2059,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: Date.now(),
+            turnStartedAt: getServerTimestamp(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(newBuffs),
             boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -1936,7 +2095,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: consecutiveSixesRef.current,
             winner: null,
             finishOrder: finishOrderRef.current.join(','),
-            turnStartedAt: Date.now(),
+            turnStartedAt: getServerTimestamp(),
             powerUps: serializeInventory(newInv),
             activeBuffs: serializeBuffs(activeBuffsRef.current),
             boardEffects: serializeBoardEffects(newEffects),
@@ -1951,6 +2110,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
     // Unknown power-up — reset guard
     moveInFlightRef.current = false;
+    } catch {
+      // Ensure moveInFlight is always reset on any error to prevent game freeze
+      moveInFlightRef.current = false;
+    }
   }, [showHint, executeMove]);
 
   // Golden Mushroom pick handler
@@ -2009,7 +2172,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         consecutiveSixes: nextSixes,
         winner: null,
         finishOrder: curFinishOrder.join(','),
-        turnStartedAt: Date.now(),
+        turnStartedAt: getServerTimestamp(),
         rollStats: serializeRollStats(gmRollStats),
         powerUps: serializeInventory(inventoryRef.current),
         activeBuffs: serializeBuffs(gmSkipBuffs),
@@ -2041,7 +2204,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       consecutiveSixes: curSixes,
       winner: null,
       finishOrder: curFinishOrder.join(','),
-      turnStartedAt: Date.now(),
+      turnStartedAt: getServerTimestamp(),
       rollStats: serializeRollStats(gmRollStats),
       powerUps: serializeInventory(inventoryRef.current),
       activeBuffs: serializeBuffs(activeBuffsRef.current),
@@ -2175,7 +2338,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             consecutiveSixes: 0,
             winner: null,
             finishOrder: curFinishOrder.join(','),
-            turnStartedAt: Date.now(),
+            turnStartedAt: getServerTimestamp(),
             rollStats: serializeRollStats(rollStatsRef.current),
             ...(powerUpsEnabledRef.current ? {
               powerUps: serializeInventory(inventoryRef.current),
@@ -2252,7 +2415,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: Date.now(),
+                  turnStartedAt: getServerTimestamp(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(newBuffs),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2284,7 +2447,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: Date.now(),
+                  turnStartedAt: getServerTimestamp(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(newBuffs),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2313,7 +2476,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: Date.now(),
+                  turnStartedAt: getServerTimestamp(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(activeBuffsRef.current),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2359,9 +2522,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 ? findFirstOpponentAhead(currentTokens, shooterTrack, currentTurn)
                 : findNearestOpponentBehind(currentTokens, shooterTrack, currentTurn);
               if (target === null) continue; // no target, try next power-up
-              const newTokens = knockBack(currentTokens, target, 3);
+              let newTokens = knockBack(currentTokens, target, 3);
+              // Capture any opponent at the knockback landing position
+              const botShellCapture = captureAfterKnockback(newTokens, target);
+              newTokens = botShellCapture.tokens;
               let shellFlag = flagStateRef.current;
-              if (!shellFlag.used && shellFlag.carrier === target) {
+              if (!shellFlag.used && shellFlag.carrier !== null && botShellCapture.capturedIndices.includes(shellFlag.carrier)) {
+                const knockPos = newTokens[target];
+                if (knockPos.startsWith('track-')) {
+                  shellFlag = { cell: parseInt(knockPos.split('-')[1]), carrier: null, used: false };
+                }
+              } else if (!shellFlag.used && shellFlag.carrier === target) {
                 const newPos = newTokens[target];
                 if (newPos.startsWith('track-')) {
                   shellFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
@@ -2396,9 +2567,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             if (puId === 'blue-shell') {
               const target = findLeaderLeadToken(currentTokens, activePlayerCountRef.current, currentTurn);
               if (target === null) continue; // no leader target, try next power-up
-              const newTokens = knockBack(currentTokens, target, 5);
+              let newTokens = knockBack(currentTokens, target, 5);
+              // Capture any opponent at the knockback landing position
+              const botBlueCapture = captureAfterKnockback(newTokens, target);
+              newTokens = botBlueCapture.tokens;
               let bsFlag = flagStateRef.current;
-              if (!bsFlag.used && bsFlag.carrier === target) {
+              if (!bsFlag.used && bsFlag.carrier !== null && botBlueCapture.capturedIndices.includes(bsFlag.carrier)) {
+                const knockPos = newTokens[target];
+                if (knockPos.startsWith('track-')) {
+                  bsFlag = { cell: parseInt(knockPos.split('-')[1]), carrier: null, used: false };
+                }
+              } else if (!bsFlag.used && bsFlag.carrier === target) {
                 const newPos = newTokens[target];
                 if (newPos.startsWith('track-')) {
                   bsFlag = { cell: parseInt(newPos.split('-')[1]), carrier: null, used: false };
@@ -2473,7 +2652,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: Date.now(),
+                  turnStartedAt: getServerTimestamp(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(newBuffs),
                   boardEffects: serializeBoardEffects(boardEffectsRef.current),
@@ -2486,8 +2665,38 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             }
 
             if (puId === 'banana-peel') {
-              const bananaTokenIdx = findFurthestTrackToken(currentTokens, currentTurn);
-              const placedCell = bananaTokenIdx !== null ? parseInt(currentTokens[bananaTokenIdx].split('-')[1]) : null;
+              // Smart placement: place banana ahead of nearest opponent (trap them)
+              const botTrackToken = findFurthestTrackToken(currentTokens, currentTurn);
+              let placedCell: number | null = null;
+              if (botTrackToken !== null) {
+                const botTrack = parseInt(currentTokens[botTrackToken].split('-')[1]);
+                // Look for nearest opponent behind and place banana in their path
+                const nearOpp = findNearestOpponentBehind(currentTokens, botTrack, currentTurn);
+                if (nearOpp !== null) {
+                  const oppPos = currentTokens[nearOpp];
+                  if (oppPos.startsWith('track-')) {
+                    const oppTrack = parseInt(oppPos.split('-')[1]);
+                    // Place 3-5 cells ahead of opponent (likely roll landing zone)
+                    // but verify the candidate is between opponent and bot (circular distance check)
+                    const oppToBotDist = botTrack >= oppTrack
+                      ? botTrack - oppTrack
+                      : (TRACK_SIZE - oppTrack) + botTrack;
+                    for (const offset of [3, 4, 2, 5]) {
+                      if (offset >= oppToBotDist) continue; // Would be past the bot — useless
+                      const candidate = ((oppTrack - 1 + offset) % TRACK_SIZE) + 1;
+                      if (!SAFE_ZONES.has(candidate)) {
+                        placedCell = candidate;
+                        break;
+                      }
+                    }
+                  }
+                }
+                // Fallback: place at own position
+                if (placedCell === null) {
+                  const fallback = parseInt(currentTokens[botTrackToken].split('-')[1]);
+                  if (!SAFE_ZONES.has(fallback)) placedCell = fallback;
+                }
+              }
               if (placedCell === null || SAFE_ZONES.has(placedCell)) continue; // can't place, try next power-up
               const newEffects = [...boardEffectsRef.current, { type: 'banana' as const, cell: placedCell, ownerColorIdx: colorIndex(currentTurn) }];
               const gc = gameCodeRef.current;
@@ -2501,7 +2710,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   consecutiveSixes: consecutiveSixesRef.current,
                   winner: null,
                   finishOrder: finishOrderRef.current.join(','),
-                  turnStartedAt: Date.now(),
+                  turnStartedAt: getServerTimestamp(),
                   powerUps: serializeInventory(newInv),
                   activeBuffs: serializeBuffs(activeBuffsRef.current),
                   boardEffects: serializeBoardEffects(newEffects),
@@ -2550,7 +2759,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               consecutiveSixes: nextSixes,
               winner: null,
               finishOrder: finishOrderRef.current.join(','),
-              turnStartedAt: Date.now(),
+              turnStartedAt: getServerTimestamp(),
               rollStats: serializeRollStats(rollStatsRef.current),
               ...(powerUpsEnabledRef.current ? {
                 powerUps: serializeInventory(inventoryRef.current),
@@ -2565,66 +2774,19 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           return;
         }
 
-        // Simple AI: prioritize captures > getting home > furthest advance > deploy from base
+        // Smart AI: score each valid move and pick the best
         const entries = computedMoves.map(m => [m.tokenIndex, m.newPosition] as const);
         let bestIdx = entries[0][0];
         let bestScore = -Infinity;
 
-        // Pre-compute leader among opponents so bots target the winner
-        let leaderColor: LudoColor | null = null;
-        let leaderScore = -1;
-        for (const c of TURN_ORDER.slice(0, activePlayerCountRef.current)) {
-          if (c === currentTurn) continue;
-          const s = getPlayerScore(tokensRef.current, c);
-          if (s > leaderScore) { leaderScore = s; leaderColor = c; }
-        }
+        // Pre-compute leader once for all move evaluations
+        const botLeader = getLeaderColor(tokensRef.current, activePlayerCountRef.current, currentTurn);
 
         for (const [tokenIdx, targetPos] of entries) {
-          let score = 0;
-          const curPos = tokensRef.current[tokenIdx];
-
-          // Deploy from base is valuable
-          if (curPos === 'base') score += 50;
-
-          // Moving into final corridor is very valuable
-          if (targetPos.startsWith('final-')) {
-            const finalNum = parseInt(targetPos.split('-')[1]);
-            score += 100 + finalNum * 20;
-          }
-
-          // Check if this move captures an opponent — prioritize the leader
-          if (targetPos.startsWith('track-')) {
-            const targetCell = parseInt(targetPos.split('-')[1]);
-            for (let i = 0; i < TOTAL_TOKENS; i++) {
-              if (getTokenColor(i) === currentTurn) continue;
-              if (tokensRef.current[i] === targetPos && !SAFE_ZONES.has(targetCell)) {
-                score += getTokenColor(i) === leaderColor ? 160 : 80; // Target the winner!
-              }
-            }
-            // Prefer moving to safe zones
-            if (SAFE_ZONES.has(targetCell)) score += 10;
-            // Prefer advancing further along the track
-            const start = START_POSITIONS[currentTurn];
-            const dist = targetCell >= start
-              ? targetCell - start
-              : (TRACK_SIZE - start) + targetCell;
-            score += dist;
-
-            // Flag pickup: high priority
-            const fs = flagStateRef.current;
-            if (!fs.used && fs.cell === targetCell && fs.carrier === null) {
-              score += 150;
-            }
-          }
-
-          // Flag carrier heading home: boost final corridor moves
-          {
-            const fs = flagStateRef.current;
-            if (!fs.used && fs.carrier === tokenIdx && targetPos.startsWith('final-')) {
-              score += 200;
-            }
-          }
-
+          const score = scoreBotMove(
+            tokenIdx, targetPos, tokensRef.current, currentTurn,
+            activePlayerCountRef.current, boardEffectsRef.current, flagStateRef.current, botLeader
+          );
           if (score > bestScore) {
             bestScore = score;
             bestIdx = tokenIdx;
@@ -2647,9 +2809,16 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const isBotTurn = botColorsRef.current.has(currentTurn);
     if (!isBotTurn) return;
 
-    // Auto-pick the highest roll after a short delay
+    // Smart pick: highest roll, but avoid 6/12 if at 2 consecutive sixes (would waste turn)
     const timer = setTimeout(() => {
-      const best = Math.max(...goldenMushroomRolls);
+      const curSixes = consecutiveSixesRef.current;
+      let options = [...goldenMushroomRolls];
+      if (curSixes >= 2) {
+        // Filter out effective-6 values to avoid 3-sixes penalty
+        const safe = options.filter(r => !isEffectiveSix(r));
+        if (safe.length > 0) options = safe;
+      }
+      const best = Math.max(...options);
       handleGoldenMushroomPick(best);
     }, 400);
     return () => clearTimeout(timer);
@@ -3166,8 +3335,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           top: `${(coords[0] - 1) * CELL_PCT + TOKEN_PAD_PCT + dy}%`,
         }}
         onClick={() => isClickable && handleMoveToken(idx)}
+        onKeyDown={(e) => { if (isClickable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleMoveToken(idx); } }}
         role="button"
-        aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1}${carryingFlag ? ' (carrying flag)' : ''}`}
+        tabIndex={isClickable ? 0 : -1}
+        aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1}${isClickable ? ' (can move)' : ''}${carryingFlag ? ' (carrying flag)' : ''}`}
       >
         {carryingFlag && <span className={styles.tokenFlagIndicator}>{'🏁'}</span>}
       </div>
@@ -3202,8 +3373,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   isClickable ? styles.baseTokenClickable : '',
                 ].filter(Boolean).join(' ')}
                 onClick={() => isClickable && handleMoveToken(idx)}
+                onKeyDown={(e) => { if (isClickable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleMoveToken(idx); } }}
                 role="button"
-                aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1} (in base)`}
+                tabIndex={isClickable ? 0 : -1}
+                aria-label={`${COLOR_LABELS[color]} token ${localIdx + 1} (in base)${isClickable ? ' — can deploy' : ''}`}
               />
             );
           })}
@@ -3254,7 +3427,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       </div>
 
       {gamePaused && gamePhase === 'playing' && (
-        <div className={styles.pauseOverlay} onClick={() => gameCode && toggleGamePause(gameCode)} role="button">
+        <div className={styles.pauseOverlay} onClick={() => !isSpectating && gameCode && toggleGamePause(gameCode)} onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isSpectating && gameCode) { e.preventDefault(); toggleGamePause(gameCode); } }} role="button" tabIndex={0} aria-label="Resume game">
           <svg className={styles.pauseIcon} width="120" height="120" viewBox="0 0 120 120" fill="none">
             <circle cx="60" cy="60" r="56" stroke="white" strokeWidth="4" opacity="0.3" />
             <rect x="38" y="32" width="14" height="56" rx="4" fill="white" />
@@ -3331,7 +3504,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 }
               }}
               role="button"
+              tabIndex={0}
+              aria-label="Copy game code"
               title="Click to copy"
+              onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && gameCode) { e.preventDefault(); navigator.clipboard.writeText(gameCode).then(() => showHint('Copied!')); } }}
             >
               {gameCode}
             </div>
@@ -3466,8 +3642,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                     ))}
                   </div>
 
-                  {/* Track cells (skip corner cells 6,20,34,48 that overlap base quadrants) */}
-                  {TRACK_INDICES.map(n => (n === 6 || n === 20 || n === 34 || n === 48) ? null : renderTrackCell(n))}
+                  {/* Track cells (all 56 including corner cells at arm junctions) */}
+                  {TRACK_INDICES.map(n => renderTrackCell(n))}
 
                   {/* Tokens on track and final corridor */}
                   {TOKEN_INDICES.map(i => renderToken(i))}
@@ -3518,6 +3694,47 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                           className={styles.homeCelebration}
                           style={{ color: COLOR_HEX[ef.color] }}
                         />
+                      );
+                    }
+                    if (ef.type === 'puLightning') {
+                      return (
+                        <div
+                          key={`lightning-${ef.ts}`}
+                          className={styles.puLightningFlash}
+                        />
+                      );
+                    }
+                    if (ef.type === 'puShellHit' && ef.coords) {
+                      return (
+                        <div
+                          key={`shellhit-${ef.ts}-${ef.coords[0]}-${ef.coords[1]}`}
+                          className={styles.puShellHit}
+                          style={{
+                            left: `${(ef.coords[1] - 1) * CELL_PCT}%`,
+                            top: `${(ef.coords[0] - 1) * CELL_PCT}%`,
+                          }}
+                        >{ef.emoji}</div>
+                      );
+                    }
+                    if (ef.type === 'puWarp' && ef.coords) {
+                      return (
+                        <div
+                          key={`warp-${ef.ts}-${ef.coords[0]}-${ef.coords[1]}`}
+                          className={styles.puWarpSwirl}
+                          style={{
+                            left: `${(ef.coords[1] - 1) * CELL_PCT}%`,
+                            top: `${(ef.coords[0] - 1) * CELL_PCT}%`,
+                          }}
+                        />
+                      );
+                    }
+                    if (ef.type === 'puBuff') {
+                      return (
+                        <div
+                          key={`buff-${ef.ts}-${ef.emoji}`}
+                          className={styles.puBuffActivate}
+                          style={{ color: COLOR_HEX[ef.color] }}
+                        >{ef.emoji}</div>
                       );
                     }
                     return null;
@@ -3604,6 +3821,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                 {statusHint && (
                   <span className={styles.statusHint}>{statusHint}</span>
                 )}
+                <span aria-live="polite" aria-atomic="true" className={styles.srOnly}>{statusHint || statusMessage}</span>
                 {showRollReminder && (
                   <span className={styles.rollReminder}>Roll!</span>
                 )}
@@ -3683,7 +3901,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
                   {activeBuffs.map((buff, i) => {
                     const buffColor = colorFromIndex(buff.playerColorIdx);
                     return (
-                      <span key={i} className={styles.buffIndicator}>
+                      <span key={`${buff.type}-${buff.playerColorIdx}-${buff.duration}`} className={styles.buffIndicator}>
                         <span className={styles.buffPlayerDot} style={{ background: COLOR_HEX[buffColor] }} />
                         {buff.type === 'star' ? '⭐' : buff.type === 'lightning' ? '⚡' : '🪶'}
                         <span className={styles.buffDuration}>{buff.duration}</span>

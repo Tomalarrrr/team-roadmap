@@ -54,7 +54,7 @@ export interface LudoMoveUpdate {
   consecutiveSixes: number;
   winner: LudoColor | null;
   finishOrder: string;
-  turnStartedAt: number;
+  turnStartedAt: number | object; // Accepts firebase serverTimestamp() sentinel
   // Mario Mode fields (optional)
   powerUps?: string;
   boardEffects?: string;
@@ -63,6 +63,18 @@ export interface LudoMoveUpdate {
   mysteryBoxes?: string;
   flag?: string;
   rollStats?: string;
+}
+
+/**
+ * Get Firebase server timestamp sentinel. Falls back to Date.now() if db module not loaded.
+ */
+export function getServerTimestamp(): object | number {
+  try {
+    const db = getDbModule();
+    return db.serverTimestamp();
+  } catch {
+    return Date.now();
+  }
 }
 
 // --- Serialization ---
