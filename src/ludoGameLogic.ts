@@ -227,14 +227,24 @@ export function scoreBotMove(
   let score = 0;
   const curPos = currentTokens[tokenIdx];
 
-  // Deploy from base is highly valuable — getting tokens into play is critical in Ludo.
-  // Rolling a 6 is rare, so bots should almost always take the opportunity to deploy.
-  if (curPos === 'base') score += 90;
+  // --- Helper: count bot tokens already on track or in final corridor ---
+  const botIndices = getColorTokenIndices(botColor);
+  const tokensInPlay = botIndices.filter(i => {
+    const p = currentTokens[i];
+    return p !== 'base' && p !== 'final-6';
+  }).length;
+
+  // Deploy from base: valuable but decreasing as more tokens are already in play.
+  // 1st deploy: 90, 2nd: 70, 3rd: 50, 4th: 30. Ensures the bot prefers advancing
+  // existing tokens when they're well-positioned, rather than always deploying.
+  if (curPos === 'base') score += 90 - tokensInPlay * 20;
 
   // Moving into final corridor is very valuable (safe from all threats)
   if (targetPos.startsWith('final-')) {
     const finalNum = parseInt(targetPos.split('-')[1]);
     score += 100 + finalNum * 20;
+    // Reaching home (final-6) grants a bonus turn — that extra roll is worth ~35 points
+    if (finalNum === 6) score += 35;
   }
 
   if (targetPos.startsWith('track-')) {
@@ -251,11 +261,18 @@ export function scoreBotMove(
       }
     }
 
-    // Capture opponent — prioritize the leader
+    // Capture opponent — prioritize the leader, and value advanced victims more.
+    // Captures also grant a bonus turn (+35 for the expected value of the extra roll).
     for (let i = 0; i < TOTAL_TOKENS; i++) {
       if (getTokenColor(i) === botColor) continue;
       if (currentTokens[i] === targetPos && !SAFE_ZONES.has(targetCell)) {
-        score += getTokenColor(i) === leader ? 160 : 80;
+        const victimColor = getTokenColor(i);
+        const victimStart = START_POSITIONS[victimColor];
+        const victimDist = targetCell >= victimStart
+          ? targetCell - victimStart
+          : (TRACK_SIZE - victimStart) + targetCell;
+        // Base: 80 for normal, 160 for leader. +35 bonus turn. +victimProgress/3 (up to ~18).
+        score += (victimColor === leader ? 160 : 80) + 35 + Math.floor(victimDist / 3);
       }
     }
 
@@ -266,7 +283,15 @@ export function scoreBotMove(
     const bananaCells = new Set(boardEffects.filter(e => e.type === 'banana' && e.ownerColorIdx !== colorIndex(botColor)).map(e => e.cell));
     if (bananaCells.has(targetCell)) score -= 40;
 
-    // Danger assessment: penalize landing near opponents who could capture next turn
+    // Advance further along the track
+    const start = START_POSITIONS[botColor];
+    const dist = targetCell >= start
+      ? targetCell - start
+      : (TRACK_SIZE - start) + targetCell;
+    score += dist;
+
+    // Danger assessment: penalize proportional to token progress.
+    // Losing an advanced token (40+ cells along) is devastating vs. losing one just deployed.
     if (!SAFE_ZONES.has(targetCell)) {
       for (let i = 0; i < TOTAL_TOKENS; i++) {
         if (getTokenColor(i) === botColor) continue;
@@ -276,17 +301,59 @@ export function scoreBotMove(
           const fwdDist = targetCell >= oppCell
             ? targetCell - oppCell
             : (TRACK_SIZE - oppCell) + targetCell;
-          if (fwdDist >= 1 && fwdDist <= 6) score -= 15;
+          if (fwdDist >= 1 && fwdDist <= 6) {
+            // Base penalty -10, plus up to -13 extra scaled by how far along this token is
+            score -= 10 + Math.floor(dist / 4);
+          }
         }
       }
     }
 
-    // Advance further along the track
-    const start = START_POSITIONS[botColor];
-    const dist = targetCell >= start
-      ? targetCell - start
-      : (TRACK_SIZE - start) + targetCell;
-    score += dist;
+    // Escape bonus: reward moving a token that's currently under threat to a SAFE destination.
+    // Only applies when the target is actually safer (safe zone, or no opponents in range).
+    // The more progress the token has, the more valuable it is to protect.
+    if (curPos.startsWith('track-')) {
+      const curCell = parseInt(curPos.split('-')[1]);
+      if (!SAFE_ZONES.has(curCell)) {
+        let wasInDanger = false;
+        for (let i = 0; i < TOTAL_TOKENS; i++) {
+          if (getTokenColor(i) === botColor) continue;
+          const p = currentTokens[i];
+          if (p.startsWith('track-')) {
+            const oppCell = parseInt(p.split('-')[1]);
+            const fwdDist = curCell >= oppCell
+              ? curCell - oppCell
+              : (TRACK_SIZE - oppCell) + curCell;
+            if (fwdDist >= 1 && fwdDist <= 6) { wasInDanger = true; break; }
+          }
+        }
+        if (wasInDanger) {
+          // Check if target is actually safer (safe zone or no opponents threatening it)
+          let targetIsSafe = SAFE_ZONES.has(targetCell);
+          if (!targetIsSafe) {
+            targetIsSafe = true; // assume safe until proven otherwise
+            for (let i = 0; i < TOTAL_TOKENS; i++) {
+              if (getTokenColor(i) === botColor) continue;
+              const p = currentTokens[i];
+              if (p.startsWith('track-')) {
+                const oppCell = parseInt(p.split('-')[1]);
+                const fwdDist2 = targetCell >= oppCell
+                  ? targetCell - oppCell
+                  : (TRACK_SIZE - oppCell) + targetCell;
+                if (fwdDist2 >= 1 && fwdDist2 <= 6) { targetIsSafe = false; break; }
+              }
+            }
+          }
+          if (targetIsSafe) {
+            // Full escape reward — base +20, plus up to +13 extra for advanced tokens
+            const curDist = curCell >= start
+              ? curCell - start
+              : (TRACK_SIZE - start) + curCell;
+            score += 20 + Math.floor(curDist / 4);
+          }
+        }
+      }
+    }
 
     // Flag pickup: high priority
     if (!flagState.used && flagState.cell === targetCell && flagState.carrier === null) {

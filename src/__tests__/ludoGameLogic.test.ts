@@ -364,6 +364,16 @@ describe('scoreBotMove', () => {
     expect(score).toBeGreaterThan(0);
   });
 
+  it('decreases deploy priority when more tokens are in play', () => {
+    // All at base: deploy score is highest
+    const score1 = scoreBotMove(0, 'track-1', BASE_TOKENS, 'red', 4, noEffects, noFlag);
+    // One already on track: deploy score should be lower
+    const tokens2 = [...BASE_TOKENS] as TokenPosition[];
+    tokens2[1] = 'track-10'; // 2nd red token already in play
+    const score2 = scoreBotMove(0, 'track-1', tokens2, 'red', 4, noEffects, noFlag);
+    expect(score1).toBeGreaterThan(score2);
+  });
+
   it('scores final corridor higher than track', () => {
     const tokens = [...BASE_TOKENS] as TokenPosition[];
     tokens[0] = 'track-50';
@@ -372,7 +382,16 @@ describe('scoreBotMove', () => {
     expect(finalScore).toBeGreaterThan(trackScore);
   });
 
-  it('scores capture higher than non-capture', () => {
+  it('gives extra bonus for reaching home (final-6) due to bonus turn', () => {
+    const tokens = [...BASE_TOKENS] as TokenPosition[];
+    tokens[0] = 'final-4';
+    const final5 = scoreBotMove(0, 'final-5', tokens, 'red', 4, noEffects, noFlag);
+    const final6 = scoreBotMove(0, 'final-6', tokens, 'red', 4, noEffects, noFlag);
+    // final-6 should be worth more than just 20 points above final-5 (has bonus turn value)
+    expect(final6 - final5).toBeGreaterThan(20);
+  });
+
+  it('scores capture higher than non-capture (includes bonus turn value)', () => {
     const tokens = [...BASE_TOKENS] as TokenPosition[];
     tokens[0] = 'track-3';
     tokens[4] = 'track-5'; // Green opponent at cell 5
@@ -408,5 +427,79 @@ describe('scoreBotMove', () => {
     tokens2[0] = 'track-3';
     const safeScore = scoreBotMove(0, 'track-5', tokens2, 'red', 4, noEffects, noFlag);
     expect(dangerScore).toBeLessThan(safeScore);
+  });
+
+  it('penalizes danger more for advanced tokens than newly deployed ones', () => {
+    // Use a safe current position so the escape bonus doesn't interfere.
+    // Token near start: current on safe zone 10, target cell 3 (near start=1)
+    const tokensEarly = [...BASE_TOKENS] as TokenPosition[];
+    tokensEarly[0] = 'track-10'; // red at safe zone (no escape bonus)
+    tokensEarly[4] = 'track-2'; // green can reach target cell 3 (fwdDist=1)
+    const earlyDanger = scoreBotMove(0, 'track-3', tokensEarly, 'red', 4, noEffects, noFlag);
+    const tokensEarlyNoDanger = [...BASE_TOKENS] as TokenPosition[];
+    tokensEarlyNoDanger[0] = 'track-10';
+    const earlySafe = scoreBotMove(0, 'track-3', tokensEarlyNoDanger, 'red', 4, noEffects, noFlag);
+
+    // Token far along: current on safe zone 38, target cell 47 (far from start=1)
+    const tokensLate = [...BASE_TOKENS] as TokenPosition[];
+    tokensLate[0] = 'track-38'; // red at safe zone (no escape bonus)
+    tokensLate[4] = 'track-46'; // green can reach target cell 47 (fwdDist=1)
+    const lateDanger = scoreBotMove(0, 'track-47', tokensLate, 'red', 4, noEffects, noFlag);
+    const tokensLateNoDanger = [...BASE_TOKENS] as TokenPosition[];
+    tokensLateNoDanger[0] = 'track-38';
+    const lateSafe = scoreBotMove(0, 'track-47', tokensLateNoDanger, 'red', 4, noEffects, noFlag);
+
+    const earlyPenalty = earlySafe - earlyDanger;
+    const latePenalty = lateSafe - lateDanger;
+    expect(latePenalty).toBeGreaterThan(earlyPenalty);
+  });
+
+  it('rewards escaping danger to a safe destination', () => {
+    const tokens = [...BASE_TOKENS] as TokenPosition[];
+    tokens[0] = 'track-20'; // Red token at cell 20
+    tokens[4] = 'track-18'; // Green 2 cells behind — threatens cell 20
+
+    // Moving the threatened token to safe zone 24 (no opponents can reach it)
+    const escapeScore = scoreBotMove(0, 'track-24', tokens, 'red', 4, noEffects, noFlag);
+    // Moving the same token if it were NOT in danger
+    const tokensNoDanger = [...BASE_TOKENS] as TokenPosition[];
+    tokensNoDanger[0] = 'track-20';
+    const noEscapeScore = scoreBotMove(0, 'track-24', tokensNoDanger, 'red', 4, noEffects, noFlag);
+
+    expect(escapeScore).toBeGreaterThan(noEscapeScore);
+  });
+
+  it('does NOT reward escaping into another threatened position', () => {
+    const tokens = [...BASE_TOKENS] as TokenPosition[];
+    tokens[0] = 'track-20'; // Red token at cell 20
+    tokens[4] = 'track-18'; // Green threatens current position
+    tokens[5] = 'track-22'; // Another green threatens target cell 23
+
+    // Moving from danger into danger — should NOT get escape bonus
+    const dangerToDanger = scoreBotMove(0, 'track-23', tokens, 'red', 4, noEffects, noFlag);
+    // Same move without any threats
+    const tokensClean = [...BASE_TOKENS] as TokenPosition[];
+    tokensClean[0] = 'track-20';
+    const cleanMove = scoreBotMove(0, 'track-23', tokensClean, 'red', 4, noEffects, noFlag);
+
+    // dangerToDanger should be LESS than or equal to cleanMove (no escape reward, still has danger penalty)
+    expect(dangerToDanger).toBeLessThan(cleanMove);
+  });
+
+  it('values capturing an advanced opponent more than a newly deployed one', () => {
+    // Capture opponent near their start (low progress for green, start=15)
+    const tokensEarlyVictim = [...BASE_TOKENS] as TokenPosition[];
+    tokensEarlyVictim[0] = 'track-14'; // Red
+    tokensEarlyVictim[4] = 'track-16'; // Green just deployed (1 cell from start 15)
+    const earlyCapture = scoreBotMove(0, 'track-16', tokensEarlyVictim, 'red', 4, noEffects, noFlag);
+
+    // Capture opponent far from their start (high progress for green)
+    const tokensLateVictim = [...BASE_TOKENS] as TokenPosition[];
+    tokensLateVictim[0] = 'track-8'; // Red
+    tokensLateVictim[4] = 'track-11'; // Green at cell 11, ~52 cells from start 15
+    const lateCapture = scoreBotMove(0, 'track-11', tokensLateVictim, 'red', 4, noEffects, noFlag);
+
+    // Late capture should be more valuable (sending back a more advanced token)
+    expect(lateCapture).toBeGreaterThan(earlyCapture);
   });
 });

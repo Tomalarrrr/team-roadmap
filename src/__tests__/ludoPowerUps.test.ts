@@ -360,26 +360,47 @@ describe('recordRoll', () => {
     expect(result[0].rolls[2]).toBe(1); // Index 2 = face 3
   });
 
-  it('maps doubled values (Super Mushroom) to original face', () => {
+  it('records each face correctly (1-6)', () => {
     const stats = [
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
     ];
-    const result = recordRoll(stats, 0, 10); // 10 → face 5 → index 4
-    expect(result[0].rolls[4]).toBe(1);
+    // Callers now pass original die faces (1-6), not modified values
+    const r1 = recordRoll(stats, 0, 1);
+    expect(r1[0].rolls[0]).toBe(1); // face 1 → index 0
+    const r5 = recordRoll(stats, 0, 5);
+    expect(r5[0].rolls[4]).toBe(1); // face 5 → index 4
+    const r6 = recordRoll(stats, 0, 6);
+    expect(r6[0].rolls[5]).toBe(1); // face 6 → index 5
   });
 
-  it('maps 12 to face 6', () => {
+  it('clamps out-of-range values as safety net', () => {
     const stats = [
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
       { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
     ];
-    const result = recordRoll(stats, 0, 12);
-    expect(result[0].rolls[5]).toBe(1); // Index 5 = face 6
+    // Values > 6 should clamp to face 6 (safety net, shouldn't happen with fixed callers)
+    const result = recordRoll(stats, 0, 10);
+    expect(result[0].rolls[5]).toBe(1); // Clamped to index 5 (face 6)
+  });
+
+  it('accumulates multiple rolls', () => {
+    let stats = [
+      { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+      { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+      { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+      { rolls: [0, 0, 0, 0, 0, 0], captures: 0 },
+    ];
+    stats = recordRoll(stats, 0, 3);
+    stats = recordRoll(stats, 0, 3);
+    stats = recordRoll(stats, 0, 6);
+    expect(stats[0].rolls[2]).toBe(2); // Two 3s
+    expect(stats[0].rolls[5]).toBe(1); // One 6
+    expect(stats[1].rolls[2]).toBe(0); // Other colors unaffected
   });
 });
 

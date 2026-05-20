@@ -860,9 +860,9 @@ export function deserializeRollStats(str: string): RollStats {
 
 export function recordRoll(stats: RollStats, colorIdx: number, diceValue: number): RollStats {
   const result = stats.map(s => ({ rolls: [...s.rolls], captures: s.captures }));
-  // Map doubled rolls (Super Mushroom: 7-12) back to original face
-  const face = diceValue > 6 ? Math.round(diceValue / 2) : diceValue;
-  const idx = Math.min(face, 6) - 1;
+  // diceValue should be the original die face (1-6), recorded before any power-up modifications.
+  // Clamp to valid range as a safety net.
+  const idx = Math.max(0, Math.min(diceValue, 6) - 1);
   result[colorIdx].rolls[idx]++;
   return result;
 }

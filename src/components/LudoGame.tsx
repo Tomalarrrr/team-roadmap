@@ -533,6 +533,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   activePowerUpRef.current = activePowerUp;
   const goldenMushroomRef = useRef(goldenMushroomRolls);
   goldenMushroomRef.current = goldenMushroomRolls;
+  // Original (pre-Lightning-halving) die faces for Golden Mushroom, used for accurate tally recording
+  const goldenMushroomOrigFacesRef = useRef<[number, number, number] | null>(null);
   const pendingDiscardRef = useRef(pendingDiscard);
   pendingDiscardRef.current = pendingDiscard;
   const flagStateRef = useRef(flagState);
@@ -1485,27 +1487,55 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }
 
     // Apply pity-timer: guarantee a 6 after N consecutive non-6 rolls (per-color)
+    // Only triggers when player is truly stuck — all tokens at base or finished (final-6).
+    // Tokens in the final corridor (final-1..5) can move with any roll, so no pity needed.
     const colorKey = activeColor;
     let roll = serverRolls[0];
     const rollIndices = getColorTokenIndices(activeColor);
     const hasTokenAtHome = rollIndices.some(i => tokensRef.current[i] === 'base');
-    const noneOnTrack = rollIndices.every(i => {
+    const allBaseOrFinished = rollIndices.every(i => {
       const t = tokensRef.current[i];
-      return t === 'base' || t === 'final-6' || t.startsWith('final-');
+      return t === 'base' || t === 'final-6';
     });
-    const needsSix = hasTokenAtHome && noneOnTrack;
+    const needsSix = hasTokenAtHome && allBaseOrFinished;
     let pityForced = false;
     const stuckCount = homeStuckRolls.current[colorKey] || 0;
-    const threshold = pityThreshold.current[colorKey] ?? (3 + Math.floor(Math.random() * 4));
+    const threshold = pityThreshold.current[colorKey] ?? (4 + Math.floor(Math.random() * 3));
     if (!(colorKey in pityThreshold.current)) pityThreshold.current[colorKey] = threshold;
     if (needsSix && stuckCount >= threshold) {
       roll = 6;
       pityForced = true;
     }
+
+    // Snapshot the original die face BEFORE power-up modifications (for accurate roll tally).
+    // Pity-forced 6 is included since it replaces the die roll, but Super Mushroom doubling
+    // and Lightning halving are power-up effects and shouldn't distort the tally.
+    const originalFace = roll;
+
+    // Super Mushroom: double the roll
+    if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'super-mushroom') {
+      roll = Math.min(roll * 2, 12);
+      setActivePowerUp(null);
+    }
+
+    // Lightning debuff: halve the roll.
+    // Exception: pity-forced 6s are protected — the pity system guarantees a deploy
+    // for stuck players, and Lightning shouldn't override that fairness guarantee.
+    if (powerUpsEnabledRef.current && !pityForced) {
+      const ci = colorIndex(activeColor);
+      if (hasLightningDebuff(activeBuffsRef.current, ci)) {
+        roll = Math.max(1, Math.floor(roll / 2));
+        showHint('⚡ Lightning debuff! Your roll was halved!');
+      }
+    }
+
+    // Update stuck-counter AFTER all power-up modifications.
+    // Only reset when the final roll is an effective 6 (can actually deploy).
+    // This prevents Lightning halving a natural 6→3 from falsely resetting the counter.
     if (needsSix) {
-      if (roll === 6) {
+      if (isEffectiveSix(roll)) {
         homeStuckRolls.current[colorKey] = 0;
-        pityThreshold.current[colorKey] = 3 + Math.floor(Math.random() * 4);
+        pityThreshold.current[colorKey] = 4 + Math.floor(Math.random() * 3);
       } else {
         homeStuckRolls.current[colorKey] = stuckCount + 1;
       }
@@ -1515,22 +1545,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const prevRolls = lastTwoRolls.current[colorKey] || [0, 0];
     lastTwoRolls.current[colorKey] = [prevRolls[1], roll];
     totalRollCounts.current[colorKey] = (totalRollCounts.current[colorKey] || 0) + 1;
-    if (roll === 6 && !pityForced) sixCounts.current[colorKey] = (sixCounts.current[colorKey] || 0) + 1;
-
-    // Super Mushroom: double the roll
-    if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'super-mushroom') {
-      roll = Math.min(roll * 2, 12);
-      setActivePowerUp(null);
-    }
-
-    // Lightning debuff: halve the roll
-    if (powerUpsEnabledRef.current) {
-      const ci = colorIndex(activeColor);
-      if (hasLightningDebuff(activeBuffsRef.current, ci)) {
-        roll = Math.max(1, Math.floor(roll / 2));
-        showHint('⚡ Lightning debuff! Your roll was halved!');
-      }
-    }
+    if (isEffectiveSix(roll) && !pityForced) sixCounts.current[colorKey] = (sixCounts.current[colorKey] || 0) + 1;
 
     // Golden Mushroom: show pick modal instead of proceeding
     if (isGoldenMushroom) {
@@ -1539,12 +1554,16 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       // Apply lightning debuff to alt rolls too for fairness
       const ci2 = colorIndex(activeColor);
       const isLightning = hasLightningDebuff(activeBuffsRef.current, ci2);
-      let r2 = serverRolls[1] ?? (Math.floor(Math.random() * 6) + 1);
-      let r3 = serverRolls[2] ?? (Math.floor(Math.random() * 6) + 1);
+      const origR2 = serverRolls[1] ?? (Math.floor(Math.random() * 6) + 1);
+      const origR3 = serverRolls[2] ?? (Math.floor(Math.random() * 6) + 1);
+      let r2 = origR2;
+      let r3 = origR3;
       if (isLightning) {
         r2 = Math.max(1, Math.floor(r2 / 2));
         r3 = Math.max(1, Math.floor(r3 / 2));
       }
+      // Store original die faces for accurate tally recording when the player picks
+      goldenMushroomOrigFacesRef.current = [originalFace, origR2, origR3];
       setActivePowerUp(null);
       // Show modal after rolling animation
       rollTimeoutRef.current = setTimeout(() => {
@@ -1567,8 +1586,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         diceAnimKeyRef.current += 1;
         rolledThisTurnRef.current = true;
 
-        // Record this roll in synced stats (Bullet Bill uses roll=10, maps to face 5)
-        const bbRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), 10);
+        // Record the original die face in synced stats (Bullet Bill overrides movement to 10,
+        // but the tally should reflect the actual die face that was rolled)
+        const bbRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), originalFace);
         rollStatsRef.current = bbRollStats;
 
         // Find the furthest-ahead token on the track to rocket
@@ -1647,8 +1667,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       diceAnimKeyRef.current += 1;
       rolledThisTurnRef.current = true;
 
-      // Record this roll in synced stats
-      const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), roll);
+      // Record the original die face in synced stats (before Super Mushroom / Lightning modifications)
+      const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), originalFace);
       rollStatsRef.current = updatedRollStats;
 
       const currentTokens = tokensRef.current;
@@ -2121,8 +2141,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     diceAnimKeyRef.current += 1;
     rolledThisTurnRef.current = true;
 
-    // Record this roll in synced stats
-    const gmRollStats = recordRoll(rollStatsRef.current, colorIndex(currentTurnRef.current), pickedRoll);
+    // Record the original die face in synced stats (before Lightning halving).
+    // Match the picked (possibly halved) value back to its original face.
+    const gmOptions = goldenMushroomRef.current;
+    const gmOrigFaces = goldenMushroomOrigFacesRef.current;
+    let gmFaceToRecord = pickedRoll; // fallback: use picked value if originals unavailable
+    if (gmOptions && gmOrigFaces) {
+      const pickIdx = gmOptions.indexOf(pickedRoll);
+      if (pickIdx !== -1) gmFaceToRecord = gmOrigFaces[pickIdx];
+    }
+    goldenMushroomOrigFacesRef.current = null; // Clean up
+    const gmRollStats = recordRoll(rollStatsRef.current, colorIndex(currentTurnRef.current), gmFaceToRecord);
     rollStatsRef.current = gmRollStats;
 
     const gc = gameCodeRef.current;
