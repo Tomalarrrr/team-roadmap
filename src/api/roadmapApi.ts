@@ -27,6 +27,7 @@ import {
   isLegacyArrayFormat,
 } from '../utils/firebaseConversions';
 import { markFirebaseActivity } from '../firebase';
+import { fetchWithTimeout, jitter } from '../utils/fetchWithTimeout';
 
 export type Unsubscribe = () => void;
 
@@ -34,6 +35,8 @@ export type Unsubscribe = () => void;
 const POLL_INTERVAL_MS = 5_000;
 /** Slow poll cadence used while the tab is hidden — keeps connection alive without burning battery. */
 const HIDDEN_POLL_INTERVAL_MS = 60_000;
+/** Per-request timeout — a hung VPN connection must not stall the poll loop. */
+const REQUEST_TIMEOUT_MS = 12_000;
 
 const PROXY_BASE = '/api/db';
 
@@ -41,13 +44,13 @@ const PROXY_BASE = '/api/db';
 
 async function proxyFetch(path: string, init?: RequestInit): Promise<Response> {
   const url = `${PROXY_BASE}/${path.replace(/^\/+/, '')}`;
-  const response = await fetch(url, {
+  const response = await fetchWithTimeout(url, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers || {}),
     },
-  });
+  }, REQUEST_TIMEOUT_MS);
   if (!response.ok) {
     let detail = '';
     try {
@@ -157,10 +160,11 @@ export function subscribeToRoadmap(
       onError?.(err instanceof Error ? err : new Error(String(err)));
     } finally {
       if (!stopped) {
-        const interval = document.visibilityState === 'hidden'
+        const base = document.visibilityState === 'hidden'
           ? HIDDEN_POLL_INTERVAL_MS
           : POLL_INTERVAL_MS;
-        timer = setTimeout(tick, interval);
+        // Jitter so many clients don't poll the proxy in lockstep.
+        timer = setTimeout(tick, jitter(base));
       }
     }
   };

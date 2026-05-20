@@ -30,6 +30,7 @@ import {
   serializeFlag,
   initRollStats,
 } from '../ludoPowerUps';
+import { fetchWithTimeout, sleep, jitter } from '../utils/fetchWithTimeout';
 
 export { serializeTokens, deserializeTokens };
 export type { LudoColor, LudoPlayer, LudoGameState, LudoMoveUpdate, TokenPosition, TurnPhase };
@@ -40,6 +41,10 @@ const PROXY_BASE = '/api/db';
 const POLL_INTERVAL_MS = 1200;
 const HIDDEN_POLL_INTERVAL_MS = 15000;
 const MAX_TXN_RETRIES = 12;
+const REQUEST_TIMEOUT_MS = 12_000;
+/** Base backoff between conditional-write conflict retries (grows + jitters). */
+const TXN_RETRY_BASE_MS = 80;
+const TXN_RETRY_MAX_MS = 1_500;
 
 // Firebase REST honours the server-timestamp sentinel in write bodies, so we
 // send it directly instead of the SDK's serverTimestamp() object.
@@ -50,18 +55,18 @@ export function getServerTimestamp(): object {
 // ---------- Low-level proxy helpers ----------
 
 async function proxyGet<T = unknown>(path: string): Promise<T | null> {
-  const res = await fetch(`${PROXY_BASE}/${path}`, { method: 'GET', cache: 'no-store' });
+  const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, { method: 'GET', cache: 'no-store' }, REQUEST_TIMEOUT_MS);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   const text = await res.text();
   return text && text !== 'null' ? (JSON.parse(text) as T) : null;
 }
 
 async function proxyGetWithEtag<T = unknown>(path: string): Promise<{ value: T | null; etag: string }> {
-  const res = await fetch(`${PROXY_BASE}/${path}`, {
+  const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, {
     method: 'GET',
     headers: { 'X-Firebase-ETag': 'true' },
     cache: 'no-store',
-  });
+  }, REQUEST_TIMEOUT_MS);
   if (!res.ok) throw new Error(`GET ${path} (etag) failed: ${res.status}`);
   const etag = res.headers.get('ETag') ?? '';
   const text = await res.text();
@@ -70,7 +75,7 @@ async function proxyGetWithEtag<T = unknown>(path: string): Promise<{ value: T |
 }
 
 async function proxyRemove(path: string): Promise<void> {
-  const res = await fetch(`${PROXY_BASE}/${path}`, { method: 'DELETE' });
+  const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, { method: 'DELETE' }, REQUEST_TIMEOUT_MS);
   if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);
 }
 
@@ -101,18 +106,22 @@ async function proxyTransaction<T>(
     if (next === undefined || next === null) {
       return { committed: false, snapshot: value };
     }
-    const res = await fetch(`${PROXY_BASE}/${path}`, {
+    const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'if-match': etag },
       body: JSON.stringify(next),
-    });
+    }, REQUEST_TIMEOUT_MS);
     if (res.ok) {
       return { committed: true, snapshot: next as T };
     }
     if (res.status !== 412) {
       throw new Error(`Transaction PUT ${path} failed: ${res.status}`);
     }
-    // 412 Precondition Failed → value changed under us; re-read and retry.
+    // 412 Precondition Failed → value changed under us. Back off (exponential,
+    // capped, jittered) before re-reading so concurrent writers don't hammer
+    // the proxy in a tight lockstep loop.
+    const backoff = Math.min(TXN_RETRY_BASE_MS * 2 ** attempt, TXN_RETRY_MAX_MS);
+    await sleep(jitter(backoff));
   }
   return { committed: false, snapshot: null };
 }
@@ -357,9 +366,9 @@ export function subscribeToGame(
       // Keep polling — a transient failure shouldn't drop the player out.
     } finally {
       if (!stopped) {
-        const interval =
+        const base =
           document.visibilityState === 'hidden' ? HIDDEN_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
-        timer = setTimeout(tick, interval);
+        timer = setTimeout(tick, jitter(base));
       }
     }
   };

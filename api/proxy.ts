@@ -18,6 +18,11 @@
 
 export const config = { runtime: 'edge' };
 
+// Locally declare the only Node/runtime global we need, so this file is
+// self-contained and type-checks under both the API and app tsconfigs (a test
+// in src/ imports it) without depending on @types/node.
+declare const process: { env: Record<string, string | undefined> };
+
 const ALLOWED_METHODS = new Set(['GET', 'PUT', 'PATCH', 'POST', 'DELETE']);
 const PATH_REGEX = /^[a-zA-Z0-9_\-/]*$/;
 // Subtrees this proxy is allowed to touch. Roadmap is the core data; `ludo` is
