@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/api/db/:dbpath*", "destination": "/api/proxy?dbpath=:dbpath*" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
