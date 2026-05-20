@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+// Roadmap reads/writes go through our Vercel API proxy (src/api/roadmapApi.ts)
+// rather than the Firebase SDK directly. This is the workaround for corporate
+// VPNs / proxies (e.g. Imprivata, Zscaler) that block Firebase's WebSocket and
+// long-polling endpoints. See api/db/[...path].ts.
 import {
   subscribeToRoadmap,
   saveRoadmap,
@@ -10,8 +14,8 @@ import {
   updateLeaveBlockAtPath,
   setupConnectionLifecycle,
   forceReconnect,
-  getLastFirebaseActivity,
-} from '../firebase';
+} from '../api/roadmapApi';
+import { getLastFirebaseActivity } from '../firebase';
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { withRetry } from '../utils/retry';
@@ -110,7 +114,14 @@ export function useRoadmap() {
 
   // Counter-based save tracking: prevents isSaving from flashing false between
   // concurrent saves. Increment on save start, decrement on save end.
+  // Also drives remote-echo suppression for the polling sync model: while any
+  // write is in flight (count > 0), incoming poll snapshots are ignored so they
+  // can't clobber freshly-applied optimistic state. `lastSaveCompletedAtRef`
+  // extends that protection for a short cooldown after the last write settles,
+  // covering the read-after-write race where a poll request issued *before* our
+  // write reached the server returns stale data *after* the write completes.
   const savingCountRef = useRef(0);
+  const lastSaveCompletedAtRef = useRef(0);
   const startSaving = useCallback(() => {
     savingCountRef.current++;
     setIsSaving(true);
@@ -119,16 +130,16 @@ export function useRoadmap() {
     savingCountRef.current = Math.max(0, savingCountRef.current - 1);
     if (savingCountRef.current === 0) {
       setIsSaving(false);
+      lastSaveCompletedAtRef.current = Date.now();
     }
   }, []);
 
   // Track pending optimistic updates for rollback
   const pendingUpdateRef = useRef<RoadmapData | null>(null);
-  // Counter-based local update tracking: each save increments, each Firebase echo
-  // decrements. Only treat incoming data as a remote change when counter is 0.
-  // This prevents rapid sequential saves from having their echoes overwrite
-  // optimistic state (the old boolean flag could only track one save at a time).
-  const localUpdateCountRef = useRef(0);
+  // Serialized snapshot of the last remote data we applied — lets the poll
+  // callback skip redundant setData() calls when nothing changed since the
+  // previous poll (the proxy always delivers every tick).
+  const lastSyncedRef = useRef<string | null>(null);
 
   // Debounce connection state to prevent rapid state flapping
   const connectionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -171,15 +182,28 @@ export function useRoadmap() {
           resubscribeAttempts = 0; // Reset on successful data
           isRecoveringRef.current = false;
 
-          // If local saves are in flight, this echo is from our own write — decrement
-          // the counter and keep the current optimistic state instead of overwriting it.
-          if (localUpdateCountRef.current > 0) {
-            localUpdateCountRef.current--;
+          // Suppress remote snapshots while our own writes are in flight, and
+          // for a short cooldown afterwards, so a stale poll can't overwrite
+          // optimistic state. Server truth re-syncs on the next clean poll.
+          const POST_SAVE_COOLDOWN_MS = 1500;
+          if (
+            savingCountRef.current > 0 ||
+            Date.now() - lastSaveCompletedAtRef.current < POST_SAVE_COOLDOWN_MS
+          ) {
             setLoading(false);
             return;
           }
 
-          setData(normalizeData(newData));
+          // De-dupe: the proxy delivers a snapshot every poll, so skip setState
+          // when nothing actually changed since the last applied snapshot.
+          const normalized = normalizeData(newData);
+          const serialized = JSON.stringify(normalized);
+          if (serialized === lastSyncedRef.current) {
+            setLoading(false);
+            return;
+          }
+          lastSyncedRef.current = serialized;
+          setData(normalized);
           setLoading(false);
         },
         (error) => {
@@ -338,7 +362,6 @@ export function useRoadmap() {
     const sanitizedData = sanitizeForFirebase(normalizeData(newData));
 
     // Update both state and ref immediately (optimistic)
-    localUpdateCountRef.current++;
     dataRef.current = sanitizedData;
     setData(sanitizedData);
     setSaveError(null);
@@ -385,7 +408,6 @@ export function useRoadmap() {
 
     // Optimistic update
     const newMembers = currentData.teamMembers.map(m => m.id === memberId ? updatedMember : m);
-    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, teamMembers: newMembers };
     setData(dataRef.current);
     startSaving();
@@ -477,7 +499,6 @@ export function useRoadmap() {
 
     // Optimistic update
     const newProjects = currentData.projects.map(p => p.id === projectId ? updatedProject : p);
-    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
     startSaving();
@@ -562,7 +583,6 @@ export function useRoadmap() {
     const newProjects = currentData.projects.map(p =>
       p.id === projectId ? { ...p, milestones: newMilestones } : p
     );
-    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
     startSaving();
@@ -668,7 +688,6 @@ export function useRoadmap() {
 
     // Optimistic update
     const newDependencies = dependencies.map(d => d.id === dependencyId ? updatedDependency : d);
-    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, dependencies: newDependencies };
     setData(dataRef.current);
     startSaving();
@@ -710,7 +729,6 @@ export function useRoadmap() {
 
     // Optimistic update
     const newLeaveBlocks = leaveBlocks.map(l => l.id === leaveId ? updatedLeaveBlock : l);
-    localUpdateCountRef.current++;
     dataRef.current = { ...currentData, leaveBlocks: newLeaveBlocks };
     setData(dataRef.current);
     startSaving();

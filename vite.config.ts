@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
@@ -20,13 +20,34 @@ function swVersionPlugin() {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  // The /api/db proxy (api/db/[...path].ts) only runs on Vercel, not under the
+  // plain Vite dev server. To keep `npm run dev` working, mirror its behaviour
+  // here by proxying /api/db/* straight to the Firebase REST API.
+  const env = loadEnv(mode, process.cwd(), '')
+  const dbUrl = (env.FIREBASE_DATABASE_URL || env.VITE_FIREBASE_DATABASE_URL || '').replace(/\/$/, '')
+
+  return {
   plugins: [react(), swVersionPlugin()],
   server: {
     // Prevent connection resets during development
     hmr: {
       overlay: true
-    }
+    },
+    proxy: dbUrl
+      ? {
+          // Rewrite /api/db/<path> → <db>/<path>.json so dev matches the
+          // production Edge proxy. http-proxy forwards method + body natively.
+          '^/api/db/.*': {
+            target: dbUrl,
+            changeOrigin: true,
+            rewrite: (path: string) => {
+              const sub = path.replace(/^\/api\/db\//, '').replace(/\/+$/, '')
+              return `/${sub}.json`
+            }
+          }
+        }
+      : undefined
   },
   build: {
     // Split chunks for better caching and faster loads
@@ -70,5 +91,6 @@ export default defineConfig({
   // Optimize dependency pre-bundling for faster dev and build
   optimizeDeps: {
     include: ['react', 'react-dom', '@dnd-kit/core', '@dnd-kit/sortable', 'date-fns']
+  }
   }
 })
