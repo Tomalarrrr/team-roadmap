@@ -20,6 +20,11 @@ export const config = { runtime: 'edge' };
 
 const ALLOWED_METHODS = new Set(['GET', 'PUT', 'PATCH', 'POST', 'DELETE']);
 const PATH_REGEX = /^[a-zA-Z0-9_\-/]*$/;
+// Subtrees this proxy is allowed to touch. Roadmap is the core data; `ludo` is
+// the hidden game, routed through here so it works behind corporate VPNs that
+// block Firebase's WebSocket. Everything else (presence, connectFour, DB root)
+// still goes via the Firebase SDK and must not be reachable through the proxy.
+const ALLOWED_ROOTS = ['roadmap', 'ludo'];
 
 export default async function handler(request: Request): Promise<Response> {
   const databaseUrl =
@@ -49,10 +54,10 @@ export default async function handler(request: Request): Promise<Response> {
     return jsonError(400, 'Invalid path');
   }
 
-  // This proxy exists only for the roadmap data tree. Games and presence still
-  // use the Firebase SDK directly, so there's no reason to expose any other
-  // subtree (or the DB root) through here.
-  if (path !== 'roadmap' && !path.startsWith('roadmap/')) {
+  // Restrict to the allowed subtrees only — this proxy must not be a
+  // general-purpose read/write gateway to the whole database.
+  const root = path.split('/')[0];
+  if (!ALLOWED_ROOTS.includes(root)) {
     return jsonError(403, 'Path not allowed');
   }
 
@@ -69,11 +74,20 @@ export default async function handler(request: Request): Promise<Response> {
     }
   }
 
+  // Forward Firebase's ETag headers so the client can emulate transactions:
+  // GET with `X-Firebase-ETag: true` returns an ETag; a conditional write with
+  // `if-match: <etag>` succeeds only if the value is unchanged (else 412).
+  const upstreamHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  const reqEtag = request.headers.get('x-firebase-etag');
+  if (reqEtag) upstreamHeaders['X-Firebase-ETag'] = reqEtag;
+  const ifMatch = request.headers.get('if-match');
+  if (ifMatch) upstreamHeaders['if-match'] = ifMatch;
+
   let upstream: Response;
   try {
     upstream = await fetch(upstreamUrl, {
       method: request.method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: upstreamHeaders,
       body,
     });
   } catch (err) {
@@ -82,14 +96,17 @@ export default async function handler(request: Request): Promise<Response> {
   }
 
   // Pass through status and body. Force no-store so corporate caching proxies
-  // don't serve stale roadmap reads.
+  // don't serve stale reads. Surface the upstream ETag for transaction support.
   const text = await upstream.text();
+  const responseHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'Cache-Control': 'no-store',
+  };
+  const respEtag = upstream.headers.get('etag');
+  if (respEtag) responseHeaders['ETag'] = respEtag;
   return new Response(text, {
     status: upstream.status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-store',
-    },
+    headers: responseHeaders,
   });
 }
 

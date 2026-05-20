@@ -19,7 +19,7 @@ import {
   type TurnPhase,
   getServerTimestamp,
   requestDiceRoll,
-} from '../ludoFirebase';
+} from '../api/ludoApi';
 import {
   POWER_UPS,
   type PowerUpId,
