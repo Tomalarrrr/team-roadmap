@@ -54,15 +54,26 @@ export function getServerTimestamp(): object {
 
 // ---------- Low-level proxy helpers ----------
 
+// Corporate proxies (Imprivata) cache GET responses even when we send
+// `Cache-Control: no-store`. That poisons the ETag transaction below: the
+// client reads a *stale* ETag, so every conditional PUT returns 412, the retry
+// loop never commits, and the join silently fails. Appending a unique param
+// makes each GET URL distinct so no intermediary can serve a cached copy. The
+// Vercel proxy only reads `dbpath`, so `_cb` is ignored and never hits Firebase.
+function bust(path: string): string {
+  const sep = path.includes('?') ? '&' : '?';
+  return `${PROXY_BASE}/${path}${sep}_cb=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+}
+
 async function proxyGet<T = unknown>(path: string): Promise<T | null> {
-  const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, { method: 'GET', cache: 'no-store' }, REQUEST_TIMEOUT_MS);
+  const res = await fetchWithTimeout(bust(path), { method: 'GET', cache: 'no-store' }, REQUEST_TIMEOUT_MS);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status}`);
   const text = await res.text();
   return text && text !== 'null' ? (JSON.parse(text) as T) : null;
 }
 
 async function proxyGetWithEtag<T = unknown>(path: string): Promise<{ value: T | null; etag: string }> {
-  const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, {
+  const res = await fetchWithTimeout(bust(path), {
     method: 'GET',
     headers: { 'X-Firebase-ETag': 'true' },
     cache: 'no-store',
