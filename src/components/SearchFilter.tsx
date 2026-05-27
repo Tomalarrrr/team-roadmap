@@ -81,8 +81,14 @@ export const SearchFilter = memo(function SearchFilter({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [showAllTags, setShowAllTags] = useState(false);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
-  const [showConnectFour, setShowConnectFour] = useState(false);
-  const [showLudo, setShowLudo] = useState(false);
+  // Auto-open games from shareable URL params (?c4 / ?ludo) — initialised here
+  // instead of in a mount effect so there's no setState-after-mount.
+  const [showConnectFour, setShowConnectFour] = useState(
+    () => !!new URLSearchParams(window.location.search).get('c4')
+  );
+  const [showLudo, setShowLudo] = useState(
+    () => !!new URLSearchParams(window.location.search).get('ludo')
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -127,27 +133,22 @@ export const SearchFilter = memo(function SearchFilter({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Auto-open games from shareable URL parameters (bypass lock for external players)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('c4')) setShowConnectFour(true);
-    if (params.get('ludo')) setShowLudo(true);
-  }, []);
-
-  // Easter egg: Connect Four & Ludo (only when site is unlocked)
-  useEffect(() => {
-    if (isLocked) return;
-    if (filters.search.trim().toLowerCase() === 'connect four') {
+  // Easter egg: typing "connect four" / "ludo" opens the game (only when the
+  // site is unlocked). Handled during render rather than in an effect — it
+  // converges because the matching branch immediately clears the search box,
+  // so the condition is false on the next render. All state here is local.
+  if (!isLocked) {
+    const magic = filters.search.trim().toLowerCase();
+    if (magic === 'connect four') {
       setShowConnectFour(true);
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
-    }
-    if (filters.search.trim().toLowerCase() === 'ludo') {
+    } else if (magic === 'ludo') {
       setShowLudo(true);
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
     }
-  }, [filters.search, isLocked]);
+  }
 
   // Compute search results as derived state (no effect needed)
   const { searchResults, totalResultCount } = useMemo(() => {
@@ -169,14 +170,13 @@ export const SearchFilter = memo(function SearchFilter({
     return { searchResults: results.slice(0, 8), totalResultCount: results.length };
   }, [filters.search, projects, recentProjects]);
 
-  // Reset selection when search changes
-  const prevSearchRef = useRef(filters.search);
-  useEffect(() => {
-    if (prevSearchRef.current !== filters.search) {
-      prevSearchRef.current = filters.search;
-      setSelectedIndex(0);
-    }
-  }, [filters.search]);
+  // Reset selection when search changes — derived during render (search is a
+  // string, so the comparison is stable and this converges immediately).
+  const [prevSearch, setPrevSearch] = useState(filters.search);
+  if (prevSearch !== filters.search) {
+    setPrevSearch(filters.search);
+    setSelectedIndex(0);
+  }
 
   // Handle selecting a project (saves to recent)
   const handleSelectProject = useCallback((projectId: string) => {

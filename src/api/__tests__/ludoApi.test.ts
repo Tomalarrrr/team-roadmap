@@ -18,6 +18,7 @@ vi.mock('../../firebase', () => ({
 }));
 
 import { makeMove, addBot, createGame, type LudoGameState } from '../ludoApi';
+import { deserializeRollStats } from '../../ludoPowerUps';
 
 type FakeRes = {
   ok: boolean;
@@ -142,6 +143,41 @@ describe('makeMove (transaction emulation)', () => {
       .mockResolvedValueOnce(res({ error: 'boom' }, { status: 500 }));
 
     await expect(makeMove('GAME', 'red', moveUpdates)).rejects.toThrow(/500/);
+  });
+});
+
+describe('makeMove rollStats merge (anti-clobber)', () => {
+  // rollStats packs all four colours' counts in one field; format per colour is
+  // "r1,r2,r3,r4,r5,r6,captures" joined by "|". Index 5 is the count of 6s.
+  const stats = (redSixes: number, greenSixes: number, redCaps = 0, greenCaps = 0) =>
+    `0,0,0,0,0,${redSixes},${redCaps}|0,0,0,0,0,${greenSixes},${greenCaps}|0,0,0,0,0,0,0|0,0,0,0,0,0,0`;
+
+  it('takes the per-cell max so a stale writer cannot wipe another player\'s rolls', async () => {
+    // Server already has red=5 sixes, green=2. A client that only saw red=3
+    // writes its fresh green=4 — red must NOT regress to 3.
+    fetchMock
+      .mockResolvedValueOnce(res(baseState({ currentTurn: 'red', rollStats: stats(5, 2, 1, 0) }), { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    const ok = await makeMove('GAME', 'red', { ...moveUpdates, rollStats: stats(3, 4, 0, 3) });
+
+    expect(ok).toBe(true);
+    const merged = deserializeRollStats(JSON.parse(fetchMock.mock.calls[1][1].body).rollStats);
+    expect(merged[0].rolls[5]).toBe(5); // red sixes: max(5,3)
+    expect(merged[1].rolls[5]).toBe(4); // green sixes: max(2,4)
+    expect(merged[0].captures).toBe(1); // red captures: max(1,0)
+    expect(merged[1].captures).toBe(3); // green captures: max(0,3)
+  });
+
+  it('passes rollStats through untouched when the server has none yet', async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(baseState({ currentTurn: 'red', rollStats: undefined }), { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    const ok = await makeMove('GAME', 'red', { ...moveUpdates, rollStats: stats(1, 0) });
+
+    expect(ok).toBe(true);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).rollStats).toBe(stats(1, 0));
   });
 });
 

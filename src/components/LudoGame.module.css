@@ -1016,6 +1016,38 @@
   border: 1px solid var(--border-light);
 }
 
+/* Connection-lost indicator (proxy poll failing or browser offline) */
+.reconnectingPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #b45309;
+  background: #fffbeb;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  border: 1px solid #fcd34d;
+  white-space: nowrap;
+}
+
+.reconnectingDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  animation: reconnectingPulse 1s ease-in-out infinite;
+}
+
+@keyframes reconnectingPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reconnectingDot { animation: none; }
+}
+
 /* Waiting screen */
 .gameCodeDisplay {
   font-family: 'SF Mono', 'Fira Code', monospace;

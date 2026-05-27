@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { ensureInitialized, getDbModule, getFirebaseDatabase } from '../firebase';
 
 let cachedPaused: boolean | null = null;
-let listeners = new Set<(paused: boolean) => void>();
+const listeners = new Set<(paused: boolean) => void>();
 let globalUnsub: (() => void) | null = null;
 let initPromise: Promise<void> | null = null; // prevents duplicate listener race
 

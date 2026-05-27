@@ -393,6 +393,13 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const [playerNames, setPlayerNames] = useState<Partial<Record<LudoColor, string>>>({});
   // playerCount is tracked via activePlayerCount (set from Firebase state)
   const [error, setError] = useState<string | null>(null);
+  // Ludo's own connectivity: the proxy poll succeeding/failing, independent of
+  // the app's Firebase-based online status (which the corporate VPN blocks).
+  const [isConnected, setIsConnected] = useState(true);
+  // Browser-level reachability (instant offline feedback via online/offline events).
+  const [isBrowserOnline, setIsBrowserOnline] = useState(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
   const [isLoading, setIsLoading] = useState(false);
   const [isSinglePlayer, setIsSinglePlayer] = useState(false);
   const isSinglePlayerRef = useRef(false);
@@ -437,6 +444,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   const turnStartedAtRef = useRef<number>(Date.now());
   const turnLocalStartRef = useRef<number>(Date.now()); // client-side turn start (immune to clock skew)
   const prevTokensRef = useRef('bas'.repeat(16));
+  // Tracks an optimistically-applied local move awaiting server confirmation.
+  // `from`/`to` are serialized token strings; used to ignore stale polls that
+  // still show the pre-move board and to detect when our write has landed.
+  const pendingMoveRef = useRef<{ from: string; to: string } | null>(null);
   const hintTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const rollTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const movedTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -680,6 +691,129 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     advance();
   }, [scheduleRenderTick]);
 
+  // --- Token transition animations ---
+  // Drives cell-by-cell movement, knockback/deploy/home effects, and capture
+  // ghosts for a change from `oldTokensStr` to `newTokensStr`. Called both by
+  // the poll handler (for remote moves) and optimistically by executeMove (so
+  // the local player's own moves animate instantly instead of waiting a poll).
+  const runTokenAnimations = useCallback((oldTokensStr: string, newTokensStr: string) => {
+    const oldTokens = deserializeTokens(oldTokensStr);
+    const parsedTokens = deserializeTokens(newTokensStr);
+
+    // Track animation paths for capturers (to compute capture delay)
+    const animPaths = new Map<number, [number, number][]>();
+
+    // Pass 1: Start animations for movers (skip captured tokens)
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
+      if (oldTokens[i] !== parsedTokens[i]) {
+        if (parsedTokens[i] === 'base' && oldTokens[i] !== 'base') continue; // capture — handled in pass 2
+        const path = computeMovePath(oldTokens[i], parsedTokens[i], getTokenColor(i));
+        // For base→track deployment, prepend base coords so the token
+        // visually starts at the base and slides smoothly to the start cell
+        if (oldTokens[i] === 'base' && path.length > 0) {
+          const baseCoords = getTokenCoords('base', i);
+          if (baseCoords) path.unshift(baseCoords);
+        }
+        if (path.length > 1) {
+          animPaths.set(i, path);
+          startTokenAnimation(i, path);
+        }
+      }
+    }
+
+    // Power-up effects: detect knockbacks (token moved backward on track)
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
+      if (oldTokens[i] === parsedTokens[i]) continue;
+      if (!oldTokens[i].startsWith('track-') || !parsedTokens[i].startsWith('track-')) continue;
+      if (parsedTokens[i] === 'base') continue; // capture, not knockback
+      const oldTrack = parseInt(oldTokens[i].split('-')[1]);
+      const newTrack = parseInt(parsedTokens[i].split('-')[1]);
+      const color = getTokenColor(i);
+      const start = START_POSITIONS[color];
+      const oldDist = oldTrack >= start ? oldTrack - start : (TRACK_SIZE - start) + oldTrack;
+      const newDist = newTrack >= start ? newTrack - start : (TRACK_SIZE - start) + newTrack;
+      if (newDist < oldDist) {
+        // Token moved backward = knockback. Show hit effect at old position
+        const coords = TRACK_COORDS[oldTrack];
+        if (coords) pushEffect({ type: 'puShellHit', color, coords, emoji: '💥', ts: Date.now() }, 700);
+      }
+    }
+
+    // Game effects: deploy sparkle + home celebration
+    for (const timer of effectTimers.current) clearTimeout(timer);
+    effectTimers.current = [];
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
+      if (oldTokens[i] === parsedTokens[i]) continue;
+      const color = getTokenColor(i);
+      // Deploy: base → track (sparkle at departure point)
+      if (oldTokens[i] === 'base' && parsedTokens[i].startsWith('track-')) {
+        const baseCoords = getTokenCoords('base', i);
+        if (baseCoords) {
+          const effect = { type: 'deploy' as const, color, coords: baseCoords, ts: Date.now() };
+          gameEffects.current.push(effect);
+          scheduleRenderTick();
+          const timer = setTimeout(() => {
+            gameEffects.current = gameEffects.current.filter(e => e !== effect);
+            scheduleRenderTick();
+          }, 600);
+          effectTimers.current.push(timer);
+        }
+      }
+      // Home arrival: final-N → final-6 (star burst at home center)
+      if (parsedTokens[i] === 'final-6' && oldTokens[i].startsWith('final-')) {
+        const path = animPaths.get(i);
+        const delay = path ? (path.length - 1) * STEP_MS : 0;
+        const effect = { type: 'home' as const, color, ts: Date.now() + delay };
+        const showTimer = setTimeout(() => {
+          gameEffects.current.push(effect);
+          scheduleRenderTick();
+          const cleanupTimer = setTimeout(() => {
+            gameEffects.current = gameEffects.current.filter(e => e !== effect);
+            scheduleRenderTick();
+          }, 800);
+          effectTimers.current.push(cleanupTimer);
+        }, delay);
+        effectTimers.current.push(showTimer);
+      }
+    }
+
+    // Pass 2: Schedule capture ghosts with delay until the capturer arrives
+    for (const timer of captureShowTimers.current) clearTimeout(timer);
+    captureShowTimers.current = [];
+
+    for (let i = 0; i < TOTAL_TOKENS; i++) {
+      if (oldTokens[i] === parsedTokens[i]) continue;
+      if (!(parsedTokens[i] === 'base' && oldTokens[i] !== 'base')) continue;
+
+      // Find the capturer: the token whose NEW position matches this token's OLD position
+      let capturerDelay = 0;
+      for (let j = 0; j < TOTAL_TOKENS; j++) {
+        if (j === i) continue;
+        if (parsedTokens[j] === oldTokens[i] && oldTokens[j] !== parsedTokens[j]) {
+          const path = animPaths.get(j);
+          if (path) capturerDelay = (path.length - 1) * STEP_MS;
+          break;
+        }
+      }
+
+      const coords = getTokenCoords(oldTokens[i], i);
+      if (coords) {
+        const captureData = { index: i, coords, color: getTokenColor(i), ts: Date.now() + capturerDelay };
+        const showTimer = setTimeout(() => {
+          capturedTokens.current.push(captureData);
+          scheduleRenderTick();
+          // Each capture independently cleans itself up after 500ms
+          const cleanupTimer = setTimeout(() => {
+            capturedTokens.current = capturedTokens.current.filter(t => t !== captureData);
+            scheduleRenderTick();
+          }, 500);
+          captureShowTimers.current.push(cleanupTimer);
+        }, capturerDelay);
+        captureShowTimers.current.push(showTimer);
+      }
+    }
+  }, [startTokenAnimation, pushEffect, scheduleRenderTick]);
+
   // --- Dice rolling animation (rapid face cycling) ---
 
   useEffect(() => {
@@ -762,6 +896,25 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       // Only clear connection-type errors (not user action errors like join failures)
       setError(prev => prev === 'Connection lost. Please rejoin.' ? null : prev);
 
+      // Optimistic-move reconciliation: we may have already applied this player's
+      // move locally and written it to the proxy. The poll runs on its own cadence,
+      // so an in-flight read can still return the pre-move board.
+      if (pendingMoveRef.current) {
+        if (state.tokens === pendingMoveRef.current.to) {
+          // Our write landed — clear the guard; prevTokensRef already equals this,
+          // so the animation block below is a no-op (no double-animation).
+          pendingMoveRef.current = null;
+        } else if (state.tokens === pendingMoveRef.current.from) {
+          // Stale read from before our write committed — ignore it entirely so
+          // we don't rewind the board and replay the move backward.
+          return;
+        } else {
+          // A genuinely newer board arrived (another player/bot moved) — stop
+          // guarding and reconcile to it normally.
+          pendingMoveRef.current = null;
+        }
+      }
+
       const parsedTokens = deserializeTokens(state.tokens);
 
       // Reset moveInFlight on any state change (token, turn, or phase change)
@@ -771,122 +924,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
         clearTimeout(autoMoveRef.current);
       }
 
-      // Detect token moves and start cell-by-cell animations + capture effects
+      // Detect token moves and start cell-by-cell animations + capture effects.
+      // (Skipped when this state merely confirms our own optimistic move — see
+      // the pendingMove guard above, which leaves prevTokensRef already equal.)
       if (state.tokens !== prevTokensRef.current) {
-        const oldTokens = deserializeTokens(prevTokensRef.current);
-
-        // Track animation paths for capturers (to compute capture delay)
-        const animPaths = new Map<number, [number, number][]>();
-
-        // Pass 1: Start animations for movers (skip captured tokens)
-        for (let i = 0; i < TOTAL_TOKENS; i++) {
-          if (oldTokens[i] !== parsedTokens[i]) {
-            if (parsedTokens[i] === 'base' && oldTokens[i] !== 'base') continue; // capture — handled in pass 2
-            const path = computeMovePath(oldTokens[i], parsedTokens[i], getTokenColor(i));
-            // For base→track deployment, prepend base coords so the token
-            // visually starts at the base and slides smoothly to the start cell
-            if (oldTokens[i] === 'base' && path.length > 0) {
-              const baseCoords = getTokenCoords('base', i);
-              if (baseCoords) path.unshift(baseCoords);
-            }
-            if (path.length > 1) {
-              animPaths.set(i, path);
-              startTokenAnimation(i, path);
-            }
-          }
-        }
-
-        // Power-up effects: detect knockbacks (token moved backward on track)
-        for (let i = 0; i < TOTAL_TOKENS; i++) {
-          if (oldTokens[i] === parsedTokens[i]) continue;
-          if (!oldTokens[i].startsWith('track-') || !parsedTokens[i].startsWith('track-')) continue;
-          if (parsedTokens[i] === 'base') continue; // capture, not knockback
-          const oldTrack = parseInt(oldTokens[i].split('-')[1]);
-          const newTrack = parseInt(parsedTokens[i].split('-')[1]);
-          const color = getTokenColor(i);
-          const start = START_POSITIONS[color];
-          const oldDist = oldTrack >= start ? oldTrack - start : (TRACK_SIZE - start) + oldTrack;
-          const newDist = newTrack >= start ? newTrack - start : (TRACK_SIZE - start) + newTrack;
-          if (newDist < oldDist) {
-            // Token moved backward = knockback. Show hit effect at old position
-            const coords = TRACK_COORDS[oldTrack];
-            if (coords) pushEffect({ type: 'puShellHit', color, coords, emoji: '💥', ts: Date.now() }, 700);
-          }
-        }
-
-        // Game effects: deploy sparkle + home celebration
-        for (const timer of effectTimers.current) clearTimeout(timer);
-        effectTimers.current = [];
-        for (let i = 0; i < TOTAL_TOKENS; i++) {
-          if (oldTokens[i] === parsedTokens[i]) continue;
-          const color = getTokenColor(i);
-          // Deploy: base → track (sparkle at departure point)
-          if (oldTokens[i] === 'base' && parsedTokens[i].startsWith('track-')) {
-            const baseCoords = getTokenCoords('base', i);
-            if (baseCoords) {
-              const effect = { type: 'deploy' as const, color, coords: baseCoords, ts: Date.now() };
-              gameEffects.current.push(effect);
-              scheduleRenderTick();
-              const timer = setTimeout(() => {
-                gameEffects.current = gameEffects.current.filter(e => e !== effect);
-                scheduleRenderTick();
-              }, 600);
-              effectTimers.current.push(timer);
-            }
-          }
-          // Home arrival: final-N → final-6 (star burst at home center)
-          if (parsedTokens[i] === 'final-6' && oldTokens[i].startsWith('final-')) {
-            const path = animPaths.get(i);
-            const delay = path ? (path.length - 1) * STEP_MS : 0;
-            const effect = { type: 'home' as const, color, ts: Date.now() + delay };
-            const showTimer = setTimeout(() => {
-              gameEffects.current.push(effect);
-              scheduleRenderTick();
-              const cleanupTimer = setTimeout(() => {
-                gameEffects.current = gameEffects.current.filter(e => e !== effect);
-                scheduleRenderTick();
-              }, 800);
-              effectTimers.current.push(cleanupTimer);
-            }, delay);
-            effectTimers.current.push(showTimer);
-          }
-        }
-
-        // Pass 2: Schedule capture ghosts with delay until the capturer arrives
-        for (const timer of captureShowTimers.current) clearTimeout(timer);
-        captureShowTimers.current = [];
-
-        for (let i = 0; i < TOTAL_TOKENS; i++) {
-          if (oldTokens[i] === parsedTokens[i]) continue;
-          if (!(parsedTokens[i] === 'base' && oldTokens[i] !== 'base')) continue;
-
-          // Find the capturer: the token whose NEW position matches this token's OLD position
-          let capturerDelay = 0;
-          for (let j = 0; j < TOTAL_TOKENS; j++) {
-            if (j === i) continue;
-            if (parsedTokens[j] === oldTokens[i] && oldTokens[j] !== parsedTokens[j]) {
-              const path = animPaths.get(j);
-              if (path) capturerDelay = (path.length - 1) * STEP_MS;
-              break;
-            }
-          }
-
-          const coords = getTokenCoords(oldTokens[i], i);
-          if (coords) {
-            const captureData = { index: i, coords, color: getTokenColor(i), ts: Date.now() + capturerDelay };
-            const showTimer = setTimeout(() => {
-              capturedTokens.current.push(captureData);
-              scheduleRenderTick();
-              // Each capture independently cleans itself up after 500ms
-              const cleanupTimer = setTimeout(() => {
-                capturedTokens.current = capturedTokens.current.filter(t => t !== captureData);
-                scheduleRenderTick();
-              }, 500);
-              captureShowTimers.current.push(cleanupTimer);
-            }, capturerDelay);
-            captureShowTimers.current.push(showTimer);
-          }
-        }
+        runTokenAnimations(prevTokensRef.current, state.tokens);
       }
       prevTokensRef.current = state.tokens;
 
@@ -1042,6 +1084,8 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           transitionToPlaying();
         }
       }
+    }, (connected: boolean) => {
+      if (!cancelled) setIsConnected(connected);
     }).then(unsub => {
       if (cancelled) {
         unsub();
@@ -1051,6 +1095,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     }).catch((err) => {
       console.error('[Ludo] Subscription failed:', err);
       setError('Connection lost. Please rejoin.');
+      if (!cancelled) setIsConnected(false);
     });
 
     return () => {
@@ -1058,6 +1103,21 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       unsubscribe?.();
     };
   }, [gameCode]);
+
+  // Browser online/offline events — instant feedback. Proxy reachability is
+  // tracked separately by the poll (isConnected); the banner shows if either
+  // says we're cut off. We only flip browser-online here; the poll is the
+  // authority on whether the game is actually syncing again.
+  useEffect(() => {
+    const onOnline = () => setIsBrowserOnline(true);
+    const onOffline = () => setIsBrowserOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, []);
 
   // --- Game handlers (all read from refs to avoid stale closures) ---
 
@@ -1075,7 +1135,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const curFinishOrder = finishOrderRef.current;
     const curPlayerCount = activePlayerCountRef.current;
 
-    let { newTokens, captured, reachedHome } = applyMove(currentTokens, tokenIndex, newPosition);
+    const moveResult = applyMove(currentTokens, tokenIndex, newPosition);
+    let newTokens = moveResult.newTokens;
+    let captured = moveResult.captured;
+    const reachedHome = moveResult.reachedHome;
 
     // Track which tokens were captured (before auto-deploy might change them)
     const capturedIndices: number[] = [];
@@ -1304,7 +1367,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     let updatedInv = inventoryRef.current;
     let updatedEffects = boardEffectsRef.current;
     let updatedBuffs = activeBuffsRef.current;
-    let updatedCoins = [...coinsRef.current];
+    const updatedCoins = [...coinsRef.current];
     let updatedMysteryBoxes = mysteryBoxesRef.current;
 
     if (powerUpsEnabledRef.current) {
@@ -1445,12 +1508,37 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       update.flag = serializeFlag(updatedFlag);
     }
 
-    try {
-      await makeMove(gc, curColor, update);
-    } catch {
-      moveInFlightRef.current = false;
+    // --- Optimistic local apply (#1): animate this move right now instead of
+    // waiting for the next poll to echo it back (which added up to a full poll
+    // interval of dead time before the token visibly moved). The proxy write
+    // runs in the background; the poll confirms it, or we roll back on failure.
+    const newTokensStr = update.tokens;
+    const fromTokensStr = prevTokensRef.current;
+    if (newTokensStr !== fromTokensStr) {
+      runTokenAnimations(fromTokensStr, newTokensStr);
+      prevTokensRef.current = newTokensStr;
+      tokensRef.current = [...newTokens];
+      setTokens([...newTokens]);
+      pendingMoveRef.current = { from: fromTokensStr, to: newTokensStr };
     }
-  }, [showHint]);
+
+    const rollbackOptimistic = () => {
+      moveInFlightRef.current = false;
+      // Only roll back if our move is still the unconfirmed pending one.
+      if (pendingMoveRef.current && pendingMoveRef.current.to === newTokensStr) {
+        const revertStr = pendingMoveRef.current.from;
+        pendingMoveRef.current = null;
+        const reverted = deserializeTokens(revertStr);
+        prevTokensRef.current = revertStr;
+        tokensRef.current = reverted;
+        setTokens(reverted);
+      }
+    };
+
+    makeMove(gc, curColor, update)
+      .then((committed) => { if (!committed) rollbackOptimistic(); })
+      .catch(rollbackOptimistic);
+  }, [showHint, runTokenAnimations]);
 
   const handleRollDice = useCallback(async () => {
     const gc = gameCodeRef.current;
@@ -1507,10 +1595,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       pityForced = true;
     }
 
-    // Snapshot the original die face BEFORE power-up modifications (for accurate roll tally).
-    // Pity-forced 6 is included since it replaces the die roll, but Super Mushroom doubling
-    // and Lightning halving are power-up effects and shouldn't distort the tally.
-    const originalFace = roll;
+    // Face used for the displayed "Dice Rolls" tally: the TRUE random die from the
+    // RNG, before any adjustments. We deliberately use serverRolls[0] (not `roll`)
+    // so pity-forced 6s are NOT counted as real 6s — otherwise an unlucky player
+    // stuck at base accumulates manufactured 6s and the stats look rigged. Super
+    // Mushroom doubling and Lightning halving are likewise excluded.
+    const originalFace = serverRolls[0];
 
     // Super Mushroom: double the roll
     if (powerUpsEnabledRef.current && activePowerUpRef.current?.id === 'super-mushroom') {
@@ -1748,7 +1838,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           autoMoveRef.current = setTimeout(() => {
             if (currentTurnRef.current !== expectedColor) return; // Turn changed — abort
             executeMove(m.tokenIndex, m.newPosition, roll);
-          }, 600);
+          }, 350); // brief beat to read the die, then the optimistic move animates instantly
           return;
         }
         // Fall through to 'move' phase so the player can choose to use their power-up
@@ -3411,6 +3501,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           {isSpectating && gamePhase === 'playing' && (
             <span className={styles.spectateBadge}>Spectating</span>
           )}
+          {gamePhase !== 'lobby' && (!isConnected || !isBrowserOnline) && (
+            <span
+              className={styles.reconnectingPill}
+              role="status"
+              aria-live="polite"
+              title="Lost connection to the game server — retrying"
+            >
+              <span className={styles.reconnectingDot} />
+              Reconnecting…
+            </span>
+          )}
         </span>
         {gamePhase === 'playing' && !winner && !isSpectating && (
           <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={() => gameCode && toggleGamePause(gameCode)} aria-label={gamePaused ? 'Resume game' : 'Pause game'}>
@@ -3905,7 +4006,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
               {/* Active buff indicators */}
               {powerUpsEnabled && activeBuffs.length > 0 && (
                 <div className={styles.activeBuffsBar}>
-                  {activeBuffs.map((buff, _i) => {
+                  {activeBuffs.map((buff) => {
                     const buffColor = colorFromIndex(buff.playerColorIdx);
                     return (
                       <span key={`${buff.type}-${buff.playerColorIdx}-${buff.duration}`} className={styles.buffIndicator}>

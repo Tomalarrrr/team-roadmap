@@ -9,6 +9,7 @@ import {
   getNextTurn,
   scoreBotMove,
 } from '../ludoGameLogic';
+import type { BoardEffect } from '../ludoPowerUps';
 import type { TokenPosition } from '../ludoFirebase';
 
 // Constants from ludoPowerUps (used implicitly by the logic)
@@ -357,7 +358,7 @@ describe('getNextTurn', () => {
 
 describe('scoreBotMove', () => {
   const noFlag = { cell: null, carrier: null, used: true } as const;
-  const noEffects: any[] = [];
+  const noEffects: BoardEffect[] = [];
 
   it('scores deploy from base positively', () => {
     const score = scoreBotMove(0, 'track-1', BASE_TOKENS, 'red', 4, noEffects, noFlag);

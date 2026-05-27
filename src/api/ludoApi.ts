@@ -29,6 +29,8 @@ import {
   generateFlagCell,
   serializeFlag,
   initRollStats,
+  deserializeRollStats,
+  serializeRollStats,
 } from '../ludoPowerUps';
 import { fetchWithTimeout, sleep, jitter } from '../utils/fetchWithTimeout';
 
@@ -40,6 +42,8 @@ export type Unsubscribe = () => void;
 const PROXY_BASE = '/api/db';
 const POLL_INTERVAL_MS = 1200;
 const HIDDEN_POLL_INTERVAL_MS = 15000;
+/** Faster poll cadence while disconnected, to recover promptly once the proxy is reachable again. */
+const RECONNECT_POLL_INTERVAL_MS = 700;
 const MAX_TXN_RETRIES = 12;
 const REQUEST_TIMEOUT_MS = 12_000;
 /** Base backoff between conditional-write conflict retries (grows + jitters). */
@@ -357,16 +361,30 @@ export async function joinGame(
 
 export function subscribeToGame(
   code: string,
-  callback: (state: LudoGameState | null) => void
+  callback: (state: LudoGameState | null) => void,
+  // Reports poll health so the UI can show a "reconnecting" indicator. Only
+  // fired on transitions (connected ⇄ disconnected), never on every poll.
+  onConnectionChange?: (connected: boolean) => void
 ): Promise<Unsubscribe> {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastSerialized: string | null = null;
+  let failures = 0;
+  let connected = true;
+
+  const setConnected = (next: boolean) => {
+    if (next !== connected) {
+      connected = next;
+      onConnectionChange?.(next);
+    }
+  };
 
   const tick = async () => {
     if (stopped) return;
     try {
       const state = await proxyGet<LudoGameState>(`ludo/${code}`);
+      failures = 0;
+      setConnected(true);
       const serialized = JSON.stringify(state);
       if (serialized !== lastSerialized) {
         lastSerialized = serialized;
@@ -374,11 +392,19 @@ export function subscribeToGame(
       }
     } catch (err) {
       console.error('[Ludo] Poll error:', err);
-      // Keep polling — a transient failure shouldn't drop the player out.
+      // Keep polling — a transient failure shouldn't drop the player out — but
+      // after two misses (~2.4s) surface a disconnect so the player isn't left
+      // staring at a silently-frozen board.
+      failures += 1;
+      if (failures >= 2) setConnected(false);
     } finally {
       if (!stopped) {
         const base =
-          document.visibilityState === 'hidden' ? HIDDEN_POLL_INTERVAL_MS : POLL_INTERVAL_MS;
+          document.visibilityState === 'hidden'
+            ? HIDDEN_POLL_INTERVAL_MS
+            : connected
+              ? POLL_INTERVAL_MS
+              : RECONNECT_POLL_INTERVAL_MS; // retry sooner while disconnected (polls never overlap)
         timer = setTimeout(tick, jitter(base));
       }
     }
@@ -402,6 +428,28 @@ export function subscribeToGame(
   return Promise.resolve(unsubscribe);
 }
 
+/**
+ * Merge two serialized rollStats strings by taking the per-cell maximum.
+ *
+ * rollStats packs all four players' cumulative roll/capture counts into one
+ * field, and every writer rewrites the whole field from its own view. In
+ * multiplayer that means concurrent moves clobber each other (last-write-wins),
+ * dropping rolls a client hadn't yet polled — which made some players' tallies
+ * read far lower than reality. Because each client only ever increments its own
+ * colour and counts never decrease mid-game, a per-cell max is a safe,
+ * conflict-free merge that preserves every player's progress. (Resets zero the
+ * stats via a direct transaction, not makeMove, so they bypass this merge.)
+ */
+function mergeRollStats(currentStr: string, incomingStr: string): string {
+  const cur = deserializeRollStats(currentStr);
+  const inc = deserializeRollStats(incomingStr);
+  const merged = cur.map((s, i) => ({
+    rolls: s.rolls.map((v, j) => Math.max(v, inc[i]?.rolls[j] ?? 0)),
+    captures: Math.max(s.captures, inc[i]?.captures ?? 0),
+  }));
+  return serializeRollStats(merged);
+}
+
 export async function makeMove(
   code: string,
   expectedTurn: LudoColor,
@@ -411,7 +459,15 @@ export async function makeMove(
     if (!current) return current;
     if (current.currentTurn !== expectedTurn) return undefined; // Not this player's turn
     if (current.winner != null) return undefined; // Game over
-    return { ...current, ...updates };
+    return {
+      ...current,
+      ...updates,
+      // Re-merge against the freshly-read value so a concurrent writer's rolls
+      // aren't lost (see mergeRollStats). Runs on every txn attempt/retry.
+      ...(updates.rollStats && current.rollStats
+        ? { rollStats: mergeRollStats(current.rollStats, updates.rollStats) }
+        : {}),
+    };
   });
   return result.committed;
 }

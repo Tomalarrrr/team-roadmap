@@ -705,7 +705,7 @@ export function applyStarEffect(
 ): TokenPosition[] {
   const result = [...tokens] as TokenPosition[];
   // Walk from fromTrack+1 to toTrack
-  let steps = toTrack >= fromTrack
+  const steps = toTrack >= fromTrack
     ? toTrack - fromTrack
     : (TRACK_SIZE - fromTrack) + toTrack;
 

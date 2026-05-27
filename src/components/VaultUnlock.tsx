@@ -31,10 +31,10 @@ export function VaultUnlock({ isOpen, onUnlocked, onCancel }: VaultUnlockProps) 
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
 
-  // Derive phase transitions from props via effect (avoids setState during render)
-  useEffect(() => {
-    setPhase(prev => derivePhase(isOpen, prev));
-  }, [isOpen]);
+  // Derive phase transitions during render (derivePhase is pure and idempotent,
+  // so this converges in one extra render — no effect / post-paint flash needed).
+  const nextPhase = derivePhase(isOpen, phase);
+  if (nextPhase !== phase) setPhase(nextPhase);
 
   // Exit animation timer
   useEffect(() => {

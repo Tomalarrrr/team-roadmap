@@ -25,6 +25,7 @@ import {
   TRACK_SIZE,
   TOTAL_TOKENS,
 } from '../ludoPowerUps';
+import type { PowerUpId } from '../ludoPowerUps';
 import type { TokenPosition } from '../ludoFirebase';
 
 const BASE_TOKENS: TokenPosition[] = Array(16).fill('base');
@@ -38,7 +39,7 @@ describe('Inventory serialization', () => {
   });
 
   it('round-trips full inventory', () => {
-    const inv = [['super-mushroom'], ['lightning-bolt'], ['blue-shell'], ['coin-block']] as any;
+    const inv = [['super-mushroom'], ['lightning-bolt'], ['blue-shell'], ['coin-block']] as (PowerUpId | null)[][];
     const result = deserializeInventory(serializeInventory(inv));
     expect(result[0][0]).toBe('super-mushroom');
     expect(result[1][0]).toBe('lightning-bolt');

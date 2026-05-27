@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import styles from './OfflineBanner.module.css';
 
 interface OfflineBannerProps {
@@ -11,16 +11,18 @@ export function OfflineBanner({ isOnline }: OfflineBannerProps) {
 
   const needsDisplay = !isOnline;
 
-  // Detect transition from offline -> online to show "synced" briefly
-  const prevNeedsDisplayRef = useRef(needsDisplay);
-  useEffect(() => {
-    if (prevNeedsDisplayRef.current && !needsDisplay) {
-      setCooldown(true);
+  // Detect the offline⇄online transition during render (React's "adjust state
+  // when a value changes" pattern) rather than in an effect — needsDisplay is a
+  // boolean so the comparison is stable and this converges in one extra render.
+  const [prevNeedsDisplay, setPrevNeedsDisplay] = useState(needsDisplay);
+  if (prevNeedsDisplay !== needsDisplay) {
+    setPrevNeedsDisplay(needsDisplay);
+    if (prevNeedsDisplay && !needsDisplay) {
+      setCooldown(true); // just came back online → show "synced" briefly
     } else if (needsDisplay) {
-      setCooldown(false);
+      setCooldown(false); // went offline → clear any pending cooldown
     }
-    prevNeedsDisplayRef.current = needsDisplay;
-  }, [needsDisplay]);
+  }
 
   // Clear cooldown after 2s
   useEffect(() => {
