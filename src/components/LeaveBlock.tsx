@@ -14,8 +14,10 @@ interface LeaveBlockProps {
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
-// Purple color scheme for annual leave
-const LEAVE_COLORS = { bg: '#f3e8ff', dot: '#a855f7' };
+// Purple color scheme for annual leave. The dot is saturated (not a pale tint)
+// so the strip reads clearly when laid *over* a colored project bar — matching
+// the period-marker strip treatment. A pale dot washes out over dark bars.
+const LEAVE_COLORS = { bg: '#f3e8ff', dot: '#7C3AED' };
 
 export function LeaveBlock({
   leave,
@@ -45,7 +47,7 @@ export function LeaveBlock({
   }, [leave, timelineStart, dayWidth, laneHeight]);
 
   // Dotted pattern using radial gradient
-  const dotPattern = `radial-gradient(circle, ${LEAVE_COLORS.dot} 1px, transparent 1px)`;
+  const dotPattern = `radial-gradient(circle, ${LEAVE_COLORS.dot} 1.4px, transparent 1.4px)`;
 
   const handleContextMenu = (e: React.MouseEvent) => {
     if (isLocked) return;

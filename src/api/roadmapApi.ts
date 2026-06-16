@@ -23,7 +23,7 @@ import type {
 import {
   firebaseSnapshotToRoadmapData,
   roadmapDataToFirebaseFormat,
-  projectToFirebase,
+  arrayToKeyedObject,
   isLegacyArrayFormat,
 } from '../utils/firebaseConversions';
 import { markFirebaseActivity } from '../firebase';
@@ -35,6 +35,8 @@ export type Unsubscribe = () => void;
 const POLL_INTERVAL_MS = 5_000;
 /** Slow poll cadence used while the tab is hidden — keeps connection alive without burning battery. */
 const HIDDEN_POLL_INTERVAL_MS = 60_000;
+/** Upper bound for exponential backoff after consecutive poll failures (flaky VPN). */
+const MAX_POLL_BACKOFF_MS = 60_000;
 /** Per-request timeout — a hung VPN connection must not stall the poll loop. */
 const REQUEST_TIMEOUT_MS = 12_000;
 
@@ -68,6 +70,40 @@ async function proxyFetch(path: string, init?: RequestInit): Promise<Response> {
 async function proxyGet<T = unknown>(path: string): Promise<T> {
   const response = await proxyFetch(path, { method: 'GET' });
   return (await response.json()) as T;
+}
+
+/**
+ * Conditional GET for the poll loop. Sends If-None-Match so the proxy can reply
+ * 304 (no body) when the snapshot is unchanged — the common case on a 5s poll.
+ * Returns `notModified` so the caller can skip the parse/convert/deliver work
+ * entirely, and the fresh ETag to send on the next tick.
+ */
+async function proxyGetConditional(
+  path: string,
+  etag: string | null
+): Promise<{ notModified: boolean; etag: string | null; raw: unknown }> {
+  const url = `${PROXY_BASE}/${path.replace(/^\/+/, '')}`;
+  const res = await fetchWithTimeout(
+    url,
+    {
+      method: 'GET',
+      // no-store so neither the browser HTTP cache nor a corporate proxy answers
+      // the conditional request — we want our edge proxy to make the 304 call.
+      cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(etag ? { 'If-None-Match': etag } : {}),
+      },
+    },
+    REQUEST_TIMEOUT_MS
+  );
+  if (res.status === 304) {
+    return { notModified: true, etag, raw: null };
+  }
+  if (!res.ok) {
+    throw new Error(`Proxy GET ${path} failed: ${res.status}`);
+  }
+  return { notModified: false, etag: res.headers.get('ETag') ?? null, raw: await res.json() };
 }
 
 async function proxyPut(path: string, value: unknown): Promise<void> {
@@ -128,13 +164,26 @@ export function subscribeToRoadmap(
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let migrationChecked = false;
+  // ETag of the last snapshot the proxy returned. Sent back as If-None-Match so
+  // an unchanged poll comes back as a body-less 304 we can short-circuit.
+  let etag: string | null = null;
+  // Consecutive poll failures, used to back off so we don't hammer a flaky /
+  // throttled VPN connection. Reset to 0 on any successful poll.
+  let consecutiveFailures = 0;
 
   const tick = async () => {
     if (stopped) return;
     try {
-      const raw = await proxyGet('roadmap');
+      const { notModified, etag: nextEtag, raw } = await proxyGetConditional('roadmap', etag);
       markFirebaseActivity();
       reportPollResult(true);
+      consecutiveFailures = 0;
+      etag = nextEtag;
+
+      // 304 Not Modified: nothing changed since the last poll, so skip the
+      // parse/convert/deliver work and the caller's diff entirely.
+      if (notModified) return;
+
       const data = firebaseSnapshotToRoadmapData(raw);
 
       // One-time legacy-format migration: if the data is still in pre-keyed
@@ -157,12 +206,18 @@ export function subscribeToRoadmap(
       onData(data);
     } catch (err) {
       reportPollResult(false);
+      consecutiveFailures++;
       onError?.(err instanceof Error ? err : new Error(String(err)));
     } finally {
       if (!stopped) {
-        const base = document.visibilityState === 'hidden'
+        let base = document.visibilityState === 'hidden'
           ? HIDDEN_POLL_INTERVAL_MS
           : POLL_INTERVAL_MS;
+        // Exponential backoff while polls keep failing, capped — recovers to the
+        // normal cadence on the next success (consecutiveFailures resets to 0).
+        if (consecutiveFailures > 0) {
+          base = Math.min(base * 2 ** Math.min(consecutiveFailures, 5), MAX_POLL_BACKOFF_MS);
+        }
         // Jitter so many clients don't poll the proxy in lockstep.
         timer = setTimeout(tick, jitter(base));
       }
@@ -214,31 +269,43 @@ export async function saveRoadmap(data: RoadmapData): Promise<void> {
   await proxyPut('roadmap', roadmapDataToFirebaseFormat(data));
 }
 
-export async function updateProjectAtPath(projectId: string, project: Project): Promise<void> {
-  await proxyPut(`roadmap/projects/${encodeURIComponent(projectId)}`, projectToFirebase(project));
+// The granular updaters write only the *changed* fields via PATCH (Firebase's
+// merge) rather than PUTting the whole record. This way two users editing
+// different fields of the same project/milestone/etc. don't clobber each other:
+// each write touches only the keys it actually changed. (Concurrent edits to
+// the *same* field remain last-write-wins, which is unavoidable and fine.)
+
+export async function updateProjectAtPath(projectId: string, updates: Partial<Project>): Promise<void> {
+  // A `milestones` field only appears on whole-object writes (e.g. undo restore);
+  // convert it to keyed-object form so the storage shape stays consistent.
+  const patch: Record<string, unknown> = { ...updates };
+  if (Array.isArray(patch.milestones)) {
+    patch.milestones = arrayToKeyedObject(patch.milestones as Milestone[]);
+  }
+  await proxyPatch(`roadmap/projects/${encodeURIComponent(projectId)}`, patch);
 }
 
 export async function updateMilestoneAtPath(
   projectId: string,
   milestoneId: string,
-  milestone: Milestone
+  updates: Partial<Milestone>
 ): Promise<void> {
-  await proxyPut(
+  await proxyPatch(
     `roadmap/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}`,
-    milestone
+    { ...updates }
   );
 }
 
-export async function updateDependencyAtPath(depId: string, dependency: Dependency): Promise<void> {
-  await proxyPut(`roadmap/dependencies/${encodeURIComponent(depId)}`, dependency);
+export async function updateDependencyAtPath(depId: string, updates: Partial<Dependency>): Promise<void> {
+  await proxyPatch(`roadmap/dependencies/${encodeURIComponent(depId)}`, { ...updates });
 }
 
-export async function updateTeamMemberAtPath(memberId: string, member: TeamMember): Promise<void> {
-  await proxyPut(`roadmap/teamMembers/${encodeURIComponent(memberId)}`, member);
+export async function updateTeamMemberAtPath(memberId: string, updates: Partial<TeamMember>): Promise<void> {
+  await proxyPatch(`roadmap/teamMembers/${encodeURIComponent(memberId)}`, { ...updates });
 }
 
-export async function updateLeaveBlockAtPath(leaveId: string, leaveBlock: LeaveBlock): Promise<void> {
-  await proxyPut(`roadmap/leaveBlocks/${encodeURIComponent(leaveId)}`, leaveBlock);
+export async function updateLeaveBlockAtPath(leaveId: string, updates: Partial<LeaveBlock>): Promise<void> {
+  await proxyPatch(`roadmap/leaveBlocks/${encodeURIComponent(leaveId)}`, { ...updates });
 }
 
 /**

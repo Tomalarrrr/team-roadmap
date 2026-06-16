@@ -30,7 +30,7 @@ export function DependencyArrow({
       onClick={handleClick}
       onMouseDown={handleMouseDown}
       title="Create dependency"
-      aria-label="Create dependency to another project or milestone"
+      aria-label="Create dependency to another project"
     >
       <svg
         width="12"

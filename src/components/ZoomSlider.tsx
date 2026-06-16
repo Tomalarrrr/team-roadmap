@@ -82,11 +82,13 @@ export function ZoomSlider({
     };
   }, [isDragging, handleDrag]);
 
-  // Get the current zoom level label
+  // Get the current zoom level label. Thresholds MUST match Timeline.tsx's
+  // displayMode (YEAR_VIEW_THRESHOLD = 1.5, WEEK_VIEW_THRESHOLD = 5) so the
+  // slider's label never disagrees with the headers the timeline is rendering.
   const getCurrentLabel = () => {
     if (value >= 5) return 'Week';
-    if (value >= 1.8) return 'Month';
-    return 'Year';
+    if (value <= 1.5) return 'Year';
+    return 'Month';
   };
 
   const position = valueToPosition(value);

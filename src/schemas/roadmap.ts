@@ -23,6 +23,8 @@ export const projectSchema = z.object({
   startDate: dateStringSchema,
   endDate: dateStringSchema,
   statusColor: colorSchema,
+  // Historic projects predate sizing — default them to medium so capacity maths stay valid.
+  size: z.enum(['large', 'medium', 'small']).default('medium'),
   milestones: z.array(milestoneSchema).max(100).default([]),
   dependencies: z.array(z.string().max(100)).optional().default([])
 }).refine(

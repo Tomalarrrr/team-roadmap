@@ -9,6 +9,16 @@
  */
 
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
+import { normalizeStatusColor } from './statusColors';
+
+/**
+ * Normalize an optional custom color (e.g. teamMember.nameColor) to canonical
+ * hex, preserving `undefined` so we don't force a color onto members that
+ * never had one.
+ */
+function normalizeOptionalColor(color?: string): string | undefined {
+  return color ? normalizeStatusColor(color) : undefined;
+}
 
 // ---------- Firebase storage types ----------
 
@@ -63,8 +73,12 @@ function projectFromFirebase(raw: FirebaseProject | null): Project | null {
   if (!raw || typeof raw !== 'object') return null;
   const milestones = keyedObjectToArray<Milestone>(
     raw.milestones as Record<string, Milestone> | Milestone[] | null
-  );
-  return { ...raw, milestones } as Project;
+  ).map(m => ({ ...m, statusColor: normalizeStatusColor(m.statusColor) }));
+  return {
+    ...raw,
+    statusColor: normalizeStatusColor(raw.statusColor),
+    milestones,
+  } as Project;
 }
 
 /**
@@ -127,7 +141,7 @@ export function firebaseSnapshotToRoadmapData(data: unknown): RoadmapData {
   // Convert team members and sort by order field
   const teamMembers = keyedObjectToArray<TeamMember>(
     raw.teamMembers as Record<string, TeamMember> | TeamMember[] | undefined
-  ).sort((a, b) => {
+  ).map(m => ({ ...m, nameColor: normalizeOptionalColor(m.nameColor) })).sort((a, b) => {
     const orderA = a.order ?? Number.MAX_SAFE_INTEGER;
     const orderB = b.order ?? Number.MAX_SAFE_INTEGER;
     if (orderA !== orderB) return orderA - orderB;

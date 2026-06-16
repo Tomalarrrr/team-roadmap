@@ -79,7 +79,6 @@ export const SearchFilter = memo(function SearchFilter({
   const [isOpen, setIsOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [showAllTags, setShowAllTags] = useState(false);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
   // Auto-open games from shareable URL params (?c4 / ?ludo) — initialised here
   // instead of in a mount effect so there's no setState-after-mount.
@@ -98,17 +97,6 @@ export const SearchFilter = memo(function SearchFilter({
       .map(id => projects.find(p => p.id === id))
       .filter((p): p is Project => p !== undefined);
   }, [recentProjectIds, projects]);
-
-  // Extract all unique tags from projects
-  const allTags = useMemo(() => {
-    const tags = new Set<string>();
-    projects.forEach(p => {
-      p.milestones?.forEach(m => {
-        m.tags?.forEach(t => tags.add(t));
-      });
-    });
-    return Array.from(tags).sort();
-  }, [projects]);
 
   // Get platform-appropriate modifier key symbol
   const modifierKey = getModifierKeySymbol();
@@ -160,11 +148,7 @@ export const SearchFilter = memo(function SearchFilter({
     const results = projects.filter(p => {
       const matchesTitle = p.title.toLowerCase().includes(query);
       const matchesOwner = p.owner.toLowerCase().includes(query);
-      const matchesMilestone = p.milestones?.some(m =>
-        m.title.toLowerCase().includes(query) ||
-        m.tags?.some(t => t.toLowerCase().includes(query))
-      );
-      return matchesTitle || matchesOwner || matchesMilestone;
+      return matchesTitle || matchesOwner;
     });
 
     return { searchResults: results.slice(0, 8), totalResultCount: results.length };
@@ -261,7 +245,7 @@ export const SearchFilter = memo(function SearchFilter({
               <input
                 ref={inputRef}
                 type="text"
-                placeholder="Search projects, milestones, tags..."
+                placeholder="Search projects..."
                 value={filters.search}
                 onChange={(e) => setFilters(f => ({ ...f, search: e.target.value }))}
                 onKeyDown={handleKeyDown}
@@ -337,36 +321,6 @@ export const SearchFilter = memo(function SearchFilter({
                   ))}
                 </div>
               </div>
-
-              {allTags.length > 0 && (
-                <div className={styles.filterSection}>
-                  <span className={styles.filterLabel}>Tags</span>
-                  <div className={styles.filterChips}>
-                    {(showAllTags ? allTags : allTags.slice(0, 10)).map(tag => (
-                      <button
-                        key={tag}
-                        className={`${styles.chip} ${filters.tags.includes(tag) ? styles.chipActive : ''}`}
-                        onClick={() => setFilters(f => ({
-                          ...f,
-                          tags: f.tags.includes(tag)
-                            ? f.tags.filter(t => t !== tag)
-                            : [...f.tags, tag]
-                        }))}
-                      >
-                        {tag}
-                      </button>
-                    ))}
-                    {allTags.length > 10 && (
-                      <button
-                        className={styles.moreBtn}
-                        onClick={() => setShowAllTags(prev => !prev)}
-                      >
-                        {showAllTags ? 'Show less' : `+${allTags.length - 10} more`}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
 
               <div className={styles.filterSection}>
                 <span className={styles.filterLabel}>Status</span>

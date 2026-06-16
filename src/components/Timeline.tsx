@@ -31,10 +31,16 @@ import {
   getFYEnd,
   getVisibleFYs,
   getTodayPosition,
-  getBarDimensions,
-  calculateStacks
+  getBarDimensions
 } from '../utils/dateUtils';
-import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from 'date-fns';
+import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format, addDays, parseISO } from 'date-fns';
+import {
+  CAPACITY,
+  UNIT_HEIGHT,
+  heightForSize,
+  supportSegments,
+  type CapacityItem,
+} from '../utils/capacity';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
@@ -92,6 +98,15 @@ function calculateProjectStacks(projects: Project[]): Map<string, number> {
   return stacks;
 }
 
+// Pixel height of a lane's project stack: the row heights plus the gaps between
+// them, floored at the 4-slot capacity frame so light lanes still reserve it.
+function stackPixelHeight(rowHeights: number[]): number {
+  const stack = rowHeights.length > 0
+    ? rowHeights.reduce((sum, h) => sum + h, 0) + (rowHeights.length - 1) * PROJECT_VERTICAL_GAP
+    : 0;
+  return Math.max(stack, CAPACITY * UNIT_HEIGHT);
+}
+
 interface TimelineProps {
   projects: Project[];
   teamMembers: TeamMember[];
@@ -101,29 +116,21 @@ interface TimelineProps {
   dayWidth?: number; // Pixels per day (0.5 - 12)
   selectedProjectId?: string | null;
   filteredOwners?: string[]; // When set, only show swimlanes for these owners
-  newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
   newDependencyIds?: Set<string>; // IDs of newly created dependencies (for entrance animation)
   isLocked?: boolean; // When true, disable all editing actions (view mode)
   isFullscreen?: boolean; // When true, timeline takes full viewport
   onAddProject: (ownerName: string, suggestedStart?: string, suggestedEnd?: string) => void;
   onUpdateProject: (projectId: string, updates: Partial<Project>) => Promise<void>;
   onDeleteProject: (projectId: string) => void;
-  onAddMilestone: (projectId: string) => void;
   onEditProject: (project: Project) => void;
-  onEditMilestone: (projectId: string, milestoneId: string) => void;
-  onUpdateMilestone: (projectId: string, milestoneId: string, updates: Partial<import('../types').Milestone>) => Promise<void>;
-  onDeleteMilestone: (projectId: string, milestoneId: string) => void;
   onAddTeamMember: () => void;
   onEditTeamMember: (member: TeamMember) => void;
   onReorderTeamMembers: (fromIndex: number, toIndex: number) => void;
   onCopyProject?: (project: Project) => void;
   onSelectProject?: (project: Project) => void;
-  onSelectMilestone?: (projectId: string, milestoneId: string, milestone: import('../types').Milestone) => void;
   onAddDependency?: (
     fromProjectId: string,
-    toProjectId: string,
-    fromMilestoneId?: string,
-    toMilestoneId?: string
+    toProjectId: string
   ) => void;
   onRemoveDependency?: (depId: string) => void;
   onUpdateDependency?: (depId: string, updates: Partial<Dependency>) => void;
@@ -159,32 +166,19 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
 
 const DEFAULT_DAY_WIDTH = 3; // Default to month view
 
-const BASE_PROJECT_HEIGHT = 52; // Minimum project bar height
-const MILESTONE_ROW_HEIGHT = 24; // Height per milestone row
-const PROJECT_CONTENT_HEIGHT = 28; // Height of the title/dates area
-const PROJECT_VERTICAL_GAP = 20; // Gap between stacked projects (increased for visual clarity)
+const BASE_PROJECT_HEIGHT = 52; // Project bar height (fixed)
+const PROJECT_VERTICAL_GAP = 6; // Gap between stacked pills — kept small so a stack reads as a capacity bar and spare-capacity (Team Support) stays visible
 const LANE_PADDING = 16; // Padding top and bottom of lane
 const LANE_BOTTOM_BUFFER = 8; // Extra buffer at bottom to prevent spillover
 const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
 const COLLAPSED_LANE_HEIGHT = 40; // Height for collapsed lanes
+const SUPPORT_PILL_HEIGHT = 18; // Thin Team Support / Development footer strip
+const SUPPORT_GAP = 6; // Gap between the project stack and the support strip below it
 
 // Stable empty defaults to avoid creating new references on each render
 const EMPTY_SET = new Set<string>();
 const EMPTY_LEAVE_BLOCKS: LeaveBlockType[] = [];
 const EMPTY_PERIOD_MARKERS: PeriodMarkerType[] = [];
-
-// Calculate project bar height based on its milestones
-function calculateProjectHeight(milestones: { id: string; startDate: string; endDate: string }[] | undefined): number {
-  if (!milestones || milestones.length === 0) {
-    return BASE_PROJECT_HEIGHT;
-  }
-
-  const milestoneStacks = calculateStacks(milestones);
-  const maxStack = milestoneStacks.size > 0 ? Math.max(...milestoneStacks.values()) : -1;
-  const milestoneRows = maxStack + 1;
-  const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
-  return Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
-}
 
 // Ref handle type for parent components
 export interface TimelineRef {
@@ -200,24 +194,18 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   dayWidth: dayWidthProp,
   selectedProjectId,
   filteredOwners,
-  newMilestoneIds,
   newDependencyIds,
   isLocked = false,
   isFullscreen = false,
   onAddProject,
   onUpdateProject,
   onDeleteProject,
-  onAddMilestone,
   onEditProject,
-  onEditMilestone,
-  onUpdateMilestone,
-  onDeleteMilestone,
   onAddTeamMember,
   onEditTeamMember,
   onReorderTeamMembers,
   onCopyProject,
   onSelectProject,
-  onSelectMilestone,
   onAddDependency,
   onRemoveDependency,
   onUpdateDependency,
@@ -519,7 +507,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   }), [scrollToToday]);
 
   // Track which project/milestone is hovered for dependency highlighting
-  const [hoveredItemId, setHoveredItemId] = useState<{ projectId: string; milestoneId?: string } | null>(null);
+  const [hoveredItemId, setHoveredItemId] = useState<{ projectId: string } | null>(null);
 
   // Leave context menu state
   const [leaveContextMenu, setLeaveContextMenu] = useState<{
@@ -829,8 +817,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     return stacks;
   }, [teamMembers, projectStacksByOwner]);
 
-  // Calculate the maximum project height for each stack row in each lane
-  // This accounts for milestones stacking within projects
+  // Calculate lane heights from the fixed-height project bars in each stack row.
   const { laneHeights, laneStackHeights } = useMemo(() => {
     const heights: number[] = [];
     const stackHeights: Record<string, number[]> = {};
@@ -847,30 +834,78 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       const stacks = projectStacksByOwner[member.name];
       const maxStack = stacks && stacks.size > 0 ? Math.max(...stacks.values()) : -1;
 
-      // Calculate max height for each stack row
+      // Each row is as tall as its tallest pill — pill height is the project's slot
+      // cost (Large 2 / Medium 1.5 / Small 1 units). Keeping a per-row height array
+      // means stackTopOffset and dependency anchoring stay aligned.
       const rowHeights: number[] = [];
       for (let row = 0; row <= maxStack; row++) {
-        // Find all projects in this stack row and get their max height
-        const projectsInRow = ownerProjects.filter(p => stacks?.get(p.id) === row);
-        const maxHeightInRow = projectsInRow.reduce((max, p) => {
-          const height = isFullscreen ? BASE_PROJECT_HEIGHT : calculateProjectHeight(p.milestones);
-          return Math.max(max, height);
-        }, BASE_PROJECT_HEIGHT);
-        rowHeights.push(maxHeightInRow);
+        const tallest = ownerProjects.reduce(
+          (max, p) => ((stacks?.get(p.id) ?? 0) === row
+            ? Math.max(max, heightForSize(p.size ?? 'medium'))
+            : max),
+          UNIT_HEIGHT,
+        );
+        rowHeights.push(tallest);
       }
 
       stackHeights[member.name] = rowHeights;
 
-      // Total lane height is sum of all row heights + gaps + padding + buffer
-      const totalProjectHeight = rowHeights.length > 0
-        ? rowHeights.reduce((sum, h) => sum + h, 0) + (rowHeights.length - 1) * PROJECT_VERTICAL_GAP
-        : 0;
-      const height = Math.max(MIN_LANE_HEIGHT, totalProjectHeight + LANE_PADDING * 2 + LANE_BOTTOM_BUFFER);
+      // Fit the 4-slot capacity frame at minimum, growing only to the actual
+      // stack if it happens to be taller (still bounded by the 4-slot model).
+      // Then reserve a thin footer *below* the stack for the Team Support strip,
+      // so it sits in its own row and can never overlap a project pill.
+      const stackPx = stackPixelHeight(rowHeights);
+      const contentHeight = stackPx + SUPPORT_GAP + SUPPORT_PILL_HEIGHT;
+      const height = Math.max(MIN_LANE_HEIGHT, contentHeight + LANE_PADDING * 2 + LANE_BOTTOM_BUFFER);
       heights.push(height);
     });
 
     return { laneHeights: heights, laneStackHeights: stackHeights };
-  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes, isFullscreen]);
+  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes]);
+
+  // Spare capacity per owner across the visible window, surfaced as Team Support.
+  const supportByOwner = useMemo(() => {
+    const startISO = format(timelineStart, 'yyyy-MM-dd');
+    const endISO = format(timelineEnd, 'yyyy-MM-dd');
+    const byOwner: Record<string, ReturnType<typeof supportSegments>> = {};
+    displayedTeamMembers.forEach(member => {
+      if (collapsedLanes.has(member.id)) {
+        byOwner[member.name] = [];
+        return;
+      }
+      const items: CapacityItem[] = (projectsByOwner[member.name] || []).map(p => ({
+        id: p.id,
+        startDate: p.startDate,
+        endDate: p.endDate,
+        size: p.size ?? 'medium',
+      }));
+      // Only surface Team Support / Development where the member is *working but
+      // not full* — i.e. some slots are used yet spare capacity remains (load
+      // 3.5/4 etc). Fully-idle stretches (no project at all) are skipped so the
+      // pill doesn't blanket every empty part of the timeline, and fully-loaded
+      // stretches have nothing spare to show.
+      const partial = supportSegments(items, startISO, endISO)
+        .filter(s => s.freeSlots > 0 && s.freeSlots < CAPACITY);
+
+      // Merge date-contiguous partial segments into a single span so a run of
+      // overlapping projects reads as one clean strip rather than a staircase of
+      // little pills at different free-slot heights.
+      const mergedSupport: typeof partial = [];
+      for (const seg of partial) {
+        const prev = mergedSupport[mergedSupport.length - 1];
+        const isContiguous = prev &&
+          format(addDays(parseISO(prev.endDate), 1), 'yyyy-MM-dd') === seg.startDate;
+        if (isContiguous) {
+          prev.endDate = seg.endDate;
+          prev.freeSlots = Math.min(prev.freeSlots, seg.freeSlots);
+        } else {
+          mergedSupport.push({ ...seg });
+        }
+      }
+      byOwner[member.name] = mergedSupport;
+    });
+    return byOwner;
+  }, [displayedTeamMembers, projectsByOwner, collapsedLanes, timelineStart, timelineEnd]);
 
   // Calculate cumulative lane positions
   const lanePositions = useMemo(() => {
@@ -942,8 +977,6 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           key={dep.id}
           fromProject={fromProject}
           toProject={toProject}
-          fromMilestoneId={isFullscreen ? undefined : dep.fromMilestoneId}
-          toMilestoneId={isFullscreen ? undefined : dep.toMilestoneId}
           timelineStart={timelineStart}
           dayWidth={dayWidth}
           projectStacks={globalProjectStacks}
@@ -961,7 +994,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         />
       );
     });
-  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds, ownerNameToMemberId, collapsedLanes, isFullscreen]);
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds, ownerNameToMemberId, collapsedLanes]);
 
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>
@@ -1156,6 +1189,27 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                         })}
                       />
                     ))}
+                    {/* Team Support / Development — one thin strip marking spare
+                        capacity while the member is working but not full. It lives
+                        in a dedicated footer row *below* the whole project stack,
+                        so it never overlaps a project pill. */}
+                    {!isLaneCollapsed && supportByOwner[member.name]?.map((seg) => {
+                      const { left, width } = getBarDimensions(seg.startDate, seg.endDate, timelineStart, dayWidth);
+                      const top = LANE_PADDING + stackPixelHeight(laneStackHeights[member.name] || []) + SUPPORT_GAP;
+                      return (
+                        <div
+                          key={`support-${seg.startDate}`}
+                          className={styles.supportBlock}
+                          style={{ left, width, top, height: SUPPORT_PILL_HEIGHT }}
+                          title="Team Support / Development"
+                        >
+                          {/* Only label segments wide enough to read — keeps slivers quiet */}
+                          {width > 150 && (
+                            <span className={styles.supportLabel}>Team Support / Development</span>
+                          )}
+                        </div>
+                      );
+                    })}
                     {/* Projects */}
                     {projectsByOwner[member.name]?.map((project) => {
                       const stackIdx = stacks?.get(project.id) ?? 0;
@@ -1169,25 +1223,15 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                         stackTopOffset={getStackTopOffset(member.name, stackIdx)}
                         laneTop={lanePositions[idx]}
                         isSelected={project.id === selectedProjectId}
-                        newMilestoneIds={newMilestoneIds}
                         isLocked={isLocked}
-                        isFullscreen={isFullscreen}
                         onUpdate={(updates) => onUpdateProject(project.id, updates)}
                         onDelete={() => onDeleteProject(project.id)}
-                        onAddMilestone={() => onAddMilestone(project.id)}
                         onEdit={() => onEditProject(project)}
-                        onEditMilestone={(mid) => onEditMilestone(project.id, mid)}
-                        onUpdateMilestone={(mid, updates) => onUpdateMilestone(project.id, mid, updates)}
-                        onDeleteMilestone={(mid) => onDeleteMilestone(project.id, mid)}
                         onCopy={onCopyProject ? () => onCopyProject(project) : undefined}
                         onSelect={onSelectProject ? () => onSelectProject(project) : undefined}
-                        onSelectMilestone={onSelectMilestone ? (mid) => {
-                          const milestone = project.milestones?.find(m => m.id === mid);
-                          if (milestone) onSelectMilestone(project.id, mid, milestone);
-                        } : undefined}
                         onEdgeDrag={handleEdgeDrag}
-                        onHoverChange={(hovered, milestoneId) => setHoveredItemId(
-                          hovered ? { projectId: project.id, milestoneId } : null
+                        onHoverChange={(hovered) => setHoveredItemId(
+                          hovered ? { projectId: project.id } : null
                         )}
                       />
                       );

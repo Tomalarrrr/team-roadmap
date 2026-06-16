@@ -4,42 +4,38 @@ import type { Dependency } from '../types';
  * Checks if adding a new dependency would create a circular dependency.
  * Uses depth-first search to detect cycles in the dependency graph.
  *
+ * A dependency is fundamentally a PROJECT-ordering constraint: even a
+ * milestone-anchored edge means its source project must precede its target
+ * project. So the cycle graph is keyed purely on project ids. Keying on a mix of
+ * milestone and project ids (as an earlier version did) left the two namespaces
+ * disconnected, so a cross-namespace cycle — e.g. P1→P2 plus a milestone edge
+ * P2.m→P1 — went undetected. Project-keying closes that hole.
+ *
  * @param dependencies - Current list of dependencies
- * @param fromId - Source project/milestone ID
- * @param toId - Target project/milestone ID
- * @param fromProjectId - Source project ID (for milestones)
- * @param toProjectId - Target project ID (for milestones)
+ * @param fromProjectId - Source project ID
+ * @param toProjectId - Target project ID
  * @returns true if adding this dependency would create a cycle
  */
 export function wouldCreateCycle(
   dependencies: Dependency[],
-  fromId: string,
-  toId: string
+  fromProjectId: string,
+  toProjectId: string
 ): boolean {
-  // Self-dependency check
-  if (fromId === toId) return true;
+  // Self-dependency (a project ordering against itself) is always a cycle.
+  if (fromProjectId === toProjectId) return true;
 
-  // Build adjacency list for the dependency graph
+  // Build a project-level adjacency list from every dependency.
   const graph = new Map<string, Set<string>>();
-
-  dependencies.forEach(dep => {
-    const source = dep.fromMilestoneId || dep.fromProjectId;
-    const target = dep.toMilestoneId || dep.toProjectId;
-
-    if (!graph.has(source)) {
-      graph.set(source, new Set());
-    }
+  const addEdge = (source: string, target: string) => {
+    if (!graph.has(source)) graph.set(source, new Set());
     graph.get(source)!.add(target);
-  });
+  };
 
-  // Add the new edge temporarily
-  if (!graph.has(fromId)) {
-    graph.set(fromId, new Set());
-  }
-  graph.get(fromId)!.add(toId);
+  dependencies.forEach(dep => addEdge(dep.fromProjectId, dep.toProjectId));
 
-  // Check if there's a path from toId back to fromId (which would create a cycle)
-  return hasPath(graph, toId, fromId);
+  // Add the candidate edge, then look for a path back from target to source.
+  addEdge(fromProjectId, toProjectId);
+  return hasPath(graph, toProjectId, fromProjectId);
 }
 
 /**
@@ -112,11 +108,9 @@ export function validateDependency(
     return { valid: false, error: 'This dependency already exists' };
   }
 
-  // Check for circular dependency
-  const fromId = fromMilestoneId || fromProjectId;
-  const toId = toMilestoneId || toProjectId;
-
-  if (wouldCreateCycle(dependencies, fromId, toId)) {
+  // Check for circular dependency at the project level (milestone anchoring
+  // doesn't change which project must precede which).
+  if (wouldCreateCycle(dependencies, fromProjectId, toProjectId)) {
     return { valid: false, error: 'This would create a circular dependency' };
   }
 

@@ -12,9 +12,10 @@ export const projectSchema = z.object({
   owner: z.string().min(1, 'Owner is required').max(50, 'Owner name too long'),
   startDate: dateStringSchema,
   endDate: dateStringSchema,
-  statusColor: colorSchema
+  statusColor: colorSchema,
+  size: z.enum(['large', 'medium', 'small'], { message: 'Select a project size' })
 }).refine(data => new Date(data.endDate) >= new Date(data.startDate), {
-  message: 'End date must be after start date',
+  message: 'End date must be on or after start date',
   path: ['endDate']
 });
 
@@ -27,7 +28,7 @@ export const milestoneSchema = z.object({
   tags: z.array(z.string().max(30, 'Tag too long')).max(10, 'Too many tags'),
   statusColor: colorSchema
 }).refine(data => new Date(data.endDate) >= new Date(data.startDate), {
-  message: 'End date must be after start date',
+  message: 'End date must be on or after start date',
   path: ['endDate']
 });
 

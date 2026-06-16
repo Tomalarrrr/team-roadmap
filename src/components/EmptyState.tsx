@@ -4,7 +4,6 @@ export type EmptyStateType =
   | 'no-projects'
   | 'no-team-members'
   | 'no-search-results'
-  | 'no-milestones'
   | 'no-dependencies';
 
 interface EmptyStateProps {
@@ -53,19 +52,6 @@ const EMPTY_STATE_CONFIG: Record<EmptyStateType, {
     ),
     title: 'No results found',
     description: 'Try adjusting your search or filters to find what you\'re looking for.'
-  },
-  'no-milestones': {
-    icon: (
-      <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M8 24h32" />
-        <circle cx="16" cy="24" r="4" fill="currentColor" opacity="0.2" />
-        <circle cx="32" cy="24" r="4" fill="currentColor" opacity="0.2" />
-        <path d="M24 16v16" strokeDasharray="4 4" opacity="0.5" />
-      </svg>
-    ),
-    title: 'No milestones',
-    description: 'Break this project into milestones to track progress along the way.',
-    actionLabel: 'Add Milestone'
   },
   'no-dependencies': {
     icon: (

@@ -712,3 +712,38 @@
     font-size: 0.8rem;
   }
 }
+
+/* ========================================
+   Team Support / Development filler
+   Fills spare capacity below the project stack.
+   ======================================== */
+
+.supportBlock {
+  position: absolute;
+  z-index: 1; /* behind project bars */
+  /* Thin rounded pill — reads as "open capacity / available for support work"
+     in the gaps without competing with the project pills for attention. */
+  border-radius: var(--radius-full, 999px);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-light);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.supportLabel {
+  /* Sticky so a single label stays readable as the lane scrolls horizontally,
+     rather than repeating the text across every segment. */
+  position: sticky;
+  left: 0;
+  padding: 0 10px;
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  opacity: 0.75;
+}

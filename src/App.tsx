@@ -10,6 +10,7 @@ import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCovera
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates, parseLocalDate, toDateString } from './utils/dateUtils';
+import { evaluateAssignment, formatCapacityMessage, type CapacityItem } from './utils/capacity';
 import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -21,7 +22,6 @@ import styles from './App.module.css';
 
 // Lazy load form components (not needed until user clicks)
 const ProjectForm = lazy(() => import('./components/ProjectForm').then(m => ({ default: m.ProjectForm })));
-const MilestoneForm = lazy(() => import('./components/MilestoneForm').then(m => ({ default: m.MilestoneForm })));
 const TeamMemberForm = lazy(() => import('./components/TeamMemberForm').then(m => ({ default: m.TeamMemberForm })));
 const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then(m => ({ default: m.ShortcutsModal })));
 
@@ -33,8 +33,6 @@ function sanitizeError(error: string): string {
 type ModalType =
   | { type: 'add-project'; ownerName: string; suggestedStart: string; suggestedEnd: string }
   | { type: 'edit-project'; project: Project }
-  | { type: 'add-milestone'; projectId: string; project: Project }
-  | { type: 'edit-milestone'; projectId: string; project: Project; milestone: Milestone }
   | { type: 'add-member' }
   | { type: 'edit-member'; member: TeamMember }
   | null;
@@ -80,7 +78,6 @@ function App() {
     isOnline,
     isSaving,
     lastSaved,
-    newMilestoneIds,
     newDependencyIds,
     clearError,
     addTeamMember,
@@ -90,9 +87,6 @@ function App() {
     addProject,
     updateProject,
     deleteProject,
-    addMilestone,
-    updateMilestone,
-    deleteMilestone,
     addDependency,
     removeDependency,
     updateDependency,
@@ -287,20 +281,14 @@ function App() {
     await addProject(project);
   }, [addProject]);
 
-  const handlePasteMilestone = useCallback(async (milestone: Omit<Milestone, 'id'>, projectId: string) => {
-    await addMilestone(projectId, milestone);
-  }, [addMilestone]);
-
   // Clipboard
   const {
     copyProject,
     paste,
     hasContent: hasClipboard,
-    setSelectedProject,
-    setSelectedMilestone
+    setSelectedProject
   } = useClipboard({
     onPasteProject: handlePasteProject,
-    onPasteMilestone: handlePasteMilestone,
     onShowToast: showToast
   });
 
@@ -354,14 +342,6 @@ function App() {
         return false;
       }
 
-      // Filter by tags (O(1) lookup per tag)
-      if (hasTagFilter) {
-        const hasMatchingTag = p.milestones?.some(m =>
-          m.tags?.some(t => tags.has(t))
-        );
-        if (!hasMatchingTag) return false;
-      }
-
       // Filter by status
       if (hasStatusFilter && getProjectDisplayStatus(p) !== filters.status) {
         return false;
@@ -371,11 +351,7 @@ function App() {
       if (hasSearchFilter) {
         const titleMatch = p.title.toLowerCase().includes(searchQuery);
         const ownerMatch = p.owner.toLowerCase().includes(searchQuery);
-        const milestoneMatch = p.milestones?.some(m =>
-          m.title.toLowerCase().includes(searchQuery) ||
-          m.tags?.some(t => t.toLowerCase().includes(searchQuery))
-        );
-        if (!titleMatch && !ownerMatch && !milestoneMatch) return false;
+        if (!titleMatch && !ownerMatch) return false;
       }
 
       return true;
@@ -472,7 +448,7 @@ function App() {
             for (const dep of deps) {
               addDependency(
                 dep.fromProjectId, dep.toProjectId,
-                dep.fromMilestoneId, dep.toMilestoneId, dep.type
+                undefined, undefined, dep.type
               ).catch(() => { /* target may have been deleted */ });
             }
           }
@@ -636,7 +612,8 @@ function App() {
             owner: project.owner,
             startDate: toDateString(startDate),
             endDate: toDateString(endDate),
-            statusColor: normalizeStatusColor(project.statusColor)
+            statusColor: normalizeStatusColor(project.statusColor),
+            size: project.size ?? 'medium'
           }).then(() => {
             showToast('Project duplicated', 'success');
           }).catch(() => {
@@ -718,22 +695,13 @@ function App() {
 
   // Project handlers with undo support
   const handleAddProject = useCallback(
-    async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Omit<Milestone, 'id'>[] }) => {
+    async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Milestone[] }) => {
       try {
-        const { milestones: newMilestones, ...projectData } = values;
+        // Milestones are no longer created through the form; ignore the field.
+        const { milestones: _milestones, ...projectData } = values; // eslint-disable-line @typescript-eslint/no-unused-vars -- field intentionally dropped
         const newProject = await addProject(projectData);
-        const addedMilestones: Milestone[] = [];
-        if (newProject && newMilestones && newMilestones.length > 0) {
-          // Add milestones to the newly created project
-          for (const milestone of newMilestones) {
-            const added = await addMilestone(newProject.id, milestone);
-            if (added) addedMilestones.push(added);
-          }
-        }
         if (newProject) {
-          // Record full project state including milestones for proper undo
-          const fullProject = { ...newProject, milestones: addedMilestones };
-          recordAction('CREATE_PROJECT', fullProject, createInverse('CREATE_PROJECT', null, fullProject));
+          recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
         }
         showToast('Project created successfully', 'success');
         closeModal();
@@ -741,44 +709,17 @@ function App() {
         showToast(`Failed to create project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
       }
     },
-    [addProject, addMilestone, closeModal, recordAction, showToast]
+    [addProject, closeModal, recordAction, showToast]
   );
 
   const handleEditProject = useCallback(
-    async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Array<{ id?: string } & Omit<Milestone, 'id'>> }) => {
+    async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Milestone[] }) => {
       if (modal?.type === 'edit-project') {
         try {
           const beforeState = modal.project;
-          const { milestones: updatedMilestones, ...projectData } = values;
+          // Milestones aren't edited here; omit the field so existing milestone data is preserved.
+          const { milestones: _milestones, ...projectData } = values; // eslint-disable-line @typescript-eslint/no-unused-vars -- field intentionally dropped
           await updateProject(modal.project.id, projectData);
-
-          // Handle milestone updates if provided
-          if (updatedMilestones) {
-            const existingMilestones = modal.project.milestones || [];
-            const existingIds = new Set(existingMilestones.map(m => m.id));
-            const updatedIds = new Set(updatedMilestones.filter(m => m.id).map(m => m.id));
-
-            // Delete removed milestones
-            for (const existing of existingMilestones) {
-              if (!updatedIds.has(existing.id)) {
-                await deleteMilestone(modal.project.id, existing.id);
-              }
-            }
-
-            // Update existing and add new milestones
-            for (const milestone of updatedMilestones) {
-              if (milestone.id && existingIds.has(milestone.id)) {
-                // Update existing
-                const { id, ...milestoneData } = milestone;
-                await updateMilestone(modal.project.id, id, milestoneData);
-              } else if (!milestone.id) {
-                // Add new
-                const { id: _newId, ...milestoneData } = milestone; // eslint-disable-line @typescript-eslint/no-unused-vars -- Stripping auto-generated id before save
-                await addMilestone(modal.project.id, milestoneData);
-              }
-            }
-          }
-
           recordAction('UPDATE_PROJECT', values, createInverse('UPDATE_PROJECT', beforeState, values));
           closeModal();
         } catch (error) {
@@ -786,7 +727,49 @@ function App() {
         }
       }
     },
-    [modal, updateProject, updateMilestone, addMilestone, deleteMilestone, closeModal, recordAction, showToast]
+    [modal, updateProject, closeModal, recordAction, showToast]
+  );
+
+  // Capacity-guarded update used by the timeline (drag to reassign / resize).
+  // Rejects changes that would push an owner over their 4-slot capacity; the
+  // pill reverts to its prior position and a toast explains why.
+  const handleTimelineUpdateProject = useCallback(
+    async (projectId: string, updates: Partial<Project>) => {
+      const current = data.projects.find(p => p.id === projectId);
+      const affectsCapacity =
+        updates.owner !== undefined ||
+        updates.startDate !== undefined ||
+        updates.endDate !== undefined ||
+        updates.size !== undefined;
+
+      if (current && affectsCapacity) {
+        const merged = { ...current, ...updates };
+        const byOwner: Record<string, CapacityItem[]> = {};
+        data.projects.forEach(p => {
+          // Skip malformed fragments with no owner so they don't surface as an
+          // "undefined" suggestion or pollute another owner's capacity sum.
+          if (!p.owner) return;
+          (byOwner[p.owner] ??= []).push(p);
+        });
+        const candidate: CapacityItem = {
+          id: merged.id,
+          startDate: merged.startDate,
+          endDate: merged.endDate,
+          size: merged.size ?? 'medium',
+        };
+        const verdict = evaluateAssignment(byOwner, candidate, merged.owner);
+        if (!verdict.fits) {
+          showToast(
+            formatCapacityMessage(verdict, merged.owner, candidate.size) ?? 'Over capacity',
+            'error',
+          );
+          return; // reject — ProjectBar reverts its optimistic preview
+        }
+      }
+
+      await updateProject(projectId, updates);
+    },
+    [data.projects, updateProject, showToast]
   );
 
   const handleDeleteProject = useCallback(
@@ -816,8 +799,8 @@ function App() {
                     await addDependency(
                       dep.fromProjectId,
                       dep.toProjectId,
-                      dep.fromMilestoneId,
-                      dep.toMilestoneId,
+                      undefined,
+                      undefined,
                       dep.type
                     );
                   } catch {
@@ -835,92 +818,13 @@ function App() {
     [data.projects, data.dependencies, deleteProject, recordAction, showToast, addProject, addDependency]
   );
 
-  // Milestone handlers
-  const handleAddMilestone = useCallback(
-    async (values: Omit<Milestone, 'id'>) => {
-      if (modal?.type === 'add-milestone') {
-        try {
-          const project = modal.project;
-
-          // Check if milestone extends beyond project bounds
-          const milestoneStart = new Date(values.startDate);
-          const milestoneEnd = new Date(values.endDate);
-          const projectStart = new Date(project.startDate);
-          const projectEnd = new Date(project.endDate);
-
-          const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
-
-          // Add the milestone
-          await addMilestone(modal.projectId, values);
-
-          // Auto-expand project bounds if milestone extends beyond
-          if (needsExpansion) {
-            const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
-            const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
-
-            await updateProject(modal.projectId, {
-              startDate: newStartDate,
-              endDate: newEndDate
-            });
-            showToast('Project dates expanded to fit milestone', 'info');
-          }
-
-          closeModal();
-        } catch (error) {
-          showToast(`Failed to add milestone: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-        }
-      }
-    },
-    [modal, addMilestone, updateProject, closeModal, showToast]
-  );
-
-  const handleEditMilestone = useCallback(
-    async (values: Omit<Milestone, 'id'>) => {
-      if (modal?.type === 'edit-milestone') {
-        try {
-          const project = modal.project;
-
-          // Check if milestone extends beyond project bounds
-          const milestoneStart = new Date(values.startDate);
-          const milestoneEnd = new Date(values.endDate);
-          const projectStart = new Date(project.startDate);
-          const projectEnd = new Date(project.endDate);
-
-          const needsExpansion = milestoneStart < projectStart || milestoneEnd > projectEnd;
-
-          // Update the milestone
-          await updateMilestone(modal.projectId, modal.milestone.id, values);
-
-          // Auto-expand project bounds if milestone extends beyond
-          if (needsExpansion) {
-            const newStartDate = milestoneStart < projectStart ? values.startDate : project.startDate;
-            const newEndDate = milestoneEnd > projectEnd ? values.endDate : project.endDate;
-
-            await updateProject(modal.projectId, {
-              startDate: newStartDate,
-              endDate: newEndDate
-            });
-            showToast('Project dates expanded to fit milestone', 'info');
-          }
-
-          closeModal();
-        } catch (error) {
-          showToast(`Failed to update milestone: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
-        }
-      }
-    },
-    [modal, updateMilestone, updateProject, closeModal, showToast]
-  );
-
-  // Dependency handlers (persisted to Firebase)
+  // Dependency handlers (persisted to Firebase) — project-level only.
   const handleAddDependency = useCallback(async (
     fromProjectId: string,
-    toProjectId: string,
-    fromMilestoneId?: string,
-    toMilestoneId?: string
+    toProjectId: string
   ) => {
     try {
-      await addDependency(fromProjectId, toProjectId, fromMilestoneId, toMilestoneId);
+      await addDependency(fromProjectId, toProjectId);
       showToast('Dependency created', 'success');
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -1008,30 +912,9 @@ function App() {
     }
   }, [updatePeriodMarker, showToast]);
 
-  const openAddMilestone = useCallback(
-    (projectId: string) => {
-      const project = data.projects.find((p) => p.id === projectId);
-      if (project) {
-        setModal({ type: 'add-milestone', projectId, project });
-      }
-    },
-    [data.projects]
-  );
-
   const openEditProject = useCallback((project: Project) => {
     setModal({ type: 'edit-project', project });
   }, []);
-
-  const openEditMilestone = useCallback(
-    (projectId: string, milestoneId: string) => {
-      const project = data.projects.find((p) => p.id === projectId);
-      const milestone = project?.milestones?.find((m) => m.id === milestoneId);
-      if (project && milestone) {
-        setModal({ type: 'edit-milestone', projectId, project, milestone });
-      }
-    },
-    [data.projects]
-  );
 
   if (loading) {
     return (
@@ -1087,7 +970,6 @@ function App() {
           dayWidth={dayWidth}
           selectedProjectId={selectedProjectId}
           filteredOwners={filters.owners.length > 0 ? filters.owners : undefined}
-          newMilestoneIds={newMilestoneIds}
           newDependencyIds={newDependencyIds}
           isLocked={isLocked}
           isFullscreen={isFullscreen}
@@ -1101,19 +983,14 @@ function App() {
               setModal({ type: 'add-project', ownerName, suggestedStart, suggestedEnd });
             }
           }}
-          onUpdateProject={updateProject}
+          onUpdateProject={handleTimelineUpdateProject}
           onDeleteProject={handleDeleteProject}
-          onAddMilestone={openAddMilestone}
           onEditProject={openEditProject}
-          onEditMilestone={openEditMilestone}
-          onUpdateMilestone={updateMilestone}
-          onDeleteMilestone={deleteMilestone}
           onAddTeamMember={() => setModal({ type: 'add-member' })}
           onEditTeamMember={(member) => setModal({ type: 'edit-member', member })}
           onReorderTeamMembers={reorderTeamMembers}
           onCopyProject={copyProject}
           onSelectProject={setSelectedProject}
-          onSelectMilestone={(_, __, milestone) => setSelectedMilestone(milestone)}
           onAddDependency={handleAddDependency}
           onRemoveDependency={handleRemoveDependency}
           onUpdateDependency={handleUpdateDependency}
@@ -1163,6 +1040,8 @@ function App() {
                 startDate: modal.suggestedStart,
                 endDate: modal.suggestedEnd
               }}
+              teamMembers={data.teamMembers}
+              projects={data.projects}
               onSubmit={handleAddProject}
               onCancel={closeModal}
               hideOwner
@@ -1181,55 +1060,17 @@ function App() {
                 owner: modal.project.owner,
                 startDate: modal.project.startDate,
                 endDate: modal.project.endDate,
-                statusColor: modal.project.statusColor
+                statusColor: modal.project.statusColor,
+                size: modal.project.size
               }}
               initialMilestones={modal.project.milestones}
               teamMembers={data.teamMembers}
+              projects={data.projects}
+              editingProjectId={modal.project.id}
               onSubmit={handleEditProject}
               onCancel={closeModal}
               onDelete={async () => {
                 await handleDeleteProject(modal.project.id);
-                closeModal();
-              }}
-              isEditing
-            />
-          )}
-        </Suspense>
-      </Modal>
-
-      {/* Add Milestone Modal */}
-      <Modal isOpen={modal?.type === 'add-milestone'} onClose={closeModal} title="Add Milestone">
-        <Suspense fallback={formFallback}>
-          {modal?.type === 'add-milestone' && (
-            <MilestoneForm
-              projectStartDate={modal.project.startDate}
-              projectEndDate={modal.project.endDate}
-              onSubmit={handleAddMilestone}
-              onCancel={closeModal}
-            />
-          )}
-        </Suspense>
-      </Modal>
-
-      {/* Edit Milestone Modal */}
-      <Modal isOpen={modal?.type === 'edit-milestone'} onClose={closeModal} title="Edit Milestone">
-        <Suspense fallback={formFallback}>
-          {modal?.type === 'edit-milestone' && (
-            <MilestoneForm
-              initialValues={{
-                title: modal.milestone.title,
-                description: modal.milestone.description,
-                startDate: modal.milestone.startDate,
-                endDate: modal.milestone.endDate,
-                tags: modal.milestone.tags,
-                statusColor: modal.milestone.statusColor
-              }}
-              projectStartDate={modal.project.startDate}
-              projectEndDate={modal.project.endDate}
-              onSubmit={handleEditMilestone}
-              onCancel={closeModal}
-              onDelete={async () => {
-                await deleteMilestone(modal.projectId, modal.milestone.id);
                 closeModal();
               }}
               isEditing

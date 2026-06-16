@@ -2,7 +2,7 @@ import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { PeriodMarker as PeriodMarkerType, PeriodMarkerColor } from '../types';
 import { differenceInDays } from 'date-fns';
-import { formatShortDate } from '../utils/dateUtils';
+import { formatShortDate, getBarDimensions, parseLocalDate } from '../utils/dateUtils';
 import styles from './PeriodMarker.module.css';
 
 interface PeriodMarkerProps {
@@ -26,7 +26,7 @@ const MARKER_COLORS: Record<PeriodMarkerColor, { bg: string; dot: string }> = {
 const TOOLTIP_DELAY_MS = 400;
 
 function formatDuration(startDate: string, endDate: string): string {
-  const days = differenceInDays(new Date(endDate), new Date(startDate)) + 1;
+  const days = differenceInDays(parseLocalDate(endDate), parseLocalDate(startDate)) + 1;
   if (days < 7) return `${days} day${days === 1 ? '' : 's'}`;
   const weeks = Math.round(days / 7);
   if (weeks < 5) return `${weeks} week${weeks === 1 ? '' : 's'}`;
@@ -42,20 +42,17 @@ export function PeriodMarker({
   isLocked = false,
   onContextMenu
 }: PeriodMarkerProps) {
-  const { left, width } = useMemo(() => {
-    const startDate = new Date(marker.startDate);
-    const endDate = new Date(marker.endDate);
-    const daysFromStart = differenceInDays(startDate, timelineStart);
-    const duration = differenceInDays(endDate, startDate) + 1;
-
-    return {
-      left: daysFromStart * dayWidth,
-      width: duration * dayWidth
-    };
-  }, [marker, timelineStart, dayWidth]);
+  // Position the band with the exact same helper project bars use, so a marker
+  // and a project sharing a date align pixel-for-pixel. The previous code parsed
+  // dates with `new Date(str)` (UTC midnight) while `timelineStart` is local
+  // midnight, which drifted the band a full day in UTC-behind timezones.
+  const { left, width } = useMemo(
+    () => getBarDimensions(marker.startDate, marker.endDate, timelineStart, dayWidth),
+    [marker.startDate, marker.endDate, timelineStart, dayWidth]
+  );
 
   const colors = MARKER_COLORS[marker.color];
-  const dotPattern = `radial-gradient(circle, ${colors.dot} 1px, transparent 1px)`;
+  const dotPattern = `radial-gradient(circle, ${colors.dot} 1.4px, transparent 1.4px)`;
 
   // Tooltip state — rendered via portal to escape z-index stacking context
   const [showTooltip, setShowTooltip] = useState(false);
@@ -108,13 +105,20 @@ export function PeriodMarker({
       style={{
         left,
         width,
-        height: totalHeight,
-        backgroundColor: colors.bg,
-        backgroundImage: dotPattern,
-        backgroundSize: '6px 6px'
+        height: totalHeight
       }}
       aria-label={marker.label || `${marker.color} period marker: ${marker.startDate} to ${marker.endDate}`}
     >
+      {/* Translucent colored fill (behind the label, above the bars) */}
+      <div
+        className={styles.band}
+        style={{
+          backgroundColor: colors.bg,
+          backgroundImage: dotPattern,
+          backgroundSize: '6px 6px'
+        }}
+      />
+
       {/* Hover zone for tooltip and right-click */}
       <div
         className={styles.hoverZone}

@@ -27,9 +27,13 @@ describe('generateGameCode', () => {
     for (let i = 0; i < 1000; i++) {
       codes.add(generateGameCode());
     }
-    // With 30^4 = ~810K combinations, 1000 codes should be nearly all unique
-    // Allow 1 collision (birthday paradox probability ~0.06%)
-    expect(codes.size).toBeGreaterThanOrEqual(999);
+    // The alphabet is 32 chars, so 32^4 ≈ 1.05M combinations. For 1000 draws the
+    // expected number of birthday-paradox collisions is ~0.48, and 2–3 collisions
+    // occur in a non-trivial fraction of runs — so a `>= 999` bound is flaky.
+    // Allow up to 10 collisions: the Poisson tail P(>=10 | mean 0.48) is
+    // effectively zero, so this still fails loudly if the generator is broken
+    // (e.g. a constant or tiny alphabet) without flaking on healthy randomness.
+    expect(codes.size).toBeGreaterThanOrEqual(990);
   });
 });
 

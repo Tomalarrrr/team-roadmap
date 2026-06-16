@@ -1,29 +1,44 @@
 .marker {
   position: absolute;
   top: 0;
-  z-index: 0; /* Behind projects, milestones, and dependency lines */
+  /* Full-height dotted band that sits *behind* the lanes (rendered before them in
+     the DOM, so a 0 z-index paints under each isolated lane stacking context).
+     The near-transparent lane backgrounds let it show through empty areas, while
+     the opaque project pills paint cleanly on top of it. */
+  z-index: 0;
   pointer-events: none;
+}
+
+/* Colored dotted fill laid over the timeline. Opacity is high enough that the
+   pattern reads on top of saturated project bars (not just empty gaps) while
+   the bars still show through underneath. */
+.band {
+  position: absolute;
+  inset: 0;
+  opacity: 0.72;
 }
 
 .label {
   position: absolute;
   top: 8px;
   left: 8px;
+  z-index: 2; /* above the translucent band */
+  display: inline-block;
   font-size: 11px;
-  font-weight: 500;
+  font-weight: 600;
   color: #374151;
-  background: rgba(255, 255, 255, 0.85);
-  padding: 2px 6px;
-  border-radius: 3px;
-  max-width: calc(100% - 20px);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  padding: 2px 7px;
+  border-radius: 4px;
+  /* Allow the chip to extend beyond a narrow band so short labels (e.g. a
+     one-week "Christmas" marker) read in full rather than truncating to "C…". */
+  max-width: 180px;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: auto;
   cursor: context-menu;
-  /* Allow up to 2 lines of wrapping, then truncate with ellipsis */
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  line-height: 1.3;
 }
 
 /* Hover zone for right-click context menu - covers full marker height */

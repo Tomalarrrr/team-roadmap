@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface ViewportPositionOptions {
   position: { x: number; y: number } | null;
@@ -12,14 +12,15 @@ export function useViewportPosition(
   const { position, isOpen } = options;
   const [computedPosition, setComputedPosition] = useState<{ x: number; y: number } | null>(null);
 
-  // Reset computed position when input position changes (prevents stale flash on reopen)
-  const prevPositionRef = useRef(position);
-  useEffect(() => {
-    if (position !== prevPositionRef.current) {
-      prevPositionRef.current = position;
-      setComputedPosition(null);
-    }
-  }, [position]);
+  // Reset computed position when input position changes (prevents stale flash on
+  // reopen). Done by adjusting state *during render* — React's blessed pattern
+  // for "reset state on prop change" — rather than in an effect, which would
+  // paint a stale frame first and triggers the set-state-in-effect lint.
+  const [prevPosition, setPrevPosition] = useState(position);
+  if (position !== prevPosition) {
+    setPrevPosition(position);
+    setComputedPosition(null);
+  }
 
   useEffect(() => {
     if (!isOpen || !position || !menuRef.current) {

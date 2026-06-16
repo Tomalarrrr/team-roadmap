@@ -41,11 +41,50 @@ const LEGACY_COLOR_MAP: Record<string, string> = {
   '#9ca3af': '#6E7D89',
 };
 
-// Normalize a hex color: if it's a legacy value, return the new equivalent.
-export function normalizeStatusColor(hex: string): string {
-  if (!hex) return DEFAULT_STATUS_COLOR;
-  const lower = hex.toLowerCase();
-  return LEGACY_COLOR_MAP[lower] ?? hex;
+// Convert "rgb(r, g, b)" / "rgba(r, g, b, a)" → "#RRGGBB". Returns null if the
+// input isn't an rgb()/rgba() string so callers can fall through to other formats.
+function rgbToHex(value: string): string | null {
+  const match = value.match(
+    /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*[\d.]+\s*)?\)$/i
+  );
+  if (!match) return null;
+  const toHex = (n: number) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
+  const [, r, g, b] = match;
+  return `#${toHex(Number(r))}${toHex(Number(g))}${toHex(Number(b))}`.toUpperCase();
+}
+
+// Normalize any supported color input to a canonical "#RRGGBB" (uppercase) value.
+//
+// Handles every format that has reached persisted data over the app's lifetime:
+//   - rgb()/rgba() strings (older seed/import format) → hex
+//   - 3-digit shorthand hex (#abc) → 6-digit
+//   - legacy palette hex → current palette equivalent
+//   - already-canonical hex → uppercased (so exact swatch matching works)
+//
+// This is the single choke point that lets the rest of the app assume hex:
+// forms validate against a hex-only schema, and swatch selection compares hex
+// exactly. Unrecognized input falls back to the default rather than persisting
+// a value the validation schema would later reject.
+export function normalizeStatusColor(color: string): string {
+  if (!color) return DEFAULT_STATUS_COLOR;
+  let hex = color.trim();
+
+  // rgb()/rgba() → hex
+  const fromRgb = rgbToHex(hex);
+  if (fromRgb) hex = fromRgb;
+
+  // Expand 3-digit shorthand (#abc → #aabbcc)
+  if (/^#[0-9A-Fa-f]{3}$/.test(hex)) {
+    hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+  }
+
+  // Map legacy palette values to their current equivalents (case-insensitive)
+  const legacy = LEGACY_COLOR_MAP[hex.toLowerCase()];
+  if (legacy) return legacy;
+
+  // Canonicalize valid hex to uppercase; reject anything else.
+  if (/^#[0-9A-Fa-f]{6}$/.test(hex)) return hex.toUpperCase();
+  return DEFAULT_STATUS_COLOR;
 }
 
 // Helper to get status name from hex color (handles legacy colors)

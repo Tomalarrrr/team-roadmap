@@ -1,65 +1,15 @@
 import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
-import type { Project, Milestone, Waypoint } from '../types';
+import type { Project, Waypoint } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
 import styles from './DependencyLine.module.css';
 
-// Helper to calculate milestone stack index (memoized externally)
-// Cache milestone stack calculations using content-based key for reliable cache hits
-const milestoneStackCache = new Map<string, Map<string, number>>();
-
-// Create a content-based cache key from milestone IDs and dates
-function getMilestoneStacksCacheKey(milestones: Milestone[]): string {
-  return milestones.map(m => `${m.id}:${m.startDate}:${m.endDate}`).sort().join('|');
-}
-
-function getMilestoneStacks(milestones: Milestone[]): Map<string, number> {
-  const cacheKey = getMilestoneStacksCacheKey(milestones);
-  const cached = milestoneStackCache.get(cacheKey);
-  if (cached) return cached;
-
-  const stacks = new Map<string, number>();
-  const sorted = [...milestones].sort((a, b) =>
-    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-  );
-
-  // Use interval scheduling algorithm (same as ProjectBar optimization)
-  const stackEndTimes: number[] = [];
-
-  sorted.forEach((milestone) => {
-    const startTime = new Date(milestone.startDate).getTime();
-    const endTime = new Date(milestone.endDate).getTime();
-
-    let assignedStack = -1;
-    for (let i = 0; i < stackEndTimes.length; i++) {
-      if (stackEndTimes[i] < startTime) {
-        assignedStack = i;
-        stackEndTimes[i] = endTime;
-        break;
-      }
-    }
-    if (assignedStack === -1) {
-      assignedStack = stackEndTimes.length;
-      stackEndTimes.push(endTime);
-    }
-    stacks.set(milestone.id, assignedStack);
-  });
-
-  // Limit cache size to prevent memory leaks
-  if (milestoneStackCache.size > 100) {
-    const firstKey = milestoneStackCache.keys().next().value;
-    if (firstKey) milestoneStackCache.delete(firstKey);
-  }
-
-  milestoneStackCache.set(cacheKey, stacks);
-  return stacks;
-}
+// Dependencies are drawn project-to-project. (Milestones are no longer surfaced
+// in the UI, so there is no milestone-level anchoring.)
 
 interface DependencyLineProps {
   fromProject: Project;
   toProject: Project;
-  fromMilestoneId?: string;
-  toMilestoneId?: string;
   timelineStart: Date;
   dayWidth: number;
   projectStacks: Map<string, number>;
@@ -68,7 +18,7 @@ interface DependencyLineProps {
   ownerToLaneIndex: Map<string, number>;
   lineIndex?: number; // For staggering connection points
   isAnyHovered?: boolean; // True if any dependency line is hovered
-  hoveredItemId?: { projectId: string; milestoneId?: string } | null; // Currently hovered project/milestone
+  hoveredItemId?: { projectId: string } | null; // Currently hovered project
   isNew?: boolean; // True if this dependency was just created (for entrance animation)
   onHoverChange?: (hovered: boolean) => void;
   onRemove: () => void;
@@ -77,17 +27,14 @@ interface DependencyLineProps {
 }
 
 const BASE_PROJECT_HEIGHT = 52; // Minimum project bar height
-const PROJECT_VERTICAL_GAP = 20; // Gap between stacked projects
+const PROJECT_VERTICAL_GAP = 6; // Gap between stacked projects (kept in sync with Timeline)
 const BAR_VERTICAL_OFFSET = 16; // LANE_PADDING
 const BAR_HEIGHT = 52;
-const MILESTONE_HEIGHT = 20;
-const MILESTONE_GAP = 4;
-const PROJECT_CONTENT_HEIGHT = 28;
 
 // Waypoints are stored in a zoom-independent and layout-independent format:
 // - x is stored as "days from timeline start" (not pixels)
 // - y is stored as offset from baseline (the straight line between endpoints)
-// This ensures waypoints shift correctly when layout changes (e.g. milestones stack)
+// This ensures waypoints shift correctly when layout changes (e.g. stacks shift)
 
 // Calculate the baseline Y at a given X position (interpolating between endpoints)
 function getBaselineY(x: number, fromX: number, fromY: number, toX: number, toY: number): number {
@@ -146,22 +93,9 @@ function areDependencyPropsEqual(
       prevProps.fromProject.endDate !== nextProps.fromProject.endDate ||
       prevProps.toProject.startDate !== nextProps.toProject.startDate ||
       prevProps.toProject.endDate !== nextProps.toProject.endDate ||
-      prevProps.fromMilestoneId !== nextProps.fromMilestoneId ||
-      prevProps.toMilestoneId !== nextProps.toMilestoneId ||
       prevProps.dayWidth !== nextProps.dayWidth ||
       prevProps.lineIndex !== nextProps.lineIndex ||
       prevProps.isNew !== nextProps.isNew) {
-    return false;
-  }
-
-  // Check if milestones arrays changed (affects positioning)
-  const prevFromMilestones = prevProps.fromProject.milestones || [];
-  const nextFromMilestones = nextProps.fromProject.milestones || [];
-  const prevToMilestones = prevProps.toProject.milestones || [];
-  const nextToMilestones = nextProps.toProject.milestones || [];
-
-  if (prevFromMilestones.length !== nextFromMilestones.length ||
-      prevToMilestones.length !== nextToMilestones.length) {
     return false;
   }
 
@@ -205,8 +139,6 @@ function areDependencyPropsEqual(
 export const DependencyLine = memo(function DependencyLine({
   fromProject,
   toProject,
-  fromMilestoneId,
-  toMilestoneId,
   timelineStart,
   dayWidth,
   projectStacks,
@@ -240,34 +172,10 @@ export const DependencyLine = memo(function DependencyLine({
   useEffect(() => { previewWaypointsRef.current = previewWaypoints; }, [previewWaypoints]);
   const svgRef = useRef<SVGGElement>(null);
 
-  // Memoize milestone stacks to avoid recalculation
-  const fromMilestoneStacks = useMemo(
-    () => getMilestoneStacks(fromProject.milestones || []),
-    [fromProject.milestones]
-  );
-
-  const toMilestoneStacks = useMemo(
-    () => getMilestoneStacks(toProject.milestones || []),
-    [toProject.milestones]
-  );
-
   const line = useMemo(() => {
-    // Get milestone objects if specified
-    const fromMilestone = fromMilestoneId
-      ? fromProject.milestones?.find(m => m.id === fromMilestoneId)
-      : undefined;
-    const toMilestone = toMilestoneId
-      ? toProject.milestones?.find(m => m.id === toMilestoneId)
-      : undefined;
-
-    // Calculate dimensions based on milestone or project
-    const fromDims = fromMilestone
-      ? getBarDimensions(fromMilestone.startDate, fromMilestone.endDate, timelineStart, dayWidth)
-      : getBarDimensions(fromProject.startDate, fromProject.endDate, timelineStart, dayWidth);
-
-    const toDims = toMilestone
-      ? getBarDimensions(toMilestone.startDate, toMilestone.endDate, timelineStart, dayWidth)
-      : getBarDimensions(toProject.startDate, toProject.endDate, timelineStart, dayWidth);
+    // Dependencies anchor at the project bars (end of source → start of target).
+    const fromDims = getBarDimensions(fromProject.startDate, fromProject.endDate, timelineStart, dayWidth);
+    const toDims = getBarDimensions(toProject.startDate, toProject.endDate, timelineStart, dayWidth);
 
     const fromStack = projectStacks.get(fromProject.id) || 0;
     const toStack = projectStacks.get(toProject.id) || 0;
@@ -278,29 +186,12 @@ export const DependencyLine = memo(function DependencyLine({
     const fromLaneOffset = lanePositions[fromLaneIndex] ?? 0;
     const toLaneOffset = lanePositions[toLaneIndex] ?? 0;
 
-    // Calculate Y positions using dynamic stack heights
+    // Calculate Y positions (centre of each project bar) using dynamic stack heights
     const fromStackOffset = getStackTopOffset(fromProject.owner, fromStack);
     const toStackOffset = getStackTopOffset(toProject.owner, toStack);
 
-    let fromY: number;
-    let toY: number;
-
-    if (fromMilestone) {
-      // Milestone position: within project bar, below content
-      const milestoneStackIdx = fromMilestoneStacks.get(fromMilestoneId!) ?? 0;
-      const projectTop = fromLaneOffset + fromStackOffset;
-      fromY = projectTop + PROJECT_CONTENT_HEIGHT + 6 + milestoneStackIdx * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2;
-    } else {
-      fromY = fromLaneOffset + fromStackOffset + BAR_HEIGHT / 2;
-    }
-
-    if (toMilestone) {
-      const milestoneStackIdx = toMilestoneStacks.get(toMilestoneId!) ?? 0;
-      const projectTop = toLaneOffset + toStackOffset;
-      toY = projectTop + PROJECT_CONTENT_HEIGHT + 6 + milestoneStackIdx * (MILESTONE_HEIGHT + MILESTONE_GAP) + MILESTONE_HEIGHT / 2;
-    } else {
-      toY = toLaneOffset + toStackOffset + BAR_HEIGHT / 2;
-    }
+    const fromY = fromLaneOffset + fromStackOffset + BAR_HEIGHT / 2;
+    const toY = toLaneOffset + toStackOffset + BAR_HEIGHT / 2;
 
     // Calculate X positions
     const fromX = fromDims.left + fromDims.width; // End of from element
@@ -488,22 +379,16 @@ export const DependencyLine = memo(function DependencyLine({
     fromProject.owner,
     fromProject.startDate,
     fromProject.endDate,
-    fromProject.milestones,
     toProject.id,
     toProject.owner,
     toProject.startDate,
     toProject.endDate,
-    toProject.milestones,
-    fromMilestoneId,
-    toMilestoneId,
     timelineStart,
     dayWidth,
     projectStacks,
     lanePositions,
     ownerToLaneIndex,
     lineIndex,
-    fromMilestoneStacks,
-    toMilestoneStacks,
     getStackTopOffset,
     waypoints,
     previewWaypoints
@@ -709,19 +594,11 @@ export const DependencyLine = memo(function DependencyLine({
   // Determine if this line should be dimmed (another line is hovered, but not this one)
   const isDimmed = isAnyHovered && !isHovered;
 
-  // Check if this dependency is connected to the currently hovered project/milestone
+  // Check if this dependency is connected to the currently hovered project.
   const isConnectedToHoveredItem = useMemo(() => {
     if (!hoveredItemId) return false;
-    const { projectId, milestoneId } = hoveredItemId;
-
-    // If hovering a specific milestone, only highlight dependencies connected to that milestone
-    if (milestoneId) {
-      return fromMilestoneId === milestoneId || toMilestoneId === milestoneId;
-    }
-
-    // If hovering a project (no milestone), highlight ALL dependencies connected to that project
-    return fromProject.id === projectId || toProject.id === projectId;
-  }, [hoveredItemId, fromProject.id, toProject.id, fromMilestoneId, toMilestoneId]);
+    return fromProject.id === hoveredItemId.projectId || toProject.id === hoveredItemId.projectId;
+  }, [hoveredItemId, fromProject.id, toProject.id]);
 
   return (
     <g

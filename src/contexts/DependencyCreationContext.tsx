@@ -21,9 +21,7 @@ interface DependencyCreationProviderProps {
   children: ReactNode;
   onAddDependency?: (
     fromProjectId: string,
-    toProjectId: string,
-    fromMilestoneId?: string,
-    toMilestoneId?: string
+    toProjectId: string
   ) => void;
 }
 
@@ -60,18 +58,9 @@ export function DependencyCreationProvider({
   const completeCreation = useCallback((target: DependencyTarget) => {
     const currentSource = stateRef.current.source;
     if (currentSource && onAddDependency) {
-      // Prevent self-dependency
-      const isSameSource =
-        currentSource.projectId === target.projectId &&
-        currentSource.milestoneId === target.milestoneId;
-
-      if (!isSameSource) {
-        onAddDependency(
-          currentSource.projectId,
-          target.projectId,
-          currentSource.milestoneId,
-          target.milestoneId
-        );
+      // Prevent self-dependency (project-level)
+      if (currentSource.projectId !== target.projectId) {
+        onAddDependency(currentSource.projectId, target.projectId);
       }
     }
     setState({

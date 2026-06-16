@@ -138,16 +138,19 @@ export function useDataVersion(data: RoadmapData): {
   hasChanged: boolean;
 } {
   const currentHash = hashData(data);
-  const previousHashRef = useRef<string | null>(null);
+  // Track the previous hash in state (not a ref) so it can be read during
+  // render without violating the rules of hooks. Reading a ref during render
+  // is non-deterministic under concurrent rendering; state is the correct tool.
+  const [previousHash, setPreviousHash] = useState<string | null>(null);
 
   useEffect(() => {
-    // After render, shift: current becomes previous for next comparison
-    previousHashRef.current = currentHash;
+    // After commit, shift: current becomes previous for the next comparison.
+    setPreviousHash(currentHash);
   }, [currentHash]);
 
   return {
     currentHash,
-    previousHash: previousHashRef.current,
-    hasChanged: previousHashRef.current !== null && previousHashRef.current !== currentHash
+    previousHash,
+    hasChanged: previousHash !== null && previousHash !== currentHash
   };
 }

@@ -1,7 +1,6 @@
 import { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Project, ContextMenuItem } from '../types';
-import { MilestoneLine } from './MilestoneLine';
 import { DependencyArrow } from './DependencyArrow';
 import { ContextMenu } from './ContextMenu';
 import { useContextMenu } from '../hooks/useContextMenu';
@@ -10,10 +9,10 @@ import {
   getBarDimensions,
   toISODateString,
   formatShortDate,
-  isDatePast,
-  calculateStacks
+  isDatePast
 } from '../utils/dateUtils';
 import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor } from '../utils/statusColors';
+import { heightForSize } from '../utils/capacity';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
 
@@ -37,27 +36,16 @@ interface ProjectBarProps {
   laneTop?: number; // Absolute top position of the lane for dependency positioning
   isDragging?: boolean;
   isSelected?: boolean;
-  newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
   isLocked?: boolean; // When true, disable drag and edit actions (view mode)
-  isFullscreen?: boolean; // When true, hide milestones for clean view
   dragListeners?: React.DOMAttributes<HTMLDivElement>;
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
-  onAddMilestone: () => void;
   onEdit: () => void;
-  onEditMilestone: (milestoneId: string) => void;
-  onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => Promise<void>;
-  onDeleteMilestone: (milestoneId: string) => void;
   onCopy?: () => void;
   onSelect?: () => void;
-  onSelectMilestone?: (milestoneId: string) => void;
   onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
-  onHoverChange?: (hovered: boolean, milestoneId?: string) => void; // For dependency highlighting
+  onHoverChange?: (hovered: boolean) => void; // For dependency highlighting
 }
-
-const BASE_PROJECT_HEIGHT = 52;
-const MILESTONE_ROW_HEIGHT = 24;
-const PROJECT_CONTENT_HEIGHT = 28;
 
 type DragMode = 'move' | 'resize-start' | 'resize-end' | null;
 
@@ -70,20 +58,13 @@ export function ProjectBar({
   laneTop = 0,
   isDragging: externalDragging,
   isSelected,
-  newMilestoneIds,
   isLocked = false,
-  isFullscreen = false,
   dragListeners, // Used for cross-lane dragging (reassign owner)
   onUpdate,
   onDelete,
-  onAddMilestone,
   onEdit,
-  onEditMilestone,
-  onUpdateMilestone,
-  onDeleteMilestone,
   onCopy,
   onSelect,
-  onSelectMilestone,
   onEdgeDrag,
   onHoverChange
 }: ProjectBarProps) {
@@ -121,11 +102,6 @@ export function ProjectBar({
         label: 'Edit Project',
         onClick: onEdit
       },
-      {
-        id: 'add-milestone',
-        label: 'Add Milestone',
-        onClick: onAddMilestone
-      },
       ...(onCopy ? [{
         id: 'copy',
         label: 'Copy Project',
@@ -138,7 +114,7 @@ export function ProjectBar({
         variant: 'danger' as const
       }
     ];
-  }, [onEdit, onAddMilestone, onCopy, onDelete, isLocked]);
+  }, [onEdit, onCopy, onDelete, isLocked]);
 
   // Dependency creation context
   const { state: depState, startCreation, completeCreation } = useDependencyCreation();
@@ -177,25 +153,11 @@ export function ProjectBar({
     setPreviewDates(null);
   }
 
-  // Calculate effective dates including milestone extensions
-  // Use preview dates during drag for smooth visual feedback
-  const effectiveDates = useMemo(() => {
-    const baseStart = previewDates?.start ?? project.startDate;
-    const baseEnd = previewDates?.end ?? project.endDate;
-    let effectiveStart = baseStart;
-    let effectiveEnd = baseEnd;
-
-    (project.milestones || []).forEach(milestone => {
-      if (milestone.startDate < effectiveStart) {
-        effectiveStart = milestone.startDate;
-      }
-      if (milestone.endDate > effectiveEnd) {
-        effectiveEnd = milestone.endDate;
-      }
-    });
-
-    return { start: effectiveStart, end: effectiveEnd };
-  }, [project.startDate, project.endDate, project.milestones, previewDates]);
+  // Bar spans the project's own dates. Use preview dates during drag for smooth feedback.
+  const effectiveDates = useMemo(() => ({
+    start: previewDates?.start ?? project.startDate,
+    end: previewDates?.end ?? project.endDate
+  }), [project.startDate, project.endDate, previewDates]);
 
   const { left, width } = getBarDimensions(
     effectiveDates.start,
@@ -210,10 +172,8 @@ export function ProjectBar({
 
   // Status label for badge and tooltip
   const statusLabel = isPast ? 'Complete' : getStatusNameByHex(project.statusColor);
-  // Show badge when bar is wide enough to read, but hide when projectContentEnd appears (width > 400)
-  // to avoid overlapping the right-aligned title/dates
-  const showStatusBadge = !dragMode && !externalDragging && width > 120 && width <= 400 && statusLabel;
-  const milestoneCount = project.milestones?.length || 0;
+  // Show the status badge (top-right) whenever the bar is wide enough to read.
+  const showStatusBadge = !dragMode && !externalDragging && width > 120 && statusLabel;
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     if (isLocked) return; // Disable drag when locked
@@ -434,22 +394,8 @@ export function ProjectBar({
     };
   }, [dragMode, dragStartX, originalStartDate, originalEndDate]);
 
-  // Calculate milestone stacking
-  const milestoneStacks = useMemo(
-    () => calculateStacks(project.milestones || []),
-    [project.milestones]
-  );
-
-  // Calculate max milestone stack for dynamic project bar height
-  const maxMilestoneStack = useMemo(() => {
-    if (milestoneStacks.size === 0) return 0;
-    return Math.max(...milestoneStacks.values());
-  }, [milestoneStacks]);
-
-  // Calculate dynamic project bar height
-  const milestoneRows = maxMilestoneStack + 1;
-  const dynamicHeight = PROJECT_CONTENT_HEIGHT + (milestoneRows * MILESTONE_ROW_HEIGHT) + 8;
-  const projectBarHeight = isFullscreen ? BASE_PROJECT_HEIGHT : Math.max(BASE_PROJECT_HEIGHT, dynamicHeight);
+  // Pill height is literally the project's slot cost: Large 2 / Medium 1.5 / Small 1.
+  const projectBarHeight = heightForSize(project.size ?? 'medium');
 
   // Use stackTopOffset if provided (dynamic heights), otherwise fall back to fixed calculation
   // The fallback is a safety net - Timeline should always provide stackTopOffset
@@ -610,6 +556,9 @@ export function ProjectBar({
         width,
         top: topPosition,
         height: projectBarHeight,
+        // Pill height is the slot cost — override the stylesheet's min-height so
+        // Small/Medium pills aren't clamped (keeps them aligned with lane rows).
+        minHeight: projectBarHeight,
         backgroundColor: displayColor || '#1e3a5f'
       }}
       role="button"
@@ -739,48 +688,7 @@ export function ProjectBar({
             {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
           </span>
         </div>
-        {width > 400 && (
-          <div className={styles.projectContentEnd}>
-            <span className={styles.projectDates}>
-              {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
-            </span>
-            <span className={styles.projectSeparator}>•</span>
-            <span className={styles.projectTitle}>
-              {project.title}
-            </span>
-          </div>
-        )}
       </div>
-
-      {/* Milestones as lines within the project bar - OUTSIDE dragArea to prevent interference */}
-      {!isFullscreen && (
-        <div
-          className={styles.milestonesContainer}
-          style={{ height: (maxMilestoneStack + 1) * 24 }}
-        >
-          {(project.milestones || []).map((milestone) => (
-            <MilestoneLine
-              key={milestone.id}
-              milestone={milestone}
-              projectId={project.id}
-              timelineStart={timelineStart}
-              dayWidth={dayWidth}
-              projectLeft={left}
-              projectWidth={width}
-              stackIndex={milestoneStacks.get(milestone.id) || 0}
-              laneTop={topPosition}
-              absoluteLaneTop={laneTop}
-              isNew={newMilestoneIds?.has(milestone.id) ?? false}
-              isLocked={isLocked}
-              onUpdate={(updates) => onUpdateMilestone(milestone.id, updates)}
-              onEdit={() => onEditMilestone(milestone.id)}
-              onDelete={() => onDeleteMilestone(milestone.id)}
-              onSelect={onSelectMilestone ? () => onSelectMilestone(milestone.id) : undefined}
-              onHoverChange={onHoverChange ? (hovered) => onHoverChange(hovered, milestone.id) : undefined}
-            />
-          ))}
-        </div>
-      )}
 
       {/* Context menu */}
       <ContextMenu
@@ -809,11 +717,6 @@ export function ProjectBar({
             {formatShortDate(project.startDate)} {'\u2013'} {formatShortDate(project.endDate)}
             {' \u00B7 '}{formatDuration(project.startDate, project.endDate)}
           </div>
-          {milestoneCount > 0 && (
-            <div className={styles.tooltipMilestones}>
-              {milestoneCount} milestone{milestoneCount !== 1 ? 's' : ''}
-            </div>
-          )}
           {statusLabel && (
             <div className={styles.pastBadge} style={!isPast ? { color: displayColor } : undefined}>
               {statusLabel}

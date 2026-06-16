@@ -166,20 +166,6 @@
   flex-shrink: 0;
 }
 
-.projectContentEnd {
-  position: absolute;
-  top: 0;
-  right: 12px;
-  padding: 8px 8px 4px;
-  pointer-events: none;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: nowrap;
-  overflow: hidden;
-  flex-shrink: 0;
-}
-
 .dragHint {
   position: absolute;
   top: 50%;

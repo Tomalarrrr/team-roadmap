@@ -583,6 +583,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       for (const timer of captureShowTimers.current) clearTimeout(timer);
       for (const timer of introTimersRef.current) clearTimeout(timer);
       for (const timer of effectTimers.current) clearTimeout(timer);
+      // Read the live ref at unmount on purpose — we must clear whatever timers
+      // are outstanding now, not a snapshot captured when the effect mounted.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
       for (const timer of tokenAnimTimers.current.values()) {
         clearTimeout(timer);
       }
@@ -1102,6 +1105,10 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       cancelled = true;
       unsubscribe?.();
     };
+    // Intentionally only re-subscribe when the game code changes. Including the
+    // handler callbacks (pushEffect/runTokenAnimations/transitionToPlaying) would
+    // tear down and recreate the realtime subscription on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gameCode]);
 
   // Browser online/offline events — instant feedback. Proxy reachability is
@@ -1538,6 +1545,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     makeMove(gc, curColor, update)
       .then((committed) => { if (!committed) rollbackOptimistic(); })
       .catch(rollbackOptimistic);
+    // scheduleRenderTick/tickMysteryBoxesOnRoundEnd are stable game-loop helpers
+    // intentionally omitted to keep this callback's identity stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHint, runTokenAnimations]);
 
   const handleRollDice = useCallback(async () => {
@@ -1867,6 +1877,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       };
       try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
     }, rollAnimMs);
+    // sessionId/tickMysteryBoxesOnRoundEnd are read for their current values and
+    // intentionally excluded to keep this callback stable across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executeMove, showHint]);
 
   const handleMoveToken = useCallback((tokenIndex: number) => {
@@ -2220,6 +2233,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       // Ensure moveInFlight is always reset on any error to prevent game freeze
       moveInFlightRef.current = false;
     }
+    // pushEffect is a stable game-loop helper intentionally omitted to keep this
+    // callback's identity stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHint, executeMove]);
 
   // Golden Mushroom pick handler
@@ -2328,6 +2344,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       flag: serializeFlag(flagStateRef.current),
     };
     makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
+    // tickMysteryBoxesOnRoundEnd is a stable game-loop helper intentionally
+    // omitted to keep this callback's identity stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [executeMove, showHint]);
 
   // Discard handler for full inventory
@@ -2474,6 +2493,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
+    // Drive this 1s timer purely off gamePhase; tickMysteryBoxesOnRoundEnd is
+    // called for its current behaviour and must not re-create the interval.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase]);
 
   // --- Single player bot AI ---
@@ -2983,6 +3005,9 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
       for (const timer of introTimersRef.current) clearTimeout(timer);
       introTimersRef.current = [];
     };
+    // Re-run the intro sequence only on phase/trigger changes; scheduleRenderTick
+    // is a stable helper intentionally omitted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gamePhase, introTrigger]);
 
   // Animated transition from lobby/waiting → playing

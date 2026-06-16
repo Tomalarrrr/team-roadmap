@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { ensureInitialized, getDbModule, getFirebaseDatabase } from '../firebase';
 
 let cachedPaused: boolean | null = null;
-const listeners = new Set<(paused: boolean) => void>();
+const listeners = new Set<() => void>();
 let globalUnsub: (() => void) | null = null;
 let initPromise: Promise<void> | null = null; // prevents duplicate listener race
 
@@ -15,9 +15,8 @@ function startGlobalListener() {
     const db = getFirebaseDatabase();
     const pauseRef = ref(db, 'gamePaused');
     globalUnsub = onValue(pauseRef, (snapshot) => {
-      const val = snapshot.val() === true;
-      cachedPaused = val;
-      listeners.forEach(fn => fn(val));
+      cachedPaused = snapshot.val() === true;
+      listeners.forEach(fn => fn());
     });
     initPromise = null;
   }).catch(() => { initPromise = null; });
@@ -31,24 +30,25 @@ function stopGlobalListener() {
   }
 }
 
-export function useGamePause() {
-  const [paused, setPaused] = useState(cachedPaused ?? false);
-  const mountedRef = useRef(true);
+// External-store wiring for useSyncExternalStore: subscribing registers a
+// no-arg notifier and (re)starts the shared Firebase listener; the snapshot is
+// read from the module-level cache. This is the canonical way to mirror an
+// external data source into React state without a setState-in-effect.
+function subscribePause(onStoreChange: () => void): () => void {
+  listeners.add(onStoreChange);
+  startGlobalListener();
+  return () => {
+    listeners.delete(onStoreChange);
+    stopGlobalListener();
+  };
+}
 
-  useEffect(() => {
-    mountedRef.current = true;
-    const handler = (val: boolean) => {
-      if (mountedRef.current) setPaused(val);
-    };
-    listeners.add(handler);
-    startGlobalListener();
-    if (cachedPaused !== null) setPaused(cachedPaused);
-    return () => {
-      mountedRef.current = false;
-      listeners.delete(handler);
-      stopGlobalListener();
-    };
-  }, []);
+function getPauseSnapshot(): boolean {
+  return cachedPaused ?? false;
+}
+
+export function useGamePause() {
+  const paused = useSyncExternalStore(subscribePause, getPauseSnapshot, getPauseSnapshot);
 
   const togglePause = useCallback(async () => {
     await ensureInitialized();

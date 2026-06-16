@@ -1,19 +1,19 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { format, addDays } from 'date-fns';
-import { projectSchema, validateForm, milestoneSchema } from '../utils/validation';
+import { projectSchema, validateForm } from '../utils/validation';
 import { STATUS_COLORS, DEFAULT_STATUS_COLOR, normalizeStatusColor } from '../utils/statusColors';
-import type { Milestone, TeamMember } from '../types';
+import {
+  SIZE_LABELS,
+  SIZE_SLOTS,
+  heightForSize,
+  evaluateAssignment,
+  formatCapacityMessage,
+  type CapacityItem,
+} from '../utils/capacity';
+import type { Milestone, Project, ProjectSize, TeamMember } from '../types';
 import styles from './Form.module.css';
 
-interface MilestoneData {
-  id?: string;
-  title: string;
-  description?: string;
-  startDate: string;
-  endDate: string;
-  tags: string[];
-  statusColor: string;
-}
+const SIZE_OPTIONS: ProjectSize[] = ['large', 'medium', 'small'];
 
 interface ProjectFormProps {
   initialValues?: Partial<{
@@ -22,30 +22,36 @@ interface ProjectFormProps {
     startDate: string;
     endDate: string;
     statusColor: string;
+    size: ProjectSize;
   }>;
+  // Existing milestones are preserved untouched on submit (no longer editable in the UI).
   initialMilestones?: Milestone[];
   teamMembers?: TeamMember[];
+  // All projects on the board — used to enforce per-member capacity (4 slots).
+  projects?: Project[];
+  // When editing, the project's own id so it isn't counted against its owner's capacity.
+  editingProjectId?: string;
   onSubmit: (values: {
     title: string;
     owner: string;
     startDate: string;
     endDate: string;
     statusColor: string;
-    milestones?: MilestoneData[];
+    size: ProjectSize;
+    milestones?: Milestone[];
   }) => void | Promise<void>;
   onCancel: () => void;
   onDelete?: () => void;
   isEditing?: boolean;
   hideOwner?: boolean;
-  milestoneCount?: number;
 }
-
-// Milestone colors use the same STATUS_COLORS from shared utility
 
 export function ProjectForm({
   initialValues,
   initialMilestones,
   teamMembers,
+  projects,
+  editingProjectId,
   onSubmit,
   onCancel,
   onDelete,
@@ -57,112 +63,20 @@ export function ProjectForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(normalizeStatusColor(initialValues?.statusColor || DEFAULT_STATUS_COLOR));
+  const [size, setSize] = useState<ProjectSize>(initialValues?.size || 'medium');
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [capacityError, setCapacityError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // Milestone management state
-  const [milestones, setMilestones] = useState<MilestoneData[]>(
-    initialMilestones?.map(m => ({
-      id: m.id,
-      title: m.title,
-      description: m.description,
-      startDate: m.startDate,
-      endDate: m.endDate,
-      tags: m.tags,
-      statusColor: normalizeStatusColor(m.statusColor)
-    })) || []
-  );
-  const [showMilestoneForm, setShowMilestoneForm] = useState(false);
-  const [editingMilestoneIndex, setEditingMilestoneIndex] = useState<number | null>(null);
-  const [milestoneTitle, setMilestoneTitle] = useState('');
-  const [milestoneDescription, setMilestoneDescription] = useState('');
-  const [milestoneStartDate, setMilestoneStartDate] = useState('');
-  const [milestoneEndDate, setMilestoneEndDate] = useState('');
-  const [milestoneTags, setMilestoneTags] = useState('');
-  const [milestoneColor, setMilestoneColor] = useState(STATUS_COLORS[0].hex);
-  const [milestoneErrors, setMilestoneErrors] = useState<Record<string, string>>({});
-
-  // Sorted milestones for display (soonest first), with original index for edit/delete operations
-  const sortedMilestones = useMemo(() => {
-    return milestones
-      .map((m, index) => ({ ...m, originalIndex: index }))
-      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
-  }, [milestones]);
-
-  const resetMilestoneForm = () => {
-    setMilestoneTitle('');
-    setMilestoneDescription('');
-    setMilestoneStartDate(startDate || '');
-    setMilestoneEndDate(startDate || '');
-    setMilestoneTags('');
-    setMilestoneColor(STATUS_COLORS[0].hex);
-    setMilestoneErrors({});
-    setShowMilestoneForm(false);
-    setEditingMilestoneIndex(null);
-  };
-
-  const handleAddMilestoneClick = () => {
-    setMilestoneStartDate(startDate || '');
-    setMilestoneEndDate(startDate || '');
-    setShowMilestoneForm(true);
-    setEditingMilestoneIndex(null);
-  };
-
-  const handleEditMilestone = (index: number) => {
-    const m = milestones[index];
-    setMilestoneTitle(m.title);
-    setMilestoneDescription(m.description || '');
-    setMilestoneStartDate(m.startDate);
-    setMilestoneEndDate(m.endDate);
-    setMilestoneTags(m.tags.join(', '));
-    setMilestoneColor(normalizeStatusColor(m.statusColor));
-    setEditingMilestoneIndex(index);
-    setShowMilestoneForm(true);
-  };
-
-  const handleDeleteMilestone = (index: number) => {
-    setMilestones(prev => prev.filter((_, i) => i !== index));
-    if (editingMilestoneIndex === index) {
-      resetMilestoneForm();
-    }
-  };
-
-  const handleSaveMilestone = () => {
-    const tags = milestoneTags
-      .split(',')
-      .map(t => t.trim())
-      .filter(t => t.length > 0);
-
-    const milestoneData = {
-      title: milestoneTitle.trim(),
-      description: milestoneDescription.trim() || '',
-      startDate: milestoneStartDate,
-      endDate: milestoneEndDate,
-      tags,
-      statusColor: milestoneColor
-    };
-
-    const result = validateForm(milestoneSchema, milestoneData);
-    if (!result.success) {
-      setMilestoneErrors(result.errors);
-      return;
-    }
-
-    if (editingMilestoneIndex !== null) {
-      // Update existing milestone
-      setMilestones(prev => prev.map((m, i) =>
-        i === editingMilestoneIndex
-          ? { ...milestoneData, id: m.id }
-          : m
-      ));
-    } else {
-      // Add new milestone
-      setMilestones(prev => [...prev, milestoneData]);
-    }
-
-    resetMilestoneForm();
-  };
+  // Projects grouped by owner for the capacity engine.
+  const projectsByOwner = useMemo(() => {
+    const grouped: Record<string, CapacityItem[]> = {};
+    (projects ?? []).forEach(p => {
+      (grouped[p.owner] ??= []).push(p);
+    });
+    return grouped;
+  }, [projects]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -174,7 +88,8 @@ export function ProjectForm({
       owner: owner.trim(),
       startDate,
       endDate,
-      statusColor
+      statusColor,
+      size
     });
 
     if (!result.success) {
@@ -182,11 +97,30 @@ export function ProjectForm({
       return;
     }
 
+    // Hard-block over-capacity assignments. Skipped only when we have no board
+    // context to check against (e.g. the form rendered without `projects`).
+    if (projects) {
+      const candidate: CapacityItem = {
+        id: editingProjectId ?? '__new__',
+        startDate: result.data.startDate,
+        endDate: result.data.endDate,
+        size: result.data.size,
+      };
+      const verdict = evaluateAssignment(projectsByOwner, candidate, result.data.owner);
+      if (!verdict.fits) {
+        setErrors({});
+        setCapacityError(formatCapacityMessage(verdict, result.data.owner, result.data.size) ?? 'Over capacity.');
+        return;
+      }
+    }
+
     setErrors({});
+    setCapacityError(null);
     setIsSaving(true);
 
     try {
-      await onSubmit({ ...result.data, milestones });
+      // Preserve any existing milestone data untouched — milestones are no longer edited here.
+      await onSubmit({ ...result.data, milestones: initialMilestones });
     } finally {
       setIsSaving(false);
     }
@@ -215,7 +149,7 @@ export function ProjectForm({
             id="owner"
             type="text"
             value={owner}
-            onChange={(e) => setOwner(e.target.value)}
+            onChange={(e) => { setOwner(e.target.value); setCapacityError(null); }}
             className={styles.input}
             placeholder="Enter owner name"
             list="owner-suggestions"
@@ -239,7 +173,7 @@ export function ProjectForm({
             id="startDate"
             type="date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e) => { setStartDate(e.target.value); setCapacityError(null); }}
             className={styles.input}
             required
           />
@@ -254,6 +188,7 @@ export function ProjectForm({
             onChange={(e) => {
               setEndDate(e.target.value);
               setErrors({});
+              setCapacityError(null);
             }}
             className={styles.input}
             required
@@ -275,9 +210,36 @@ export function ProjectForm({
         </button>
       )}
 
+      <div className={styles.field}>
+        <label className={styles.label}>Project Size</label>
+        <div className={styles.sizePicker}>
+          {SIZE_OPTIONS.map(opt => (
+            <button
+              key={opt}
+              type="button"
+              className={`${styles.sizeOption} ${size === opt ? styles.selected : ''}`}
+              onClick={() => { setSize(opt); setCapacityError(null); }}
+              aria-pressed={size === opt}
+            >
+              <span className={styles.sizeOptionBar} style={{ height: heightForSize(opt) / 2 }} />
+              <span className={styles.sizeOptionName}>{SIZE_LABELS[opt]}</span>
+              <span className={styles.sizeOptionSlots}>
+                {SIZE_SLOTS[opt]} slot{SIZE_SLOTS[opt] === 1 ? '' : 's'}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {Object.keys(errors).length > 0 && (
         <div className={styles.error}>
           {Object.values(errors).join('. ')}
+        </div>
+      )}
+
+      {capacityError && (
+        <div className={styles.capacityWarning}>
+          {capacityError}
         </div>
       )}
 
@@ -309,175 +271,9 @@ export function ProjectForm({
         </div>
       </div>
 
-      {/* Milestones Section */}
-      <div className={styles.milestonesSection}>
-        <div className={styles.milestonesSectionHeader}>
-          <label className={styles.label}>Milestones</label>
-          <span className={styles.hint}>Optional</span>
-        </div>
-
-        {/* Existing milestones list (sorted by soonest date first) */}
-        {sortedMilestones.length > 0 && (
-          <div className={styles.milestonesList}>
-            {sortedMilestones.map((m) => (
-              <div key={m.id || m.originalIndex} className={styles.milestoneItem}>
-                <div
-                  className={styles.milestoneColorDot}
-                  style={{ backgroundColor: m.statusColor }}
-                />
-                <div className={styles.milestoneInfo}>
-                  <span className={styles.milestoneTitle}>{m.title}</span>
-                  <span className={styles.milestoneDates}>
-                    {m.startDate} - {m.endDate}
-                  </span>
-                </div>
-                <div className={styles.milestoneActions}>
-                  <button
-                    type="button"
-                    className={styles.milestoneEditBtn}
-                    onClick={() => handleEditMilestone(m.originalIndex)}
-                    aria-label="Edit milestone"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.milestoneDeleteBtn}
-                    onClick={() => handleDeleteMilestone(m.originalIndex)}
-                    aria-label="Delete milestone"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Add/Edit milestone form */}
-        {showMilestoneForm ? (
-          <div className={styles.milestoneFormInline}>
-            <div className={styles.field}>
-              <label htmlFor="milestoneTitle" className={styles.label}>Title</label>
-              <input
-                id="milestoneTitle"
-                type="text"
-                value={milestoneTitle}
-                onChange={(e) => setMilestoneTitle(e.target.value)}
-                className={styles.input}
-                placeholder="Milestone title"
-                autoFocus
-              />
-              {milestoneErrors.title && (
-                <span className={styles.fieldError}>{milestoneErrors.title}</span>
-              )}
-            </div>
-
-            <div className={styles.field}>
-              <label htmlFor="milestoneDescription" className={styles.label}>
-                Description <span className={styles.optional}>(optional)</span>
-              </label>
-              <textarea
-                id="milestoneDescription"
-                value={milestoneDescription}
-                onChange={(e) => setMilestoneDescription(e.target.value)}
-                className={styles.textarea}
-                placeholder="Add details..."
-                rows={2}
-              />
-            </div>
-
-            <div className={styles.row}>
-              <div className={styles.field}>
-                <label htmlFor="milestoneStartDate" className={styles.label}>Start</label>
-                <input
-                  id="milestoneStartDate"
-                  type="date"
-                  value={milestoneStartDate}
-                  onChange={(e) => setMilestoneStartDate(e.target.value)}
-                  className={styles.input}
-                />
-              </div>
-              <div className={styles.field}>
-                <label htmlFor="milestoneEndDate" className={styles.label}>End</label>
-                <input
-                  id="milestoneEndDate"
-                  type="date"
-                  value={milestoneEndDate}
-                  min={milestoneStartDate}
-                  onChange={(e) => {
-                    setMilestoneEndDate(e.target.value);
-                    setMilestoneErrors(prev => ({ ...prev, endDate: '' }));
-                  }}
-                  className={styles.input}
-                />
-              </div>
-            </div>
-            {milestoneErrors.endDate && (
-              <span className={styles.fieldError}>{milestoneErrors.endDate}</span>
-            )}
-
-            <div className={styles.field}>
-              <label htmlFor="milestoneTags" className={styles.label}>Tags</label>
-              <input
-                id="milestoneTags"
-                type="text"
-                value={milestoneTags}
-                onChange={(e) => setMilestoneTags(e.target.value)}
-                className={styles.input}
-                placeholder="Comma-separated tags"
-              />
-            </div>
-
-            <div className={styles.field}>
-              <label className={styles.label}>Status</label>
-              <div className={styles.colorPicker}>
-                {STATUS_COLORS.map(({ hex, name }) => (
-                  <div key={hex} className={styles.colorOption}>
-                    <button
-                      type="button"
-                      className={`${styles.colorSwatch} ${milestoneColor === hex ? styles.selected : ''}`}
-                      style={{ backgroundColor: hex }}
-                      onClick={() => setMilestoneColor(hex)}
-                      aria-label={`Select ${name} status`}
-                      title={name}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className={styles.milestoneFormActions}>
-              <button
-                type="button"
-                onClick={resetMilestoneForm}
-                className={styles.cancelBtn}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveMilestone}
-                className={styles.submitBtn}
-              >
-                {editingMilestoneIndex !== null ? 'Update' : 'Add'} Milestone
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={handleAddMilestoneClick}
-            className={styles.addMilestoneBtn}
-          >
-            + Add Milestone
-          </button>
-        )}
-      </div>
-
       {showDeleteConfirm && (
         <div className={styles.deleteConfirm}>
-          <p>Are you sure you want to delete this project and all its milestones?</p>
+          <p>Are you sure you want to delete this project?</p>
           <div className={styles.deleteConfirmActions}>
             <button type="button" onClick={() => setShowDeleteConfirm(false)} className={styles.cancelBtn}>
               Cancel

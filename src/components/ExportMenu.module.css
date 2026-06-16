@@ -138,3 +138,27 @@
   font-size: 0.75rem;
   color: var(--text-muted);
 }
+
+.menuItem:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.menuItem:disabled:hover {
+  background: none;
+}
+
+.menuItem[aria-busy='true'] {
+  opacity: 1;
+}
+
+.menuError {
+  margin: 0 8px 8px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-medium);
+  border-left: 3px solid #B5444A;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  color: var(--text-primary);
+}

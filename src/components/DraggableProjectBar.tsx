@@ -12,21 +12,14 @@ interface DraggableProjectBarProps {
   stackTopOffset?: number; // Calculated top position within the lane
   laneTop?: number; // Absolute top position of the lane for dependency positioning
   isSelected?: boolean;
-  newMilestoneIds?: Set<string>; // IDs of newly created milestones (for entrance animation)
   isLocked?: boolean; // When true, disable drag and edit actions
-  isFullscreen?: boolean; // When true, hide milestones for clean view
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
-  onAddMilestone: () => void;
   onEdit: () => void;
-  onEditMilestone: (milestoneId: string) => void;
-  onUpdateMilestone: (milestoneId: string, updates: Partial<import('../types').Milestone>) => Promise<void>;
-  onDeleteMilestone: (milestoneId: string) => void;
   onCopy?: () => void;
   onSelect?: () => void;
-  onSelectMilestone?: (milestoneId: string) => void;
   onEdgeDrag?: (mouseX: number, isDragging: boolean) => void;
-  onHoverChange?: (hovered: boolean, milestoneId?: string) => void; // For dependency highlighting
+  onHoverChange?: (hovered: boolean) => void; // For dependency highlighting
 }
 
 function DraggableProjectBarComponent({
@@ -37,19 +30,12 @@ function DraggableProjectBarComponent({
   stackTopOffset,
   laneTop = 0,
   isSelected,
-  newMilestoneIds,
   isLocked = false,
-  isFullscreen = false,
   onUpdate,
   onDelete,
-  onAddMilestone,
   onEdit,
-  onEditMilestone,
-  onUpdateMilestone,
-  onDeleteMilestone,
   onCopy,
   onSelect,
-  onSelectMilestone,
   onEdgeDrag,
   onHoverChange
 }: DraggableProjectBarProps) {
@@ -79,20 +65,13 @@ function DraggableProjectBarComponent({
         laneTop={laneTop}
         isDragging={isDragging}
         isSelected={isSelected}
-        newMilestoneIds={newMilestoneIds}
         isLocked={isLocked}
-        isFullscreen={isFullscreen}
         dragListeners={listeners}
         onUpdate={onUpdate}
         onDelete={onDelete}
-        onAddMilestone={onAddMilestone}
         onEdit={onEdit}
-        onEditMilestone={onEditMilestone}
-        onUpdateMilestone={onUpdateMilestone}
-        onDeleteMilestone={onDeleteMilestone}
         onCopy={onCopy}
         onSelect={onSelect}
-        onSelectMilestone={onSelectMilestone}
         onEdgeDrag={onEdgeDrag}
         onHoverChange={onHoverChange}
       />
@@ -111,9 +90,7 @@ export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps
     prevProps.stackTopOffset === nextProps.stackTopOffset &&
     prevProps.laneTop === nextProps.laneTop &&
     prevProps.isSelected === nextProps.isSelected &&
-    prevProps.isLocked === nextProps.isLocked &&
-    prevProps.isFullscreen === nextProps.isFullscreen &&
-    prevProps.newMilestoneIds === nextProps.newMilestoneIds
+    prevProps.isLocked === nextProps.isLocked
     // Note: Callback props are excluded from comparison as they're typically stable
   );
 });

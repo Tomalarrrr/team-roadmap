@@ -101,6 +101,46 @@ describe('proxy ETag handling (transaction support)', () => {
   });
 });
 
+describe('proxy conditional GET (poll 304s)', () => {
+  beforeEach(() => {
+    // Fresh Response per call: a Response body can only be read once, and these
+    // tests invoke the handler more than once.
+    fetchMock.mockImplementation(async () =>
+      new Response('{"ok":true}', { status: 200, headers: { ETag: 'srv-etag' } })
+    );
+  });
+
+  it('returns a computed ETag and 304 (no body) when If-None-Match matches', async () => {
+    const first = await handler(makeReq('roadmap'));
+    expect(first.status).toBe(200);
+    const tag = first.headers.get('ETag');
+    expect(tag).toBeTruthy();
+
+    // Identical upstream body → identical computed tag → unchanged.
+    const second = await handler(makeReq('roadmap', { headers: { 'If-None-Match': tag! } }));
+    expect(second.status).toBe(304);
+    expect(await second.text()).toBe('');
+    expect(second.headers.get('ETag')).toBe(tag);
+  });
+
+  it('returns 200 with the body when If-None-Match does not match', async () => {
+    const r = await handler(makeReq('roadmap', { headers: { 'If-None-Match': 'W/"stale"' } }));
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe('{"ok":true}');
+  });
+
+  it('never 304s a read that requested the Firebase ETag (ludo transactions)', async () => {
+    // Transaction reads must always get the opaque upstream ETag and a real
+    // body, even if a stale If-None-Match rides along.
+    const r = await handler(makeReq('ludo/ABCD', {
+      headers: { 'X-Firebase-ETag': 'true', 'If-None-Match': 'anything' },
+    }));
+    expect(r.status).toBe(200);
+    expect(r.headers.get('ETag')).toBe('srv-etag');
+    expect(await r.text()).toBe('{"ok":true}');
+  });
+});
+
 describe('proxy configuration errors', () => {
   it('returns 500 when the database URL is not configured', async () => {
     vi.stubEnv('FIREBASE_DATABASE_URL', '');

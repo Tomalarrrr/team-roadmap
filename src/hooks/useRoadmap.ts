@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 // Roadmap reads/writes go through our Vercel API proxy (src/api/roadmapApi.ts)
 // rather than the Firebase SDK directly. This is the workaround for corporate
 // VPNs / proxies (e.g. Imprivata, Zscaler) that block Firebase's WebSocket and
@@ -12,10 +12,14 @@ import {
   updateDependencyAtPath,
   updateTeamMemberAtPath,
   updateLeaveBlockAtPath,
+  batchUpdate,
   setupConnectionLifecycle,
   forceReconnect,
 } from '../api/roadmapApi';
 import { getLastFirebaseActivity } from '../firebase';
+import { projectToFirebase } from '../utils/firebaseConversions';
+import { createWriteCoalescer } from '../utils/writeCoalescer';
+import { changedFields } from '../utils/objectDiff';
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { withRetry } from '../utils/retry';
@@ -32,6 +36,22 @@ const saveWithRetry = (data: RoadmapData) =>
       console.warn(`Save failed, retry ${attempt}/3:`, error.message);
     }
   });
+
+// Wrap a targeted multi-path PATCH (only the changed paths) with the same retry
+// policy. Used by add/delete ops so they no longer re-upload the whole roadmap.
+const batchWithRetry = (updates: Record<string, unknown>) =>
+  withRetry(() => batchUpdate(updates), {
+    maxRetries: 3,
+    baseDelayMs: 500,
+    onRetry: (error, attempt) => {
+      console.warn(`Batch update failed, retry ${attempt}/3:`, error.message);
+    }
+  });
+
+// Trailing debounce for the bursty project-edit write path (e.g. holding [ / ]
+// to nudge dates). Long enough to coalesce a key-repeat burst, short enough
+// that a single edit persists promptly. Optimistic UI is unaffected.
+const WRITE_DEBOUNCE_MS = 400;
 
 const DEFAULT_DATA: RoadmapData = {
   projects: [],
@@ -133,6 +153,28 @@ export function useRoadmap() {
       lastSaveCompletedAtRef.current = Date.now();
     }
   }, []);
+
+  // Coalesces bursts of project edits into one trailing write. Bracketing each
+  // burst with startSaving/finishSaving keeps the "saving" indicator on and —
+  // crucially — keeps remote-echo poll suppression active for the whole window,
+  // so an in-flight poll can't overwrite the optimistic edit before it persists.
+  const writeCoalescer = useMemo(
+    () => createWriteCoalescer(WRITE_DEBOUNCE_MS, { onBurstStart: startSaving, onBurstEnd: finishSaving }),
+    [startSaving, finishSaving]
+  );
+  // Per-key pre-burst snapshot, used to roll back if a coalesced write fails.
+  const writeRollbackRef = useRef<Map<string, RoadmapData>>(new Map());
+
+  // Don't lose a debounced edit if the tab is hidden/closed or the hook unmounts
+  // mid-window: flush any pending coalesced writes immediately.
+  useEffect(() => {
+    const flush = () => writeCoalescer.flushAll();
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      writeCoalescer.flushAll();
+    };
+  }, [writeCoalescer]);
 
   // Track pending optimistic updates for rollback
   const pendingUpdateRef = useRef<RoadmapData | null>(null);
@@ -350,8 +392,18 @@ export function useRoadmap() {
   // Only clear the rollback snapshot when ALL have resolved.
   const pendingSaveCountRef = useRef(0);
 
-  // Optimistic save: update UI immediately, save in background, rollback on failure
-  const optimisticSave = useCallback(async (newData: RoadmapData) => {
+  // Optimistic save: update UI immediately, save in background, rollback on failure.
+  //
+  // `write` lets the caller persist only the paths that actually changed via a
+  // targeted PATCH instead of re-uploading the whole roadmap. This is both
+  // cheaper (no full-tree payload) and safer for concurrent editing: a full PUT
+  // overwrites the entire tree and can clobber another user's unrelated change,
+  // whereas a PATCH touches only the given paths. When omitted we fall back to
+  // the full-tree save (used for rollback and any whole-document rewrite).
+  const optimisticSave = useCallback(async (
+    newData: RoadmapData,
+    write?: () => Promise<void>
+  ) => {
     // Capture pre-save state for rollback. On first concurrent save, snapshot current data.
     // Subsequent concurrent saves keep the original pre-save snapshot.
     const rollbackData = pendingUpdateRef.current ?? dataRef.current;
@@ -368,7 +420,7 @@ export function useRoadmap() {
     startSaving();
 
     try {
-      await saveWithRetry(sanitizedData);
+      await (write ? write() : saveWithRetry(sanitizedData));
       setLastSaved(new Date());
     } catch (error) {
       // Rollback on failure to pre-save snapshot
@@ -391,11 +443,13 @@ export function useRoadmap() {
 
   const addTeamMember = useCallback(async (member: Omit<TeamMember, 'id'>) => {
     const currentData = dataRef.current;
-    const newMember: TeamMember = { ...member, id: uuidv4() };
-    await optimisticSave({
-      ...currentData,
-      teamMembers: [...currentData.teamMembers, newMember]
-    });
+    // Assign order explicitly (a full save would renumber by index, but a
+    // targeted write won't, so append at the end of the current list).
+    const newMember: TeamMember = { ...member, id: uuidv4(), order: currentData.teamMembers.length };
+    await optimisticSave(
+      { ...currentData, teamMembers: [...currentData.teamMembers, newMember] },
+      () => batchWithRetry({ [`teamMembers/${newMember.id}`]: sanitizeForFirebase(newMember) })
+    );
     analytics.memberAdded(newMember.id);
   }, [optimisticSave]);
 
@@ -414,7 +468,8 @@ export function useRoadmap() {
 
     try {
       // Granular Firebase update - only updates this specific team member by ID
-      await withRetry(() => updateTeamMemberAtPath(memberId, sanitizeForFirebase(updatedMember)), {
+      // Write only the changed fields (field-level merge), not the whole member.
+      await withRetry(() => updateTeamMemberAtPath(memberId, sanitizeForFirebase(updates)), {
         maxRetries: 3,
         baseDelayMs: 500
       });
@@ -450,13 +505,22 @@ export function useRoadmap() {
     const newLeaveBlocks = (currentData.leaveBlocks || []).filter(
       l => l.memberId !== memberId
     );
-    await optimisticSave({
-      ...currentData,
-      projects: newProjects,
-      teamMembers: newMembers,
-      dependencies: newDependencies,
-      leaveBlocks: newLeaveBlocks
-    });
+    // Delete exactly the affected paths (member + owned projects + orphaned
+    // dependencies + orphaned leave blocks) in one atomic PATCH.
+    const paths: Record<string, unknown> = { [`teamMembers/${memberId}`]: null };
+    for (const id of deletedProjectIds) paths[`projects/${id}`] = null;
+    for (const d of (currentData.dependencies || [])) {
+      if (deletedProjectIds.has(d.fromProjectId) || deletedProjectIds.has(d.toProjectId)) {
+        paths[`dependencies/${d.id}`] = null;
+      }
+    }
+    for (const l of (currentData.leaveBlocks || [])) {
+      if (l.memberId === memberId) paths[`leaveBlocks/${l.id}`] = null;
+    }
+    await optimisticSave(
+      { ...currentData, projects: newProjects, teamMembers: newMembers, dependencies: newDependencies, leaveBlocks: newLeaveBlocks },
+      () => batchWithRetry(paths)
+    );
     analytics.memberDeleted(memberId);
   }, [optimisticSave]);
 
@@ -467,7 +531,11 @@ export function useRoadmap() {
     newMembers.splice(toIndex, 0, moved);
     // Assign order fields based on new positions for ID-keyed Firebase storage
     const orderedMembers = newMembers.map((m, i) => ({ ...m, order: i }));
-    await optimisticSave({ ...currentData, teamMembers: orderedMembers });
+    // Write only the teamMembers subtree (one path per member) so the reorder
+    // doesn't rewrite — and risk clobbering — unrelated collections.
+    const paths: Record<string, unknown> = {};
+    for (const m of orderedMembers) paths[`teamMembers/${m.id}`] = sanitizeForFirebase(m);
+    await optimisticSave({ ...currentData, teamMembers: orderedMembers }, () => batchWithRetry(paths));
     analytics.memberReordered();
   }, [optimisticSave]);
 
@@ -482,45 +550,71 @@ export function useRoadmap() {
       id: uuidv4(),
       milestones: []
     };
-    await optimisticSave({
-      ...currentData,
-      projects: [...currentData.projects, newProject]
-    });
+    await optimisticSave(
+      { ...currentData, projects: [...currentData.projects, newProject] },
+      () => batchWithRetry({ [`projects/${newProject.id}`]: projectToFirebase(sanitizeForFirebase(newProject)) })
+    );
     analytics.projectCreated(newProject.id);
     return newProject;
   }, [optimisticSave]);
 
-  const updateProject = useCallback(async (projectId: string, updates: Partial<Project>) => {
+  // The one hot, bursty write path: holding [ / ] to nudge a selected project's
+  // dates fires this on every key-repeat. Each call applies the optimistic state
+  // immediately, but the network write is coalesced (one trailing PUT per
+  // project) so a burst is a single write rather than dozens. On failure the
+  // optimistic state rolls back to the pre-burst snapshot and the error surfaces
+  // via the global saveError toast (so we deliberately don't reject here — many
+  // callers fire-and-forget, and an unhandled rejection would be noise).
+  const updateProject = useCallback((projectId: string, updates: Partial<Project>): Promise<void> => {
     const currentData = dataRef.current;
     const existingProject = currentData.projects.find(p => p.id === projectId);
-    if (!existingProject) return;
+    if (!existingProject) return Promise.resolve();
 
     const updatedProject = { ...existingProject, ...updates };
 
-    // Optimistic update
+    // Optimistic update (immediate, on every call)
     const newProjects = currentData.projects.map(p => p.id === projectId ? updatedProject : p);
     dataRef.current = { ...currentData, projects: newProjects };
     setData(dataRef.current);
-    startSaving();
 
-    try {
-      // Granular Firebase update - only updates this specific project by ID
-      await withRetry(() => updateProjectAtPath(projectId, sanitizeForFirebase(updatedProject)), {
-        maxRetries: 3,
-        baseDelayMs: 500
-      });
-      analytics.projectUpdated(projectId);
-      setLastSaved(new Date());
-    } catch (error) {
-      // Rollback on failure
-      dataRef.current = currentData;
-      setData(currentData);
-      setSaveError(error instanceof Error ? error.message : 'Failed to save');
-      throw error;
-    } finally {
-      finishSaving();
-    }
-  }, [startSaving, finishSaving]);
+    const key = `project:${projectId}`;
+    // Capture the pre-burst snapshot once, on the first edit of a burst.
+    if (!writeCoalescer.has(key)) writeRollbackRef.current.set(key, currentData);
+
+    writeCoalescer.schedule(key, async () => {
+      const rollback = writeRollbackRef.current.get(key);
+      writeRollbackRef.current.delete(key);
+      // Diff the *accumulated* burst against the pre-burst snapshot, then write
+      // only the changed fields. Reading from dataRef here (not the closed-over
+      // value) captures every edit in the burst — polls are suppressed while
+      // saving, so dataRef only reflects our own optimistic edits. This both
+      // coalesces the burst into one write and avoids clobbering a concurrent
+      // edit to other fields of the same project.
+      const before = rollback?.projects.find(p => p.id === projectId);
+      const after = dataRef.current.projects.find(p => p.id === projectId);
+      if (!after) return; // project was deleted mid-burst
+      const patch = changedFields(before, after);
+      if (Object.keys(patch).length === 0) return; // nothing actually changed
+      try {
+        await withRetry(() => updateProjectAtPath(projectId, sanitizeForFirebase(patch)), {
+          maxRetries: 3,
+          baseDelayMs: 500
+        });
+        analytics.projectUpdated(projectId);
+        setLastSaved(new Date());
+      } catch (error) {
+        if (rollback) {
+          dataRef.current = rollback;
+          setData(rollback);
+        }
+        setSaveError(error instanceof Error ? error.message : 'Failed to save');
+      }
+    });
+
+    // Resolve immediately: the optimistic update is already applied and the
+    // persisted write is coalesced. Failures surface via saveError, not a reject.
+    return Promise.resolve();
+  }, [writeCoalescer]);
 
   const deleteProject = useCallback(async (projectId: string) => {
     const currentData = dataRef.current;
@@ -529,7 +623,16 @@ export function useRoadmap() {
     const newDependencies = (currentData.dependencies || []).filter(
       d => d.fromProjectId !== projectId && d.toProjectId !== projectId
     );
-    await optimisticSave({ ...currentData, projects: newProjects, dependencies: newDependencies });
+    const paths: Record<string, unknown> = { [`projects/${projectId}`]: null };
+    for (const d of (currentData.dependencies || [])) {
+      if (d.fromProjectId === projectId || d.toProjectId === projectId) {
+        paths[`dependencies/${d.id}`] = null;
+      }
+    }
+    await optimisticSave(
+      { ...currentData, projects: newProjects, dependencies: newDependencies },
+      () => batchWithRetry(paths)
+    );
     analytics.projectDeleted(projectId);
   }, [optimisticSave]);
 
@@ -543,7 +646,10 @@ export function useRoadmap() {
       }
       return p;
     });
-    await optimisticSave({ ...currentData, projects: newProjects });
+    await optimisticSave(
+      { ...currentData, projects: newProjects },
+      () => batchWithRetry({ [`projects/${projectId}/milestones/${newMilestone.id}`]: sanitizeForFirebase(newMilestone) })
+    );
     analytics.milestoneCreated(newMilestone.id);
 
     // Track new milestone for entrance animation
@@ -589,7 +695,8 @@ export function useRoadmap() {
 
     try {
       // Granular Firebase update - only updates this specific milestone by ID
-      await withRetry(() => updateMilestoneAtPath(projectId, milestoneId, sanitizeForFirebase(updatedMilestone)), {
+      // Write only the changed fields (field-level merge), not the whole milestone.
+      await withRetry(() => updateMilestoneAtPath(projectId, milestoneId, sanitizeForFirebase(updates)), {
         maxRetries: 3,
         baseDelayMs: 500
       });
@@ -619,7 +726,16 @@ export function useRoadmap() {
     const newDependencies = (currentData.dependencies || []).filter(
       d => d.fromMilestoneId !== milestoneId && d.toMilestoneId !== milestoneId
     );
-    await optimisticSave({ ...currentData, projects: newProjects, dependencies: newDependencies });
+    const paths: Record<string, unknown> = { [`projects/${projectId}/milestones/${milestoneId}`]: null };
+    for (const d of (currentData.dependencies || [])) {
+      if (d.fromMilestoneId === milestoneId || d.toMilestoneId === milestoneId) {
+        paths[`dependencies/${d.id}`] = null;
+      }
+    }
+    await optimisticSave(
+      { ...currentData, projects: newProjects, dependencies: newDependencies },
+      () => batchWithRetry(paths)
+    );
     analytics.milestoneDeleted(milestoneId);
   }, [optimisticSave]);
 
@@ -654,7 +770,10 @@ export function useRoadmap() {
       type
     };
     const newDependencies = [...(currentData.dependencies || []), newDependency];
-    await optimisticSave({ ...currentData, dependencies: newDependencies });
+    await optimisticSave(
+      { ...currentData, dependencies: newDependencies },
+      () => batchWithRetry({ [`dependencies/${newDependency.id}`]: sanitizeForFirebase(newDependency) })
+    );
 
     // Track new dependency for entrance animation
     setNewDependencyIds(prev => new Set(prev).add(newDependency.id));
@@ -675,7 +794,10 @@ export function useRoadmap() {
   const removeDependency = useCallback(async (dependencyId: string) => {
     const currentData = dataRef.current;
     const newDependencies = (currentData.dependencies || []).filter(d => d.id !== dependencyId);
-    await optimisticSave({ ...currentData, dependencies: newDependencies });
+    await optimisticSave(
+      { ...currentData, dependencies: newDependencies },
+      () => batchWithRetry({ [`dependencies/${dependencyId}`]: null })
+    );
   }, [optimisticSave]);
 
   const updateDependency = useCallback(async (dependencyId: string, updates: Partial<Dependency>) => {
@@ -694,7 +816,8 @@ export function useRoadmap() {
 
     try {
       // Granular Firebase update - only updates this specific dependency by ID
-      await withRetry(() => updateDependencyAtPath(dependencyId, sanitizeForFirebase(updatedDependency)), {
+      // Write only the changed fields (field-level merge), not the whole dependency.
+      await withRetry(() => updateDependencyAtPath(dependencyId, sanitizeForFirebase(updates)), {
         maxRetries: 3,
         baseDelayMs: 500
       });
@@ -715,7 +838,10 @@ export function useRoadmap() {
     const currentData = dataRef.current;
     const newLeaveBlock: LeaveBlock = { ...leaveBlock, id: uuidv4() };
     const newLeaveBlocks = [...(currentData.leaveBlocks || []), newLeaveBlock];
-    await optimisticSave({ ...currentData, leaveBlocks: newLeaveBlocks });
+    await optimisticSave(
+      { ...currentData, leaveBlocks: newLeaveBlocks },
+      () => batchWithRetry({ [`leaveBlocks/${newLeaveBlock.id}`]: sanitizeForFirebase(newLeaveBlock) })
+    );
     return newLeaveBlock;
   }, [optimisticSave]);
 
@@ -735,7 +861,8 @@ export function useRoadmap() {
 
     try {
       // Granular Firebase update - only updates this specific leave block by ID
-      await withRetry(() => updateLeaveBlockAtPath(leaveId, sanitizeForFirebase(updatedLeaveBlock)), {
+      // Write only the changed fields (field-level merge), not the whole leave block.
+      await withRetry(() => updateLeaveBlockAtPath(leaveId, sanitizeForFirebase(updates)), {
         maxRetries: 3,
         baseDelayMs: 500
       });
@@ -753,7 +880,10 @@ export function useRoadmap() {
   const deleteLeaveBlock = useCallback(async (leaveId: string) => {
     const currentData = dataRef.current;
     const newLeaveBlocks = (currentData.leaveBlocks || []).filter(l => l.id !== leaveId);
-    await optimisticSave({ ...currentData, leaveBlocks: newLeaveBlocks });
+    await optimisticSave(
+      { ...currentData, leaveBlocks: newLeaveBlocks },
+      () => batchWithRetry({ [`leaveBlocks/${leaveId}`]: null })
+    );
   }, [optimisticSave]);
 
   // Period marker CRUD operations
@@ -761,7 +891,10 @@ export function useRoadmap() {
     const currentData = dataRef.current;
     const newMarker: PeriodMarker = { ...marker, id: uuidv4() };
     const newMarkers = [...(currentData.periodMarkers || []), newMarker];
-    await optimisticSave({ ...currentData, periodMarkers: newMarkers });
+    await optimisticSave(
+      { ...currentData, periodMarkers: newMarkers },
+      () => batchWithRetry({ [`periodMarkers/${newMarker.id}`]: sanitizeForFirebase(newMarker) })
+    );
     return newMarker;
   }, [optimisticSave]);
 
@@ -774,13 +907,19 @@ export function useRoadmap() {
     const updatedMarker = { ...markers[markerIndex], ...updates };
     const newMarkers = [...markers];
     newMarkers[markerIndex] = updatedMarker;
-    await optimisticSave({ ...currentData, periodMarkers: newMarkers });
+    await optimisticSave(
+      { ...currentData, periodMarkers: newMarkers },
+      () => batchWithRetry({ [`periodMarkers/${markerId}`]: sanitizeForFirebase(updatedMarker) })
+    );
   }, [optimisticSave]);
 
   const deletePeriodMarker = useCallback(async (markerId: string) => {
     const currentData = dataRef.current;
     const newMarkers = (currentData.periodMarkers || []).filter(m => m.id !== markerId);
-    await optimisticSave({ ...currentData, periodMarkers: newMarkers });
+    await optimisticSave(
+      { ...currentData, periodMarkers: newMarkers },
+      () => batchWithRetry({ [`periodMarkers/${markerId}`]: null })
+    );
   }, [optimisticSave]);
 
   return {

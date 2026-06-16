@@ -12,12 +12,33 @@ interface ExportMenuProps {
 
 export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // Which export is currently running (disables the list and shows progress),
+  // and the last error message (so a failed export never fails silently).
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Get platform-appropriate shortcut display
   const exportShortcut = `${getModifierKeySymbol()}E`;
 
   const exportOptions = getExportOptions(projects, teamMembers, dependencies);
+
+  const runExport = async (option: (typeof exportOptions)[number]) => {
+    if (busyId) return; // one export at a time
+    setError(null);
+    setBusyId(option.id);
+    try {
+      await option.action();
+      setIsOpen(false);
+    } catch (err) {
+      // Surface the failure instead of letting it become an unhandled rejection
+      // with no user feedback (the menu used to just close on a failed PDF).
+      console.error(`Export "${option.id}" failed:`, err);
+      setError(`${option.label} failed. Please try again.`);
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   // Close on click outside
   useEffect(() => {
@@ -29,6 +50,12 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
+  }, [isOpen]);
+
+  // Drop any stale error message once the menu is closed, so it doesn't reappear
+  // on the next open.
+  useEffect(() => {
+    if (!isOpen) setError(null);
   }, [isOpen]);
 
   // Keyboard shortcut (Cmd+E)
@@ -68,19 +95,21 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
               <button
                 key={option.id}
                 className={styles.menuItem}
-                onClick={() => {
-                  option.action();
-                  setIsOpen(false);
-                }}
+                disabled={busyId !== null}
+                aria-busy={busyId === option.id}
+                onClick={() => { void runExport(option); }}
               >
                 <span className={styles.menuIcon}>{option.icon}</span>
                 <div className={styles.menuItemContent}>
-                  <span className={styles.menuItemLabel}>{option.label}</span>
+                  <span className={styles.menuItemLabel}>
+                    {busyId === option.id ? 'Exporting…' : option.label}
+                  </span>
                   <span className={styles.menuItemDesc}>{option.description}</span>
                 </div>
               </button>
             ))}
           </div>
+          {error && <div className={styles.menuError} role="alert">{error}</div>}
         </div>
       )}
     </div>

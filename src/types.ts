@@ -8,6 +8,10 @@ export interface Milestone {
   statusColor: string;
 }
 
+// Project effort sizing — drives both pill height and capacity-slot cost.
+// Large = 2 slots, Medium = 1.5, Small = 1 (see utils/capacity.ts).
+export type ProjectSize = 'large' | 'medium' | 'small';
+
 export interface Project {
   id: string;
   title: string;
@@ -15,6 +19,7 @@ export interface Project {
   startDate: string;
   endDate: string;
   statusColor: string;
+  size: ProjectSize; // Effort size; historic projects default to 'medium' on load.
   milestones: Milestone[];
   dependencies?: string[]; // IDs of projects this depends on
 }

@@ -2,9 +2,11 @@
   position: absolute;
   border-radius: var(--radius-sm);
   cursor: context-menu; /* Indicate right-click menu available */
-  opacity: 0.7;
+  opacity: 0.65;
   transition: opacity 0.15s ease;
-  z-index: 0; /* Behind projects, milestones, and dependency lines */
+  /* Full-height dotted band in the *background*: it shows through empty parts of
+     the lane, and the project pills (z-index 2+) paint cleanly on top of it. */
+  z-index: 0;
   overflow: visible; /* Allow tooltip to overflow */
   display: flex;
   align-items: center;

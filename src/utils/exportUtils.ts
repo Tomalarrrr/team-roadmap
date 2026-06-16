@@ -7,7 +7,8 @@ interface ExportOption {
   label: string;
   description: string;
   icon: string;
-  action: () => void;
+  // May be async (PDF). Callers must await and surface rejections to the user.
+  action: () => void | Promise<unknown>;
 }
 
 // Visually relevant CSS properties for export rendering.
@@ -171,6 +172,17 @@ export async function exportTimelineToPDF() {
     const contentHeight = Math.max(lanesHeight, sidebarHeight);
     const fullHeight = headerHeight + contentHeight;
 
+    // Choose the highest render scale (for crisp retina output) that keeps BOTH
+    // canvas dimensions under the browser's max. At default zoom the full 6-year
+    // timeline is ~6500px wide; at the desired 3× that's ~19700px, past Chrome's
+    // ~16384px limit, which silently yields a blank/clipped canvas. Clamp so the
+    // export always renders. Integer scale keeps the crop math exact.
+    const MAX_CANVAS_DIM = 16384;
+    const scale = Math.max(
+      1,
+      Math.min(3, Math.floor(MAX_CANVAS_DIM / fullWidth), Math.floor(MAX_CANVAS_DIM / fullHeight))
+    );
+
     // Temporarily mount the styled clone for rendering
     clonedElement.style.position = 'absolute';
     clonedElement.style.left = '-9999px';
@@ -183,7 +195,7 @@ export async function exportTimelineToPDF() {
       // First, capture the FULL timeline
       const fullCanvas = await html2canvas(clonedElement, {
         backgroundColor: '#fafafa',
-        scale: 3, // Higher scale for better quality (retina + extra)
+        scale, // clamped above so the canvas stays within browser limits
         logging: false,
         useCORS: true,
         allowTaint: false,
@@ -203,8 +215,9 @@ export async function exportTimelineToPDF() {
       // Remove the temporary clone
       document.body.removeChild(clonedElement);
 
-      // Now crop the canvas to sidebar + 6-month window
-      const scale = 3; // Must match html2canvas scale
+      // Now crop the canvas to sidebar + 6-month window. Reuses the same `scale`
+      // the canvas was rendered at (NOT a hardcoded 3) so the crop stays aligned
+      // when the scale was clamped down for a large timeline.
       const cropX = SIDEBAR_WIDTH * scale; // Start after sidebar for timeline crop
       const cropStartX = windowStartX * scale; // Timeline portion start
       const cropWidth = (SIDEBAR_WIDTH + windowWidth) * scale;
@@ -236,9 +249,9 @@ export async function exportTimelineToPDF() {
       const imgWidth = croppedCanvas.width;
       const imgHeight = croppedCanvas.height;
 
-      // Use A3 landscape for large timelines, or custom size
-      const pdfWidth = imgWidth / 3; // Divide by scale factor
-      const pdfHeight = imgHeight / 3;
+      // Convert device pixels back to CSS px by dividing by the render scale.
+      const pdfWidth = imgWidth / scale;
+      const pdfHeight = imgHeight / scale;
 
       // Create PDF with proper dimensions
       const pdf = new jsPDF({
@@ -263,6 +276,12 @@ export async function exportTimelineToPDF() {
       // Save the PDF
       pdf.save(filename);
       analytics.exportPDF();
+
+      // Release the large backing buffers immediately rather than waiting for
+      // GC — at 3× scale each canvas is tens of MB, and repeated exports would
+      // otherwise stack retained allocations and risk OOM.
+      fullCanvas.width = fullCanvas.height = 0;
+      croppedCanvas.width = croppedCanvas.height = 0;
 
       return true;
     } catch (canvasError) {
