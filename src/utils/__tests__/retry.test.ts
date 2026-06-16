@@ -56,4 +56,18 @@ describe('isRetryableError', () => {
     expect(isRetryableError(new Error('Validation failed'))).toBe(true);
     expect(isRetryableError(new Error('Something went wrong'))).toBe(true);
   });
+
+  it('returns false for HTTP 4xx client errors from the proxy', () => {
+    expect(isRetryableError(new Error('Proxy PATCH roadmap failed: 400'))).toBe(false);
+    expect(isRetryableError(new Error('Proxy PATCH roadmap failed: 400 (size is not allowed)'))).toBe(false);
+    expect(isRetryableError(new Error('Proxy PUT roadmap failed: 401'))).toBe(false);
+    expect(isRetryableError(new Error('Proxy GET roadmap failed: 404'))).toBe(false);
+  });
+
+  it('still retries transient 408/429 and 5xx statuses', () => {
+    expect(isRetryableError(new Error('Proxy GET roadmap failed: 408'))).toBe(true);
+    expect(isRetryableError(new Error('Proxy PATCH roadmap failed: 429'))).toBe(true);
+    expect(isRetryableError(new Error('Proxy PUT roadmap failed: 500'))).toBe(true);
+    expect(isRetryableError(new Error('Proxy PUT roadmap failed: 503'))).toBe(true);
+  });
 });

@@ -215,7 +215,7 @@ export async function exportTimelineToPDF() {
       // Remove the temporary clone
       document.body.removeChild(clonedElement);
 
-      // Now crop the canvas to sidebar + 6-month window. Reuses the same `scale`
+      // Now crop the canvas to sidebar + 12-month window. Reuses the same `scale`
       // the canvas was rendered at (NOT a hardcoded 3) so the crop stays aligned
       // when the scale was clamped down for a large timeline.
       const cropX = SIDEBAR_WIDTH * scale; // Start after sidebar for timeline crop
@@ -237,10 +237,10 @@ export async function exportTimelineToPDF() {
           0, 0, SIDEBAR_WIDTH * scale, cropHeight  // dest: start at 0
         );
 
-        // Draw the 6-month window of the timeline (after sidebar)
+        // Draw the 12-month window of the timeline (after sidebar)
         ctx.drawImage(
           fullCanvas,
-          cropX + cropStartX, 0, windowWidth * scale, cropHeight, // source: 6-month window
+          cropX + cropStartX, 0, windowWidth * scale, cropHeight, // source: 12-month window
           SIDEBAR_WIDTH * scale, 0, windowWidth * scale, cropHeight // dest: after sidebar
         );
       }

@@ -182,6 +182,14 @@ export function useRoadmap() {
   // callback skip redundant setData() calls when nothing changed since the
   // previous poll (the proxy always delivers every tick).
   const lastSyncedRef = useRef<string | null>(null);
+  // A remote snapshot that arrived while our own write was in flight (or during
+  // the post-save cooldown) and was therefore deferred rather than applied.
+  // Because the proxy de-dupes via ETag, an unchanged snapshot is never
+  // re-delivered, so we must hold the deferred one and apply it once the
+  // suppression window clears — otherwise a teammate's concurrent change is
+  // lost until the next unrelated write or a full reload.
+  const deferredSnapshotRef = useRef<{ data: RoadmapData; receivedAt: number } | null>(null);
+  const deferredFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Debounce connection state to prevent rapid state flapping
   const connectionDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -208,6 +216,54 @@ export function useRoadmap() {
     // Set up visibility-based connection management
     const cleanupLifecycle = setupConnectionLifecycle();
 
+    // Suppress remote snapshots while our own writes are in flight, and for a
+    // short cooldown afterwards, so a stale poll can't overwrite optimistic
+    // state during the read-after-write race.
+    const POST_SAVE_COOLDOWN_MS = 1500;
+
+    const isSuppressing = () =>
+      savingCountRef.current > 0 ||
+      Date.now() - lastSaveCompletedAtRef.current < POST_SAVE_COOLDOWN_MS;
+
+    // Apply a snapshot to local state, de-duping against the last applied one
+    // (the proxy delivers a snapshot every poll, so skip setState when nothing
+    // actually changed).
+    const applySnapshot = (newData: RoadmapData) => {
+      const normalized = normalizeData(newData);
+      const serialized = JSON.stringify(normalized);
+      if (serialized === lastSyncedRef.current) {
+        setLoading(false);
+        return;
+      }
+      lastSyncedRef.current = serialized;
+      setData(normalized);
+      setLoading(false);
+    };
+
+    // After the suppression window clears, apply the snapshot we deferred (if
+    // any). Only apply one that arrived *after* our last write settled — an
+    // older one may predate our own change and would revert it; that case
+    // self-heals because the proxy ETag advanced past it, so the next poll
+    // re-delivers the correct merged state.
+    const scheduleDeferredFlush = () => {
+      if (deferredFlushTimerRef.current) return;
+      const elapsed = Date.now() - lastSaveCompletedAtRef.current;
+      const delay = Math.max(POST_SAVE_COOLDOWN_MS - elapsed, 50);
+      deferredFlushTimerRef.current = setTimeout(() => {
+        deferredFlushTimerRef.current = null;
+        if (!mounted) return;
+        if (isSuppressing()) {
+          scheduleDeferredFlush();
+          return;
+        }
+        const pending = deferredSnapshotRef.current;
+        deferredSnapshotRef.current = null;
+        if (pending && pending.receivedAt >= lastSaveCompletedAtRef.current) {
+          applySnapshot(pending.data);
+        }
+      }, delay);
+    };
+
     // Subscribe to roadmap data with error recovery.
     // subscriptionId tracks the current attempt — if a stale promise resolves
     // after a newer attempt started, its unsub is cleaned up immediately.
@@ -224,29 +280,19 @@ export function useRoadmap() {
           resubscribeAttempts = 0; // Reset on successful data
           isRecoveringRef.current = false;
 
-          // Suppress remote snapshots while our own writes are in flight, and
-          // for a short cooldown afterwards, so a stale poll can't overwrite
-          // optimistic state. Server truth re-syncs on the next clean poll.
-          const POST_SAVE_COOLDOWN_MS = 1500;
-          if (
-            savingCountRef.current > 0 ||
-            Date.now() - lastSaveCompletedAtRef.current < POST_SAVE_COOLDOWN_MS
-          ) {
+          if (isSuppressing()) {
+            // Don't apply now, but hold onto it: the proxy won't re-deliver an
+            // unchanged snapshot, so dropping it outright would lose a
+            // teammate's concurrent change.
+            deferredSnapshotRef.current = { data: newData, receivedAt: Date.now() };
+            scheduleDeferredFlush();
             setLoading(false);
             return;
           }
 
-          // De-dupe: the proxy delivers a snapshot every poll, so skip setState
-          // when nothing actually changed since the last applied snapshot.
-          const normalized = normalizeData(newData);
-          const serialized = JSON.stringify(normalized);
-          if (serialized === lastSyncedRef.current) {
-            setLoading(false);
-            return;
-          }
-          lastSyncedRef.current = serialized;
-          setData(normalized);
-          setLoading(false);
+          // A fresh snapshot supersedes any deferred one.
+          deferredSnapshotRef.current = null;
+          applySnapshot(newData);
         },
         (error) => {
           // Listener error - attempt to resubscribe with backoff
@@ -378,6 +424,10 @@ export function useRoadmap() {
       }
       if (resubscribeTimeoutRef.current) {
         clearTimeout(resubscribeTimeoutRef.current);
+      }
+      if (deferredFlushTimerRef.current) {
+        clearTimeout(deferredFlushTimerRef.current);
+        deferredFlushTimerRef.current = null;
       }
       if (staleCheckIntervalRef.current) {
         clearInterval(staleCheckIntervalRef.current);

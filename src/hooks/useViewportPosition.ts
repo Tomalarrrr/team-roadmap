@@ -12,18 +12,29 @@ export function useViewportPosition(
   const { position, isOpen } = options;
   const [computedPosition, setComputedPosition] = useState<{ x: number; y: number } | null>(null);
 
-  // Reset computed position when input position changes (prevents stale flash on
-  // reopen). Done by adjusting state *during render* — React's blessed pattern
-  // for "reset state on prop change" — rather than in an effect, which would
-  // paint a stale frame first and triggers the set-state-in-effect lint.
-  const [prevPosition, setPrevPosition] = useState(position);
-  if (position !== prevPosition) {
-    setPrevPosition(position);
+  const posX = position ? position.x : null;
+  const posY = position ? position.y : null;
+
+  // Reset computed position when the input coordinates change (prevents a stale
+  // flash on reopen). Done by adjusting state *during render* — React's blessed
+  // pattern for "reset state on prop change" — rather than in an effect, which
+  // would paint a stale frame first and triggers the set-state-in-effect lint.
+  //
+  // CRITICAL: compare by VALUE (x/y), not object identity. Callers routinely
+  // pass a fresh `{ x, y }` literal every render; a reference check here would
+  // set state on every render — and because each synchronous re-render builds
+  // yet another new object, it would never converge, throwing React error #301
+  // ("Too many re-renders"). Comparing the numbers converges in one extra render.
+  const [prevPos, setPrevPos] = useState(position);
+  const prevX = prevPos ? prevPos.x : null;
+  const prevY = prevPos ? prevPos.y : null;
+  if (prevX !== posX || prevY !== posY) {
+    setPrevPos(position);
     setComputedPosition(null);
   }
 
   useEffect(() => {
-    if (!isOpen || !position || !menuRef.current) {
+    if (!isOpen || posX === null || posY === null || !menuRef.current) {
       return;
     }
 
@@ -34,12 +45,12 @@ export function useViewportPosition(
       const menuRect = menuRef.current.getBoundingClientRect();
       const EDGE_PADDING = 8;
 
-      let x = position.x;
-      let y = position.y;
+      let x = posX;
+      let y = posY;
 
       // Check right edge overflow
       if (x + menuRect.width > window.innerWidth - EDGE_PADDING) {
-        x = position.x - menuRect.width;
+        x = posX - menuRect.width;
       }
 
       // Clamp to left edge
@@ -49,7 +60,7 @@ export function useViewportPosition(
 
       // Check bottom edge overflow
       if (y + menuRect.height > window.innerHeight - EDGE_PADDING) {
-        y = position.y - menuRect.height;
+        y = posY - menuRect.height;
       }
 
       // Clamp to top edge
@@ -62,7 +73,10 @@ export function useViewportPosition(
 
     observer.observe(menuRef.current);
     return () => observer.disconnect();
-  }, [isOpen, position, menuRef]);
+    // Depend on the coordinate VALUES, not the `position` object — an inline
+    // `{ x, y }` prop changes identity every render and would otherwise rebuild
+    // the observer needlessly on each render.
+  }, [isOpen, posX, posY, menuRef]);
 
   // Return null when closed — bypasses any stale computedPosition
   if (!isOpen) return null;

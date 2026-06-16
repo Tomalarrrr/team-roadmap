@@ -33,4 +33,22 @@ describe('changedFields', () => {
     const after = { title: 'A', milestones: [{ id: 'm1' }, { id: 'm2' }] };
     expect(changedFields(before, after)).toEqual({ milestones: after.milestones });
   });
+
+  it('emits null for a field that was removed (so the PATCH deletes it)', () => {
+    const before = { title: 'A', label: 'urgent' } as { title: string; label?: string };
+    const after = { title: 'A' } as { title: string; label?: string };
+    expect(changedFields(before, after)).toEqual({ label: null });
+  });
+
+  it('emits null for a field explicitly cleared to undefined', () => {
+    const before = { title: 'A', label: 'urgent' } as { title: string; label?: string };
+    const after = { title: 'A', label: undefined } as { title: string; label?: string };
+    expect(changedFields(before, after)).toEqual({ label: null });
+  });
+
+  it('does not emit a field that was absent in both', () => {
+    const before = { title: 'A', label: undefined } as { title: string; label?: string };
+    const after = { title: 'B', label: undefined } as { title: string; label?: string };
+    expect(changedFields(before, after)).toEqual({ title: 'B' });
+  });
 });

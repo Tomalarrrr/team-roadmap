@@ -9,8 +9,8 @@ import { Modal } from './components/Modal';
 import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage } from './types';
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
-import { getSuggestedProjectDates, parseLocalDate, toDateString } from './utils/dateUtils';
-import { evaluateAssignment, formatCapacityMessage, isCapacityExempt, DEFAULT_SIZE, type CapacityItem } from './utils/capacity';
+import { getSuggestedProjectDates, parseLocalDate, toDateString, isDatePast } from './utils/dateUtils';
+import { evaluateAssignment, formatCapacityMessage, isCapacityExempt, DEFAULT_SIZE, type CapacityItem, type ProjectSize } from './utils/capacity';
 import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -228,6 +228,33 @@ function App() {
     projectsRef.current = data.projects;
   }, [data.projects]);
 
+  // Shared capacity guard. Given a candidate placement, returns an error message
+  // if it would push the owner over CAPACITY, or null if it fits / is exempt.
+  // Reads the live project list from a ref so it has no reactive deps and is
+  // safe to call from the keyboard handler without re-registering listeners.
+  // Every path that moves work onto a member — drag/resize, keyboard date-shift,
+  // and duplicate — funnels through here so the ceiling is enforced uniformly.
+  const checkCapacityFit = useCallback(
+    (candidate: { id: string; owner?: string; title?: string; startDate: string; endDate: string; size?: ProjectSize }): string | null => {
+      if (!candidate.owner || isCapacityExempt(candidate)) return null;
+      const byOwner: Record<string, CapacityItem[]> = {};
+      projectsRef.current.forEach(p => {
+        if (!p.owner) return;
+        if (isCapacityExempt(p)) return;
+        (byOwner[p.owner] ??= []).push(p);
+      });
+      const item: CapacityItem = {
+        id: candidate.id,
+        startDate: candidate.startDate,
+        endDate: candidate.endDate,
+        size: candidate.size ?? DEFAULT_SIZE,
+      };
+      const verdict = evaluateAssignment(byOwner, item, candidate.owner, toDateString(new Date()));
+      return verdict.fits ? null : (formatCapacityMessage(verdict, candidate.owner, item.size) ?? 'Over capacity');
+    },
+    []
+  );
+
   // View mode lock — always starts locked; unlock is session-only (resets on tab close)
   const [isLocked, setIsLocked] = useState(true);
   const [showVaultUnlock, setShowVaultUnlock] = useState(false);
@@ -297,11 +324,13 @@ function App() {
   // Determine the display status of a project based on its dates and color
   const getProjectDisplayStatus = useCallback((project: Project): ProjectStatus => {
     const today = new Date();
-    const endDate = parseLocalDate(project.endDate);
     const startDate = parseLocalDate(project.startDate);
 
-    // Past projects are always "complete" (auto-blue)
-    if (endDate < today) {
+    // Past projects are always "complete" (auto-blue). Compare at day
+    // granularity (via isDatePast) so a project on its final day still counts
+    // as active — matches ProjectBar, which also uses isDatePast. A time-of-day
+    // comparison would mis-classify a project ending today as complete.
+    if (isDatePast(project.endDate)) {
       return 'complete';
     }
 
@@ -607,11 +636,26 @@ function App() {
           const endDate = parseLocalDate(project.endDate);
           startDate.setDate(startDate.getDate() + 7);
           endDate.setDate(endDate.getDate() + 7);
+          const newStart = toDateString(startDate);
+          const newEnd = toDateString(endDate);
+          // Enforce the same capacity ceiling as drag/resize and the form.
+          const capacityError = checkCapacityFit({
+            id: '__duplicate__', // sentinel: not in the owner's set, so purely additive
+            owner: project.owner,
+            title: `${project.title} (copy)`,
+            startDate: newStart,
+            endDate: newEnd,
+            size: project.size ?? DEFAULT_SIZE,
+          });
+          if (capacityError) {
+            showToast(capacityError, 'error');
+            return;
+          }
           addProject({
             title: `${project.title} (copy)`,
             owner: project.owner,
-            startDate: toDateString(startDate),
-            endDate: toDateString(endDate),
+            startDate: newStart,
+            endDate: newEnd,
             statusColor: normalizeStatusColor(project.statusColor),
             size: project.size ?? DEFAULT_SIZE
           }).then(() => {
@@ -633,9 +677,17 @@ function App() {
           const endDate = parseLocalDate(project.endDate);
           startDate.setDate(startDate.getDate() + shift);
           endDate.setDate(endDate.getDate() + shift);
+          const newStart = toDateString(startDate);
+          const newEnd = toDateString(endDate);
+          // Enforce the same capacity ceiling as drag/resize and the form.
+          const capacityError = checkCapacityFit({ ...project, startDate: newStart, endDate: newEnd });
+          if (capacityError) {
+            showToast(capacityError, 'error');
+            return;
+          }
           updateProject(project.id, {
-            startDate: toDateString(startDate),
-            endDate: toDateString(endDate)
+            startDate: newStart,
+            endDate: newEnd
           });
         }
         return;
@@ -653,7 +705,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, selectedProjectId, addProject, updateProject, showToast]);
+  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, selectedProjectId, addProject, updateProject, showToast, checkCapacityFit]);
 
   // Team member handlers
   const handleAddMember = useCallback(
@@ -720,7 +772,11 @@ function App() {
           // Milestones aren't edited here; omit the field so existing milestone data is preserved.
           const { milestones: _milestones, ...projectData } = values; // eslint-disable-line @typescript-eslint/no-unused-vars -- field intentionally dropped
           await updateProject(modal.project.id, projectData);
-          recordAction('UPDATE_PROJECT', values, createInverse('UPDATE_PROJECT', beforeState, values));
+          // Record the full merged project (with id + preserved milestones) as the
+          // redo target — `projectData`/`values` alone lack an `id`, so redo's
+          // isProject() guard would reject it and silently do nothing.
+          const afterState: Project = { ...beforeState, ...projectData };
+          recordAction('UPDATE_PROJECT', afterState, createInverse('UPDATE_PROJECT', beforeState, afterState));
           closeModal();
         } catch (error) {
           showToast(`Failed to update project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
@@ -743,40 +799,17 @@ function App() {
         updates.size !== undefined;
 
       const merged = current ? { ...current, ...updates } : null;
-      // The Digital Queue is exempt from capacity, so moving/resizing it never
-      // needs a fit check.
-      if (merged && affectsCapacity && !isCapacityExempt(merged)) {
-        const byOwner: Record<string, CapacityItem[]> = {};
-        data.projects.forEach(p => {
-          // Skip malformed fragments with no owner so they don't surface as an
-          // "undefined" suggestion or pollute another owner's capacity sum.
-          if (!p.owner) return;
-          // Exempt projects (the Digital Queue) don't consume slots, so they're
-          // left out of every owner's capacity sum.
-          if (isCapacityExempt(p)) return;
-          (byOwner[p.owner] ??= []).push(p);
-        });
-        const candidate: CapacityItem = {
-          id: merged.id,
-          startDate: merged.startDate,
-          endDate: merged.endDate,
-          size: merged.size ?? DEFAULT_SIZE,
-        };
-        // Only judge capacity from today forward — a clash that's already in the
-        // past can't be undone, so it shouldn't block moving/resizing a project.
-        const verdict = evaluateAssignment(byOwner, candidate, merged.owner, toDateString(new Date()));
-        if (!verdict.fits) {
-          showToast(
-            formatCapacityMessage(verdict, merged.owner, candidate.size) ?? 'Over capacity',
-            'error',
-          );
+      if (merged && affectsCapacity) {
+        const capacityError = checkCapacityFit(merged);
+        if (capacityError) {
+          showToast(capacityError, 'error');
           return; // reject — ProjectBar reverts its optimistic preview
         }
       }
 
       await updateProject(projectId, updates);
     },
-    [data.projects, updateProject, showToast]
+    [data.projects, updateProject, showToast, checkCapacityFit]
   );
 
   const handleDeleteProject = useCallback(

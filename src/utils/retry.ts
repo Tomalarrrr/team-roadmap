@@ -59,6 +59,19 @@ export function isRetryableError(error: Error): boolean {
     return false;
   }
 
+  // HTTP client errors (4xx) won't succeed on retry — a rejected write (bad
+  // field, failed DB-rule validation, etc.) is permanent, so retrying just
+  // burns ~3.5s of backoff before surfacing an error that was final on attempt
+  // one. 408 (Request Timeout) and 429 (Too Many Requests) are transient, so
+  // they stay retryable. The proxy surfaces status as "... failed: <status>".
+  const statusMatch = message.match(/failed:\s*(\d{3})\b/);
+  if (statusMatch) {
+    const status = Number(statusMatch[1]);
+    if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+      return false;
+    }
+  }
+
   // Default: retry unknown errors (safer than failing immediately)
   return true;
 }

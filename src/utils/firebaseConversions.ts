@@ -8,6 +8,7 @@
  * format transparently, so the app works correctly during and after the transition.
  */
 
+import { v4 as uuidv4 } from 'uuid';
 import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
 import { normalizeStatusColor } from './statusColors';
 
@@ -56,9 +57,11 @@ export function keyedObjectToArray<T>(obj: Record<string, T> | T[] | null | unde
 export function arrayToKeyedObject<T extends { id: string }>(arr: T[]): Record<string, T> {
   const result: Record<string, T> = {};
   for (const item of arr) {
-    if (item && item.id) {
-      result[item.id] = item;
-    }
+    if (!item) continue; // skip null/undefined holes
+    // Preserve a record that's missing its id by minting one rather than
+    // silently dropping it — a full save / migration must never lose data.
+    const id = item.id || uuidv4();
+    result[id] = item.id ? item : { ...item, id };
   }
   return result;
 }
@@ -171,12 +174,13 @@ export function roadmapDataToFirebaseFormat(data: RoadmapData): FirebaseRoadmapD
   // Assign order to team members based on current array position
   const orderedMembers = data.teamMembers.map((m, i) => ({ ...m, order: i }));
 
-  // Convert projects with nested milestones
+  // Convert projects with nested milestones. Mint an id for any project that's
+  // missing one so a full save / migration preserves it instead of dropping it.
   const projectsObj: Record<string, FirebaseProject> = {};
   for (const project of data.projects) {
-    if (project && project.id) {
-      projectsObj[project.id] = projectToFirebase(project);
-    }
+    if (!project) continue;
+    const id = project.id || uuidv4();
+    projectsObj[id] = projectToFirebase(project.id ? project : { ...project, id });
   }
 
   return {

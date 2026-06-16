@@ -1239,6 +1239,26 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
           const toTrack = parseInt(newPosition.split('-')[1]);
           const preStarTokens = [...newTokens];
           newTokens = applyStarEffect(newTokens, fromTrack, toTrack, curColor);
+          // A star sweep is a capture: any opponent it sent home loses their
+          // power-ups and counts toward the capture stat / bonus turn, exactly
+          // like a normal capture. (We deliberately DON'T add these to
+          // capturedIndices: the flag logic below treats a star-relocated
+          // carrier as "knocked loose" rather than stolen — see step 1b.)
+          for (let i = 0; i < TOTAL_TOKENS; i++) {
+            if (preStarTokens[i].startsWith('track-') && newTokens[i] === 'base') {
+              captured = true;
+              const victimColor = getTokenColor(i);
+              const vci = colorIndex(victimColor);
+              const inv = inventoryRef.current;
+              if (inv[vci][0] !== null) {
+                const clearedInv = inv.map((slots, idx) =>
+                  idx === vci ? [null] as (PowerUpId | null)[] : [...slots]
+                );
+                inventoryRef.current = clearedInv;
+                setInventory(clearedInv);
+              }
+            }
+          }
           // Spawn poof effects at locations where tokens were teleported
           for (let i = 0; i < TOTAL_TOKENS; i++) {
             if (preStarTokens[i] !== newTokens[i] && preStarTokens[i].startsWith('track-')) {
