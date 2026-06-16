@@ -40,6 +40,7 @@ import {
   heightForSize,
   isCapacityExempt,
   supportSegments,
+  DEFAULT_SIZE,
   type CapacityItem,
 } from '../utils/capacity';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
@@ -843,7 +844,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       for (let row = 0; row <= maxStack; row++) {
         const tallest = ownerProjects.reduce(
           (max, p) => ((stacks?.get(p.id) ?? 0) === row
-            ? Math.max(max, heightForSize(p.size ?? 'medium'))
+            ? Math.max(max, heightForSize(p.size ?? DEFAULT_SIZE))
             : max),
           UNIT_HEIGHT,
         );
@@ -883,7 +884,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           id: p.id,
           startDate: p.startDate,
           endDate: p.endDate,
-          size: p.size ?? 'medium',
+          size: p.size ?? DEFAULT_SIZE,
         }));
       // Only surface Team Support / Development where the member is *working but
       // not full* — i.e. some slots are used yet spare capacity remains (load

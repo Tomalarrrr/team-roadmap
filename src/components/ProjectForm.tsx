@@ -9,6 +9,7 @@ import {
   evaluateAssignment,
   formatCapacityMessage,
   isCapacityExempt,
+  DEFAULT_SIZE,
   type CapacityItem,
 } from '../utils/capacity';
 import type { Milestone, Project, ProjectSize, TeamMember } from '../types';
@@ -64,7 +65,7 @@ export function ProjectForm({
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(normalizeStatusColor(initialValues?.statusColor || DEFAULT_STATUS_COLOR));
-  const [size, setSize] = useState<ProjectSize>(initialValues?.size || 'medium');
+  const [size, setSize] = useState<ProjectSize>(initialValues?.size || DEFAULT_SIZE);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [capacityError, setCapacityError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -110,7 +111,13 @@ export function ProjectForm({
         endDate: result.data.endDate,
         size: result.data.size,
       };
-      const verdict = evaluateAssignment(projectsByOwner, candidate, result.data.owner);
+      // Judge capacity only from today forward; past clashes can't be acted on.
+      const verdict = evaluateAssignment(
+        projectsByOwner,
+        candidate,
+        result.data.owner,
+        format(new Date(), 'yyyy-MM-dd'),
+      );
       if (!verdict.fits) {
         setErrors({});
         setCapacityError(formatCapacityMessage(verdict, result.data.owner, result.data.size) ?? 'Over capacity.');

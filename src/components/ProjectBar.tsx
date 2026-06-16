@@ -12,7 +12,7 @@ import {
   isDatePast
 } from '../utils/dateUtils';
 import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor } from '../utils/statusColors';
-import { heightForSize } from '../utils/capacity';
+import { heightForSize, DEFAULT_SIZE } from '../utils/capacity';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
 
@@ -395,7 +395,7 @@ export function ProjectBar({
   }, [dragMode, dragStartX, originalStartDate, originalEndDate]);
 
   // Pill height is literally the project's slot cost: Large 2 / Medium 1.5 / Small 1.
-  const projectBarHeight = heightForSize(project.size ?? 'medium');
+  const projectBarHeight = heightForSize(project.size ?? DEFAULT_SIZE);
 
   // Use stackTopOffset if provided (dynamic heights), otherwise fall back to fixed calculation
   // The fallback is a safety net - Timeline should always provide stackTopOffset

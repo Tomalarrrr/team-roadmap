@@ -24,8 +24,13 @@ export const SIZE_SLOTS: Record<ProjectSize, number> = {
   small: 1,
 };
 
-/** Default size for historic projects that predate the size field. */
-export const DEFAULT_SIZE: ProjectSize = 'medium';
+/**
+ * Default size for projects with no explicit size yet (e.g. historic projects
+ * that predate the size field). Treated as a Small (1 slot) starting point so an
+ * unsized backlog doesn't silently consume 1.5 slots each and block legitimate
+ * work — bump individual projects up once they're properly sized.
+ */
+export const DEFAULT_SIZE: ProjectSize = 'small';
 
 /** Days of recovery buffer added after a project ends before its slots free up. */
 export const RECOVERY_BUFFER_DAYS = 7;
@@ -129,9 +134,16 @@ export interface FitResult {
  *
  * `existing` should NOT include the candidate itself (filter by id upstream when
  * checking a move/resize of an already-placed project).
+ *
+ * When `asOf` (an ISO date, typically today) is given, capacity is only checked
+ * from that date forward: a clash that sits entirely in the past can't be acted
+ * on, so it must never block an edit. The candidate's window is clamped to start
+ * no earlier than `asOf`, which also drops any item that ended before `asOf` out
+ * of the overlap.
  */
-export function checkFit(existing: CapacityItem[], candidate: CapacityItem): FitResult {
-  const existingPeak = peakOverlappingLoad(existing, candidate.startDate, candidate.endDate);
+export function checkFit(existing: CapacityItem[], candidate: CapacityItem, asOf?: string): FitResult {
+  const windowStart = asOf && asOf > candidate.startDate ? asOf : candidate.startDate;
+  const existingPeak = peakOverlappingLoad(existing, windowStart, candidate.endDate);
   const peakLoad = existingPeak + slotsFor(candidate.size);
   return {
     fits: peakLoad <= CAPACITY,
@@ -155,12 +167,13 @@ export function suggestMembers(
   projectsByOwner: Record<string, CapacityItem[]>,
   candidate: CapacityItem,
   excludeOwner: string,
+  asOf?: string,
 ): MemberSuggestion[] {
   const suggestions: MemberSuggestion[] = [];
   for (const owner of Object.keys(projectsByOwner)) {
     if (owner === excludeOwner) continue;
     const others = projectsByOwner[owner].filter(p => p.id !== candidate.id);
-    const result = checkFit(others, candidate);
+    const result = checkFit(others, candidate, asOf);
     if (result.fits) {
       suggestions.push({ owner, freeSlots: result.freeSlots });
     }
@@ -180,6 +193,7 @@ export function suggestMembers(
 export function earliestAvailableDate(
   existing: CapacityItem[],
   candidate: CapacityItem,
+  asOf?: string,
 ): string | null {
   const others = existing.filter(p => p.id !== candidate.id);
   const spanDays = differenceInDays(parseISO(candidate.endDate), parseISO(candidate.startDate));
@@ -194,7 +208,7 @@ export function earliestAvailableDate(
   const sortedStarts = [...starts].sort();
   for (const start of sortedStarts) {
     const end = format(addDays(parseISO(start), spanDays), 'yyyy-MM-dd');
-    if (checkFit(others, { ...candidate, startDate: start, endDate: end }).fits) {
+    if (checkFit(others, { ...candidate, startDate: start, endDate: end }, asOf).fits) {
       return start;
     }
   }
@@ -218,9 +232,10 @@ export function evaluateAssignment(
   projectsByOwner: Record<string, CapacityItem[]>,
   candidate: CapacityItem,
   intendedOwner: string,
+  asOf?: string,
 ): CapacityVerdict {
   const ownerProjects = (projectsByOwner[intendedOwner] ?? []).filter(p => p.id !== candidate.id);
-  const result = checkFit(ownerProjects, candidate);
+  const result = checkFit(ownerProjects, candidate, asOf);
 
   if (result.fits) {
     return { fits: true, peakLoad: result.peakLoad, alternativeOwners: [], availableFrom: null };
@@ -229,8 +244,8 @@ export function evaluateAssignment(
   return {
     fits: false,
     peakLoad: result.peakLoad,
-    alternativeOwners: suggestMembers(projectsByOwner, candidate, intendedOwner),
-    availableFrom: earliestAvailableDate(ownerProjects, candidate),
+    alternativeOwners: suggestMembers(projectsByOwner, candidate, intendedOwner, asOf),
+    availableFrom: earliestAvailableDate(ownerProjects, candidate, asOf),
   };
 }
 

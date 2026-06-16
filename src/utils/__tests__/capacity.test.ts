@@ -39,6 +39,12 @@ describe('slotsFor', () => {
     expect(slotsFor('medium')).toBe(1.5);
     expect(slotsFor('small')).toBe(1);
   });
+
+  it('falls back to Small (1 slot) for a missing/unknown size', () => {
+    // Unsized projects must not silently consume a Medium's 1.5 slots.
+    expect(slotsFor(undefined as unknown as CapacityItem['size'])).toBe(1);
+    expect(slotsFor('xl' as unknown as CapacityItem['size'])).toBe(1);
+  });
 });
 
 describe('peakLoadInRange', () => {
@@ -85,6 +91,37 @@ describe('checkFit', () => {
     const existing = [item('a', '2026-01-01', '2026-01-31', 'large')]; // 2
     const candidate = item('b', '2026-03-01', '2026-03-31', 'large'); // separate month
     expect(checkFit(existing, candidate).fits).toBe(true);
+  });
+
+  describe('asOf (ignore the past)', () => {
+    // A long candidate that clashes only in a window that has already passed.
+    const existing = [
+      item('p1', '2026-01-01', '2026-04-01', 'large'), // 2, ends before asOf
+      item('p2', '2026-01-01', '2026-04-01', 'large'), // 2, ends before asOf
+    ];
+    const candidate = item('c', '2026-02-01', '2026-10-01', 'large'); // spans past -> future
+
+    it('blocks on a past clash when asOf is not given (legacy behaviour)', () => {
+      // Feb–Apr: p1 + p2 + candidate = 6 > 4.
+      expect(checkFit(existing, candidate).fits).toBe(false);
+      expect(checkFit(existing, candidate).peakLoad).toBe(6);
+    });
+
+    it('ignores the past clash once asOf clears it', () => {
+      // From 2026-06-01 the two blockers are finished, so only the candidate
+      // remains over its future window.
+      const result = checkFit(existing, candidate, '2026-06-01');
+      expect(result.fits).toBe(true);
+      expect(result.peakLoad).toBe(2);
+    });
+
+    it('still blocks on a clash that lands after asOf', () => {
+      const future = [
+        item('f1', '2026-07-01', '2026-09-01', 'large'),
+        item('f2', '2026-07-01', '2026-09-01', 'large'),
+      ];
+      expect(checkFit(future, candidate, '2026-06-01').fits).toBe(false);
+    });
   });
 });
 

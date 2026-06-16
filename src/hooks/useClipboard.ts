@@ -3,6 +3,7 @@ import type { Project, Milestone, ClipboardData } from '../types';
 import { addDays, differenceInDays } from 'date-fns';
 import { toISODateString } from '../utils/dateUtils';
 import { getModifierKeySymbol, hasModifierKey } from '../utils/platformUtils';
+import { DEFAULT_SIZE } from '../utils/capacity';
 
 interface UseClipboardOptions {
   onPasteProject: (project: Omit<Project, 'id'>) => void;
@@ -77,7 +78,7 @@ export function useClipboard({ onPasteProject, onShowToast }: UseClipboardOption
         startDate: toISODateString(now),
         endDate: toISODateString(addDays(now, duration)),
         statusColor: originalProject.statusColor,
-        size: originalProject.size ?? 'medium',
+        size: originalProject.size ?? DEFAULT_SIZE,
         milestones: milestonesOffset,
         dependencies: [] // Don't copy dependencies
       };

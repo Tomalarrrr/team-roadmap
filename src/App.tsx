@@ -10,7 +10,7 @@ import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCovera
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates, parseLocalDate, toDateString } from './utils/dateUtils';
-import { evaluateAssignment, formatCapacityMessage, isCapacityExempt, type CapacityItem } from './utils/capacity';
+import { evaluateAssignment, formatCapacityMessage, isCapacityExempt, DEFAULT_SIZE, type CapacityItem } from './utils/capacity';
 import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -613,7 +613,7 @@ function App() {
             startDate: toDateString(startDate),
             endDate: toDateString(endDate),
             statusColor: normalizeStatusColor(project.statusColor),
-            size: project.size ?? 'medium'
+            size: project.size ?? DEFAULT_SIZE
           }).then(() => {
             showToast('Project duplicated', 'success');
           }).catch(() => {
@@ -760,9 +760,11 @@ function App() {
           id: merged.id,
           startDate: merged.startDate,
           endDate: merged.endDate,
-          size: merged.size ?? 'medium',
+          size: merged.size ?? DEFAULT_SIZE,
         };
-        const verdict = evaluateAssignment(byOwner, candidate, merged.owner);
+        // Only judge capacity from today forward — a clash that's already in the
+        // past can't be undone, so it shouldn't block moving/resizing a project.
+        const verdict = evaluateAssignment(byOwner, candidate, merged.owner, toDateString(new Date()));
         if (!verdict.fits) {
           showToast(
             formatCapacityMessage(verdict, merged.owner, candidate.size) ?? 'Over capacity',
