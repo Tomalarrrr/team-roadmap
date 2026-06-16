@@ -12,6 +12,7 @@
           "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
           "endDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
           "statusColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
+          "size": { ".validate": "newData.isString() && (newData.val() == 'large' || newData.val() == 'medium' || newData.val() == 'small')" },
           "milestones": {
             "$milestoneId": {
               ".validate": "newData.hasChildren(['id', 'title', 'startDate', 'endDate', 'statusColor'])",
