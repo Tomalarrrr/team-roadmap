@@ -8,6 +8,7 @@ import {
   earliestAvailableDate,
   evaluateAssignment,
   supportSegments,
+  isCapacityExempt,
   type CapacityItem,
 } from '../capacity';
 
@@ -17,6 +18,20 @@ const item = (
   endDate: string,
   size: CapacityItem['size'],
 ): CapacityItem => ({ id, startDate, endDate, size });
+
+describe('isCapacityExempt', () => {
+  it('flags the Digital Queue regardless of case or surrounding whitespace', () => {
+    expect(isCapacityExempt({ title: 'Digital Queue' })).toBe(true);
+    expect(isCapacityExempt({ title: 'digital queue' })).toBe(true);
+    expect(isCapacityExempt({ title: '  Digital Queue  ' })).toBe(true);
+  });
+
+  it('does not flag ordinary projects or missing titles', () => {
+    expect(isCapacityExempt({ title: 'Checkout Redesign' })).toBe(false);
+    expect(isCapacityExempt({ title: 'Digital Queue Migration' })).toBe(false);
+    expect(isCapacityExempt({})).toBe(false);
+  });
+});
 
 describe('slotsFor', () => {
   it('maps sizes to slot costs', () => {

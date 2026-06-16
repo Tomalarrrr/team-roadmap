@@ -30,6 +30,23 @@ export const DEFAULT_SIZE: ProjectSize = 'medium';
 /** Days of recovery buffer added after a project ends before its slots free up. */
 export const RECOVERY_BUFFER_DAYS = 7;
 
+/**
+ * Title of the always-on "Digital Queue" workstream. It's ongoing BAU rather
+ * than a scheduled project, so it's exempt from the capacity model: it neither
+ * consumes a member's slots nor counts toward the CAPACITY ceiling.
+ */
+export const DIGITAL_QUEUE_TITLE = 'Digital Queue';
+
+/**
+ * True if a project is exempt from capacity accounting (currently the Digital
+ * Queue). Exempt projects are filtered out before any fit/peak-load check, so
+ * they never push a member over CAPACITY and never reduce displayed free slots.
+ * Matched on title, case-insensitively, since projects carry no category field.
+ */
+export function isCapacityExempt(project: { title?: string }): boolean {
+  return (project.title ?? '').trim().toLowerCase() === DIGITAL_QUEUE_TITLE.toLowerCase();
+}
+
 export interface CapacityItem {
   id: string;
   /** Inclusive ISO date (YYYY-MM-DD). */

@@ -8,6 +8,7 @@ import {
   heightForSize,
   evaluateAssignment,
   formatCapacityMessage,
+  isCapacityExempt,
   type CapacityItem,
 } from '../utils/capacity';
 import type { Milestone, Project, ProjectSize, TeamMember } from '../types';
@@ -73,6 +74,8 @@ export function ProjectForm({
   const projectsByOwner = useMemo(() => {
     const grouped: Record<string, CapacityItem[]> = {};
     (projects ?? []).forEach(p => {
+      // The Digital Queue is exempt — it never counts toward an owner's load.
+      if (isCapacityExempt(p)) return;
       (grouped[p.owner] ??= []).push(p);
     });
     return grouped;
@@ -97,9 +100,10 @@ export function ProjectForm({
       return;
     }
 
-    // Hard-block over-capacity assignments. Skipped only when we have no board
-    // context to check against (e.g. the form rendered without `projects`).
-    if (projects) {
+    // Hard-block over-capacity assignments. Skipped when we have no board
+    // context to check against (e.g. the form rendered without `projects`), or
+    // when this project itself is exempt (the Digital Queue consumes no slots).
+    if (projects && !isCapacityExempt(result.data)) {
       const candidate: CapacityItem = {
         id: editingProjectId ?? '__new__',
         startDate: result.data.startDate,

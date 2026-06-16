@@ -10,7 +10,7 @@ import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCovera
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates, parseLocalDate, toDateString } from './utils/dateUtils';
-import { evaluateAssignment, formatCapacityMessage, type CapacityItem } from './utils/capacity';
+import { evaluateAssignment, formatCapacityMessage, isCapacityExempt, type CapacityItem } from './utils/capacity';
 import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -742,13 +742,18 @@ function App() {
         updates.endDate !== undefined ||
         updates.size !== undefined;
 
-      if (current && affectsCapacity) {
-        const merged = { ...current, ...updates };
+      const merged = current ? { ...current, ...updates } : null;
+      // The Digital Queue is exempt from capacity, so moving/resizing it never
+      // needs a fit check.
+      if (merged && affectsCapacity && !isCapacityExempt(merged)) {
         const byOwner: Record<string, CapacityItem[]> = {};
         data.projects.forEach(p => {
           // Skip malformed fragments with no owner so they don't surface as an
           // "undefined" suggestion or pollute another owner's capacity sum.
           if (!p.owner) return;
+          // Exempt projects (the Digital Queue) don't consume slots, so they're
+          // left out of every owner's capacity sum.
+          if (isCapacityExempt(p)) return;
           (byOwner[p.owner] ??= []).push(p);
         });
         const candidate: CapacityItem = {

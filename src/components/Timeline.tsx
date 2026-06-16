@@ -38,6 +38,7 @@ import {
   CAPACITY,
   UNIT_HEIGHT,
   heightForSize,
+  isCapacityExempt,
   supportSegments,
   type CapacityItem,
 } from '../utils/capacity';
@@ -172,8 +173,9 @@ const LANE_PADDING = 16; // Padding top and bottom of lane
 const LANE_BOTTOM_BUFFER = 8; // Extra buffer at bottom to prevent spillover
 const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
 const COLLAPSED_LANE_HEIGHT = 40; // Height for collapsed lanes
-const SUPPORT_PILL_HEIGHT = 18; // Thin Team Support / Development footer strip
-const SUPPORT_GAP = 6; // Gap between the project stack and the support strip below it
+const SUPPORT_PILL_HEIGHT = 18; // Thin Team Support / Development strip
+const SUPPORT_GAP = 6; // Gap reserved below the project stack as a fallback support row
+const MIN_SUPPORT_DAYS = 14; // Don't surface Team Support for spare-capacity gaps shorter than 2 weeks
 
 // Stable empty defaults to avoid creating new references on each render
 const EMPTY_SET = new Set<string>();
@@ -873,12 +875,16 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         byOwner[member.name] = [];
         return;
       }
-      const items: CapacityItem[] = (projectsByOwner[member.name] || []).map(p => ({
-        id: p.id,
-        startDate: p.startDate,
-        endDate: p.endDate,
-        size: p.size ?? 'medium',
-      }));
+      // Exclude the Digital Queue: it's exempt from capacity, so it must not
+      // eat into the spare slots shown as Team Support.
+      const items: CapacityItem[] = (projectsByOwner[member.name] || [])
+        .filter(p => !isCapacityExempt(p))
+        .map(p => ({
+          id: p.id,
+          startDate: p.startDate,
+          endDate: p.endDate,
+          size: p.size ?? 'medium',
+        }));
       // Only surface Team Support / Development where the member is *working but
       // not full* — i.e. some slots are used yet spare capacity remains (load
       // 3.5/4 etc). Fully-idle stretches (no project at all) are skipped so the
@@ -902,7 +908,13 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           mergedSupport.push({ ...seg });
         }
       }
-      byOwner[member.name] = mergedSupport;
+
+      // Don't surface a strip for brief spare-capacity windows — a gap has to be
+      // at least 2 weeks wide before it reads as real Team Support / Development
+      // time rather than incidental slack between projects.
+      byOwner[member.name] = mergedSupport.filter(
+        s => dateFnsDiff(parseISO(s.endDate), parseISO(s.startDate)) + 1 >= MIN_SUPPORT_DAYS,
+      );
     });
     return byOwner;
   }, [displayedTeamMembers, projectsByOwner, collapsedLanes, timelineStart, timelineEnd]);
@@ -936,6 +948,33 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     }
     return offset;
   }, [laneStackHeights]);
+
+  // Vertical offset for a Team Support strip: drop it into the *highest* stack row
+  // that has no project overlapping the strip's date range, so it patches the top
+  // gap in the wall of pills rather than sitting at the lane footer. Falls back to
+  // the row just below the stack when every row is occupied across the range.
+  const getSupportTop = useCallback((ownerName: string, startDate: string, endDate: string): number => {
+    const ownerProjects = projectsByOwner[ownerName] || [];
+    const stacks = projectStacksByOwner[ownerName];
+    const rowCount = (laneStackHeights[ownerName] || []).length;
+
+    // Inclusive date-range overlap.
+    const overlaps = (aStart: string, aEnd: string) => aStart <= endDate && aEnd >= startDate;
+
+    let row = 0;
+    while (row < rowCount) {
+      const occupied = ownerProjects.some(
+        p => (stacks?.get(p.id) ?? 0) === row && overlaps(p.startDate, p.endDate),
+      );
+      if (!occupied) break;
+      row++;
+    }
+    // All rows busy across the range: park it in the reserved footer slot.
+    if (row >= rowCount) {
+      return LANE_PADDING + stackPixelHeight(laneStackHeights[ownerName] || []) + SUPPORT_GAP;
+    }
+    return getStackTopOffset(ownerName, row);
+  }, [projectsByOwner, projectStacksByOwner, laneStackHeights, getStackTopOffset]);
 
 
   // Store lane positions in ref for dependency calculation
@@ -1190,12 +1229,12 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                       />
                     ))}
                     {/* Team Support / Development — one thin strip marking spare
-                        capacity while the member is working but not full. It lives
-                        in a dedicated footer row *below* the whole project stack,
-                        so it never overlaps a project pill. */}
+                        capacity while the member is working but not full. It drops
+                        into the highest free row in the stack so it patches the top
+                        gap in the wall of pills instead of sitting at the footer. */}
                     {!isLaneCollapsed && supportByOwner[member.name]?.map((seg) => {
                       const { left, width } = getBarDimensions(seg.startDate, seg.endDate, timelineStart, dayWidth);
-                      const top = LANE_PADDING + stackPixelHeight(laneStackHeights[member.name] || []) + SUPPORT_GAP;
+                      const top = getSupportTop(member.name, seg.startDate, seg.endDate);
                       return (
                         <div
                           key={`support-${seg.startDate}`}
