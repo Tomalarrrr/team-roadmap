@@ -12,6 +12,7 @@ interface DraggableProjectBarProps {
   stackTopOffset?: number; // Calculated top position within the lane
   laneTop?: number; // Absolute top position of the lane for dependency positioning
   isSelected?: boolean;
+  isOverAllocated?: boolean; // True for the pill that tips its owner past capacity
   isLocked?: boolean; // When true, disable drag and edit actions
   onUpdate: (updates: Partial<Project>) => Promise<void>;
   onDelete: () => void;
@@ -30,6 +31,7 @@ function DraggableProjectBarComponent({
   stackTopOffset,
   laneTop = 0,
   isSelected,
+  isOverAllocated = false,
   isLocked = false,
   onUpdate,
   onDelete,
@@ -65,6 +67,7 @@ function DraggableProjectBarComponent({
         laneTop={laneTop}
         isDragging={isDragging}
         isSelected={isSelected}
+        isOverAllocated={isOverAllocated}
         isLocked={isLocked}
         dragListeners={listeners}
         onUpdate={onUpdate}
@@ -90,6 +93,7 @@ export const DraggableProjectBar = memo(DraggableProjectBarComponent, (prevProps
     prevProps.stackTopOffset === nextProps.stackTopOffset &&
     prevProps.laneTop === nextProps.laneTop &&
     prevProps.isSelected === nextProps.isSelected &&
+    prevProps.isOverAllocated === nextProps.isOverAllocated &&
     prevProps.isLocked === nextProps.isLocked
     // Note: Callback props are excluded from comparison as they're typically stable
   );

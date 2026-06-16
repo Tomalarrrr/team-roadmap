@@ -3,11 +3,11 @@ import { format, addDays } from 'date-fns';
 import { projectSchema, validateForm } from '../utils/validation';
 import { STATUS_COLORS, DEFAULT_STATUS_COLOR, normalizeStatusColor } from '../utils/statusColors';
 import {
+  CAPACITY,
   SIZE_LABELS,
   SIZE_SLOTS,
   heightForSize,
   evaluateAssignment,
-  formatCapacityMessage,
   isCapacityExempt,
   DEFAULT_SIZE,
   type CapacityItem,
@@ -67,7 +67,6 @@ export function ProjectForm({
   const [statusColor, setStatusColor] = useState(normalizeStatusColor(initialValues?.statusColor || DEFAULT_STATUS_COLOR));
   const [size, setSize] = useState<ProjectSize>(initialValues?.size || DEFAULT_SIZE);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [capacityError, setCapacityError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -81,6 +80,30 @@ export function ProjectForm({
     });
     return grouped;
   }, [projects]);
+
+  // Soft, non-blocking capacity heads-up. Over-allocation is allowed (a member can
+  // be deliberately overloaded), so this never prevents saving — it just flags
+  // that the owner will be past their 4-slot ceiling in this window. The Digital
+  // Queue is exempt, so its projects never trigger it.
+  const capacityWarning = useMemo(() => {
+    const trimmedOwner = owner.trim();
+    if (!projects || !trimmedOwner || !startDate || !endDate) return null;
+    if (isCapacityExempt({ title: title.trim(), owner: trimmedOwner })) return null;
+    const candidate: CapacityItem = {
+      id: editingProjectId ?? '__new__',
+      startDate,
+      endDate,
+      size,
+    };
+    const verdict = evaluateAssignment(
+      projectsByOwner,
+      candidate,
+      trimmedOwner,
+      format(new Date(), 'yyyy-MM-dd'),
+    );
+    if (verdict.fits) return null;
+    return `Heads up: ${trimmedOwner} will be over capacity (${verdict.peakLoad} of ${CAPACITY} slots) during these dates. You can still save — it'll be flagged on the timeline.`;
+  }, [projects, projectsByOwner, owner, title, startDate, endDate, size, editingProjectId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,32 +124,10 @@ export function ProjectForm({
       return;
     }
 
-    // Hard-block over-capacity assignments. Skipped when we have no board
-    // context to check against (e.g. the form rendered without `projects`), or
-    // when this project itself is exempt (the Digital Queue consumes no slots).
-    if (projects && !isCapacityExempt(result.data)) {
-      const candidate: CapacityItem = {
-        id: editingProjectId ?? '__new__',
-        startDate: result.data.startDate,
-        endDate: result.data.endDate,
-        size: result.data.size,
-      };
-      // Judge capacity only from today forward; past clashes can't be acted on.
-      const verdict = evaluateAssignment(
-        projectsByOwner,
-        candidate,
-        result.data.owner,
-        format(new Date(), 'yyyy-MM-dd'),
-      );
-      if (!verdict.fits) {
-        setErrors({});
-        setCapacityError(formatCapacityMessage(verdict, result.data.owner, result.data.size) ?? 'Over capacity.');
-        return;
-      }
-    }
-
+    // Over-capacity assignments are allowed — the form surfaces a non-blocking
+    // heads-up (capacityWarning) and the timeline flags the over-allocated pill,
+    // but saving is never prevented on capacity grounds.
     setErrors({});
-    setCapacityError(null);
     setIsSaving(true);
 
     try {
@@ -160,7 +161,7 @@ export function ProjectForm({
             id="owner"
             type="text"
             value={owner}
-            onChange={(e) => { setOwner(e.target.value); setCapacityError(null); }}
+            onChange={(e) => setOwner(e.target.value)}
             className={styles.input}
             placeholder="Enter owner name"
             list="owner-suggestions"
@@ -184,7 +185,7 @@ export function ProjectForm({
             id="startDate"
             type="date"
             value={startDate}
-            onChange={(e) => { setStartDate(e.target.value); setCapacityError(null); }}
+            onChange={(e) => setStartDate(e.target.value)}
             className={styles.input}
             required
           />
@@ -199,7 +200,6 @@ export function ProjectForm({
             onChange={(e) => {
               setEndDate(e.target.value);
               setErrors({});
-              setCapacityError(null);
             }}
             className={styles.input}
             required
@@ -229,7 +229,7 @@ export function ProjectForm({
               key={opt}
               type="button"
               className={`${styles.sizeOption} ${size === opt ? styles.selected : ''}`}
-              onClick={() => { setSize(opt); setCapacityError(null); }}
+              onClick={() => setSize(opt)}
               aria-pressed={size === opt}
             >
               <span className={styles.sizeOptionBar} style={{ height: heightForSize(opt) / 2 }} />
@@ -248,9 +248,9 @@ export function ProjectForm({
         </div>
       )}
 
-      {capacityError && (
+      {capacityWarning && (
         <div className={styles.capacityWarning}>
-          {capacityError}
+          {capacityWarning}
         </div>
       )}
 

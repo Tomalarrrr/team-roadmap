@@ -43,13 +43,20 @@ export const RECOVERY_BUFFER_DAYS = 7;
 export const DIGITAL_QUEUE_TITLE = 'Digital Queue';
 
 /**
- * True if a project is exempt from capacity accounting (currently the Digital
- * Queue). Exempt projects are filtered out before any fit/peak-load check, so
- * they never push a member over CAPACITY and never reduce displayed free slots.
- * Matched on title, case-insensitively, since projects carry no category field.
+ * True if a project is exempt from capacity accounting (the Digital Queue).
+ * Exempt projects are filtered out before any fit/peak-load check, so they never
+ * push a member over CAPACITY and never reduce displayed free slots.
+ *
+ * Matched case-insensitively on EITHER the title or the owner: the queue is used
+ * both ways in practice — as a project literally titled "Digital Queue", and as a
+ * holding-bay lane whose *owner* is "Digital Queue" and which carries many
+ * differently-titled projects waiting to start. Either form is exempt, so the
+ * queue never caps how many projects can pile up in it.
  */
-export function isCapacityExempt(project: { title?: string }): boolean {
-  return (project.title ?? '').trim().toLowerCase() === DIGITAL_QUEUE_TITLE.toLowerCase();
+export function isCapacityExempt(project: { title?: string; owner?: string }): boolean {
+  const queue = DIGITAL_QUEUE_TITLE.toLowerCase();
+  const matches = (value?: string) => (value ?? '').trim().toLowerCase() === queue;
+  return matches(project.title) || matches(project.owner);
 }
 
 export interface CapacityItem {
@@ -293,11 +300,11 @@ export interface SupportSegment {
 
 /**
  * Break an owner's timeline into maximal segments of constant load and report
- * the free capacity (CAPACITY - load) in each. The UI renders a "Team Support /
- * Development" filler block for segments with freeSlots > 0.
+ * the free capacity (CAPACITY - load) in each.
  *
- * Bounded to [windowStart, windowEnd] so callers can scope it to the visible
- * timeline.
+ * Pure helper retained for capacity analysis and tests; it no longer drives any
+ * UI (the "Team Support / Development" filler band was removed). Bounded to
+ * [windowStart, windowEnd] so callers can scope it to the visible timeline.
  */
 export function supportSegments(
   items: CapacityItem[],

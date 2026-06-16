@@ -383,6 +383,38 @@
   display: none;
 }
 
+/* Nudge the status badge left so it doesn't collide with the over-allocation "!" */
+.statusBadge.statusBadgeShifted {
+  right: 32px;
+}
+
+/* Over-allocation marker — a clean, AutoTrader-style amber "!" in the top-right
+   corner of the pill that pushes its owner past their 4-slot capacity. */
+.overAllocBadge {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  width: 17px;
+  height: 17px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #fff;
+  background: #f5a623; /* amber alert */
+  border: 1.5px solid rgba(255, 255, 255, 0.95);
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.projectBar.dragging .overAllocBadge {
+  display: none;
+}
+
 /* Floating drag tooltip */
 .dragTooltip {
   z-index: 10001;

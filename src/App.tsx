@@ -10,7 +10,7 @@ import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCovera
 import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates, parseLocalDate, toDateString, isDatePast } from './utils/dateUtils';
-import { evaluateAssignment, formatCapacityMessage, isCapacityExempt, DEFAULT_SIZE, type CapacityItem, type ProjectSize } from './utils/capacity';
+import { DEFAULT_SIZE } from './utils/capacity';
 import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
@@ -227,33 +227,6 @@ function App() {
   useEffect(() => {
     projectsRef.current = data.projects;
   }, [data.projects]);
-
-  // Shared capacity guard. Given a candidate placement, returns an error message
-  // if it would push the owner over CAPACITY, or null if it fits / is exempt.
-  // Reads the live project list from a ref so it has no reactive deps and is
-  // safe to call from the keyboard handler without re-registering listeners.
-  // Every path that moves work onto a member — drag/resize, keyboard date-shift,
-  // and duplicate — funnels through here so the ceiling is enforced uniformly.
-  const checkCapacityFit = useCallback(
-    (candidate: { id: string; owner?: string; title?: string; startDate: string; endDate: string; size?: ProjectSize }): string | null => {
-      if (!candidate.owner || isCapacityExempt(candidate)) return null;
-      const byOwner: Record<string, CapacityItem[]> = {};
-      projectsRef.current.forEach(p => {
-        if (!p.owner) return;
-        if (isCapacityExempt(p)) return;
-        (byOwner[p.owner] ??= []).push(p);
-      });
-      const item: CapacityItem = {
-        id: candidate.id,
-        startDate: candidate.startDate,
-        endDate: candidate.endDate,
-        size: candidate.size ?? DEFAULT_SIZE,
-      };
-      const verdict = evaluateAssignment(byOwner, item, candidate.owner, toDateString(new Date()));
-      return verdict.fits ? null : (formatCapacityMessage(verdict, candidate.owner, item.size) ?? 'Over capacity');
-    },
-    []
-  );
 
   // View mode lock — always starts locked; unlock is session-only (resets on tab close)
   const [isLocked, setIsLocked] = useState(true);
@@ -638,19 +611,6 @@ function App() {
           endDate.setDate(endDate.getDate() + 7);
           const newStart = toDateString(startDate);
           const newEnd = toDateString(endDate);
-          // Enforce the same capacity ceiling as drag/resize and the form.
-          const capacityError = checkCapacityFit({
-            id: '__duplicate__', // sentinel: not in the owner's set, so purely additive
-            owner: project.owner,
-            title: `${project.title} (copy)`,
-            startDate: newStart,
-            endDate: newEnd,
-            size: project.size ?? DEFAULT_SIZE,
-          });
-          if (capacityError) {
-            showToast(capacityError, 'error');
-            return;
-          }
           addProject({
             title: `${project.title} (copy)`,
             owner: project.owner,
@@ -679,12 +639,6 @@ function App() {
           endDate.setDate(endDate.getDate() + shift);
           const newStart = toDateString(startDate);
           const newEnd = toDateString(endDate);
-          // Enforce the same capacity ceiling as drag/resize and the form.
-          const capacityError = checkCapacityFit({ ...project, startDate: newStart, endDate: newEnd });
-          if (capacityError) {
-            showToast(capacityError, 'error');
-            return;
-          }
           updateProject(project.id, {
             startDate: newStart,
             endDate: newEnd
@@ -705,7 +659,7 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, selectedProjectId, addProject, updateProject, showToast, checkCapacityFit]);
+  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, selectedProjectId, addProject, updateProject, showToast]);
 
   // Team member handlers
   const handleAddMember = useCallback(
@@ -786,30 +740,14 @@ function App() {
     [modal, updateProject, closeModal, recordAction, showToast]
   );
 
-  // Capacity-guarded update used by the timeline (drag to reassign / resize).
-  // Rejects changes that would push an owner over their 4-slot capacity; the
-  // pill reverts to its prior position and a toast explains why.
+  // Update used by the timeline (drag to reassign / resize). Over-capacity moves
+  // are allowed — a member can be deliberately overloaded — and surfaced visually
+  // on the timeline with an over-allocation marker rather than being blocked here.
   const handleTimelineUpdateProject = useCallback(
     async (projectId: string, updates: Partial<Project>) => {
-      const current = data.projects.find(p => p.id === projectId);
-      const affectsCapacity =
-        updates.owner !== undefined ||
-        updates.startDate !== undefined ||
-        updates.endDate !== undefined ||
-        updates.size !== undefined;
-
-      const merged = current ? { ...current, ...updates } : null;
-      if (merged && affectsCapacity) {
-        const capacityError = checkCapacityFit(merged);
-        if (capacityError) {
-          showToast(capacityError, 'error');
-          return; // reject — ProjectBar reverts its optimistic preview
-        }
-      }
-
       await updateProject(projectId, updates);
     },
-    [data.projects, updateProject, showToast, checkCapacityFit]
+    [updateProject]
   );
 
   const handleDeleteProject = useCallback(

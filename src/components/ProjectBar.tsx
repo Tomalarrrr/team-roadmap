@@ -36,6 +36,7 @@ interface ProjectBarProps {
   laneTop?: number; // Absolute top position of the lane for dependency positioning
   isDragging?: boolean;
   isSelected?: boolean;
+  isOverAllocated?: boolean; // True for the pill that tips its owner past capacity
   isLocked?: boolean; // When true, disable drag and edit actions (view mode)
   dragListeners?: React.DOMAttributes<HTMLDivElement>;
   onUpdate: (updates: Partial<Project>) => Promise<void>;
@@ -58,6 +59,7 @@ export function ProjectBar({
   laneTop = 0,
   isDragging: externalDragging,
   isSelected,
+  isOverAllocated = false,
   isLocked = false,
   dragListeners, // Used for cross-lane dragging (reassign owner)
   onUpdate,
@@ -631,8 +633,25 @@ export function ProjectBar({
 
       {/* Status badge */}
       {showStatusBadge && (
-        <span className={styles.statusBadge} aria-label={`Status: ${statusLabel}`}>
+        <span
+          className={`${styles.statusBadge}${isOverAllocated ? ` ${styles.statusBadgeShifted}` : ''}`}
+          aria-label={`Status: ${statusLabel}`}
+        >
           {statusLabel}
+        </span>
+      )}
+
+      {/* Over-allocation marker — a single clean "!" on the pill that tips its
+          owner past their capacity. Always shown (even on narrow pills) so the
+          warning is never hidden; suppressed only during an active drag/resize. */}
+      {isOverAllocated && !dragMode && !externalDragging && (
+        <span
+          className={styles.overAllocBadge}
+          role="img"
+          aria-label="Over capacity in this period"
+          title="Over capacity — this pushes the owner past their 4 slots in this period"
+        >
+          !
         </span>
       )}
 

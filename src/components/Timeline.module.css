@@ -508,12 +508,25 @@
   border-radius: var(--radius-full);
   white-space: nowrap;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* Pulsing red glow rendered on a pseudo-element and animated via opacity only,
+   so the always-visible Today label is composited (cheap) rather than repainted
+   every frame (which animating box-shadow directly would force). */
+.todayLabel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+  opacity: 0;
+  pointer-events: none;
   animation: todayPulse 2s ease-in-out infinite;
 }
 
 @keyframes todayPulse {
-  0%, 100% { box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15); }
-  50% { box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3); }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
 }
 
 .dependenciesLayer {
@@ -713,37 +726,3 @@
   }
 }
 
-/* ========================================
-   Team Support / Development filler
-   Fills spare capacity below the project stack.
-   ======================================== */
-
-.supportBlock {
-  position: absolute;
-  z-index: 1; /* behind project bars */
-  /* Thin rounded pill — reads as "open capacity / available for support work"
-     in the gaps without competing with the project pills for attention. */
-  border-radius: var(--radius-full, 999px);
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-light);
-  display: flex;
-  align-items: center;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.supportLabel {
-  /* Sticky so a single label stays readable as the lane scrolls horizontally,
-     rather than repeating the text across every segment. */
-  position: sticky;
-  left: 0;
-  padding: 0 10px;
-  font-size: 0.66rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  letter-spacing: 0.01em;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  opacity: 0.75;
-}
