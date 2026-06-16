@@ -7,7 +7,9 @@
   position: fixed;
   inset: 0;
   background: rgba(8, 10, 18, 0.88);
-  backdrop-filter: blur(12px);
+  /* Background is already 88% opaque, so a heavy blur is barely visible but
+     costs a full-viewport recompute — keep it light. */
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -300,22 +302,18 @@
 @keyframes vaultOverlayIn {
   from {
     opacity: 0;
-    backdrop-filter: blur(0px);
   }
   to {
     opacity: 1;
-    backdrop-filter: blur(12px);
   }
 }
 
 @keyframes vaultOverlayOut {
   from {
     opacity: 1;
-    backdrop-filter: blur(12px);
   }
   to {
     opacity: 0;
-    backdrop-filter: blur(0px);
   }
 }
 

@@ -233,6 +233,17 @@ html {
   }
 }
 
+/* Freeze all CSS animations while the tab is backgrounded. Browsers already
+   suspend painting for hidden tabs, but on multi-monitor / secondary-window
+   setups a "hidden" tab can keep compositing infinite animations — this stops
+   the style engine from ticking them so the CPU can idle. Toggled by the
+   visibilitychange listener in main.tsx. */
+html[data-tab-hidden='true'] *,
+html[data-tab-hidden='true'] *::before,
+html[data-tab-hidden='true'] *::after {
+  animation-play-state: paused !important;
+}
+
 /* Print styles */
 @media print {
   .no-print {
