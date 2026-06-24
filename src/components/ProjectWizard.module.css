@@ -1,0 +1,455 @@
+/* ============================================================================
+   Project form — a single, compact screen built around the Capacity Scoring
+   Matrix. Everything is in view at once (no steps, no scrolling). Flat and
+   white: hairline dividers, no grey panels, Auto Trader blue for interaction,
+   rounded pills, the outcome stated as a size (no numeric score on show).
+   ========================================================================== */
+
+.form {
+  /* Alias the app-wide accent (Auto Trader blue) so the modal and the rest of
+     the product share one source of truth — change it once in index.css. */
+  --at-blue: var(--accent);
+  --at-blue-dark: var(--accent-hover);
+  --at-blue-soft: var(--accent-soft);
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.saving {
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+/* ── Detail fields ────────────────────────────────────────────────────── */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+.statusName {
+  color: var(--text-muted);
+  font-weight: var(--fw-normal);
+}
+
+.input {
+  padding: 8px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.input:hover {
+  border-color: var(--border-strong);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--at-blue);
+  box-shadow: 0 0 0 3px var(--at-blue-soft);
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.inputError {
+  border-color: var(--error-red);
+}
+
+.inputError:focus {
+  box-shadow: 0 0 0 3px var(--error-red-light);
+}
+
+/* ── Status: flat colour lines with their RAG label beneath ───────────── */
+.statuses {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.status {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 2px;
+  background: transparent;
+  border-radius: var(--radius-sm);
+}
+
+.status:hover {
+  transform: none !important;
+}
+
+.status:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--at-blue-soft, #e9f2fd);
+}
+
+/* Fixed-height zone so every bar shares a common BOTTOM baseline (the bottom of
+   the selected one) and grows UPWARD on hover/selection — labels never shift. */
+.statusBarBox {
+  width: 100%;
+  height: 8px;
+  display: flex;
+  align-items: flex-end;
+}
+
+.statusBar {
+  width: 100%;
+  height: 3px;
+  border-radius: var(--radius-full);
+  transition: height var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.status:hover .statusBar {
+  height: 8px;
+}
+
+.statusLabel {
+  font-size: var(--text-2xs);
+  line-height: 1.15;
+  color: var(--text-muted);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  transition: color var(--transition-fast);
+}
+
+.status.statusSel .statusBar {
+  height: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+
+.status.statusSel .statusLabel {
+  color: var(--text-primary);
+  font-weight: var(--fw-semibold);
+}
+
+/* ── Section divider heading ──────────────────────────────────────────── */
+.sectionTitle {
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-light);
+  font-size: var(--text-xs);
+  font-weight: var(--fw-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+/* ── Scoring questions (label + compact dropdown, one line each) ──────── */
+.qList {
+  display: flex;
+  flex-direction: column;
+}
+
+.q {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+}
+
+/* Hairline rule between rows turns the seven questions into a clean spec table
+   (key left, value right) rather than seven separate boxes. */
+.q + .q {
+  border-top: 1px solid var(--border-light);
+}
+
+.qLabel {
+  /* Hug the longest label rather than a wide fixed column, so the dropdown sits
+     close to its question instead of across an empty gap. */
+  flex: 0 0 130px;
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+  line-height: var(--leading-snug);
+}
+
+.selectWrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.select {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  padding: 7px 30px 7px 11px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  text-overflow: ellipsis;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.select:hover {
+  border-color: var(--border-strong);
+}
+
+.select:focus {
+  outline: none;
+  border-color: var(--at-blue);
+  box-shadow: 0 0 0 3px var(--at-blue-soft);
+}
+
+.selectEmpty {
+  color: var(--text-muted);
+  font-weight: var(--fw-normal);
+}
+
+.selectWrapInvalid .select {
+  border-color: var(--error-red);
+  box-shadow: 0 0 0 3px var(--error-red-light);
+}
+
+.selectChev {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+/* ── Outcome size ─────────────────────────────────────────────────────── */
+.outcome {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-light);
+}
+
+.outcomeLabel {
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+/* The size is an OUTCOME, not an action — a soft-blue chip so it reads as a
+   result and doesn't compete with the solid-blue primary button. */
+.sizePill {
+  background: var(--at-blue-soft);
+  color: var(--at-blue-dark);
+  font-size: var(--text-md);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.01em;
+  padding: 4px 14px;
+  border-radius: var(--radius-full);
+  /* Small pop when the final answer lands and the size resolves. */
+  animation: sizePop 220ms var(--ease-spring);
+}
+
+@keyframes sizePop {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.outcomeMeaning {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.outcomePending {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin progress track that fills as the seven questions are answered, so the
+   form gives feedback on the way to the result. */
+.progressTrack {
+  flex: 1;
+  min-width: 60px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--at-blue);
+  transition: width var(--transition-normal);
+}
+
+/* ── Capacity reallocation (genuine warning — amber outline, no fill) ──── */
+.capacity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid #f3c969;
+  border-radius: var(--radius-md);
+}
+
+.capacityMsg {
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: #b45309;
+}
+
+.capacityNote {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.ownerPills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.reassignLabel {
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-secondary);
+}
+
+.ownerPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  color: var(--text-primary);
+  transition: border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.ownerPill:hover {
+  border-color: var(--at-blue);
+  color: var(--at-blue);
+}
+
+.ownerFree {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+.ownerPill:hover .ownerFree {
+  color: var(--at-blue);
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-light);
+}
+
+.footerRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.primaryBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 22px;
+  border-radius: var(--radius-full);
+  background: var(--at-blue);
+  color: #fff;
+  font-size: var(--text-md);
+  font-weight: var(--fw-semibold);
+  box-shadow: 0 1px 2px rgba(11, 116, 224, 0.35);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.primaryBtn:hover {
+  background: var(--at-blue-dark);
+  box-shadow: 0 4px 12px rgba(11, 116, 224, 0.32);
+}
+
+.primaryBtn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.ghostBtn {
+  padding: 9px 16px;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-md);
+  font-weight: var(--fw-medium);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.ghostBtn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.deleteLink {
+  padding: 6px 2px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  transition: color var(--transition-fast);
+}
+
+.deleteLink:hover {
+  color: var(--error-red-dark);
+  transform: none !important;
+}
+
+.deleteConfirm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.dangerBtn {
+  padding: 7px 14px;
+  border-radius: var(--radius-full);
+  background: var(--error-red);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: var(--fw-semibold);
+  transition: background var(--transition-fast);
+}
+
+.dangerBtn:hover {
+  background: var(--error-red-dark);
+}

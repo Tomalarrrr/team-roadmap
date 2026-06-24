@@ -13,6 +13,14 @@
           "endDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
           "statusColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
           "size": { ".validate": "newData.isString() && (newData.val() == 'full-time' || newData.val() == 'large' || newData.val() == 'medium' || newData.val() == 'small')" },
+          "scoring": {
+            ".validate": "newData.hasChildren(['scores', 'total'])",
+            "scores": {
+              "$criterion": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" }
+            },
+            "total": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 21" },
+            "$other": { ".validate": false }
+          },
           "milestones": {
             "$milestoneId": {
               ".validate": "newData.hasChildren(['id', 'title', 'startDate', 'endDate', 'statusColor'])",

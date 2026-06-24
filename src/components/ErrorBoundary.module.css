@@ -46,7 +46,7 @@
 }
 
 .retryBtn:hover {
-  background: #2563eb;
+  background: var(--accent-hover);
 }
 
 .reloadBtn {

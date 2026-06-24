@@ -423,7 +423,7 @@
   font-size: var(--text-md);
   font-weight: var(--fw-semibold);
   color: white;
-  background: linear-gradient(135deg, var(--accent-blue) 0%, #2563eb 100%);
+  background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-hover) 100%);
   box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
   /* Snappy, tactile transitions */
   transition: transform 80ms ease,

@@ -56,7 +56,7 @@
   align-items: center;
   justify-content: space-between;
   padding: var(--space-5) var(--space-6);
-  background: linear-gradient(to bottom, var(--bg-secondary), var(--bg-tertiary));
+  background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-light);
 }
 
@@ -84,11 +84,10 @@
 .closeBtn:hover {
   background: var(--bg-primary);
   color: var(--text-primary);
-  transform: rotate(90deg);
 }
 
 .closeBtn:active {
-  transform: rotate(90deg) scale(0.85);
+  transform: scale(0.9);
   transition-duration: 50ms;
 }
 

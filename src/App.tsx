@@ -21,7 +21,7 @@ import { generateSessionId } from './utils/gameUtils';
 import styles from './App.module.css';
 
 // Lazy load form components (not needed until user clicks)
-const ProjectForm = lazy(() => import('./components/ProjectForm').then(m => ({ default: m.ProjectForm })));
+const ProjectWizard = lazy(() => import('./components/ProjectWizard').then(m => ({ default: m.ProjectWizard })));
 const TeamMemberForm = lazy(() => import('./components/TeamMemberForm').then(m => ({ default: m.TeamMemberForm })));
 const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then(m => ({ default: m.ShortcutsModal })));
 
@@ -1031,7 +1031,7 @@ function App() {
       <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New Project">
         <Suspense fallback={formFallback}>
           {modal?.type === 'add-project' && (
-            <ProjectForm
+            <ProjectWizard
               initialValues={{
                 owner: modal.ownerName,
                 startDate: modal.suggestedStart,
@@ -1051,7 +1051,7 @@ function App() {
       <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit Project">
         <Suspense fallback={formFallback}>
           {modal?.type === 'edit-project' && (
-            <ProjectForm
+            <ProjectWizard
               initialValues={{
                 title: modal.project.title,
                 owner: modal.project.owner,
@@ -1060,6 +1060,7 @@ function App() {
                 statusColor: modal.project.statusColor,
                 size: modal.project.size
               }}
+              initialScoring={modal.project.scoring}
               initialMilestones={modal.project.milestones}
               teamMembers={data.teamMembers}
               projects={data.projects}

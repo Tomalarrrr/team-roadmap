@@ -12,6 +12,15 @@ export interface Milestone {
 // Small = 1, Medium = 2, Large = 3, Full Time = 4 slots (see utils/capacity.ts).
 export type ProjectSize = 'full-time' | 'large' | 'medium' | 'small';
 
+// Capacity Scoring Matrix result captured when a project is created/edited via
+// the wizard. `scores` is keyed by criterion id (see utils/scoring.ts), each 0–3;
+// `total` is their sum (0–21) and classifies the project's size. Optional so
+// historic projects (sized manually, pre-matrix) remain valid.
+export interface ProjectScoring {
+  scores: Record<string, number>;
+  total: number;
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -20,6 +29,7 @@ export interface Project {
   endDate: string;
   statusColor: string;
   size: ProjectSize; // Effort size; historic projects default to 'small' on load.
+  scoring?: ProjectScoring; // Capacity-matrix answers that derived the size.
   milestones: Milestone[];
   dependencies?: string[]; // IDs of projects this depends on
 }

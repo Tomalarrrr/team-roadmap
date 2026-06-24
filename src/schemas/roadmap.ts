@@ -26,6 +26,12 @@ export const projectSchema = z.object({
   // Historic projects predate sizing — default them to small (a 1-slot starting
   // point) so an unsized backlog doesn't silently eat capacity.
   size: z.enum(['full-time', 'large', 'medium', 'small']).default('small'),
+  // Capacity Scoring Matrix answers (utils/scoring.ts). Optional so legacy
+  // projects validate; must be declared here or Zod would strip it on load.
+  scoring: z.object({
+    scores: z.record(z.string(), z.number().min(0).max(3)),
+    total: z.number().min(0).max(21),
+  }).optional(),
   milestones: z.array(milestoneSchema).max(100).default([]),
   dependencies: z.array(z.string().max(100)).optional().default([])
 }).refine(

@@ -15,10 +15,10 @@
      One accent drives all interactive chrome: selection, focus, active
      controls, the Today marker. Status/owner colours are data, not chrome,
      and stay separate. Change these four lines to re-skin the whole app. */
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-soft: #dbe6fe;        /* light tint for fills/hover backgrounds */
-  --accent-ring: rgba(37, 99, 235, 0.35);
+  --accent: #0b74e0;
+  --accent-hover: #0a63c0;
+  --accent-soft: #e9f2fd;        /* light tint for fills/hover backgrounds */
+  --accent-ring: rgba(11, 116, 224, 0.35);
   /* Back-compat aliases — existing components reference these names. */
   --accent-blue: var(--accent);
   --accent-blue-light: var(--accent-soft);
@@ -30,8 +30,8 @@
   --error-red-light: rgba(239, 68, 68, 0.1);
   /* Today marker reads as part of the product's chrome rather than an alarm.
      A hair deeper than --accent so the small bold white "TODAY" label clears
-     WCAG AA (white on #3168e0 = 5.0:1; on the raw accent it was only 4.36:1). */
-  --today-line: #3168e0;
+     WCAG AA (white on #0a63c0 ≈ 5.9:1). */
+  --today-line: #0a63c0;
   /* Dependency connector — soft slate at rest so it recedes; turns accent-blue on
      hover / when its connected project is hovered. */
   --dependency-line: #9aa6b2;

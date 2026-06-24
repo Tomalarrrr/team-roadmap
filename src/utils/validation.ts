@@ -13,7 +13,13 @@ export const projectSchema = z.object({
   startDate: dateStringSchema,
   endDate: dateStringSchema,
   statusColor: colorSchema,
-  size: z.enum(['full-time', 'large', 'medium', 'small'], { message: 'Select a project size' })
+  size: z.enum(['full-time', 'large', 'medium', 'small'], { message: 'Select a project size' }),
+  // Optional Capacity Scoring Matrix result. Declared so validateForm preserves
+  // it (Zod strips unknown keys) rather than dropping it before submit.
+  scoring: z.object({
+    scores: z.record(z.string(), z.number().min(0).max(3)),
+    total: z.number().min(0).max(21),
+  }).optional()
 }).refine(data => new Date(data.endDate) >= new Date(data.startDate), {
   message: 'End date must be on or after start date',
   path: ['endDate']
