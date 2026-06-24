@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Project, Waypoint } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
+import { projectAnchorY, SLOT_PITCH } from '../utils/capacity';
 import styles from './DependencyLine.module.css';
 
 // Dependencies are drawn project-to-project. (Milestones are no longer surfaced
@@ -12,9 +13,8 @@ interface DependencyLineProps {
   toProject: Project;
   timelineStart: Date;
   dayWidth: number;
-  projectStacks: Map<string, number>;
+  projectStacks: Map<string, number>; // Per-project slot offset (slot units)
   lanePositions: number[];
-  laneStackHeights: Record<string, number[]>; // Stack heights per owner for dynamic positioning
   ownerToLaneIndex: Map<string, number>;
   lineIndex?: number; // For staggering connection points
   isAnyHovered?: boolean; // True if any dependency line is hovered
@@ -26,10 +26,10 @@ interface DependencyLineProps {
   onUpdateWaypoints?: (waypoints: Waypoint[]) => void;
 }
 
-const BASE_PROJECT_HEIGHT = 52; // Minimum project bar height
-const PROJECT_VERTICAL_GAP = 6; // Gap between stacked projects (kept in sync with Timeline)
+// Lane top padding (px) — matches Timeline's LANE_PADDING. A pill's top is this
+// plus one SLOT_PITCH per slot row above it; the per-pill *centre* is then derived
+// from the real size via projectAnchorY, so arrows stay glued to each pill's mid.
 const BAR_VERTICAL_OFFSET = 16; // LANE_PADDING
-const BAR_HEIGHT = 52;
 
 // Waypoints are stored in a zoom-independent and layout-independent format:
 // - x is stored as "days from timeline start" (not pixels)
@@ -91,8 +91,10 @@ function areDependencyPropsEqual(
       prevProps.toProject.id !== nextProps.toProject.id ||
       prevProps.fromProject.startDate !== nextProps.fromProject.startDate ||
       prevProps.fromProject.endDate !== nextProps.fromProject.endDate ||
+      prevProps.fromProject.size !== nextProps.fromProject.size ||
       prevProps.toProject.startDate !== nextProps.toProject.startDate ||
       prevProps.toProject.endDate !== nextProps.toProject.endDate ||
+      prevProps.toProject.size !== nextProps.toProject.size ||
       prevProps.dayWidth !== nextProps.dayWidth ||
       prevProps.lineIndex !== nextProps.lineIndex ||
       prevProps.isNew !== nextProps.isNew) {
@@ -102,7 +104,6 @@ function areDependencyPropsEqual(
   // Check layout-affecting props
   if (prevProps.lanePositions !== nextProps.lanePositions ||
       prevProps.projectStacks !== nextProps.projectStacks ||
-      prevProps.laneStackHeights !== nextProps.laneStackHeights ||
       prevProps.ownerToLaneIndex !== nextProps.ownerToLaneIndex ||
       prevProps.timelineStart?.getTime() !== nextProps.timelineStart?.getTime()) {
     return false;
@@ -143,7 +144,6 @@ export const DependencyLine = memo(function DependencyLine({
   dayWidth,
   projectStacks,
   lanePositions,
-  laneStackHeights,
   ownerToLaneIndex,
   lineIndex = 0,
   isAnyHovered = false,
@@ -154,15 +154,11 @@ export const DependencyLine = memo(function DependencyLine({
   waypoints,
   onUpdateWaypoints
 }: DependencyLineProps) {
-  // Helper to calculate stack top offset based on dynamic heights
-  const getStackTopOffset = useCallback((ownerName: string, stackIndex: number): number => {
-    const stackHeights = laneStackHeights[ownerName] || [];
-    let offset = BAR_VERTICAL_OFFSET;
-    for (let i = 0; i < stackIndex; i++) {
-      offset += (stackHeights[i] || BASE_PROJECT_HEIGHT) + PROJECT_VERTICAL_GAP;
-    }
-    return offset;
-  }, [laneStackHeights]);
+  // Top (px, within the lane) of a pill at a given slot offset: lane padding plus
+  // one SLOT_PITCH per slot row above it. Mirrors Timeline.getStackTopOffset.
+  const getStackTopOffset = useCallback((slotOffset: number): number => {
+    return BAR_VERTICAL_OFFSET + slotOffset * SLOT_PITCH;
+  }, []);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isSelected, setIsSelected] = useState(false);
@@ -186,12 +182,14 @@ export const DependencyLine = memo(function DependencyLine({
     const fromLaneOffset = lanePositions[fromLaneIndex] ?? 0;
     const toLaneOffset = lanePositions[toLaneIndex] ?? 0;
 
-    // Calculate Y positions (centre of each project bar) using dynamic stack heights
-    const fromStackOffset = getStackTopOffset(fromProject.owner, fromStack);
-    const toStackOffset = getStackTopOffset(toProject.owner, toStack);
+    // Calculate Y positions (centre of each project bar) from the slot grid. The
+    // centre is derived from each pill's real size-driven height (28/56/84/112),
+    // so endpoints stay glued to the middle of every pill.
+    const fromStackOffset = getStackTopOffset(fromStack);
+    const toStackOffset = getStackTopOffset(toStack);
 
-    const fromY = fromLaneOffset + fromStackOffset + BAR_HEIGHT / 2;
-    const toY = toLaneOffset + toStackOffset + BAR_HEIGHT / 2;
+    const fromY = projectAnchorY(fromProject.size, fromLaneOffset, fromStackOffset);
+    const toY = projectAnchorY(toProject.size, toLaneOffset, toStackOffset);
 
     // Calculate X positions
     const fromX = fromDims.left + fromDims.width; // End of from element
@@ -379,10 +377,12 @@ export const DependencyLine = memo(function DependencyLine({
     fromProject.owner,
     fromProject.startDate,
     fromProject.endDate,
+    fromProject.size,
     toProject.id,
     toProject.owner,
     toProject.startDate,
     toProject.endDate,
+    toProject.size,
     timelineStart,
     dayWidth,
     projectStacks,

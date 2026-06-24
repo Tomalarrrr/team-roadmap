@@ -12,7 +12,7 @@
           "startDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
           "endDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
           "statusColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
-          "size": { ".validate": "newData.isString() && (newData.val() == 'large' || newData.val() == 'medium' || newData.val() == 'small')" },
+          "size": { ".validate": "newData.isString() && (newData.val() == 'full-time' || newData.val() == 'large' || newData.val() == 'medium' || newData.val() == 'small')" },
           "milestones": {
             "$milestoneId": {
               ".validate": "newData.hasChildren(['id', 'title', 'startDate', 'endDate', 'statusColor'])",
@@ -106,41 +106,6 @@
       }
     },
 
-    "connectFour": {
-      ".read": true,
-      "$gameCode": {
-        ".write": true,
-        ".validate": "newData.hasChildren(['board', 'currentTurn', 'players', 'createdAt'])",
-        "board": {
-          ".validate": "newData.isString() && newData.val().length == 48 && newData.val().matches(/^[.RY]+$/)"
-        },
-        "currentTurn": {
-          ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'yellow')"
-        },
-        "players": {
-          "red": {
-            ".validate": "newData.hasChildren(['sessionId', 'name'])",
-            "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
-            "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
-            "$other": { ".validate": false }
-          },
-          "yellow": {
-            ".validate": "newData.hasChildren(['sessionId', 'name'])",
-            "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
-            "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
-            "$other": { ".validate": false }
-          },
-          "$other": { ".validate": false }
-        },
-        "createdAt": { ".validate": "newData.isNumber()" },
-        "winner": { ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'yellow' || newData.val() == 'draw')" },
-        "winningCells": { ".validate": "newData.isString() && newData.val().length <= 100" },
-        "startingColor": { ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'yellow')" },
-        "turnStartedAt": { ".validate": "newData.isNumber()" },
-        "$other": { ".validate": false }
-      }
-    },
-
     "ludo": {
       ".read": true,
       "$gameCode": {
@@ -205,12 +170,6 @@
         },
         "$other": { ".validate": false }
       }
-    },
-
-    "gamePaused": {
-      ".read": true,
-      ".write": true,
-      ".validate": "newData.isBoolean()"
     },
 
     ".read": false,

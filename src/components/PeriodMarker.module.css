@@ -24,12 +24,12 @@
   left: 8px;
   z-index: 2; /* above the translucent band */
   display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: var(--fw-semibold);
   color: #374151;
   background: rgba(255, 255, 255, 0.95);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
-  padding: 2px 7px;
+  padding: 2px var(--space-2);
   border-radius: 4px;
   /* Allow the chip to extend beyond a narrow band so short labels (e.g. a
      one-week "Christmas" marker) read in full rather than truncating to "C…". */
@@ -56,7 +56,7 @@
 /* Rich tooltip — rendered via portal to document.body */
 .tooltip {
   background: var(--bg-secondary);
-  padding: 10px 14px;
+  padding: var(--space-3) var(--space-4);
   border-radius: 10px;
   white-space: nowrap;
   z-index: 10000;
@@ -77,9 +77,9 @@
 .tooltipLabel {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-weight: 600;
-  font-size: 0.85rem;
+  gap: var(--space-2);
+  font-weight: var(--fw-semibold);
+  font-size: var(--text-md);
   color: var(--text-primary);
 }
 
@@ -92,12 +92,12 @@
 
 .tooltipDates {
   color: var(--text-secondary);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 .tooltipHint {
   color: var(--text-muted);
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   margin-top: 1px;
   opacity: 0.7;
 }

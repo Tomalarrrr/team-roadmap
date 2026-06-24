@@ -19,6 +19,7 @@ import {
   type TurnPhase,
   getServerTimestamp,
   requestDiceRoll,
+  updateGameState,
 } from '../api/ludoApi';
 import {
   POWER_UPS,
@@ -2382,14 +2383,12 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
     const gc = gameCodeRef.current;
     if (gc) {
       try {
-        const { ensureInitialized, getDbModule, getFirebaseDatabase } = await import('../firebase');
-        await ensureInitialized();
-        const { ref, runTransaction } = getDbModule();
-        const db = getFirebaseDatabase();
-        const gameRef = ref(db, `ludo/${gc}`);
-        await runTransaction(gameRef, (current: LudoGameState | null) => {
+        // Route through the proxy (updateGameState), not a direct Firebase write —
+        // direct writes are blocked in the VPN/proxy environments this game targets,
+        // which previously made the picked-up power-up silently vanish.
+        await updateGameState(gc, (current) => {
           if (!current || !current.powerUps) return current;
-          // Re-read current inventory from Firebase (not stale local state)
+          // Re-read current inventory from the freshly-committed value (not stale local state)
           const currentInv = deserializeInventory(current.powerUps);
           const patched = discardSlot(currentInv, mc, slot, discardedId);
           return { ...current, powerUps: serializeInventory(patched) };
@@ -3532,7 +3531,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // --- Render ---
 
   return (
-    <div className={styles.popup} style={{ left: position.x, top: position.y }}>
+    <div className={`${styles.popup} ${gamePhase === 'playing' ? '' : styles.popupCompact}`} style={{ left: position.x, top: position.y }}>
       {/* Title bar */}
       <div className={styles.titleBar} onMouseDown={handleDragStart}>
         <span className={styles.titleText}>

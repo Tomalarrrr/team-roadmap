@@ -25,7 +25,7 @@ export const projectSchema = z.object({
   statusColor: colorSchema,
   // Historic projects predate sizing — default them to small (a 1-slot starting
   // point) so an unsized backlog doesn't silently eat capacity.
-  size: z.enum(['large', 'medium', 'small']).default('small'),
+  size: z.enum(['full-time', 'large', 'medium', 'small']).default('small'),
   milestones: z.array(milestoneSchema).max(100).default([]),
   dependencies: z.array(z.string().max(100)).optional().default([])
 }).refine(
@@ -43,13 +43,13 @@ export const teamMemberSchema = z.object({
 });
 
 // Waypoint schema (for dependency paths)
-export const waypointSchema = z.object({
+const waypointSchema = z.object({
   x: z.number(),
   y: z.number()
 });
 
 // Dependency type enum
-export const dependencyTypeSchema = z.enum([
+const dependencyTypeSchema = z.enum([
   'finish-to-start',
   'start-to-start',
   'finish-to-finish'
@@ -67,7 +67,7 @@ export const dependencySchema = z.object({
 });
 
 // Leave type enum
-export const leaveTypeSchema = z.enum([
+const leaveTypeSchema = z.enum([
   'annual-leave',
   'training',
   'conference',
@@ -75,7 +75,7 @@ export const leaveTypeSchema = z.enum([
 ]);
 
 // Leave coverage enum
-export const leaveCoverageSchema = z.enum([
+const leaveCoverageSchema = z.enum([
   'quarter',
   'half',
   'full'
@@ -96,7 +96,7 @@ export const leaveBlockSchema = z.object({
 );
 
 // Period marker color enum
-export const periodMarkerColorSchema = z.enum([
+const periodMarkerColorSchema = z.enum([
   'grey',
   'yellow',
   'orange',
@@ -117,7 +117,7 @@ export const periodMarkerSchema = z.object({
 );
 
 // Complete roadmap data schema
-export const roadmapDataSchema = z.object({
+const roadmapDataSchema = z.object({
   projects: z.array(projectSchema).default([]),
   teamMembers: z.array(teamMemberSchema).default([]),
   dependencies: z.array(dependencySchema).optional().default([]),
@@ -126,21 +126,7 @@ export const roadmapDataSchema = z.object({
 });
 
 // Type exports derived from schemas
-export type ValidatedMilestone = z.infer<typeof milestoneSchema>;
-export type ValidatedProject = z.infer<typeof projectSchema>;
-export type ValidatedTeamMember = z.infer<typeof teamMemberSchema>;
-export type ValidatedDependency = z.infer<typeof dependencySchema>;
-export type ValidatedLeaveBlock = z.infer<typeof leaveBlockSchema>;
-export type ValidatedPeriodMarker = z.infer<typeof periodMarkerSchema>;
 export type ValidatedRoadmapData = z.infer<typeof roadmapDataSchema>;
-
-/**
- * Validate and parse roadmap data, returning normalized data with defaults applied.
- * Throws ZodError if validation fails.
- */
-export function validateRoadmapData(data: unknown): ValidatedRoadmapData {
-  return roadmapDataSchema.parse(data);
-}
 
 /**
  * Safely validate roadmap data, returning a result object instead of throwing.
@@ -160,37 +146,6 @@ export function safeValidateRoadmapData(data: unknown): {
 }
 
 /**
- * Validate a single project.
- */
-export function validateProject(data: unknown): ValidatedProject {
-  return projectSchema.parse(data);
-}
-
-/**
- * Safely validate a single project.
- */
-export function safeValidateProject(data: unknown): {
-  success: true;
-  data: ValidatedProject;
-} | {
-  success: false;
-  error: z.ZodError;
-} {
-  const result = projectSchema.safeParse(data);
-  if (result.success) {
-    return { success: true, data: result.data };
-  }
-  return { success: false, error: result.error };
-}
-
-/**
- * Validate a single milestone.
- */
-export function validateMilestone(data: unknown): ValidatedMilestone {
-  return milestoneSchema.parse(data);
-}
-
-/**
  * Format Zod errors into user-friendly messages.
  */
 export function formatValidationErrors(error: z.ZodError<unknown>): string[] {
@@ -199,27 +154,4 @@ export function formatValidationErrors(error: z.ZodError<unknown>): string[] {
     const path = issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
     return `${path}${issue.message}`;
   });
-}
-
-/**
- * Normalize potentially malformed data by applying defaults and coercing types.
- * This is useful for loading data from Firebase that might have missing fields.
- */
-export function normalizeRoadmapData(data: unknown): ValidatedRoadmapData {
-  // First, try to parse with defaults
-  const result = roadmapDataSchema.safeParse(data ?? {});
-
-  if (result.success) {
-    return result.data;
-  }
-
-  // If parsing fails, return empty defaults
-  console.warn('Failed to normalize roadmap data, using defaults:', result.error);
-  return {
-    projects: [],
-    teamMembers: [],
-    dependencies: [],
-    leaveBlocks: [],
-    periodMarkers: []
-  };
 }

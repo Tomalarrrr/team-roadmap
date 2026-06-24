@@ -12,7 +12,7 @@ import {
   isDatePast
 } from '../utils/dateUtils';
 import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor } from '../utils/statusColors';
-import { heightForSize, DEFAULT_SIZE } from '../utils/capacity';
+import { heightForSize, DEFAULT_SIZE, UNIT_HEIGHT } from '../utils/capacity';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
 
@@ -176,6 +176,45 @@ export function ProjectBar({
   const statusLabel = isPast ? 'Complete' : getStatusNameByHex(project.statusColor);
   // Show the status badge (top-right) whenever the bar is wide enough to read.
   const showStatusBadge = !dragMode && !externalDragging && width > 120 && statusLabel;
+  const showOverAllocBadge = isOverAllocated && !dragMode && !externalDragging;
+  // Only show the date range when the pill is wide enough to fit it. Below this,
+  // overflow-clipping the dates would leave an orphaned "•" separator (e.g.
+  // "hegfjwer •"). The dates stay available in the hover tooltip + aria-label.
+  const showDates = width > 132;
+
+  // Reserve right-hand space inside the pill so the centred label/dates never run
+  // underneath the corner badges. The badges are absolutely positioned and the
+  // dates are flex-shrink:0, so without this they slide under the transparent
+  // status tag — visible as "10 DecON TRACK" on medium-width pills. A right margin
+  // on the overflow-hidden content clips it before the badge (robust even when the
+  // dates can't shrink) while leaving the whole pill as a click/drag target.
+  // Widths: status tag ≈ 55px at right:14 (or right:32 when shifted past the
+  // over-alloc "!"); the "!" marker is 17px at right:7. +5px clearance to the badge.
+  const contentMarginRight = showStatusBadge
+    ? (isOverAllocated ? 80 : 58)
+    : showOverAllocBadge
+      ? 18
+      : 0;
+
+  // Build the accessible name from the same pieces shown on the pill, in the
+  // same visual order (status → title → dates) and with the same date
+  // separator. This keeps the visible text a subset of the accessible name so
+  // we satisfy WCAG 2.5.3 (Label in Name) — speech-input users can activate the
+  // bar by saying what they see. The status word is only included when the
+  // badge is actually rendered, so the two never drift apart.
+  // Space-joined (not comma-joined) and in the same visual order as the pill,
+  // so the rendered text — "{status} {title} {start} - {end}" — appears verbatim
+  // and contiguously inside the name. The decorative "•" separator and the
+  // over-capacity "!" badge are aria-hidden in the markup so they don't inject
+  // characters/words that aren't here. Over-capacity is surfaced as a suffix.
+  const accessibleName = [
+    showStatusBadge ? statusLabel : null,
+    project.title,
+    `${formatShortDate(project.startDate)} - ${formatShortDate(project.endDate)}`,
+    showOverAllocBadge ? 'over capacity' : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const handleMouseDown = useCallback((e: React.MouseEvent, mode: DragMode) => {
     if (isLocked) return; // Disable drag when locked
@@ -396,12 +435,15 @@ export function ProjectBar({
     };
   }, [dragMode, dragStartX, originalStartDate, originalEndDate]);
 
-  // Pill height is literally the project's slot cost: Large 2 / Medium 1.5 / Small 1.
+  // Pill height scales with slot cost and absorbs inter-pill gaps so a multi-slot
+  // pill exactly fills the band a Smalls-stack would: Small 28 / Medium 62 /
+  // Large 96 / Full Time 130 px (see heightForSize).
   const projectBarHeight = heightForSize(project.size ?? DEFAULT_SIZE);
 
-  // Use stackTopOffset if provided (dynamic heights), otherwise fall back to fixed calculation
-  // The fallback is a safety net - Timeline should always provide stackTopOffset
-  // Fallback uses: LANE_PADDING (16) + stackIndex * (BASE_PROJECT_HEIGHT + gap)
+  // Use stackTopOffset if provided, otherwise fall back. Timeline should always
+  // provide it; this is a safety net. stackIndex is the pill's slot offset, so the
+  // fallback matches Timeline.getStackTopOffset exactly:
+  //   LANE_PADDING (16) + slotOffset * SLOT_PITCH (UNIT_HEIGHT + 6 = 34).
   const topPosition = useMemo(() => {
     if (stackTopOffset !== undefined) {
       return stackTopOffset;
@@ -410,7 +452,7 @@ export function ProjectBar({
     if (import.meta.env.DEV) {
       console.warn('[ProjectBar] stackTopOffset not provided, using fallback calculation. This may cause positioning issues with variable-height projects.');
     }
-    return 16 + stackIndex * 72;
+    return 16 + stackIndex * (UNIT_HEIGHT + 6);
   }, [stackTopOffset, stackIndex]);
 
   // Keyboard handler for accessibility
@@ -565,7 +607,7 @@ export function ProjectBar({
       }}
       role="button"
       tabIndex={0}
-      aria-label={`Project: ${project.title}, ${formatShortDate(project.startDate)} to ${formatShortDate(project.endDate)}${isPast ? ', Complete' : ''}`}
+      aria-label={`Project: ${accessibleName}`}
       aria-describedby={showTooltip ? `tooltip-${project.id}` : undefined}
       onKeyDown={handleKeyDown}
       onClick={isTargetable ? handleDependencyTarget : undefined}
@@ -593,6 +635,10 @@ export function ProjectBar({
         <div
           className={styles.laneHandle}
           title="Drag to move to another team member"
+          // Decorative mouse-only drag affordance (not keyboard-focusable). Keep
+          // it out of the a11y tree so its title doesn't bleed into the pill's
+          // accessible name (WCAG 2.5.3); the title tooltip still shows on hover.
+          aria-hidden="true"
           {...dragListeners}
         >
           <svg width="8" height="14" viewBox="0 0 8 14" fill="currentColor">
@@ -635,7 +681,6 @@ export function ProjectBar({
       {showStatusBadge && (
         <span
           className={`${styles.statusBadge}${isOverAllocated ? ` ${styles.statusBadgeShifted}` : ''}`}
-          aria-label={`Status: ${statusLabel}`}
         >
           {statusLabel}
         </span>
@@ -644,18 +689,18 @@ export function ProjectBar({
       {/* Over-allocation marker — a single clean "!" on the pill that tips its
           owner past their capacity. Always shown (even on narrow pills) so the
           warning is never hidden; suppressed only during an active drag/resize. */}
-      {isOverAllocated && !dragMode && !externalDragging && (
+      {showOverAllocBadge && (
         <span
           className={styles.overAllocBadge}
-          role="img"
-          aria-label="Over capacity in this period"
+          // The "!" is drawn via CSS (::before) and the meaning is surfaced in the
+          // pill's accessible name as the "over capacity" suffix, so this stays out
+          // of the visible-text match for WCAG 2.5.3. Keep the title for the tooltip.
+          aria-hidden="true"
           title="Over capacity — this pushes the owner past their 4 slots in this period"
-        >
-          !
-        </span>
+        />
       )}
 
-      {/* Drag area - single click opens edit */}
+      {/* Drag area — single click selects, double-click opens edit */}
       <div
         className={styles.dragArea}
         onMouseDown={(e) => {
@@ -681,13 +726,14 @@ export function ProjectBar({
           const dy = Math.abs(e.clientY - clickStartRef.current.y);
           const elapsed = Date.now() - clickStartRef.current.time;
           const passes = dx < 5 && dy < 5 && elapsed < 300;
-          // If minimal movement and quick click, open edit dialog and select (unless locked)
+          // Quick click with minimal movement = select only. Editing is on
+          // double-click (below), so a project can be selected for the keyboard
+          // shortcuts ([ ] / Cmd+D / Backspace) without the edit modal popping open.
           if (passes) {
             e.stopPropagation();
             setDragMode(null);
             clickStartRef.current = null;
             onSelect?.();
-            if (!isLocked) onEdit();
             return;
           }
           clickStartRef.current = null;
@@ -698,14 +744,24 @@ export function ProjectBar({
           onEdit();
         }}
       >
-        <div className={styles.projectContent}>
+        <div className={styles.projectContent} style={{ marginRight: contentMarginRight }}>
           <span className={styles.projectTitle}>
             {project.title}
           </span>
-          <span className={styles.projectSeparator}>•</span>
-          <span className={styles.projectDates}>
-            {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
-          </span>
+          {/* Whitespace text node: keeps the title and dates as separate "words"
+              in the pill's visible text. Without it "Small A" + "13 Jul" fuse into
+              "Small A13 Jul" once the decorative "•"/"-" are stripped, which breaks
+              the visible-text-in-accessible-name match (WCAG 2.5.3). Flex layout
+              ignores whitespace-only nodes, so this is visually invisible. */}
+          {' '}
+          {showDates && (
+            <span className={styles.projectMeta}>
+              <span className={styles.projectSeparator} aria-hidden="true" />
+              <span className={styles.projectDates}>
+                {formatShortDate(project.startDate)} - {formatShortDate(project.endDate)}
+              </span>
+            </span>
+          )}
         </div>
       </div>
 

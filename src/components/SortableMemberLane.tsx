@@ -8,12 +8,13 @@ interface SortableMemberLaneProps {
   height: number;
   isLocked?: boolean; // When true, disable sorting and add project
   isCollapsed?: boolean; // When true, lane is collapsed to minimal height
+  railMode?: boolean; // When true, the whole sidebar is a thin vertical rail
   onToggleCollapse?: () => void;
   onEdit: () => void;
   onAddProject: () => void;
 }
 
-export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
+export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, railMode = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
   const {
     attributes,
     listeners,
@@ -21,7 +22,7 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
     transform,
     transition,
     isDragging
-  } = useSortable({ id: member.id, disabled: isLocked });
+  } = useSortable({ id: member.id, disabled: isLocked || railMode });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -33,6 +34,25 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
     boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.15)' : undefined,
     background: isDragging ? 'var(--bg-primary)' : undefined
   } as React.CSSProperties;
+
+  // Rail mode: the sidebar is collapsed to a thin strip, so we show only the
+  // member's name turned 90° (reading bottom-to-top), centred in the lane. The
+  // full name + title live in the tooltip, and clicking still opens the editor.
+  if (railMode) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={`${styles.memberLane} ${styles.memberLaneRail}`}
+        onClick={isLocked ? undefined : onEdit}
+        title={member.jobTitle ? `${member.name} — ${member.jobTitle}` : member.name}
+      >
+        <span className={styles.railName}>
+          {member.name}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -76,7 +96,7 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
           </div>
         )}
         <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
-          <span className={styles.memberName} style={member.nameColor ? { color: member.nameColor } : undefined}>{member.name}</span>
+          <span className={styles.memberName}>{member.name}</span>
           {!isCollapsed && <span className={styles.memberTitle}>{member.jobTitle}</span>}
         </div>
       </div>

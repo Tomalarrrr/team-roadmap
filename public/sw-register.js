@@ -1,6 +1,17 @@
 (function() {
   if (!('serviceWorker' in navigator)) return;
 
+  // Skip the service worker on local dev/preview (localhost) — it caches assets
+  // and can serve stale JS/CSS that fights Vite HMR. Unregister any SW left over
+  // from a prior run so a stale cache can't persist across `npm run dev`. On real
+  // deployed domains the SW still registers and self-heals as normal.
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      regs.forEach(function(r) { r.unregister(); });
+    }).catch(function() {});
+    return;
+  }
+
   // Register SW and force update check on every page load
   navigator.serviceWorker.register('/sw.js').then(function(reg) {
     // Immediately check for a newer SW file — picks up new deploys fast

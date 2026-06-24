@@ -42,7 +42,7 @@ export interface FirebaseRoadmapData {
  * Handles: null, undefined, actual arrays (legacy), and keyed objects (new format).
  * Firebase may also return objects with numeric string keys for sparse arrays.
  */
-export function keyedObjectToArray<T>(obj: Record<string, T> | T[] | null | undefined): T[] {
+function keyedObjectToArray<T>(obj: Record<string, T> | T[] | null | undefined): T[] {
   if (obj == null) return [];
   if (Array.isArray(obj)) return obj.filter(item => item != null);
   if (typeof obj === 'object') {

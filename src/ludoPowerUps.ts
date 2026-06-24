@@ -11,8 +11,8 @@ export type PowerUpId =
   | 'banana-peel' | 'green-shell' | 'red-shell' | 'blue-shell'
   | 'coin-block';
 
-export type PowerUpTier = 'common' | 'uncommon' | 'rare';
-export type PowerUpTiming = 'before-roll' | 'after-roll' | 'passive';
+type PowerUpTier = 'common' | 'uncommon' | 'rare';
+type PowerUpTiming = 'before-roll' | 'after-roll' | 'passive';
 
 export interface PowerUpDef {
   id: PowerUpId;
@@ -38,7 +38,7 @@ export const ENTRY_CELLS: Record<LudoColor, number> = {
 
 export const SAFE_ZONES = new Set([1, 10, 15, 24, 29, 38, 43, 52]);
 
-export const COLOR_OFFSET: Record<LudoColor, number> = {
+const COLOR_OFFSET: Record<LudoColor, number> = {
   red: 0, green: 4, yellow: 8, blue: 12,
 };
 
@@ -52,7 +52,7 @@ const EXCLUDED_CELLS = new Set([
   ...Object.values(ENTRY_CELLS),
 ]);
 
-export function generateMysteryBoxCells(): number[] {
+function generateMysteryBoxCells(): number[] {
   const candidates: number[] = [];
   for (let i = 1; i <= TRACK_SIZE; i++) {
     if (!EXCLUDED_CELLS.has(i)) candidates.push(i);
@@ -82,7 +82,7 @@ export function generateMysteryBoxCells(): number[] {
   return selected.sort((a, b) => a - b);
 }
 
-export const INVENTORY_SIZE = 1;
+const INVENTORY_SIZE = 1;
 
 // --- Power-Up Definitions ---
 
@@ -303,10 +303,6 @@ export function deserializeInventory(str: string): (PowerUpId | null)[][] {
     result.push(slots);
   }
   return result;
-}
-
-export function emptyInventoryStr(): string {
-  return '__'.repeat(4);
 }
 
 // Mystery box state: "cell:cooldown,cell:cooldown,..."
@@ -640,29 +636,6 @@ export function findFurthestTrackToken(tokens: TokenPosition[], color: LudoColor
     }
   }
   return bestIdx;
-}
-
-/**
- * Get the furthest-ahead track position owned by a color (for shell targeting).
- * Returns null if no tokens on track.
- */
-export function getBestTrackPosition(tokens: TokenPosition[], color: LudoColor): number | null {
-  const indices = getColorTokenIndices(color);
-  const start = START_POSITIONS[color];
-  let best: number | null = null;
-  let bestDist = -1;
-  for (const i of indices) {
-    const pos = tokens[i];
-    if (pos.startsWith('track-')) {
-      const track = parseInt(pos.split('-')[1]);
-      const dist = track >= start ? track - start : (TRACK_SIZE - start) + track;
-      if (dist > bestDist) {
-        bestDist = dist;
-        best = track;
-      }
-    }
-  }
-  return best;
 }
 
 /**

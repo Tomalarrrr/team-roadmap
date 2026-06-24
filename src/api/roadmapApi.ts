@@ -67,11 +67,6 @@ async function proxyFetch(path: string, init?: RequestInit): Promise<Response> {
   return response;
 }
 
-async function proxyGet<T = unknown>(path: string): Promise<T> {
-  const response = await proxyFetch(path, { method: 'GET' });
-  return (await response.json()) as T;
-}
-
 /**
  * Conditional GET for the poll loop. Sends If-None-Match so the proxy can reply
  * 304 (no body) when the snapshot is unchanged — the common case on a 5s poll.
@@ -142,12 +137,6 @@ function setConnectionState(next: boolean) {
 }
 
 // ---------- Public read API ----------
-
-/** One-shot fetch of the full roadmap snapshot. */
-export async function getRoadmap(): Promise<RoadmapData> {
-  const raw = await proxyGet('roadmap');
-  return firebaseSnapshotToRoadmapData(raw);
-}
 
 /**
  * Polling-based replacement for Firebase's onValue subscription.

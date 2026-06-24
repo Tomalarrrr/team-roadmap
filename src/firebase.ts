@@ -1,7 +1,12 @@
-import type { RoadmapData, Project, Milestone, Dependency, TeamMember, LeaveBlock } from './types';
-import { firebaseSnapshotToRoadmapData, roadmapDataToFirebaseFormat, projectToFirebase, isLegacyArrayFormat } from './utils/firebaseConversions';
 import type { FirebaseApp } from 'firebase/app';
-import type { Database, DatabaseReference, Unsubscribe } from 'firebase/database';
+import type { Database, Unsubscribe } from 'firebase/database';
+
+// Roadmap reads/writes now go through the Vercel proxy (src/api/roadmapApi.ts).
+// This module retains only what still talks to the Firebase SDK directly:
+//   - lazy Firebase init + cached db module (powers the connection-state and
+//     presence listeners below)
+//   - global "last activity" tracking (the proxy/useRoadmap stale-detector)
+//   - connection-state subscription + the presence system (usePresence)
 
 // Validate Firebase configuration
 function validateFirebaseConfig() {
@@ -42,7 +47,6 @@ const firebaseConfig = {
 // Lazy-loaded Firebase instances
 let app: FirebaseApp | null = null;
 let database: Database | null = null;
-let roadmapRef: DatabaseReference | null = null;
 let initPromise: Promise<void> | null = null;
 
 // Cached firebase/database module — avoids repeated `await import()` microtask overhead
@@ -51,7 +55,7 @@ let dbModule: typeof import('firebase/database') | null = null;
 
 // Dynamically import and initialize Firebase (deferred)
 async function initializeFirebase(): Promise<void> {
-  if (app && database && roadmapRef && dbModule) return;
+  if (app && database && dbModule) return;
 
   try {
     const [firebaseApp, firebaseDb] = await Promise.all([
@@ -65,7 +69,6 @@ async function initializeFirebase(): Promise<void> {
       ? firebaseApp.getApp()
       : firebaseApp.initializeApp(firebaseConfig);
     database = firebaseDb.getDatabase(app);
-    roadmapRef = firebaseDb.ref(database, 'roadmap');
   } catch (error) {
     // Allow re-initialization on failure
     initPromise = null;
@@ -90,12 +93,6 @@ export function ensureInitialized(): Promise<void> {
   return initPromise;
 }
 
-// Get the initialized database instance (only valid after initialization)
-export function getFirebaseDatabase() {
-  if (!database) throw new Error('Firebase not initialized');
-  return database;
-}
-
 // ============================================
 // GLOBAL FIREBASE ACTIVITY TRACKING
 // ============================================
@@ -116,137 +113,10 @@ export function getLastFirebaseActivity(): number {
   return lastFirebaseActivityTs;
 }
 
-// ============================================
-// CONNECTION LIFECYCLE MANAGEMENT
-// ============================================
-
-let visibilityHandler: (() => void) | null = null;
-// Disconnect after 2 minutes of being hidden to prevent zombie WebSockets.
-// Exported so usePresence can align its re-registration threshold.
+// Disconnect threshold after extended hidden periods. Exported so usePresence
+// can align its re-registration threshold. (The SDK connection-lifecycle
+// manager that consumed this now lives in src/api/roadmapApi.ts.)
 export const HIDDEN_DISCONNECT_MS = 2 * 60 * 1000;
-let hiddenTimer: ReturnType<typeof setTimeout> | null = null;
-// Track whether we actually completed a goOffline call
-let didGoOffline = false;
-
-/**
- * Manage Firebase connection based on tab visibility.
- * Disconnects after extended hidden periods to prevent zombie WebSockets,
- * and reconnects immediately when the tab becomes visible again.
- */
-export function setupConnectionLifecycle(): () => void {
-  if (visibilityHandler) return () => {}; // Already set up
-
-  visibilityHandler = () => {
-    if (document.visibilityState === 'hidden') {
-      // Schedule disconnect after extended hidden period
-      hiddenTimer = setTimeout(() => {
-        if (!database || !dbModule) return;
-        // Check we're still hidden (user may have returned while timer was pending)
-        if (document.visibilityState !== 'hidden') return;
-        dbModule.goOffline(database);
-        didGoOffline = true;
-        console.info('[Firebase] Went offline after extended hidden period');
-      }, HIDDEN_DISCONNECT_MS);
-    } else {
-      // Tab became visible - cancel pending disconnect
-      if (hiddenTimer) {
-        clearTimeout(hiddenTimer);
-        hiddenTimer = null;
-      }
-
-      // Only reconnect if we actually disconnected
-      if (didGoOffline && database && dbModule) {
-        didGoOffline = false;
-        dbModule.goOnline(database);
-        console.info('[Firebase] Reconnected after tab became visible');
-      }
-    }
-  };
-
-  document.addEventListener('visibilitychange', visibilityHandler);
-
-  // Also handle beforeunload to clean up
-  const unloadHandler = () => {
-    if (hiddenTimer) {
-      clearTimeout(hiddenTimer);
-    }
-  };
-  window.addEventListener('beforeunload', unloadHandler);
-
-  return () => {
-    if (visibilityHandler) {
-      document.removeEventListener('visibilitychange', visibilityHandler);
-      visibilityHandler = null;
-    }
-    window.removeEventListener('beforeunload', unloadHandler);
-    if (hiddenTimer) {
-      clearTimeout(hiddenTimer);
-      hiddenTimer = null;
-    }
-    didGoOffline = false;
-  };
-}
-
-/**
- * Force reconnect the Firebase database connection.
- * Useful for recovering from stale WebSocket states.
- */
-export async function forceReconnect(): Promise<void> {
-  if (!database || !dbModule) return;
-  dbModule.goOffline(database);
-  // Small delay to ensure clean disconnect before reconnecting
-  await new Promise(resolve => setTimeout(resolve, 100));
-  dbModule.goOnline(database);
-  console.info('[Firebase] Force reconnected');
-}
-
-// Auto-migration: tracks whether legacy array→keyed-object migration has been checked/completed.
-// Granular update functions await this promise to prevent writes to the wrong path format.
-let migrationChecked = false;
-let migrationPromise: Promise<void> | null = null;
-
-export async function subscribeToRoadmap(
-  callback: (data: RoadmapData) => void,
-  onError?: (error: Error) => void
-): Promise<Unsubscribe> {
-  await ensureInitialized();
-  const { onValue, set } = getDbModule();
-
-  const unsubscribe = onValue(
-    roadmapRef!,
-    (snapshot) => {
-      markFirebaseActivity();
-      const data = snapshot.val();
-      const roadmapData = firebaseSnapshotToRoadmapData(data);
-
-      // One-time auto-migration: if data is in legacy array format,
-      // rewrite it in keyed-object format before any granular updates can run.
-      if (!migrationChecked && data) {
-        migrationChecked = true;
-        if (isLegacyArrayFormat(data)) {
-          console.info('[Firebase] Legacy array format detected, migrating to keyed-object format...');
-          migrationPromise = set(roadmapRef!, roadmapDataToFirebaseFormat(roadmapData))
-            .then(() => {
-              console.info('[Firebase] Migration complete');
-              migrationPromise = null;
-            })
-            .catch((err) => {
-              console.error('[Firebase] Migration failed:', err);
-              migrationChecked = false; // Allow retry on next callback
-              migrationPromise = null;
-            });
-        }
-      }
-
-      callback(roadmapData);
-    },
-    (error) => {
-      console.error('[Firebase] Roadmap listener error:', error);
-      onError?.(error);
-    }
-  );
-  return unsubscribe;
-}
 
 export async function subscribeToConnectionState(callback: (connected: boolean) => void): Promise<Unsubscribe> {
   await ensureInitialized();
@@ -269,81 +139,6 @@ export async function subscribeToConnectionState(callback: (connected: boolean) 
   );
 
   return unsubscribe;
-}
-
-export async function saveRoadmap(data: RoadmapData): Promise<void> {
-  await ensureInitialized();
-  const { set } = getDbModule();
-  await set(roadmapRef!, roadmapDataToFirebaseFormat(data));
-}
-
-// Granular update functions for concurrent editing support.
-// These use ID-based paths so concurrent operations target stable keys.
-// Each awaits migrationPromise to ensure data is in keyed-object format before writing.
-
-async function awaitMigration(): Promise<void> {
-  if (migrationPromise) await migrationPromise;
-}
-
-export async function updateProjectAtPath(projectId: string, project: Project): Promise<void> {
-  await ensureInitialized();
-  await awaitMigration();
-  const { ref, set } = getDbModule();
-  const projectRef = ref(database!, `roadmap/projects/${projectId}`);
-  // Convert milestones array to keyed object for Firebase storage
-  await set(projectRef, projectToFirebase(project));
-}
-
-export async function updateMilestoneAtPath(
-  projectId: string,
-  milestoneId: string,
-  milestone: Milestone
-): Promise<void> {
-  await ensureInitialized();
-  await awaitMigration();
-  const { ref, set } = getDbModule();
-  const milestoneRef = ref(database!, `roadmap/projects/${projectId}/milestones/${milestoneId}`);
-  await set(milestoneRef, milestone);
-}
-
-export async function updateDependencyAtPath(depId: string, dependency: Dependency): Promise<void> {
-  await ensureInitialized();
-  await awaitMigration();
-  const { ref, set } = getDbModule();
-  const depRef = ref(database!, `roadmap/dependencies/${depId}`);
-  await set(depRef, dependency);
-}
-
-export async function updateTeamMemberAtPath(memberId: string, member: TeamMember): Promise<void> {
-  await ensureInitialized();
-  await awaitMigration();
-  const { ref, set } = getDbModule();
-  const memberRef = ref(database!, `roadmap/teamMembers/${memberId}`);
-  await set(memberRef, member);
-}
-
-export async function updateLeaveBlockAtPath(leaveId: string, leaveBlock: LeaveBlock): Promise<void> {
-  await ensureInitialized();
-  await awaitMigration();
-  const { ref, set } = getDbModule();
-  const leaveRef = ref(database!, `roadmap/leaveBlocks/${leaveId}`);
-  await set(leaveRef, leaveBlock);
-}
-
-// Batch update using Firebase's update() - merges multiple paths atomically
-export async function batchUpdate(updates: Record<string, unknown>): Promise<void> {
-  await ensureInitialized();
-  const { ref, update } = getDbModule();
-  const rootRef = ref(database!, 'roadmap');
-  await update(rootRef, updates);
-}
-
-export async function getRoadmap(): Promise<RoadmapData> {
-  await ensureInitialized();
-  const { get } = getDbModule();
-  const snapshot = await get(roadmapRef!);
-  const data = snapshot.val();
-  return firebaseSnapshotToRoadmapData(data);
 }
 
 // ============================================

@@ -55,14 +55,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 24px;
+  padding: var(--space-5) var(--space-6);
   background: linear-gradient(to bottom, var(--bg-secondary), var(--bg-tertiary));
   border-bottom: 1px solid var(--border-light);
 }
 
 .title {
-  font-size: 1.15rem;
-  font-weight: 600;
+  font-size: var(--text-xl);
+  font-weight: var(--fw-semibold);
   color: var(--text-primary);
   margin: 0;
   letter-spacing: -0.02em;
@@ -93,7 +93,7 @@
 }
 
 .content {
-  padding: 24px;
+  padding: var(--space-6);
   overflow-y: auto;
   flex: 1;
   /* Smooth scroll behavior */

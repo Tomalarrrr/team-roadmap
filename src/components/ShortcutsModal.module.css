@@ -26,13 +26,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: var(--space-4) var(--space-5);
   border-bottom: 1px solid var(--border-light);
 }
 
 .title {
-  font-size: 1.1rem;
-  font-weight: 600;
+  font-size: var(--text-xl);
+  font-weight: var(--fw-semibold);
   color: var(--text-primary);
   margin: 0;
 }
@@ -54,13 +54,13 @@
 }
 
 .content {
-  padding: 16px 20px;
+  padding: var(--space-4) var(--space-5);
   overflow-y: auto;
   flex: 1;
 }
 
 .category {
-  margin-bottom: 20px;
+  margin-bottom: var(--space-5);
 }
 
 .category:last-child {
@@ -68,25 +68,25 @@
 }
 
 .categoryTitle {
-  font-size: 0.7rem;
-  font-weight: 600;
+  font-size: var(--text-xs);
+  font-weight: var(--fw-semibold);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
-  margin: 0 0 10px 0;
+  margin: 0 0 var(--space-3) 0;
 }
 
 .shortcutList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 .shortcutItem {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
+  padding: var(--space-2) var(--space-3);
   background: var(--bg-tertiary);
   border-radius: var(--radius-md);
   transition: background-color var(--transition-fast);
@@ -97,14 +97,14 @@
 }
 
 .description {
-  font-size: 0.85rem;
+  font-size: var(--text-md);
   color: var(--text-primary);
 }
 
 .kbd {
   font-family: 'SF Mono', Monaco, Consolas, monospace;
-  font-size: 0.75rem;
-  padding: 4px 8px;
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
   background: var(--bg-secondary);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-sm);
@@ -113,20 +113,20 @@
 }
 
 .footer {
-  padding: 12px 20px;
+  padding: var(--space-3) var(--space-5);
   border-top: 1px solid var(--border-light);
   text-align: center;
 }
 
 .hint {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
 .kbdSmall {
   font-family: 'SF Mono', Monaco, Consolas, monospace;
-  font-size: 0.7rem;
-  padding: 2px 6px;
+  font-size: var(--text-xs);
+  padding: 2px var(--space-2);
   background: var(--bg-tertiary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-sm);
@@ -167,6 +167,6 @@
   .shortcutItem {
     flex-direction: column;
     align-items: flex-start;
-    gap: 6px;
+    gap: var(--space-2);
   }
 }

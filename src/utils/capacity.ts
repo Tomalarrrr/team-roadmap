@@ -14,33 +14,39 @@ import { parseISO, addDays, differenceInDays, format } from 'date-fns';
  * edits to the shared model files.
  */
 
-export type ProjectSize = 'large' | 'medium' | 'small';
+export type ProjectSize = 'full-time' | 'large' | 'medium' | 'small';
 
 export const CAPACITY = 4;
 
+// Slot cost equals the size's "value": Small 1, Medium 2, Large 3, Full Time 4.
+// Pixel heights follow the same scale but also absorb the inter-pill gaps (see
+// heightForSize), so a Medium spans exactly two stacked Smalls, a Large three,
+// and a Full Time all four — i.e. a Full Time alone fills a member's whole
+// 4-slot capacity band.
 export const SIZE_SLOTS: Record<ProjectSize, number> = {
-  large: 2,
-  medium: 1.5,
+  'full-time': 4,
+  large: 3,
+  medium: 2,
   small: 1,
 };
 
 /**
  * Default size for projects with no explicit size yet (e.g. historic projects
  * that predate the size field). Treated as a Small (1 slot) starting point so an
- * unsized backlog doesn't silently consume 1.5 slots each and block legitimate
+ * unsized backlog doesn't silently consume extra slots each and block legitimate
  * work — bump individual projects up once they're properly sized.
  */
 export const DEFAULT_SIZE: ProjectSize = 'small';
 
 /** Days of recovery buffer added after a project ends before its slots free up. */
-export const RECOVERY_BUFFER_DAYS = 7;
+const RECOVERY_BUFFER_DAYS = 7;
 
 /**
  * Title of the always-on "Digital Queue" workstream. It's ongoing BAU rather
  * than a scheduled project, so it's exempt from the capacity model: it neither
  * consumes a member's slots nor counts toward the CAPACITY ceiling.
  */
-export const DIGITAL_QUEUE_TITLE = 'Digital Queue';
+const DIGITAL_QUEUE_TITLE = 'Digital Queue';
 
 /**
  * True if a project is exempt from capacity accounting (the Digital Queue).
@@ -75,19 +81,65 @@ export function slotsFor(size: ProjectSize): number {
   return SIZE_SLOTS[size] ?? SIZE_SLOTS[DEFAULT_SIZE];
 }
 
-/** Pixels per capacity slot — the unit that ties pill height to slot cost.
- *  Small = 34, Medium = 51, Large = 68 (single-line pill content fits ≥34). */
-export const UNIT_HEIGHT = 34;
+/** Pixels of pill height contributed per capacity slot — the unit that ties pill
+ *  height to slot cost. A Small (1 slot) is exactly UNIT_HEIGHT: just tall enough
+ *  for its single label line with tight, symmetric breathing room. Larger sizes
+ *  are slots * UNIT_HEIGHT PLUS the internal gaps a Smalls-stack would span (see
+ *  heightForSize) — Small 28 / Medium 62 / Large 96 / Full Time 130. */
+export const UNIT_HEIGHT = 28;
+
+/** Vertical gap (px) between stacked pills. Kept here as the single source of
+ *  truth so the timeline and dependency-arrow geometry can't drift apart. */
+export const SLOT_GAP = 6;
+
+/** Vertical distance (px) from one slot row to the next: one slot plus the gap.
+ *  A pill placed at slot offset N has its top at LANE_PADDING + N * SLOT_PITCH.
+ *  Pills are positioned on this shared grid so a tall project (e.g. Full Time)
+ *  occupies the SAME vertical band as the short projects stacked beside it at a
+ *  non-overlapping time, instead of being pushed onto its own row below them. */
+export const SLOT_PITCH = UNIT_HEIGHT + SLOT_GAP;
 
 export const SIZE_LABELS: Record<ProjectSize, string> = {
+  'full-time': 'Full Time',
   large: 'Large',
   medium: 'Medium',
   small: 'Small',
 };
 
-/** Pill height in pixels for a size: height is literally its slot cost. */
+/**
+ * Pill height in pixels for a size. A pill must fill the SAME vertical band that
+ * the equivalent stack of Smalls spans on the slot grid — i.e. its slot heights
+ * PLUS the gaps that would sit between those Smalls. A naive `slots * UNIT_HEIGHT`
+ * omits those internal gaps, leaving a multi-slot pill short by (slots-1)*SLOT_GAP:
+ * a Full Time (112px) ended up 18px shorter than the four Smalls (130px) stacked
+ * beside it. Including the gaps makes Medium = 2 Smalls, Large = 3 Smalls, and
+ * Full Time = 4 Smalls (and the whole 4-slot capacityFrame) exactly.
+ *
+ * Equivalently: (slots - 1) * SLOT_PITCH + UNIT_HEIGHT.
+ * Small 28 / Medium 62 / Large 96 / Full Time 130 px.
+ */
 export function heightForSize(size: ProjectSize): number {
-  return slotsFor(size) * UNIT_HEIGHT;
+  const slots = slotsFor(size);
+  return slots * UNIT_HEIGHT + (slots - 1) * SLOT_GAP;
+}
+
+/**
+ * Vertical centre (in lane-container pixels) of a project pill — the point a
+ * dependency endpoint should anchor to.
+ *
+ * A pill's height scales with its slot cost (Small 28 / Medium 62 / Large 96 /
+ * Full Time 130 px — see heightForSize), NOT a fixed value. Anchoring to a
+ * constant half-height makes arrows attach off-centre: low on a Small pill
+ * (effectively its bottom edge) and high on a Large/Full Time pill. The centre
+ * must therefore be derived from each endpoint's own size. Unknown/missing sizes
+ * fall back to Small via slotsFor, so this never produces NaN.
+ */
+export function projectAnchorY(
+  size: ProjectSize | undefined,
+  laneOffset: number,
+  stackOffset: number,
+): number {
+  return laneOffset + stackOffset + heightForSize(size ?? DEFAULT_SIZE) / 2;
 }
 
 /** Inclusive overlap test for two ISO date ranges. ISO strings sort lexically. */
@@ -254,39 +306,6 @@ export function evaluateAssignment(
     alternativeOwners: suggestMembers(projectsByOwner, candidate, intendedOwner, asOf),
     availableFrom: earliestAvailableDate(ownerProjects, candidate, asOf),
   };
-}
-
-/**
- * Human-readable explanation of a blocked assignment, for the form and toasts.
- * Returns null when it fits (nothing to say).
- */
-export function formatCapacityMessage(
-  verdict: CapacityVerdict,
-  ownerName: string,
-  size: ProjectSize,
-): string | null {
-  if (verdict.fits) return null;
-
-  const need = slotsFor(size);
-  const lines = [
-    `${ownerName} can't take this ${SIZE_LABELS[size]} project (${need} slot${need === 1 ? '' : 's'}): it would push their load to ${verdict.peakLoad} of ${CAPACITY} during these dates.`,
-  ];
-
-  if (verdict.alternativeOwners.length > 0) {
-    const who = verdict.alternativeOwners
-      .slice(0, 3)
-      .map(o => `${o.owner} (${o.freeSlots} free)`)
-      .join(', ');
-    lines.push(`Who could take it now: ${who}.`);
-  } else {
-    lines.push('No one else has capacity in this window.');
-  }
-
-  if (verdict.availableFrom) {
-    lines.push(`${ownerName} frees up on ${verdict.availableFrom}.`);
-  }
-
-  return lines.join(' ');
 }
 
 export interface SupportSegment {

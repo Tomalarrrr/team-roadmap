@@ -29,6 +29,7 @@ import { ItemContextMenu } from './ItemContextMenu';
 import {
   getFYStart,
   getFYEnd,
+  getFYFromDate,
   getVisibleFYs,
   getTodayPosition,
   getBarDimensions
@@ -37,6 +38,7 @@ import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from
 import {
   CAPACITY,
   UNIT_HEIGHT,
+  SLOT_PITCH,
   heightForSize,
   isCapacityExempt,
   slotsFor,
@@ -45,7 +47,7 @@ import {
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
-export type ZoomLevel = 'week' | 'month' | 'year';
+type ZoomLevel = 'week' | 'month' | 'year';
 
 // Display mode thresholds based on dayWidth
 // dayWidth <= 1.5: year view (FY headers)
@@ -54,58 +56,60 @@ const YEAR_VIEW_THRESHOLD = 1.5;
 const WEEK_VIEW_THRESHOLD = 5;
 
 
-// Calculate stack indices for non-overlapping projects (optimized flight path algorithm)
-// Time complexity: O(n log n) instead of O(n²)
+// Assign every project a vertical SLOT OFFSET (in slot units) so the lane reads
+// as a shared capacity grid: a Small occupies 1 slot row, a Medium 2, a Large 3,
+// a Full Time all 4. Projects are packed in 2D — a pill claims `slots` consecutive
+// rows for its date range — so a tall project tucks into the SAME rows that short
+// projects use at a non-overlapping time (top-aligned, side by side) instead of
+// being shoved onto its own row below them.
+//
+// The returned number is the project's top slot offset; `top` pixels are then
+// LANE_PADDING + offset * SLOT_PITCH (see getStackTopOffset). Offsets can exceed
+// the 4-slot capacity when a member is over-allocated — the lane simply grows.
 function calculateProjectStacks(projects: Project[]): Map<string, number> {
   const stacks = new Map<string, number>();
   if (!projects || projects.length === 0) return stacks;
 
-  // Sort projects by start date, then by end date for consistent ordering
+  // Sort by start date, then end date, so earlier/shorter work settles first.
   const sorted = [...projects].sort((a, b) => {
     const startDiff = new Date(a.startDate).getTime() - new Date(b.startDate).getTime();
     if (startDiff !== 0) return startDiff;
     return new Date(a.endDate).getTime() - new Date(b.endDate).getTime();
   });
 
-  // Track the end time of the last project in each stack (for O(1) availability check)
-  const stackEndTimes: number[] = [];
+  // Already-placed pills, each holding the slot rows [slot, slot + slots).
+  const placed: { start: number; end: number; slot: number; slots: number }[] = [];
 
   sorted.forEach((project) => {
-    const projectStart = new Date(project.startDate).getTime();
-    const projectEnd = new Date(project.endDate).getTime();
+    const start = new Date(project.startDate).getTime();
+    const end = new Date(project.endDate).getTime();
+    const slots = slotsFor(project.size ?? DEFAULT_SIZE);
 
-    // Find the lowest available stack where this project fits
-    // A stack is available if its last project ended before this one starts
-    let stackIndex = -1;
-    for (let i = 0; i < stackEndTimes.length; i++) {
-      // Allow same-day adjacency (end < start, not <=)
-      if (stackEndTimes[i] < projectStart) {
-        stackIndex = i;
-        break;
+    // Rows blocked by pills that overlap this one in time (inclusive: a pill that
+    // ends the same day another starts still counts as occupying the row).
+    const blocked = new Set<number>();
+    for (const q of placed) {
+      if (q.start <= end && start <= q.end) {
+        for (let s = q.slot; s < q.slot + q.slots; s++) blocked.add(s);
       }
     }
 
-    // No available stack found, create a new one
-    if (stackIndex === -1) {
-      stackIndex = stackEndTimes.length;
-      stackEndTimes.push(projectEnd);
-    } else {
-      stackEndTimes[stackIndex] = projectEnd;
+    // Lowest offset where this pill's `slots` consecutive rows are all free.
+    let offset = 0;
+    while (true) {
+      let fits = true;
+      for (let s = offset; s < offset + slots; s++) {
+        if (blocked.has(s)) { fits = false; break; }
+      }
+      if (fits) break;
+      offset++;
     }
 
-    stacks.set(project.id, stackIndex);
+    placed.push({ start, end, slot: offset, slots });
+    stacks.set(project.id, offset);
   });
 
   return stacks;
-}
-
-// Pixel height of a lane's project stack: the row heights plus the gaps between
-// them, floored at the 4-slot capacity frame so light lanes still reserve it.
-function stackPixelHeight(rowHeights: number[]): number {
-  const stack = rowHeights.length > 0
-    ? rowHeights.reduce((sum, h) => sum + h, 0) + (rowHeights.length - 1) * PROJECT_VERTICAL_GAP
-    : 0;
-  return Math.max(stack, CAPACITY * UNIT_HEIGHT);
 }
 
 interface TimelineProps {
@@ -167,8 +171,6 @@ const ZOOM_DAY_WIDTHS: Record<ZoomLevel, number> = {
 
 const DEFAULT_DAY_WIDTH = 3; // Default to month view
 
-const BASE_PROJECT_HEIGHT = 52; // Project bar height (fixed)
-const PROJECT_VERTICAL_GAP = 6; // Gap between stacked pills — kept small so a stack reads as one capacity bar
 const LANE_PADDING = 16; // Padding top and bottom of lane
 const LANE_BOTTOM_BUFFER = 8; // Extra buffer at bottom to prevent spillover
 const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
@@ -242,6 +244,25 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     return 'month';
   }, [dayWidth]);
 
+  // Whole-sidebar collapse into a thin vertical rail to hand horizontal space
+  // back to the timeline. Persisted so the choice sticks across sessions.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      // Default to collapsed for first-time visitors; honour an explicit choice once made.
+      const stored = localStorage.getItem('roadmap.sidebarCollapsed');
+      return stored === null ? true : stored === 'true';
+    } catch {
+      return true;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('roadmap.sidebarCollapsed', String(sidebarCollapsed));
+    } catch {
+      /* localStorage unavailable — fall back to in-memory state */
+    }
+  }, [sidebarCollapsed]);
+
   // DnD sensors with activation constraint for responsive feel
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -295,12 +316,24 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   }, [onUpdateProject]);
 
   const { timelineStart, timelineEnd, visibleFYs } = useMemo(() => {
-    // All views now show January 2025 to December 2030
-    const start = new Date(2025, 0, 1); // January 1, 2025
-    const end = new Date(2030, 11, 31); // December 31, 2030
-    const fys = getVisibleFYs(2025, 6); // FY2025 to FY2030
+    // Default window: January 2025 to December 2030 (FY2025–FY2030). Extend it to
+    // cover any project dates that fall outside, so out-of-range projects never
+    // render off-screen with a negative offset / past the right edge.
+    let minYear = 2025;
+    let maxYear = 2030;
+    // Dates are ISO "YYYY-MM-DD" — read the calendar year directly (timezone-safe).
+    const consider = (iso?: string) => {
+      const year = iso ? parseInt(iso.slice(0, 4), 10) : NaN;
+      if (Number.isNaN(year)) return;
+      if (year < minYear) minYear = year;
+      if (year > maxYear) maxYear = year;
+    };
+    projects.forEach(p => { consider(p.startDate); consider(p.endDate); });
+    const start = new Date(minYear, 0, 1); // January 1
+    const end = new Date(maxYear, 11, 31); // December 31
+    const fys = getVisibleFYs(minYear, maxYear - minYear + 1);
     return { timelineStart: start, timelineEnd: end, visibleFYs: fys };
-  }, []);
+  }, [projects]);
 
   const totalDays = dateFnsDiff(timelineEnd, timelineStart);
   const totalWidth = totalDays * dayWidth;
@@ -339,6 +372,35 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     }
     return markers;
   }, [displayMode, timelineStart, timelineEnd, dayWidth, totalWidth]);
+
+  // Fiscal-quarter segments for the header's top band (and quarter/FY gridlines).
+  // Fiscal year starts in April, so quarters are Apr–Jun (Q1), Jul–Sep (Q2),
+  // Oct–Dec (Q3), Jan–Mar (Q4). The first quarter of an FY (Q1) is flagged so it
+  // can carry the stronger FY gridline / divider.
+  const quarterSegments = useMemo(() => {
+    if (displayMode === 'year') return [];
+    const segs: { key: string; label: string; left: number; width: number; isFyStart: boolean }[] = [];
+    let current = startOfMonth(timelineStart);
+    // Step back to the first month of the quarter this month belongs to.
+    const monthsSinceQuarterStart = (((current.getMonth() - 3 + 12) % 12)) % 3;
+    current = addMonths(current, -monthsSinceQuarterStart);
+    while (current < timelineEnd) {
+      const next = addMonths(current, 3);
+      const qIndex = Math.floor((((current.getMonth() - 3 + 12) % 12)) / 3); // 0..3
+      const fy = getFYFromDate(current);
+      const left = dateFnsDiff(current, timelineStart) * dayWidth;
+      const width = dateFnsDiff(next, current) * dayWidth;
+      segs.push({
+        key: `${fy}-Q${qIndex + 1}`,
+        label: `Q${qIndex + 1} FY${String(fy).slice(2)}`,
+        left,
+        width,
+        isFyStart: qIndex === 0,
+      });
+      current = next;
+    }
+    return segs;
+  }, [displayMode, timelineStart, timelineEnd, dayWidth]);
 
   // Memoize todayPosition to prevent unnecessary recalculations on every render
   // getTodayPosition creates new Date() internally, so we only want to recalculate
@@ -652,9 +714,19 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     let rafId: number | null = null;
     let lastScrollTop = scrollEl.scrollTop;
 
+    // The sidebar is positioned purely via transform, so its own native scrollTop
+    // must stay 0. A focus-driven scrollIntoView can force it non-zero, which the
+    // transform sync wouldn't account for — labels then drift from their rows.
+    // Neutralise any such drift whenever we sync.
+    const resetSidebarNativeScroll = () => {
+      const sidebarEl = sidebarRef.current;
+      if (sidebarEl && sidebarEl.scrollTop !== 0) sidebarEl.scrollTop = 0;
+    };
+
     // Apply initial scroll position synchronously before paint
     // Critical for preventing desync when sidebar remounts after exiting fullscreen
     sidebarContentEl.style.transform = `translate3d(0, -${lastScrollTop}px, 0)`;
+    resetSidebarNativeScroll();
 
     const syncSidebarToMain = () => {
       // Skip if scroll position hasn't changed
@@ -669,6 +741,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       // Schedule transform update on next frame for perfect sync
       rafId = requestAnimationFrame(() => {
         sidebarContentEl.style.transform = `translate3d(0, -${lastScrollTop}px, 0)`;
+        resetSidebarNativeScroll();
         rafId = null;
       });
     };
@@ -816,47 +889,40 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     return stacks;
   }, [teamMembers, projectStacksByOwner]);
 
-  // Calculate lane heights from the fixed-height project bars in each stack row.
-  const { laneHeights, laneStackHeights } = useMemo(() => {
+  // Calculate lane heights from where each pill sits on the slot grid. A pill's
+  // bottom is its slot top (offset * SLOT_PITCH) plus its own height, so the stack
+  // is as tall as the lowest pill bottom — floored at the full 4-slot capacity
+  // frame so light lanes still reserve it, and growing past it when a member is
+  // over-allocated so every stacked pill stays visible.
+  const laneHeights = useMemo(() => {
     const heights: number[] = [];
-    const stackHeights: Record<string, number[]> = {};
+    // The 4-slot frame: four stacked Smalls (3 gaps between them). This equals
+    // heightForSize('full-time') by construction — a full-capacity pill fills it
+    // exactly — but is kept as its own expression to stay independent of size.
+    const capacityFrame = (CAPACITY - 1) * SLOT_PITCH + UNIT_HEIGHT;
 
     displayedTeamMembers.forEach(member => {
       // Use collapsed height for collapsed lanes
       if (collapsedLanes.has(member.id)) {
         heights.push(COLLAPSED_LANE_HEIGHT);
-        stackHeights[member.name] = [];
         return;
       }
 
       const ownerProjects = projectsByOwner[member.name] || [];
       const stacks = projectStacksByOwner[member.name];
-      const maxStack = stacks && stacks.size > 0 ? Math.max(...stacks.values()) : -1;
 
-      // Each row is as tall as its tallest pill — pill height is the project's slot
-      // cost (Large 2 / Medium 1.5 / Small 1 units). Keeping a per-row height array
-      // means stackTopOffset and dependency anchoring stay aligned.
-      const rowHeights: number[] = [];
-      for (let row = 0; row <= maxStack; row++) {
-        const tallest = ownerProjects.reduce(
-          (max, p) => ((stacks?.get(p.id) ?? 0) === row
-            ? Math.max(max, heightForSize(p.size ?? DEFAULT_SIZE))
-            : max),
-          UNIT_HEIGHT,
-        );
-        rowHeights.push(tallest);
-      }
+      const maxBottom = ownerProjects.reduce((max, p) => {
+        const offset = stacks?.get(p.id) ?? 0;
+        const bottom = offset * SLOT_PITCH + heightForSize(p.size ?? DEFAULT_SIZE);
+        return Math.max(max, bottom);
+      }, 0);
 
-      stackHeights[member.name] = rowHeights;
-
-      // Fit the 4-slot capacity frame at minimum, growing to the actual stack
-      // height when a member is over-allocated so every stacked pill stays visible.
-      const stackPx = stackPixelHeight(rowHeights);
+      const stackPx = Math.max(maxBottom, capacityFrame);
       const height = Math.max(MIN_LANE_HEIGHT, stackPx + LANE_PADDING * 2 + LANE_BOTTOM_BUFFER);
       heights.push(height);
     });
 
-    return { laneHeights: heights, laneStackHeights: stackHeights };
+    return heights;
   }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes]);
 
   // Over-allocation markers per owner. Capacity is no longer a hard limit — a
@@ -914,15 +980,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     return map;
   }, [displayedTeamMembers]);
 
-  // Helper to calculate cumulative top offset for a project based on stack heights
-  const getStackTopOffset = useCallback((ownerName: string, stackIndex: number): number => {
-    const stackHeights = laneStackHeights[ownerName] || [];
-    let offset = LANE_PADDING;
-    for (let i = 0; i < stackIndex; i++) {
-      offset += (stackHeights[i] || BASE_PROJECT_HEIGHT) + PROJECT_VERTICAL_GAP;
-    }
-    return offset;
-  }, [laneStackHeights]);
+  // Top (px, within the lane) of a pill at a given slot offset: lane padding plus
+  // one SLOT_PITCH per slot row above it.
+  const getStackTopOffset = useCallback((slotOffset: number): number => {
+    return LANE_PADDING + slotOffset * SLOT_PITCH;
+  }, []);
 
   // Store lane positions in ref for dependency calculation
   const lanePositionsRef = useRef(lanePositions);
@@ -967,7 +1029,6 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
           dayWidth={dayWidth}
           projectStacks={globalProjectStacks}
           lanePositions={lanePositions}
-          laneStackHeights={laneStackHeights}
           ownerToLaneIndex={ownerToLaneIndex}
           lineIndex={index}
           isAnyHovered={hoveredDepId !== null}
@@ -980,26 +1041,53 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         />
       );
     });
-  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, laneStackHeights, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds, ownerNameToMemberId, collapsedLanes]);
+  }, [dependencies, projectsById, timelineStart, dayWidth, globalProjectStacks, lanePositions, ownerToLaneIndex, hoveredDepId, hoveredItemId, onRemoveDependency, onUpdateDependency, newDependencyIds, ownerNameToMemberId, collapsedLanes]);
 
   return (
     <DependencyCreationProvider onAddDependency={onAddDependency}>
     <div id="timeline-container" className={`${styles.container} ${isFullscreen ? styles.fullscreen : ''}`}>
       {/* Fixed left sidebar with team members - hidden in fullscreen */}
       {!isFullscreen && (
-      <div ref={sidebarRef} className={styles.sidebar}>
+      <div ref={sidebarRef} className={`${styles.sidebar} ${sidebarCollapsed ? styles.sidebarCollapsed : ''}`}>
         <div className={styles.sidebarHeader}>
-          <span>Team</span>
-          <button
-            className={styles.addMemberHeaderBtn}
-            onClick={onAddTeamMember}
-            disabled={isLocked}
-            title="Add team member"
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
+          {sidebarCollapsed ? (
+            <button
+              className={styles.collapseSidebarBtn}
+              onClick={() => setSidebarCollapsed(false)}
+              title="Expand team panel"
+              aria-label="Expand team panel"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          ) : (
+            <>
+              <span>Team</span>
+              <div className={styles.sidebarHeaderActions}>
+                <button
+                  className={styles.addMemberHeaderBtn}
+                  onClick={onAddTeamMember}
+                  disabled={isLocked}
+                  title="Add team member"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                  </svg>
+                </button>
+                <button
+                  className={styles.collapseSidebarBtn}
+                  onClick={() => setSidebarCollapsed(true)}
+                  title="Collapse team panel"
+                  aria-label="Collapse team panel"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                    <path d="M9 3L5 7l4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            </>
+          )}
         </div>
         <div ref={sidebarContentRef} className={styles.sidebarContent}>
           {displayedTeamMembers.length === 0 ? (
@@ -1025,6 +1113,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                     height={laneHeights[idx]}
                     isLocked={isLocked}
                     isCollapsed={collapsedLanes.has(member.id)}
+                    railMode={sidebarCollapsed}
                     onToggleCollapse={onToggleLaneCollapse ? () => onToggleLaneCollapse(member.id) : undefined}
                     onEdit={() => onEditTeamMember(member)}
                     onAddProject={() => onAddProject(member.name)}
@@ -1033,9 +1122,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
               </SortableContext>
             </DndContext>
           )}
-          <button className={styles.addMemberBtn} onClick={onAddTeamMember} disabled={isLocked}>
-            + Add Team Member
-          </button>
+          {!sidebarCollapsed && (
+            <button className={styles.addMemberBtn} onClick={onAddTeamMember} disabled={isLocked}>
+              + Add Team Member
+            </button>
+          )}
         </div>
       </div>
       )}
@@ -1063,16 +1154,29 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                 </div>
               ))
             ) : (
-              monthMarkers.map(({ label, left, width, date }, i) => (
-                <div
-                  key={i}
-                  className={`${styles.monthHeader} ${displayMode === 'week' ? styles.weekZoom : styles.monthZoom}`}
-                  style={{ left, width }}
-                  onContextMenu={(e) => handleHeaderContextMenu(e, date)}
-                >
-                  <span className={styles.monthLabel}>{label}</span>
-                </div>
-              ))
+              <>
+                {/* Tier 1 — fiscal quarter / FY band */}
+                {quarterSegments.map(({ key, label, left, width, isFyStart }) => (
+                  <div
+                    key={key}
+                    className={`${styles.quarterHeader} ${isFyStart ? styles.quarterHeaderFyStart : ''}`}
+                    style={{ left, width }}
+                  >
+                    <span className={styles.quarterLabel}>{label}</span>
+                  </div>
+                ))}
+                {/* Tier 2 — months */}
+                {monthMarkers.map(({ label, left, width, date }, i) => (
+                  <div
+                    key={i}
+                    className={`${styles.monthHeader} ${displayMode === 'week' ? styles.weekZoom : styles.monthZoom}`}
+                    style={{ left, width }}
+                    onContextMenu={(e) => handleHeaderContextMenu(e, date)}
+                  >
+                    <span className={styles.monthLabel}>{label}</span>
+                  </div>
+                ))}
+              </>
             )}
           </div>
 
@@ -1096,9 +1200,24 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                   ))}
                 </div>
               ))}
-              {displayMode === 'month' && monthMarkers.map(({ left }, i) => (
-                <div key={i} className={styles.gridLine} style={{ left }} />
-              ))}
+              {displayMode !== 'year' && (
+                <>
+                  {/* Faint month lines */}
+                  {monthMarkers.map(({ left }, i) => (
+                    <div key={`m-${i}`} className={styles.gridLine} style={{ left }} />
+                  ))}
+                  {/* Stronger quarter lines, strongest at FY boundaries */}
+                  {quarterSegments.map(({ key, left, isFyStart }) => (
+                    left > 0 ? (
+                      <div
+                        key={`q-${key}`}
+                        className={isFyStart ? styles.gridLineFy : styles.gridLineQuarter}
+                        style={{ left }}
+                      />
+                    ) : null
+                  ))}
+                </>
+              )}
 
               {/* Period markers (full-height colored bands) */}
               {periodMarkers.map((marker) => (
@@ -1121,6 +1240,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
               {/* Today line */}
               {todayPosition >= 0 && todayPosition <= totalWidth && (
                 <div className={styles.todayLine} style={{ left: todayPosition }}>
+                  <span className={styles.todayCap} />
                   <div className={styles.todayLabel}>Today</div>
                 </div>
               )}
@@ -1185,7 +1305,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                         timelineStart={timelineStart}
                         dayWidth={dayWidth}
                         stackIndex={stackIdx}
-                        stackTopOffset={getStackTopOffset(member.name, stackIdx)}
+                        stackTopOffset={getStackTopOffset(stackIdx)}
                         laneTop={lanePositions[idx]}
                         isSelected={project.id === selectedProjectId}
                         isOverAllocated={overAllocatedByOwner[member.name]?.has(project.id)}

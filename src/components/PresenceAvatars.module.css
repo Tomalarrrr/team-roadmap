@@ -1,7 +1,7 @@
 .container {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .avatarStack {
@@ -31,8 +31,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.65rem;
-  font-weight: 600;
+  font-size: var(--text-2xs);
+  font-weight: var(--fw-semibold);
   color: white;
   text-transform: uppercase;
   border: 2px solid var(--bg-secondary);
@@ -45,7 +45,7 @@
 .overflowAvatar {
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 0.6rem;
+  font-size: var(--text-2xs);
 }
 
 .editingIndicator {
@@ -65,12 +65,12 @@
   bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
-  margin-bottom: 8px;
-  padding: 6px 10px;
+  margin-bottom: var(--space-2);
+  padding: var(--space-2) var(--space-3);
   background: var(--text-primary);
   color: var(--bg-secondary);
   border-radius: var(--radius-md);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   white-space: nowrap;
   z-index: 1000;
   animation: fadeIn 0.15s var(--ease-out-expo);
@@ -89,18 +89,18 @@
 
 .tooltipName {
   display: block;
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .tooltipStatus {
   display: block;
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   color: var(--success-green);
   margin-top: 2px;
 }
 
 .label {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -135,7 +135,7 @@
   .avatar {
     width: 24px;
     height: 24px;
-    font-size: 0.55rem;
+    font-size: var(--text-2xs);
   }
 
   .avatarWrapper {

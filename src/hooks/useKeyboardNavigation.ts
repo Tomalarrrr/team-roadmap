@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback } from 'react';
 
 interface KeyboardNavOptions {
   onNavigate?: (direction: 'up' | 'down' | 'left' | 'right') => void;
@@ -61,22 +61,4 @@ export function useKeyboardNavigation(options: KeyboardNavOptions) {
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
-}
-
-// Hook to track focused element index
-export function useFocusIndex(itemCount: number) {
-  const [focusIndex, setFocusIndex] = useState(-1);
-
-  const moveFocus = useCallback((direction: 'up' | 'down') => {
-    setFocusIndex(prev => {
-      if (direction === 'up') {
-        return prev <= 0 ? itemCount - 1 : prev - 1;
-      }
-      return prev >= itemCount - 1 ? 0 : prev + 1;
-    });
-  }, [itemCount]);
-
-  const resetFocus = useCallback(() => setFocusIndex(-1), []);
-
-  return { focusIndex, setFocusIndex, moveFocus, resetFocus };
 }

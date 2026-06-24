@@ -29,7 +29,7 @@ let isInitialized = false;
 /**
  * Track an analytics event
  */
-export function track(
+function track(
   category: EventCategory,
   action: string,
   label?: string,
@@ -59,7 +59,7 @@ export function track(
 /**
  * Flush buffered events (extend to send to analytics service)
  */
-export function flush(): void {
+function flush(): void {
   if (eventBuffer.length === 0) return;
 
   const events = [...eventBuffer];
@@ -77,7 +77,7 @@ export function flush(): void {
  * Cleanup analytics resources (interval and event listeners).
  * Call this before module hot-reload or app unmount.
  */
-export function cleanupAnalytics(): void {
+function cleanupAnalytics(): void {
   if (intervalId !== null) {
     clearInterval(intervalId);
     intervalId = null;

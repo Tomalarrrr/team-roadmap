@@ -9,11 +9,6 @@ export interface Shortcut {
   action?: () => void;
 }
 
-// Get the modifier key for the current platform
-export function getModKey(): 'meta' | 'ctrl' {
-  return isMacPlatform() ? 'meta' : 'ctrl';
-}
-
 // Format shortcut for display
 export function formatShortcut(shortcut: Shortcut): string {
   const isMac = isMacPlatform();
@@ -44,34 +39,6 @@ export function formatShortcut(shortcut: Shortcut): string {
   parts.push(keyDisplay);
 
   return isMac ? parts.join('') : parts.join('+');
-}
-
-// Check if a keyboard event matches a shortcut
-export function matchesShortcut(event: KeyboardEvent, shortcut: Shortcut): boolean {
-  const isMac = isMacPlatform();
-
-  // Check key (case-insensitive)
-  if (event.key.toLowerCase() !== shortcut.key.toLowerCase()) {
-    return false;
-  }
-
-  // Check modifiers
-  const needsMeta = shortcut.modifiers.includes('meta');
-  const needsCtrl = shortcut.modifiers.includes('ctrl');
-  const needsShift = shortcut.modifiers.includes('shift');
-  const needsAlt = shortcut.modifiers.includes('alt');
-
-  // On Mac, meta is Cmd. On Windows/Linux, we map meta to Ctrl.
-  const metaPressed = isMac ? event.metaKey : event.ctrlKey;
-  const ctrlPressed = isMac ? event.ctrlKey : false; // Ctrl on Mac is separate
-
-  if (needsMeta && !metaPressed) return false;
-  if (!needsMeta && metaPressed) return false;
-  if (needsCtrl && !ctrlPressed) return false;
-  if (needsShift !== event.shiftKey) return false;
-  if (needsAlt !== event.altKey) return false;
-
-  return true;
 }
 
 // Default application shortcuts

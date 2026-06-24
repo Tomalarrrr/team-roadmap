@@ -18,44 +18,44 @@
 
 .sidebarSkeleton {
   width: 200px;
-  padding: 16px;
+  padding: var(--space-4);
   border-right: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .memberSkeleton {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px 0;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--border-light);
 }
 
 .gridSkeleton {
   flex: 1;
-  padding: 16px;
+  padding: var(--space-4);
   overflow: hidden;
 }
 
 .headerSkeleton {
   display: flex;
-  gap: 24px;
-  margin-bottom: 24px;
-  padding-bottom: 16px;
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--border-light);
 }
 
 .lanesSkeleton {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 .laneSkeleton {
   height: 80px;
-  padding: 14px;
+  padding: var(--space-4);
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-light);
@@ -65,9 +65,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  margin-top: 32px;
-  padding: 14px 20px;
+  gap: var(--space-3);
+  margin-top: var(--space-8);
+  padding: var(--space-4) var(--space-5);
   background: var(--bg-secondary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
@@ -77,17 +77,17 @@
 .recoveryBanner p {
   margin: 0;
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: var(--text-lg);
 }
 
 .recoveryButton {
-  padding: 6px 16px;
+  padding: var(--space-2) var(--space-4);
   border: none;
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--fw-medium);
   cursor: pointer;
   white-space: nowrap;
 }

@@ -5,7 +5,6 @@ import { STATUS_CONFIG, normalizeStatusColor } from '../utils/statusColors';
 import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
 
-const ConnectFourGame = lazy(() => import('./ConnectFourGame').then(m => ({ default: m.ConnectFourGame })));
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 
@@ -26,9 +25,6 @@ export interface FilterState {
   dateRange: { start: string; end: string } | null;
   status: 'all' | ProjectStatus;
 }
-
-// Re-export STATUS_CONFIG for consumers that import from here
-export { STATUS_CONFIG };
 
 const INITIAL_FILTERS: FilterState = {
   search: '',
@@ -80,13 +76,12 @@ export const SearchFilter = memo(function SearchFilter({
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
-  // Auto-open games from shareable URL params (?c4 / ?ludo) — initialised here
+  // Auto-open games from shareable URL params (?ludo) — initialised here
   // instead of in a mount effect so there's no setState-after-mount.
-  const [showConnectFour, setShowConnectFour] = useState(
-    () => !!new URLSearchParams(window.location.search).get('c4')
-  );
   const [showLudo, setShowLudo] = useState(
-    () => !!new URLSearchParams(window.location.search).get('ludo')
+    // .has() (not !!get()) so the intended shareable form "?ludo" opens the game —
+    // get() returns "" for a valueless param, which is falsy.
+    () => new URLSearchParams(window.location.search).has('ludo')
   );
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -121,17 +116,13 @@ export const SearchFilter = memo(function SearchFilter({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Easter egg: typing "connect four" / "ludo" opens the game (only when the
-  // site is unlocked). Handled during render rather than in an effect — it
-  // converges because the matching branch immediately clears the search box,
-  // so the condition is false on the next render. All state here is local.
+  // Easter egg: typing "ludo" opens the game (only when the site is unlocked).
+  // Handled during render rather than in an effect — it converges because the
+  // matching branch immediately clears the search box, so the condition is
+  // false on the next render. All state here is local.
   if (!isLocked) {
     const magic = filters.search.trim().toLowerCase();
-    if (magic === 'connect four') {
-      setShowConnectFour(true);
-      setFilters(f => ({ ...f, search: '' }));
-      setIsOpen(false);
-    } else if (magic === 'ludo') {
+    if (magic === 'ludo') {
       setShowLudo(true);
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
@@ -221,11 +212,11 @@ export const SearchFilter = memo(function SearchFilter({
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
       >
-        <svg width="18" height="18" viewBox="0 0 16 16" fill="none">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
           <path d="M7 12C9.76142 12 12 9.76142 12 7C12 4.23858 9.76142 2 7 2C4.23858 2 2 4.23858 2 7C2 9.76142 4.23858 12 7 12Z" stroke="currentColor" strokeWidth="1.5"/>
           <path d="M14 14L10.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
         </svg>
-        <span className={styles.triggerText}>Search</span>
+        <span>Search</span>
         <kbd className={styles.shortcut}>
           <span>{modifierKey}</span>K
         </kbd>
@@ -363,14 +354,6 @@ export const SearchFilter = memo(function SearchFilter({
             </div>
           </div>
         </div>
-      )}
-      {showConnectFour && createPortal(
-        <GameErrorBoundary gameName="Connect Four" onClose={() => setShowConnectFour(false)}>
-          <Suspense fallback={null}>
-            <ConnectFourGame onClose={() => setShowConnectFour(false)} isSearchOpen={isOpen} />
-          </Suspense>
-        </GameErrorBoundary>,
-        document.body
       )}
       {showLudo && createPortal(
         <GameErrorBoundary gameName="Ludo" onClose={() => setShowLudo(false)}>

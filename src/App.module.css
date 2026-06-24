@@ -7,7 +7,11 @@
 
 .main {
   flex: 1;
-  padding: 8px 16px;
+  /* Full-bleed: the timeline grid spans the full width edge-to-edge (no grey
+     gutter) and sits flush under the toolbar. The toolbar keeps its own padding,
+     and the sidebar/header have their own internal insets so text never touches
+     the edge. */
+  padding: 0;
   overflow: hidden;
   transition: padding 200ms ease;
 }

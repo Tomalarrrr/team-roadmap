@@ -30,6 +30,10 @@ export function VaultUnlock({ isOpen, onUnlocked, onCancel }: VaultUnlockProps) 
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  // Pending success/reset timers, tracked so they can be aborted if the vault is
+  // cancelled (Esc / click-out) before they fire — otherwise the 900ms success
+  // timer would still call onUnlocked after the user backed out.
+  const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
 
   // Derive phase transitions during render (derivePhase is pure and idempotent,
   // so this converges in one extra render — no effect / post-paint flash needed).
@@ -80,19 +84,29 @@ export function VaultUnlock({ isOpen, onUnlocked, onCancel }: VaultUnlockProps) 
     const entered = digitArray.join('');
     if (entered === VAULT_PIN) {
       setInputState('success');
-      setTimeout(() => {
+      timersRef.current.push(setTimeout(() => {
         onUnlocked();
-      }, SUCCESS_DELAY_MS);
+      }, SUCCESS_DELAY_MS));
     } else {
       setInputState('error');
-      setTimeout(() => {
+      timersRef.current.push(setTimeout(() => {
         setDigits(['', '', '', '']);
         setInputState('idle');
         setActiveIndex(0);
         inputRefs.current[0]?.focus();
-      }, SHAKE_DURATION_MS);
+      }, SHAKE_DURATION_MS));
     }
   }, [onUnlocked]);
+
+  // Abort any pending success/reset timer once the vault is no longer visible
+  // (cancelled or closing) so a correct PIN followed by Esc within 900ms can't
+  // still unlock. Also clears on unmount.
+  useEffect(() => {
+    if (phase === 'visible') return;
+    timersRef.current.forEach(clearTimeout);
+    timersRef.current = [];
+  }, [phase]);
+  useEffect(() => () => { timersRef.current.forEach(clearTimeout); }, []);
 
   const handleKeyDown = useCallback((index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape') {
@@ -274,6 +288,7 @@ export function VaultUnlock({ isOpen, onUnlocked, onCancel }: VaultUnlockProps) 
             >
               <input
                 ref={el => { inputRefs.current[i] = el; }}
+                name={`vault-digit-${i + 1}`}
                 className={styles.digitInput}
                 type="text"
                 inputMode="numeric"

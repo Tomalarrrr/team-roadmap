@@ -4,7 +4,6 @@ import {
   addDays,
   format,
   startOfDay,
-  isAfter,
   isBefore
 } from 'date-fns';
 
@@ -57,7 +56,8 @@ export function getVisibleFYs(startFY: number, count: number): number[] {
   return Array.from({ length: count }, (_, i) => startFY + i);
 }
 
-export function dateToTimelinePosition(
+// Used internally by getTodayPosition / getBarDimensions.
+function dateToTimelinePosition(
   date: Date | string,
   timelineStart: Date,
   dayWidth: number
@@ -65,15 +65,6 @@ export function dateToTimelinePosition(
   const d = typeof date === 'string' ? getCachedDate(date) : date;
   const days = differenceInDays(startOfDay(d), startOfDay(timelineStart));
   return days * dayWidth;
-}
-
-export function timelinePositionToDate(
-  position: number,
-  timelineStart: Date,
-  dayWidth: number
-): Date {
-  const days = Math.round(position / dayWidth);
-  return addDays(timelineStart, days);
 }
 
 // Parse a YYYY-MM-DD string as local midnight.
@@ -96,11 +87,6 @@ export function toDateString(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-export function formatDate(date: Date | string): string {
-  const d = typeof date === 'string' ? getCachedDate(date) : date;
-  return format(d, 'dd MMM yyyy');
-}
-
 export function formatShortDate(date: Date | string): string {
   const d = typeof date === 'string' ? getCachedDate(date) : date;
   return format(d, 'dd MMM');
@@ -109,10 +95,6 @@ export function formatShortDate(date: Date | string): string {
 export function isDatePast(date: Date | string): boolean {
   const d = typeof date === 'string' ? getCachedDate(date) : date;
   return isBefore(startOfDay(d), startOfDay(new Date()));
-}
-
-export function isMilestonePast(endDate: string): boolean {
-  return isDatePast(endDate);
 }
 
 export function getTodayPosition(timelineStart: Date, dayWidth: number): number {
@@ -131,16 +113,6 @@ export function getBarDimensions(
   const days = differenceInDays(end, start) + 1; // Include end date
   const width = Math.max(days * dayWidth, dayWidth); // Minimum 1 day width
   return { left, width };
-}
-
-export function clampDateToRange(
-  date: Date,
-  minDate: Date,
-  maxDate: Date
-): Date {
-  if (isBefore(date, minDate)) return minDate;
-  if (isAfter(date, maxDate)) return maxDate;
-  return date;
 }
 
 export function toISODateString(date: Date): string {
@@ -188,46 +160,4 @@ export function getSuggestedProjectDates(
   const suggestedEnd = toISODateString(addDays(earliestEndDate, 1 + defaultDuration));
 
   return { suggestedStart, suggestedEnd, hasExisting: true };
-}
-
-// Calculate stack indices for overlapping date-range items (milestones, projects)
-// Optimized O(n log n) interval scheduling algorithm
-export function calculateStacks<T extends { id: string; startDate: string; endDate: string }>(
-  items: T[]
-): Map<string, number> {
-  const stacks = new Map<string, number>();
-  if (!items || items.length === 0) return stacks;
-
-  // Sort by start date (O(n log n))
-  const sorted = [...items].sort((a, b) =>
-    new Date(a.startDate).getTime() - new Date(b.startDate).getTime()
-  );
-
-  // Track the end time of the last item in each stack
-  const stackEndTimes: number[] = [];
-
-  sorted.forEach((item) => {
-    const startTime = new Date(item.startDate).getTime();
-    const endTime = new Date(item.endDate).getTime();
-
-    // Find the first available stack (no overlap)
-    let assignedStack = -1;
-    for (let i = 0; i < stackEndTimes.length; i++) {
-      if (stackEndTimes[i] < startTime) {
-        assignedStack = i;
-        stackEndTimes[i] = endTime;
-        break;
-      }
-    }
-
-    // No available stack — create a new one
-    if (assignedStack === -1) {
-      assignedStack = stackEndTimes.length;
-      stackEndTimes.push(endTime);
-    }
-
-    stacks.set(item.id, assignedStack);
-  });
-
-  return stacks;
 }

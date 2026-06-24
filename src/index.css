@@ -4,18 +4,34 @@
   --bg-tertiary: #f5f5f5;
   --text-primary: #1a1a1a;
   --text-secondary: #666666;
-  --text-muted: #999999;
+  /* Lightest grey that still clears WCAG AA (4.5:1) on every surface token —
+     #fafafa 4.74:1, #ffffff 4.95:1, #f5f5f5 4.54:1. Was #999999 (≈2.7:1). */
+  --text-muted: #707070;
   --border-light: #e5e5e5;
   --border-medium: #d4d4d4;
-  --accent-blue: #3b82f6;
-  --accent-blue-light: #dbeafe;
-  --accent-blue-dark: #1d4ed8;
+  --border-strong: #c2c2c2;
+
+  /* ── Single brand accent ───────────────────────────────────────────────
+     One accent drives all interactive chrome: selection, focus, active
+     controls, the Today marker. Status/owner colours are data, not chrome,
+     and stay separate. Change these four lines to re-skin the whole app. */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #dbe6fe;        /* light tint for fills/hover backgrounds */
+  --accent-ring: rgba(37, 99, 235, 0.35);
+  /* Back-compat aliases — existing components reference these names. */
+  --accent-blue: var(--accent);
+  --accent-blue-light: var(--accent-soft);
+  --accent-blue-dark: var(--accent-hover);
   --success-green: #22c55e;
   --warning-amber: #f59e0b;
   --error-red: #ef4444;
   --error-red-dark: #dc2626;
   --error-red-light: rgba(239, 68, 68, 0.1);
-  --today-line: #ef4444;
+  /* Today marker reads as part of the product's chrome rather than an alarm.
+     A hair deeper than --accent so the small bold white "TODAY" label clears
+     WCAG AA (white on #3168e0 = 5.0:1; on the raw accent it was only 4.36:1). */
+  --today-line: #3168e0;
   /* Dependency connector — soft slate at rest so it recedes; turns accent-blue on
      hover / when its connected project is hovered. */
   --dependency-line: #9aa6b2;
@@ -27,6 +43,50 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-full: 9999px;
+  /* 4pt spacing scale — every layout spacing value snaps to this ramp so the UI
+     keeps a consistent rhythm. (Sub-4px micro values like 1–2px are intentional
+     hairline/precision insets and stay raw.) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* Type scale (root is 14px, so 1rem = 14px). One ladder of sizes the whole
+     UI snaps to, instead of a scatter of one-off rem values. */
+  --text-2xs: 0.625rem;   /* 8.75px — micro tags, status badges */
+  --text-xs:  0.6875rem;  /* 9.6px  — meta, captions */
+  --text-sm:  0.75rem;    /* 10.5px — secondary labels, controls */
+  --text-base: 0.8125rem; /* 11.4px — body, pill titles */
+  --text-md:  0.875rem;   /* 12.25px — emphasised body, menu items */
+  --text-lg:  1rem;       /* 14px   — section titles */
+  --text-xl:  1.125rem;   /* 15.75px — card headings */
+  --text-2xl: 1.25rem;    /* 17.5px */
+  --text-3xl: 1.5rem;     /* 21px */
+  --text-4xl: 1.75rem;    /* 24.5px */
+  --text-5xl: 2.5rem;     /* 35px — empty-state display */
+  --text-6xl: 3rem;       /* 42px */
+
+  /* Font weights — named so intent is explicit and consistent. */
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-extrabold: 800;
+  --fw-black: 900;
+
+  /* Line-heights */
+  --leading-tight: 1.2;
+  --leading-snug: 1.35;
+  --leading-normal: 1.5;
+  /* Two-tier timeline header (FY/quarter band + month row). Shared by the
+     sidebar header and timeline header so the two columns stay aligned. */
+  --timeline-band-height: 22px;
+  --timeline-month-height: 30px;
+  --timeline-header-height: 52px;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   /* Premium easing curves - slightly overshoots for springy feel */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -65,7 +125,7 @@ body {
 }
 
 h1, h2, h3, h4 {
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
   letter-spacing: -0.01em;
 }
 

@@ -7,7 +7,7 @@ interface SkeletonProps {
   borderRadius?: string;
 }
 
-export function Skeleton({ width, height, borderRadius }: SkeletonProps) {
+function Skeleton({ width, height, borderRadius }: SkeletonProps) {
   return (
     <div
       className={styles.skeleton}

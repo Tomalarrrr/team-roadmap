@@ -75,7 +75,12 @@ export function SaveStatus({ isSaving, lastSaved, saveError, isOnline = true }: 
     );
   }
 
-  // Show connection status even when no save state
+  // Online and nothing saved yet this session — say nothing. A lone "all is well"
+  // dot is just noise; the indicator only earns its place when it has news
+  // (saving, saved, an error, or being offline, all handled above/below).
+  if (isOnline) return null;
+
+  // Offline with no save state — surface the connection dot (this matters).
   return (
     <div className={styles.saveStatus}>
       {connectionDot}

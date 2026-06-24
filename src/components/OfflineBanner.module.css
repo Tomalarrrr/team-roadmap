@@ -4,7 +4,7 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 10000;
-  padding: 10px 16px;
+  padding: var(--space-3) var(--space-4);
   border-radius: var(--radius-full);
   box-shadow: var(--shadow-lg);
   animation: slideUp 0.3s var(--ease-out-expo);
@@ -13,7 +13,7 @@
 .content {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 
 .icon {
@@ -23,8 +23,8 @@
 }
 
 .message {
-  font-size: 0.85rem;
-  font-weight: 500;
+  font-size: var(--text-md);
+  font-weight: var(--fw-medium);
   white-space: nowrap;
 }
 

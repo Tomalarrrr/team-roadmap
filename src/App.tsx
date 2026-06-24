@@ -360,11 +360,13 @@ function App() {
     });
   }, [data.projects, filterSets, filters.status, getProjectDisplayStatus]);
 
-  // Scroll to project when selected from search
+  // Select a project from search and scroll to it. Selection is persistent (no
+  // auto-clear) so the per-project shortcuts ([ ] / Cmd+D / Backspace) stay usable
+  // — it clears on Escape or when another project is selected.
   const handleProjectSelect = useCallback((projectId: string) => {
-    // Clear any existing timeout
     if (selectionTimeoutRef.current) {
       clearTimeout(selectionTimeoutRef.current);
+      selectionTimeoutRef.current = null;
     }
     setSelectedProjectId(projectId);
 
@@ -376,10 +378,19 @@ function App() {
     } catch {
       // Ignore URL errors
     }
-
-    // The Timeline component will handle scrolling
-    selectionTimeoutRef.current = setTimeout(() => setSelectedProjectId(null), 2000);
+    // The Timeline component will handle scrolling.
   }, []);
+
+  // Select a project by clicking its bar: highlight it + track it for clipboard
+  // copy. Persistent, same as search selection above.
+  const handleSelectBarProject = useCallback((project: Project) => {
+    if (selectionTimeoutRef.current) {
+      clearTimeout(selectionTimeoutRef.current);
+      selectionTimeoutRef.current = null;
+    }
+    setSelectedProjectId(project.id);
+    setSelectedProject(project);
+  }, [setSelectedProject]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -706,9 +717,12 @@ function App() {
         // Milestones are no longer created through the form; ignore the field.
         const { milestones: _milestones, ...projectData } = values; // eslint-disable-line @typescript-eslint/no-unused-vars -- field intentionally dropped
         const newProject = await addProject(projectData);
-        if (newProject) {
-          recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
+        if (!newProject) {
+          // addProject resolved without creating a project — don't claim success.
+          showToast('Could not create project — please try again', 'error');
+          return;
         }
+        recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
         showToast('Project created successfully', 'success');
         closeModal();
       } catch (error) {
@@ -968,7 +982,7 @@ function App() {
           onEditTeamMember={(member) => setModal({ type: 'edit-member', member })}
           onReorderTeamMembers={reorderTeamMembers}
           onCopyProject={copyProject}
-          onSelectProject={setSelectedProject}
+          onSelectProject={handleSelectBarProject}
           onAddDependency={handleAddDependency}
           onRemoveDependency={handleRemoveDependency}
           onUpdateDependency={handleUpdateDependency}
@@ -1001,6 +1015,11 @@ function App() {
               onSubmit={handleEditMember}
               onCancel={closeModal}
               onDelete={handleDeleteMember}
+              onAddProject={() => {
+                const ownerProjects = data.projects.filter(p => p.owner === modal.member.name);
+                const { suggestedStart, suggestedEnd } = getSuggestedProjectDates(ownerProjects);
+                setModal({ type: 'add-project', ownerName: modal.member.name, suggestedStart, suggestedEnd });
+              }}
               isEditing
               projectCount={data.projects.filter(p => p.owner === modal.member.name).length}
             />

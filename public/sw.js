@@ -34,9 +34,16 @@ self.addEventListener('fetch', (event) => {
   // Skip non-GET requests
   if (request.method !== 'GET') return;
 
-  // Skip Firebase/API requests — always go to network
+  // Skip Firebase/API requests — always go to network.
+  // `/api/` covers the same-origin data proxy (/api/db/*, /api/proxy): those
+  // are live reads/writes and must NEVER be cached, or clients get frozen
+  // snapshots that only a hard-refresh-with-cache-clear can dislodge. The
+  // proxy already sends Cache-Control: no-store, but the Cache API ignores
+  // that, so the exclusion has to live here.
   const url = request.url;
-  if (url.includes('firebaseio.com') ||
+  const path = new URL(url).pathname;
+  if (path.startsWith('/api/') ||
+      url.includes('firebaseio.com') ||
       url.includes('googleapis.com') ||
       url.includes('firebase')) {
     return;
@@ -52,7 +59,10 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
           return response;
         })
-        .catch(() => caches.match(request).then((r) => r || caches.match('/')))
+        // Offline: try the exact URL, then fall back to the app shell. Use
+        // ignoreSearch so a shell first cached under a query string (e.g. /?utm=x)
+        // still satisfies a later offline navigation to a different/no query.
+        .catch(() => caches.match(request).then((r) => r || caches.match('/', { ignoreSearch: true })))
     );
     return;
   }

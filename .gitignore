@@ -29,6 +29,5 @@ backup-firebase.sh
 *.sw?
 .vercel
 
-# Local dev database (transient stand-in data)
-.local-db.json
-.local-db.backup.json
+# Local dev database (transient stand-in data) and its backups
+.local-db*.json

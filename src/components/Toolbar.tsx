@@ -64,8 +64,10 @@ export const Toolbar = memo(function Toolbar({
   return (
     <div className={styles.toolbar}>
       <div className={styles.left}>
-        <img src="/Airedale.png" alt="Airedale NHS Foundation Trust" className={styles.logo} />
         <h1 className={styles.title}>Digital Roadmap Overview</h1>
+        {/* Save state lives with the document title — quiet, and it gives the
+            left side some weight to balance the controls on the right. */}
+        <SaveStatus isSaving={isSaving} lastSaved={lastSaved} saveError={saveError} isOnline={isOnline} />
       </div>
 
       <div className={styles.center}>
@@ -79,7 +81,7 @@ export const Toolbar = memo(function Toolbar({
       </div>
 
       <div className={styles.right}>
-        {/* Presence Avatars */}
+        {/* Presence avatars (collaborators) — only when someone else is here */}
         {presenceUsers.length > 1 && (
           <>
             <PresenceAvatars
@@ -90,18 +92,13 @@ export const Toolbar = memo(function Toolbar({
           </>
         )}
 
-        {/* Save Status */}
-        <SaveStatus isSaving={isSaving} lastSaved={lastSaved} saveError={saveError} isOnline={isOnline} />
-
-        <div className={styles.divider} />
-
-        {/* Zoom Controls */}
+        {/* View — zoom */}
         <ZoomSlider value={dayWidth} onChange={onDayWidthChange} />
 
         <div className={styles.divider} />
 
-        {/* Undo/Redo */}
-        <div className={styles.undoGroup}>
+        {/* Actions — one consistent icon-button group */}
+        <div className={styles.actions}>
           <button
             className={styles.iconBtn}
             onClick={onUndo}
@@ -124,36 +121,35 @@ export const Toolbar = memo(function Toolbar({
               <path d="M10 5L13 8L10 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
+
+          <button
+            className={`${styles.iconBtn} ${isLocked ? styles.locked : ''}`}
+            onClick={onToggleLock}
+            title={isLocked ? 'Unlock editing' : 'Lock for viewing only'}
+          >
+            {isLocked ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M5 7V5C5 3.34315 6.34315 2 8 2C9.65685 2 11 3.34315 11 5V7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+                <path d="M11 7V5C11 3.34315 9.65685 2 8 2C7.1 2 6.3 2.4 5.7 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            )}
+          </button>
+
+          <ExportMenu
+            projects={projects}
+            teamMembers={teamMembers}
+            dependencies={dependencies}
+          />
         </div>
 
         <div className={styles.divider} />
 
-        {/* View Lock */}
-        <button
-          className={`${styles.iconBtn} ${isLocked ? styles.locked : ''}`}
-          onClick={onToggleLock}
-          title={isLocked ? 'Unlock editing' : 'Lock for viewing only'}
-        >
-          {isLocked ? (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M5 7V5C5 3.34315 6.34315 2 8 2C9.65685 2 11 3.34315 11 5V7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-              <path d="M11 7V5C11 3.34315 9.65685 2 8 2C7.1 2 6.3 2.4 5.7 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          )}
-        </button>
-
-        <div className={styles.divider} />
-
-        <ExportMenu
-          projects={projects}
-          teamMembers={teamMembers}
-          dependencies={dependencies}
-        />
+        <img src="/Airedale.png" alt="Airedale NHS Foundation Trust" className={styles.logo} />
       </div>
     </div>
   );

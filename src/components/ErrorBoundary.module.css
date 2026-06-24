@@ -4,7 +4,7 @@
   justify-content: center;
   min-height: 100vh;
   background: var(--bg-primary);
-  padding: 24px;
+  padding: var(--space-6);
 }
 
 .content {
@@ -13,35 +13,35 @@
 }
 
 .icon {
-  font-size: 3rem;
-  margin-bottom: 16px;
+  font-size: var(--text-6xl);
+  margin-bottom: var(--space-4);
 }
 
 .title {
-  font-size: 1.5rem;
-  font-weight: 600;
+  font-size: var(--text-3xl);
+  font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .message {
   color: var(--text-secondary);
-  margin-bottom: 24px;
-  font-size: 0.95rem;
+  margin-bottom: var(--space-6);
+  font-size: var(--text-lg);
 }
 
 .actions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   justify-content: center;
 }
 
 .retryBtn {
-  padding: 10px 20px;
+  padding: var(--space-3) var(--space-5);
   background: var(--accent-blue);
   color: white;
   border-radius: var(--radius-md);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   transition: background 0.15s;
 }
 
@@ -50,11 +50,11 @@
 }
 
 .reloadBtn {
-  padding: 10px 20px;
+  padding: var(--space-3) var(--space-5);
   background: var(--bg-tertiary);
   color: var(--text-secondary);
   border-radius: var(--radius-md);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
   transition: background 0.15s;
 }
 

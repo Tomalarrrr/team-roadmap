@@ -77,7 +77,7 @@ async function injectStylesheets(clone: HTMLElement): Promise<void> {
 
 // PDF Export - uses dynamic imports to code-split heavy libraries
 // Captures 3 months before and 9 months after today (12-month view), plus all vertical content
-export async function exportTimelineToPDF() {
+async function exportTimelineToPDF() {
   const timelineElement = document.getElementById('timeline-container');
   if (!timelineElement) {
     console.error('Timeline container not found');

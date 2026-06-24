@@ -13,7 +13,6 @@ vi.mock('../../utils/fetchWithTimeout', () => ({
 vi.mock('../../firebase', () => ({
   ensureInitialized: vi.fn(),
   getDbModule: vi.fn(),
-  getFirebaseDatabase: vi.fn(),
   markFirebaseActivity: vi.fn(),
 }));
 

@@ -15,7 +15,7 @@ import {
 import type { Milestone, Project, ProjectSize, TeamMember } from '../types';
 import styles from './Form.module.css';
 
-const SIZE_OPTIONS: ProjectSize[] = ['large', 'medium', 'small'];
+const SIZE_OPTIONS: ProjectSize[] = ['small', 'medium', 'large', 'full-time'];
 
 interface ProjectFormProps {
   initialValues?: Partial<{
@@ -146,12 +146,18 @@ export function ProjectForm({
           id="title"
           type="text"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className={styles.input}
+          onChange={(e) => {
+            setTitle(e.target.value);
+            if (errors.title) setErrors(prev => ({ ...prev, title: '' }));
+          }}
+          className={`${styles.input} ${errors.title ? styles.inputError : ''}`}
           placeholder="Enter project title"
+          maxLength={100}
+          aria-invalid={!!errors.title}
+          aria-describedby={errors.title ? 'title-error' : undefined}
           autoFocus
-          required
         />
+        {errors.title && <span id="title-error" className={styles.fieldError}>{errors.title}</span>}
       </div>
 
       {!hideOwner && (
@@ -161,12 +167,17 @@ export function ProjectForm({
             id="owner"
             type="text"
             value={owner}
-            onChange={(e) => setOwner(e.target.value)}
-            className={styles.input}
+            onChange={(e) => {
+              setOwner(e.target.value);
+              if (errors.owner) setErrors(prev => ({ ...prev, owner: '' }));
+            }}
+            className={`${styles.input} ${errors.owner ? styles.inputError : ''}`}
             placeholder="Enter owner name"
             list="owner-suggestions"
             autoComplete="off"
-            required
+            maxLength={50}
+            aria-invalid={!!errors.owner}
+            aria-describedby={errors.owner ? 'owner-error' : undefined}
           />
           {teamMembers && teamMembers.length > 0 && (
             <datalist id="owner-suggestions">
@@ -175,6 +186,7 @@ export function ProjectForm({
               ))}
             </datalist>
           )}
+          {errors.owner && <span id="owner-error" className={styles.fieldError}>{errors.owner}</span>}
         </div>
       )}
 
@@ -185,10 +197,15 @@ export function ProjectForm({
             id="startDate"
             type="date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-            className={styles.input}
-            required
+            onChange={(e) => {
+              setStartDate(e.target.value);
+              if (errors.startDate) setErrors(prev => ({ ...prev, startDate: '' }));
+            }}
+            className={`${styles.input} ${errors.startDate ? styles.inputError : ''}`}
+            aria-invalid={!!errors.startDate}
+            aria-describedby={errors.startDate ? 'startDate-error' : undefined}
           />
+          {errors.startDate && <span id="startDate-error" className={styles.fieldError}>{errors.startDate}</span>}
         </div>
         <div className={styles.field}>
           <label htmlFor="endDate" className={styles.label}>End Date</label>
@@ -199,11 +216,13 @@ export function ProjectForm({
             min={startDate}
             onChange={(e) => {
               setEndDate(e.target.value);
-              setErrors({});
+              if (errors.endDate) setErrors(prev => ({ ...prev, endDate: '' }));
             }}
-            className={styles.input}
-            required
+            className={`${styles.input} ${errors.endDate ? styles.inputError : ''}`}
+            aria-invalid={!!errors.endDate}
+            aria-describedby={errors.endDate ? 'endDate-error' : undefined}
           />
+          {errors.endDate && <span id="endDate-error" className={styles.fieldError}>{errors.endDate}</span>}
         </div>
       </div>
 
@@ -242,11 +261,17 @@ export function ProjectForm({
         </div>
       </div>
 
-      {Object.keys(errors).length > 0 && (
-        <div className={styles.error}>
-          {Object.values(errors).join('. ')}
-        </div>
-      )}
+      {(() => {
+        // Per-field errors render inline next to their input; this is a fallback
+        // for any error not tied to a visible field (e.g. size/colour).
+        const handledInline = new Set(['title', 'owner', 'startDate', 'endDate']);
+        const other = Object.entries(errors).filter(([key, msg]) => msg && !handledInline.has(key));
+        return other.length > 0 ? (
+          <div className={styles.error} role="alert">
+            {other.map(([, msg]) => msg).join('. ')}
+          </div>
+        ) : null;
+      })()}
 
       {capacityWarning && (
         <div className={styles.capacityWarning}>

@@ -22,14 +22,6 @@ export function getModifierKeySymbol(): string {
 }
 
 /**
- * Get the modifier key name for keyboard event checking.
- * Returns 'metaKey' on Mac, 'ctrlKey' on other platforms.
- */
-export function getModifierKeyName(): 'metaKey' | 'ctrlKey' {
-  return isMacPlatform() ? 'metaKey' : 'ctrlKey';
-}
-
-/**
  * Check if a keyboard event has the platform-appropriate modifier key pressed.
  */
 export function hasModifierKey(event: KeyboardEvent | React.KeyboardEvent): boolean {

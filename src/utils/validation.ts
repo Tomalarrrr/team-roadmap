@@ -13,20 +13,7 @@ export const projectSchema = z.object({
   startDate: dateStringSchema,
   endDate: dateStringSchema,
   statusColor: colorSchema,
-  size: z.enum(['large', 'medium', 'small'], { message: 'Select a project size' })
-}).refine(data => new Date(data.endDate) >= new Date(data.startDate), {
-  message: 'End date must be on or after start date',
-  path: ['endDate']
-});
-
-// Milestone form schema
-export const milestoneSchema = z.object({
-  title: z.string().min(1, 'Title is required').max(100, 'Title too long'),
-  description: z.string().max(500, 'Description too long').optional(),
-  startDate: dateStringSchema,
-  endDate: dateStringSchema,
-  tags: z.array(z.string().max(30, 'Tag too long')).max(10, 'Too many tags'),
-  statusColor: colorSchema
+  size: z.enum(['full-time', 'large', 'medium', 'small'], { message: 'Select a project size' })
 }).refine(data => new Date(data.endDate) >= new Date(data.startDate), {
   message: 'End date must be on or after start date',
   path: ['endDate']
@@ -37,11 +24,6 @@ export const teamMemberSchema = z.object({
   name: z.string().min(1, 'Name is required').max(50, 'Name too long'),
   jobTitle: z.string().min(1, 'Job title is required').max(50, 'Job title too long')
 });
-
-// Type exports
-export type ProjectInput = z.infer<typeof projectSchema>;
-export type MilestoneInput = z.infer<typeof milestoneSchema>;
-export type TeamMemberInput = z.infer<typeof teamMemberSchema>;
 
 // Validation helper
 export function validateForm<T>(schema: z.ZodSchema<T>, data: unknown): { success: true; data: T } | { success: false; errors: Record<string, string> } {

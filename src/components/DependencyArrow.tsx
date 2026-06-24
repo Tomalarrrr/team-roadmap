@@ -31,6 +31,11 @@ export function DependencyArrow({
       onMouseDown={handleMouseDown}
       title="Create dependency"
       aria-label="Create dependency to another project"
+      // At rest the arrow is invisible (opacity:0, pointer-events:none); keep it
+      // out of the a11y tree and tab order until it's actually shown, so it can't
+      // be focused while invisible nor leak its label into the parent pill's name.
+      aria-hidden={!isVisible}
+      tabIndex={isVisible ? 0 : -1}
     >
       <svg
         width="12"

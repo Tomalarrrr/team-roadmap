@@ -1,11 +1,15 @@
 .projectBar {
   position: absolute;
-  min-height: 52px;
-  border-radius: 16px;
+  /* Actual height is set inline per size (slot cost × UNIT_HEIGHT); this base
+     just matches the smallest (Small = 28px) for the rare inline-less fallback. */
+  min-height: 28px;
+  border-radius: 12px;
   cursor: pointer;
-  /* Use GPU-accelerated properties only */
+  /* Only transform (compositor-only) is transitioned. box-shadow is intentionally
+     NOT animated: repainting a shadow every frame for 150ms on every hover in/out
+     is the costliest part of a cursor sweep across a dense board. The hover shadow
+     still changes — it just snaps instantly, which is imperceptible next to the lift. */
   transition: transform 100ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)),
-              box-shadow 150ms ease,
               filter 150ms ease;
   box-shadow: var(--shadow-sm);
   z-index: 2;
@@ -99,7 +103,7 @@
   width: 12px;
   cursor: ew-resize;
   z-index: 5;
-  border-radius: 16px;
+  border-radius: 12px;
 }
 
 .resizeHandle:hover {
@@ -146,7 +150,9 @@
   bottom: 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-start;
+  /* Centre the single label line so spacing above and below the words is equal
+     and minimal — keeps the smallest pill clean and every taller size balanced. */
+  justify-content: center;
   overflow: hidden;
   cursor: pointer;
 }
@@ -156,11 +162,12 @@
 }
 
 .projectContent {
-  padding: 8px 8px 4px;
+  padding: 0 var(--space-2);
+  line-height: 1.2;
   pointer-events: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   flex-wrap: nowrap;
   overflow: hidden;
   flex-shrink: 0;
@@ -171,7 +178,7 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: rgba(255, 255, 255, 0.4);
   pointer-events: none;
   white-space: nowrap;
@@ -179,33 +186,58 @@
 }
 
 .projectTitle {
-  font-size: 0.8rem;
-  font-weight: 600;
+  font-size: var(--text-base);
+  font-weight: var(--fw-semibold);
   color: white;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* The title is the primary label, so it gives up width LAST. The date group
+     (.projectMeta) carries a far larger flex-shrink, so on a narrow pill the
+     dates collapse first and the title stays readable; the title only ellipsises
+     once the dates are fully gone. (Previously the title was the sole shrinkable
+     element, so it vanished entirely while the fixed-width dates kept their space
+     — e.g. "  • 08 Dec - 08 Feb" with no title.) */
   flex-shrink: 1;
   min-width: 0;
 }
 
+/* Separator + dates, grouped so they shrink and disappear together (no orphaned
+   "•") before the title is touched. */
+.projectMeta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  flex-shrink: 9999;
+}
+
 .projectSeparator {
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   color: rgba(255, 255, 255, 0.6);
   flex-shrink: 0;
 }
 
+/* Render the "•" as decorative CSS content, not a text node, so it isn't part
+   of the pill's visible *text*. That keeps the bar's accessible name an exact
+   match for its visible label (WCAG 2.5.3 Label in Name) — a text-node bullet
+   would have to appear verbatim in every aria-label. */
+.projectSeparator::before {
+  content: '\2022';
+}
+
 .projectDates {
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   color: rgba(255, 255, 255, 0.85);
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .projectLabel {
-  font-size: 0.65rem;
-  font-weight: 500;
+  font-size: var(--text-2xs);
+  font-weight: var(--fw-medium);
   color: rgba(255, 255, 255, 0.75);
   white-space: nowrap;
   flex-shrink: 0;
@@ -253,9 +285,9 @@
 .contextMenu button {
   display: block;
   width: 100%;
-  padding: 10px 16px;
+  padding: var(--space-3) var(--space-4);
   text-align: left;
-  font-size: 0.85rem;
+  font-size: var(--text-md);
   color: var(--text-primary);
   background: none;
   border: none;
@@ -305,7 +337,7 @@
 .tooltip {
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
-  padding: 10px 14px;
+  padding: var(--space-3) var(--space-4);
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border-light);
   z-index: 9999;
@@ -325,35 +357,35 @@
 }
 
 .tooltipTitle {
-  font-size: 0.9rem;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--fw-semibold);
   color: var(--text-primary);
-  margin-bottom: 4px;
+  margin-bottom: var(--space-1);
 }
 
 .tooltipDates {
-  font-size: 0.8rem;
+  font-size: var(--text-base);
   color: var(--text-secondary);
 }
 
 .tooltipMilestones {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .pastBadge {
-  margin-top: 6px;
-  font-size: 0.65rem;
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
   color: var(--accent-blue);
-  font-weight: 500;
+  font-weight: var(--fw-medium);
 }
 
 .tooltipHint {
-  margin-top: 8px;
-  padding-top: 8px;
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
   border-top: 1px solid var(--border-light);
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   color: var(--text-muted);
   font-style: italic;
 }
@@ -361,22 +393,23 @@
 /* Status badge on project bar */
 .statusBadge {
   position: absolute;
-  top: 6px;
-  right: 16px;
-  font-size: 0.6rem;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.2);
-  padding: 1px 6px;
-  border-radius: var(--radius-full, 999px);
+  /* Vertically centred on the pill's midline so it aligns with the centred
+     label, instead of floating in the top corner. */
+  top: 50%;
+  transform: translateY(-50%);
+  right: 14px;
+  font-size: var(--text-2xs);
+  font-weight: var(--fw-bold);
+  color: #fff;
+  /* Clear background — the tag reads directly on the pill, no glassy plate. */
+  background: transparent;
+  padding: 0;
   pointer-events: none;
   white-space: nowrap;
   z-index: 3;
   text-transform: uppercase;
   letter-spacing: 0.03em;
-  backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 .projectBar.dragging .statusBadge {
@@ -392,15 +425,17 @@
    corner of the pill that pushes its owner past their 4-slot capacity. */
 .overAllocBadge {
   position: absolute;
-  top: 5px;
+  /* Centred on the pill midline, in line with the status tag to its left. */
+  top: 50%;
+  transform: translateY(-50%);
   right: 7px;
   width: 17px;
   height: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.72rem;
-  font-weight: 800;
+  font-size: var(--text-xs);
+  font-weight: var(--fw-extrabold);
   line-height: 1;
   color: #fff;
   background: #f5a623; /* amber alert */
@@ -409,6 +444,13 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
   pointer-events: none;
   z-index: 5;
+}
+
+/* The "!" glyph is decorative CSS content (the meaning is carried by the pill's
+   accessible name via the "over capacity" suffix), so it stays out of the
+   visible-text match for WCAG 2.5.3. */
+.overAllocBadge::before {
+  content: '!';
 }
 
 .projectBar.dragging .overAllocBadge {
@@ -421,11 +463,11 @@
   pointer-events: none;
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
-  padding: 5px 10px;
+  padding: var(--space-1) var(--space-3);
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border-light);
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
   color: var(--text-primary);
   white-space: nowrap;
   animation: tooltipFadeIn 100ms ease-out;

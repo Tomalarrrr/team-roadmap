@@ -9,8 +9,8 @@ export interface Milestone {
 }
 
 // Project effort sizing — drives both pill height and capacity-slot cost.
-// Large = 2 slots, Medium = 1.5, Small = 1 (see utils/capacity.ts).
-export type ProjectSize = 'large' | 'medium' | 'small';
+// Small = 1, Medium = 2, Large = 3, Full Time = 4 slots (see utils/capacity.ts).
+export type ProjectSize = 'full-time' | 'large' | 'medium' | 'small';
 
 export interface Project {
   id: string;
@@ -19,7 +19,7 @@ export interface Project {
   startDate: string;
   endDate: string;
   statusColor: string;
-  size: ProjectSize; // Effort size; historic projects default to 'medium' on load.
+  size: ProjectSize; // Effort size; historic projects default to 'small' on load.
   milestones: Milestone[];
   dependencies?: string[]; // IDs of projects this depends on
 }
@@ -197,19 +197,6 @@ export function isProject(value: unknown): value is Project {
     typeof obj.endDate === 'string' &&
     typeof obj.statusColor === 'string' &&
     Array.isArray(obj.milestones)
-  );
-}
-
-export function isMilestone(value: unknown): value is Milestone {
-  if (!value || typeof value !== 'object') return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.id === 'string' &&
-    typeof obj.title === 'string' &&
-    typeof obj.startDate === 'string' &&
-    typeof obj.endDate === 'string' &&
-    typeof obj.statusColor === 'string' &&
-    Array.isArray(obj.tags)
   );
 }
 

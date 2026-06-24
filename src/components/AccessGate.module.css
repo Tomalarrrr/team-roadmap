@@ -4,7 +4,7 @@
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, #1e3a5f 0%, #2d5a7b 100%);
-  padding: 20px;
+  padding: var(--space-5);
 }
 
 .card {
@@ -30,42 +30,42 @@
 
 .header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: var(--space-8);
 }
 
 .header h1 {
-  font-size: 1.75rem;
-  font-weight: 700;
+  font-size: var(--text-4xl);
+  font-weight: var(--fw-bold);
   color: var(--text-primary);
-  margin: 0 0 8px 0;
+  margin: 0 0 var(--space-2) 0;
 }
 
 .header p {
-  font-size: 0.95rem;
+  font-size: var(--text-lg);
   color: var(--text-muted);
   margin: 0;
 }
 
 .form {
-  margin-bottom: 24px;
+  margin-bottom: var(--space-6);
 }
 
 .field {
-  margin-bottom: 24px;
+  margin-bottom: var(--space-6);
 }
 
 .field label {
   display: block;
-  font-size: 0.875rem;
-  font-weight: 600;
+  font-size: var(--text-md);
+  font-weight: var(--fw-semibold);
   color: var(--text-secondary);
-  margin-bottom: 8px;
+  margin-bottom: var(--space-2);
 }
 
 .input {
   width: 100%;
-  padding: 12px 16px;
-  font-size: 1rem;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-lg);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
@@ -74,7 +74,7 @@
   text-align: center;
   letter-spacing: 2px;
   text-transform: uppercase;
-  font-weight: 600;
+  font-weight: var(--fw-semibold);
 }
 
 .input:focus {
@@ -92,8 +92,8 @@
 .error {
   display: block;
   color: #B5444A;
-  font-size: 0.875rem;
-  margin-top: 8px;
+  font-size: var(--text-md);
+  margin-top: var(--space-2);
   animation: shake 0.3s;
 }
 
@@ -105,9 +105,9 @@
 
 .button {
   width: 100%;
-  padding: 14px 24px;
-  font-size: 1rem;
-  font-weight: 600;
+  padding: var(--space-4) var(--space-6);
+  font-size: var(--text-lg);
+  font-weight: var(--fw-semibold);
   color: white;
   background: var(--accent-blue);
   border: none;
@@ -128,12 +128,12 @@
 
 .footer {
   text-align: center;
-  padding-top: 24px;
+  padding-top: var(--space-6);
   border-top: 1px solid var(--border-light);
 }
 
 .footer p {
-  font-size: 0.875rem;
+  font-size: var(--text-md);
   color: var(--text-muted);
   margin: 0;
 }

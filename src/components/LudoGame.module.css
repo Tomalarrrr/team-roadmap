@@ -33,6 +33,13 @@
   transform: translateZ(0);
 }
 
+/* Lobby / waiting room has little content — size to content instead of inheriting
+   the board's tall min-height, so the pre-game popup doesn't look sparse. The
+   board (playing) keeps the full min-height above. */
+.popupCompact {
+  min-height: 0;
+}
+
 @keyframes popupIn {
   from { opacity: 0; transform: scale(0.9) translateY(20px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
@@ -108,8 +115,11 @@
   gap: 20px;
   border-radius: inherit;
   cursor: pointer;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  /* 4px not 8px: the overlay is already 92% opaque, so the blur behind it is
+     barely visible — half the radius is half the per-frame sampling cost for no
+     perceptible difference. Other Ludo overlays already use 3-4px. */
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   animation: pauseFadeIn 300ms ease-out;
 }
 
@@ -1979,7 +1989,9 @@
   left: 50%;
   transform: translate(-50%, -50%);
   font-size: 1.1em;
-  z-index: 6;
+  /* Above tokens (z-index 10) so the capture-the-flag target stays visible when a
+     token sits on its cell — matches the banana overlay (z-index 15). */
+  z-index: 16;
   filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
   pointer-events: none;
   line-height: 1;

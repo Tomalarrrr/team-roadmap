@@ -35,7 +35,7 @@ import {
 import { fetchWithTimeout, sleep, jitter } from '../utils/fetchWithTimeout';
 
 export { serializeTokens, deserializeTokens };
-export type { LudoColor, LudoPlayer, LudoGameState, LudoMoveUpdate, TokenPosition, TurnPhase };
+export type { LudoColor, LudoGameState, LudoMoveUpdate, TokenPosition, TurnPhase };
 
 export type Unsubscribe = () => void;
 
@@ -202,7 +202,7 @@ export async function createGame(
   throw new Error('Failed to generate unique game code. Try again.');
 }
 
-export async function cleanupStaleGames(): Promise<void> {
+async function cleanupStaleGames(): Promise<void> {
   try {
     const games = await proxyGet<Record<string, LudoGameState>>('ludo');
     if (!games) return;
@@ -469,6 +469,21 @@ export async function makeMove(
         : {}),
     };
   });
+  return result.committed;
+}
+
+/**
+ * Guarded read-modify-write of the game state through the proxy. Use this for
+ * out-of-band updates (e.g. discarding a power-up) so they go through the same
+ * VPN/proxy-friendly path as makeMove instead of a direct Firebase write, which
+ * is blocked in the environments this proxy exists to support. The updater
+ * re-reads the freshly committed value on every attempt, so it's race-safe.
+ */
+export async function updateGameState(
+  code: string,
+  updater: (current: LudoGameState | null) => LudoGameState | null | undefined
+): Promise<boolean> {
+  const result = await proxyTransaction<LudoGameState>(`ludo/${code}`, updater);
   return result.committed;
 }
 
