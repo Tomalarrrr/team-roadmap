@@ -44,6 +44,7 @@ import {
   slotsFor,
   DEFAULT_SIZE,
 } from '../utils/capacity';
+import { isOnHold } from '../utils/statusColors';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
@@ -230,6 +231,9 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   const edgeScrollFrameRef = useRef<number | null>(null);
   const lastMouseXRef = useRef<number>(0);
   const prevDayWidthRef = useRef<number | null>(null);
+  // Tracks the last selection we actually scrolled to, so Effect B fires once per
+  // genuine selection change instead of every time timelineStart/dayWidth churn.
+  const prevSelectedProjectIdRef = useRef<string | null>(null);
 
   // Zoom animation ref for cleanup
   const zoomTimeoutRef = useRef<number | null>(null);
@@ -421,15 +425,32 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     }
   }, [todayPosition, dayWidth]);
 
-  // Effect B: Scroll to selected project only (from search)
+  // Effect B: Scroll to the selected project only when the selection actually
+  // changes (e.g. from search or a deep-link). timelineStart/dayWidth stay in the
+  // deps so the scroll uses current values, but we no-op when selectedProjectId is
+  // unchanged — otherwise any churn of timelineStart (a new Date() is allocated
+  // whenever the projects prop reference changes: own edits, remote updates,
+  // undo/redo, filter changes) or dayWidth (zoom) would yank the viewport back to
+  // the still-selected pill while the user has scrolled elsewhere.
   useEffect(() => {
-    if (!scrollRef.current || !selectedProjectId) return;
-    const project = projects.find(p => p.id === selectedProjectId);
-    if (project) {
-      const { left } = getBarDimensions(project.startDate, project.endDate, timelineStart, dayWidth);
-      const viewportWidth = scrollRef.current.clientWidth;
-      scrollRef.current.scrollLeft = Math.max(0, left - viewportWidth / 3);
+    // Reset the guard when the selection is cleared so re-selecting the same
+    // project later (e.g. after Escape) scrolls to it again.
+    if (!selectedProjectId) {
+      prevSelectedProjectIdRef.current = null;
+      return;
     }
+    // Only a genuine selection change should move the viewport.
+    if (prevSelectedProjectIdRef.current === selectedProjectId) return;
+    if (!scrollRef.current) return;
+    const project = projects.find(p => p.id === selectedProjectId);
+    if (!project) return; // not loaded / filtered out yet — retry on a later render
+    const { left } = getBarDimensions(project.startDate, project.endDate, timelineStart, dayWidth);
+    const viewportWidth = scrollRef.current.clientWidth;
+    scrollRef.current.scrollLeft = Math.max(0, left - viewportWidth / 3);
+    // Record the id only AFTER the scroll actually ran, so a selection that
+    // arrived before the container mounted (or for a filtered-out project) isn't
+    // "consumed" and will still scroll once it becomes resolvable.
+    prevSelectedProjectIdRef.current = selectedProjectId;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId, timelineStart, dayWidth]);
 
@@ -937,7 +958,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     displayedTeamMembers.forEach(member => {
       const flagged = new Set<string>();
       if (!collapsedLanes.has(member.id)) {
-        const owned = (projectsByOwner[member.name] || []).filter(p => !isCapacityExempt(p));
+        // On-hold projects are paused, so they don't count toward the owner's
+        // 4-slot load (they stay visible in the row but never trip the over-cap
+        // marker), same as the capacity-exempt Digital Queue.
+        const owned = (projectsByOwner[member.name] || [])
+          .filter(p => !isCapacityExempt(p) && !isOnHold(p.statusColor));
         const stacks = projectStacksByOwner[member.name];
 
         // Load is piecewise-constant and only steps up at a project start, so it's

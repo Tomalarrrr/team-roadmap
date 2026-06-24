@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeStatusColor, DEFAULT_STATUS_COLOR } from '../statusColors';
+import { normalizeStatusColor, DEFAULT_STATUS_COLOR, isOnHold } from '../statusColors';
 import { colorSchema } from '../../schemas/primitives';
 
 // Regression guard for the "edit doesn't save" bug: seed/imported data stored
@@ -48,5 +48,30 @@ describe('normalizeStatusColor', () => {
     for (const input of inputs) {
       expect(colorSchema.safeParse(normalizeStatusColor(input)).success).toBe(true);
     }
+  });
+});
+
+// On-hold projects are paused and must be excluded from a member's capacity load,
+// so the helper that detects them has to recognise the On Hold status by both its
+// current and legacy hex, and reject every other status.
+describe('isOnHold', () => {
+  it('recognises the current On Hold hex', () => {
+    expect(isOnHold('#7558A6')).toBe(true);
+    expect(isOnHold('#7558a6')).toBe(true); // case-insensitive
+  });
+
+  it('recognises the legacy On Hold hex', () => {
+    expect(isOnHold('#7612c3')).toBe(true);
+  });
+
+  it('returns false for other statuses', () => {
+    expect(isOnHold('#457028')).toBe(false); // On Track
+    expect(isOnHold('#B5444A')).toBe(false); // Off Track
+    expect(isOnHold('#4A82BE')).toBe(false); // Complete
+  });
+
+  it('returns false for empty/undefined input rather than defaulting to a status', () => {
+    expect(isOnHold('')).toBe(false);
+    expect(isOnHold(undefined)).toBe(false);
   });
 });

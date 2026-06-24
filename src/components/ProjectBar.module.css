@@ -76,6 +76,13 @@
   50% { box-shadow: 0 0 0 6px var(--accent-blue-light), var(--shadow-lg); }
 }
 
+/* On-hold pills are paused and excluded from the owner's 4-slot capacity total.
+   Dim them so a parked pill reads as "not counted" — otherwise a lane that still
+   stacks an on-hold pill could look full yet (correctly) show no over-capacity "!". */
+.projectBar.onHold {
+  opacity: 0.6;
+}
+
 /* Dependency creation states */
 .projectBar.targetable {
   cursor: crosshair;
@@ -378,6 +385,15 @@
   margin-top: var(--space-2);
   font-size: var(--text-2xs);
   color: var(--accent-blue);
+  font-weight: var(--fw-medium);
+}
+
+/* Tooltip note explaining why an on-hold pill doesn't count toward capacity.
+   Uses the "On Hold" status purple to tie it back to the pill's status colour. */
+.tooltipOnHold {
+  margin-top: var(--space-2);
+  font-size: var(--text-2xs);
+  color: #7558A6;
   font-weight: var(--fw-medium);
 }
 

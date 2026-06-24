@@ -11,7 +11,7 @@ import {
   formatShortDate,
   isDatePast
 } from '../utils/dateUtils';
-import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor } from '../utils/statusColors';
+import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor, isOnHold } from '../utils/statusColors';
 import { heightForSize, DEFAULT_SIZE, UNIT_HEIGHT } from '../utils/capacity';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
@@ -174,6 +174,11 @@ export function ProjectBar({
 
   // Status label for badge and tooltip
   const statusLabel = isPast ? 'Complete' : getStatusNameByHex(project.statusColor);
+
+  // On-hold projects are paused and excluded from the owner's capacity total, so
+  // dim the pill to signal it isn't counted (only while still active — a past pill
+  // already renders as "Complete"). The hover tooltip spells out why.
+  const onHold = isOnHold(project.statusColor) && !isPast;
   // Show the status badge (top-right) whenever the bar is wide enough to read.
   const showStatusBadge = !dragMode && !externalDragging && width > 120 && statusLabel;
   const showOverAllocBadge = isOverAllocated && !dragMode && !externalDragging;
@@ -594,7 +599,7 @@ export function ProjectBar({
     <div
       ref={barRef}
       data-dependency-target
-      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''}`}
+      className={`${styles.projectBar} ${dragMode || externalDragging ? styles.dragging : ''} ${isSelected ? styles.selected : ''} ${isTargetable ? styles.targetable : ''} ${isSource ? styles.isSource : ''} ${onHold ? styles.onHold : ''}`}
       style={{
         left,
         width,
@@ -796,6 +801,9 @@ export function ProjectBar({
             <div className={styles.pastBadge} style={!isPast ? { color: displayColor } : undefined}>
               {statusLabel}
             </div>
+          )}
+          {onHold && (
+            <div className={styles.tooltipOnHold}>On hold {'\u2014'} not counted toward capacity</div>
           )}
           <div className={styles.tooltipHint}>
             {isLocked ? 'Right-click for options' : 'Click to edit \u00B7 Right-click for menu'}

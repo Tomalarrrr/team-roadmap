@@ -99,6 +99,13 @@ export function getStatusSlugByHex(hex: string): string | undefined {
   return STATUS_COLORS.find(c => c.hex.toLowerCase() === normalized.toLowerCase())?.slug;
 }
 
+// True when a status color represents "On Hold". On-hold projects are paused, so
+// callers exclude them from a member's capacity load — they don't consume any of
+// the 4 slots until taken off hold. Resolves legacy hex via getStatusSlugByHex.
+export function isOnHold(statusColor: string | undefined): boolean {
+  return !!statusColor && getStatusSlugByHex(statusColor) === 'on-hold';
+}
+
 // Default status color (To Start)
 export const DEFAULT_STATUS_COLOR = STATUS_COLORS[5].hex;
 

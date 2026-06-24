@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { format, addDays } from 'date-fns';
 import { projectSchema, validateForm } from '../utils/validation';
-import { STATUS_COLORS, DEFAULT_STATUS_COLOR, normalizeStatusColor } from '../utils/statusColors';
+import { STATUS_COLORS, DEFAULT_STATUS_COLOR, normalizeStatusColor, isOnHold } from '../utils/statusColors';
 import {
   CAPACITY,
   SIZE_LABELS,
@@ -74,8 +74,9 @@ export function ProjectForm({
   const projectsByOwner = useMemo(() => {
     const grouped: Record<string, CapacityItem[]> = {};
     (projects ?? []).forEach(p => {
-      // The Digital Queue is exempt — it never counts toward an owner's load.
-      if (isCapacityExempt(p)) return;
+      // The Digital Queue is exempt, and on-hold projects are paused — neither
+      // counts toward an owner's load.
+      if (isCapacityExempt(p) || isOnHold(p.statusColor)) return;
       (grouped[p.owner] ??= []).push(p);
     });
     return grouped;
@@ -89,6 +90,8 @@ export function ProjectForm({
     const trimmedOwner = owner.trim();
     if (!projects || !trimmedOwner || !startDate || !endDate) return null;
     if (isCapacityExempt({ title: title.trim(), owner: trimmedOwner })) return null;
+    // A project that's on hold doesn't consume capacity, so never warn for it.
+    if (isOnHold(statusColor)) return null;
     const candidate: CapacityItem = {
       id: editingProjectId ?? '__new__',
       startDate,
@@ -103,7 +106,7 @@ export function ProjectForm({
     );
     if (verdict.fits) return null;
     return `Heads up: ${trimmedOwner} will be over capacity (${verdict.peakLoad} of ${CAPACITY} slots) during these dates. You can still save — it'll be flagged on the timeline.`;
-  }, [projects, projectsByOwner, owner, title, startDate, endDate, size, editingProjectId]);
+  }, [projects, projectsByOwner, owner, title, startDate, endDate, size, statusColor, editingProjectId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
