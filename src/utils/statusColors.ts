@@ -12,15 +12,20 @@ export interface StatusColor {
   slug: string;
 }
 
+// Listed in lifecycle order (Discovery → Complete): pre-delivery stages, then the
+// in-flight health states (On Track / At Risk / Off Track), then the parked
+// states (On Hold / Deferred), then closed. The pickers and filter chips render
+// them in this order.
 export const STATUS_COLORS: StatusColor[] = [
-  { hex: '#4A82BE', name: 'Complete', slug: 'complete' },
+  { hex: '#3E95AD', name: 'Discovery', slug: 'discovery' },
+  { hex: '#B571C0', name: 'Initiation', slug: 'initiation' },
+  { hex: '#6E7D89', name: 'Ready to Start', slug: 'ready-to-start' },
   { hex: '#457028', name: 'On Track', slug: 'on-track' },
   { hex: '#A67A00', name: 'At Risk', slug: 'at-risk' },
   { hex: '#B5444A', name: 'Off Track', slug: 'off-track' },
   { hex: '#7558A6', name: 'On Hold', slug: 'on-hold' },
-  { hex: '#6E7D89', name: 'To Start', slug: 'to-start' },
-  { hex: '#B571C0', name: 'Planning', slug: 'planning' },
-  { hex: '#3E95AD', name: 'Review', slug: 'review' },
+  { hex: '#8A6D5B', name: 'Deferred', slug: 'deferred' },
+  { hex: '#4A82BE', name: 'Complete', slug: 'complete' },
 ];
 
 // For SearchFilter's STATUS_CONFIG format
@@ -106,8 +111,8 @@ export function isOnHold(statusColor: string | undefined): boolean {
   return !!statusColor && getStatusSlugByHex(statusColor) === 'on-hold';
 }
 
-// Default status color (To Start)
-export const DEFAULT_STATUS_COLOR = STATUS_COLORS[5].hex;
+// Default status color (Discovery — the first lifecycle stage)
+export const DEFAULT_STATUS_COLOR = STATUS_COLORS[0].hex;
 
 // Auto-complete color for past projects/milestones
 export const AUTO_COMPLETE_COLOR = '#4A82BE';

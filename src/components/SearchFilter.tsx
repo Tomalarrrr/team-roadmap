@@ -16,7 +16,7 @@ interface SearchFilterProps {
   isLocked?: boolean;
 }
 
-export type ProjectStatus = 'complete' | 'on-hold' | 'to-start' | 'on-track' | 'at-risk' | 'off-track' | 'planning' | 'review';
+export type ProjectStatus = 'discovery' | 'initiation' | 'ready-to-start' | 'on-track' | 'at-risk' | 'off-track' | 'on-hold' | 'deferred' | 'complete';
 
 export interface FilterState {
   search: string;

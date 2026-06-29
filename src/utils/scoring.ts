@@ -153,10 +153,10 @@ export interface ScoreBand {
 // Intentionally colourless: a red/green heat ramp would frame answers as
 // good/bad and bias the scorer. The classification is shown by label only.
 export const SCORE_BANDS: ScoreBand[] = [
-  { size: 'small', min: 0, max: 5, label: 'Small', weight: 1, meaning: 'Light-touch project' },
-  { size: 'medium', min: 6, max: 10, label: 'Medium', weight: 2, meaning: 'Standard project needing regular PM management' },
-  { size: 'large', min: 11, max: 16, label: 'Large', weight: 3, meaning: 'Heavy project needing sustained PM control' },
-  { size: 'full-time', min: 17, max: 21, label: 'Full-time', weight: 4, meaning: "Consumes most or all of a PM's capacity" },
+  { size: 'small', min: 0, max: 6, label: 'Small', weight: 1, meaning: 'Light-touch project' },
+  { size: 'medium', min: 7, max: 14, label: 'Medium', weight: 2, meaning: 'Standard project needing regular PM management' },
+  { size: 'large', min: 15, max: 18, label: 'Large', weight: 3, meaning: 'Heavy project needing sustained PM control' },
+  { size: 'full-time', min: 19, max: 21, label: 'Full-time', weight: 4, meaning: "Consumes most or all of a PM's capacity" },
 ];
 
 /** Sum of answered criteria; blanks (null/undefined) count as 0. */

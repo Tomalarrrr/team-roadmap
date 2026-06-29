@@ -18,10 +18,11 @@ import { DateRangeRail } from './DateRangeRail';
 import form from './Form.module.css';
 import s from './ProjectWizard.module.css';
 
-// Status order for the picker: lifecycle (To Start → Review → Planning), then
-// in-flight RAG health (On Track / At Risk / Off Track), then closed states
-// (Complete, On Hold). Unknown statuses fall to the end.
-const STATUS_ORDER = ['to-start', 'review', 'planning', 'on-track', 'at-risk', 'off-track', 'complete', 'on-hold'];
+// Status order for the picker: pre-delivery lifecycle (Discovery → Initiation →
+// Ready to Start), then in-flight health (On Track / At Risk / Off Track), then
+// the parked states (On Hold, Deferred), then closed (Complete). Unknown statuses
+// fall to the end.
+const STATUS_ORDER = ['discovery', 'initiation', 'ready-to-start', 'on-track', 'at-risk', 'off-track', 'on-hold', 'deferred', 'complete'];
 const ORDERED_STATUSES = [...STATUS_COLORS].sort(
   (a, b) => ((STATUS_ORDER.indexOf(a.slug) + 1) || 99) - ((STATUS_ORDER.indexOf(b.slug) + 1) || 99),
 );

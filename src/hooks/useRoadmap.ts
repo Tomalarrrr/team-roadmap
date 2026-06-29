@@ -26,6 +26,7 @@ import { withRetry } from '../utils/retry';
 import { analytics } from '../utils/analytics';
 import { validateDependency } from '../utils/dependencyUtils';
 import { safeValidateRoadmapData, formatValidationErrors } from '../schemas/roadmap';
+import { classifyScore } from '../utils/scoring';
 
 // Wrap saveRoadmap with retry logic
 const saveWithRetry = (data: RoadmapData) =>
@@ -61,6 +62,19 @@ const DEFAULT_DATA: RoadmapData = {
   periodMarkers: []
 };
 
+// The Capacity Scoring Matrix is the source of truth for a project's size: when
+// a project carries its scoring answers, (re)derive size from the stored total
+// so band changes in utils/scoring apply to existing projects on load — no data
+// migration needed. Projects without scoring (legacy / manually-sized) keep
+// their stored size.
+export function deriveSizeFromScoring(projects: Project[]): Project[] {
+  return projects.map(p =>
+    typeof p.scoring?.total === 'number' && Number.isFinite(p.scoring.total)
+      ? { ...p, size: classifyScore(p.scoring.total) }
+      : p
+  );
+}
+
 // Normalize data to ensure all required arrays exist and no undefined values
 // Uses Zod schema validation for data integrity
 function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
@@ -68,7 +82,7 @@ function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
   const result = safeValidateRoadmapData(newData);
 
   if (result.success) {
-    return result.data;
+    return { ...result.data, projects: deriveSizeFromScoring(result.data.projects) };
   }
 
   // Log validation errors in development
@@ -86,7 +100,7 @@ function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
     }))
   }));
   return {
-    projects,
+    projects: deriveSizeFromScoring(projects),
     teamMembers: newData.teamMembers || [],
     dependencies: newData.dependencies || [],
     leaveBlocks: newData.leaveBlocks || [],

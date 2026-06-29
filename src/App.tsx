@@ -313,8 +313,8 @@ function App() {
       return slug as ProjectStatus;
     }
 
-    // Default: if start date is in future, it's "to-start", otherwise "on-track"
-    if (startDate > today) return 'to-start';
+    // Default: if start date is in future, it's "ready-to-start", otherwise "on-track"
+    if (startDate > today) return 'ready-to-start';
     return 'on-track';
   }, []);
 

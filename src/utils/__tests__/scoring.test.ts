@@ -51,12 +51,12 @@ describe('score bands', () => {
 describe('classifyScore', () => {
   it('maps each band boundary to the right size', () => {
     expect(classifyScore(0)).toBe('small');
-    expect(classifyScore(5)).toBe('small');
-    expect(classifyScore(6)).toBe('medium');
-    expect(classifyScore(10)).toBe('medium');
-    expect(classifyScore(11)).toBe('large');
-    expect(classifyScore(16)).toBe('large');
-    expect(classifyScore(17)).toBe('full-time');
+    expect(classifyScore(6)).toBe('small');
+    expect(classifyScore(7)).toBe('medium');
+    expect(classifyScore(14)).toBe('medium');
+    expect(classifyScore(15)).toBe('large');
+    expect(classifyScore(18)).toBe('large');
+    expect(classifyScore(19)).toBe('full-time');
     expect(classifyScore(21)).toBe('full-time');
   });
 
