@@ -614,9 +614,14 @@
   width: 1.5px;
   /* Soften the hairline via its own colour, not element opacity — opacity here
      would composite onto the child cap + "TODAY" label too, dimming the white
-     label below WCAG AA (it read 4.19:1 at 90%). color-mix keeps the label on
-     the solid token (5.0:1) while the line itself stays calm. */
-  background: color-mix(in srgb, var(--today-line) 90%, transparent);
+     label below WCAG AA (it read 4.19:1 at 90%). Applying the alpha to the line's
+     own background keeps the label on the solid --today-line token (5.0:1) while
+     the line itself stays calm.
+     This is --today-line (#0a63c0) at 90% alpha, written as rgba() rather than
+     color-mix(in srgb, …): Chrome serialises the computed color-mix value as
+     color(srgb …), which html2canvas (the PDF / "For report" image export) cannot
+     parse — it throws mid-capture, failing the export. */
+  background: rgba(10, 99, 192, 0.9);
   z-index: 5;
 }
 
