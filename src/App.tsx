@@ -11,7 +11,7 @@ import { isProject } from './types';
 import type { FilterState, ProjectStatus } from './components/SearchFilter';
 import { getSuggestedProjectDates, parseLocalDate, toDateString, isDatePast } from './utils/dateUtils';
 import { DEFAULT_SIZE } from './utils/capacity';
-import { getStatusSlugByHex, normalizeStatusColor } from './utils/statusColors';
+import { getStatusSlugByHex, normalizeStatusColor, isAutoCompleteExempt } from './utils/statusColors';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -312,7 +312,10 @@ function App() {
     // granularity (via isDatePast) so a project on its final day still counts
     // as active — matches ProjectBar, which also uses isDatePast. A time-of-day
     // comparison would mis-classify a project ending today as complete.
-    if (isDatePast(project.endDate)) {
+    // Exception: pre-delivery/parked statuses (Discovery, Initiation, Ready to
+    // Start, On Hold, Deferred) are honoured even once the end date passes — an
+    // elapsed end date on those doesn't mean the work actually completed.
+    if (isDatePast(project.endDate) && !isAutoCompleteExempt(project.statusColor)) {
       return 'complete';
     }
 

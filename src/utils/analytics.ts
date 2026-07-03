@@ -147,6 +147,7 @@ export const analytics = {
   exportPDF: () => track('export', 'pdf'),
   exportJSON: () => track('export', 'json'),
   exportCSV: () => track('export', 'csv'),
+  exportReport: () => track('export', 'report'),
 
   // Navigation events
   zoomChanged: (level: string) => track('navigation', 'zoom', level),

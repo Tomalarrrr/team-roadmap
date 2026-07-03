@@ -111,6 +111,27 @@ export function isOnHold(statusColor: string | undefined): boolean {
   return !!statusColor && getStatusSlugByHex(statusColor) === 'on-hold';
 }
 
+// Statuses that opt out of the "auto-complete when the today line passes the end
+// date" rule. These are pre-delivery or parked stages where an elapsed end date
+// doesn't mean the work finished — a Discovery/Initiation/Ready-to-Start project
+// simply hasn't kicked off, and On Hold/Deferred are intentionally paused. Their
+// chosen status is honoured even once today passes the pill's end date.
+const AUTO_COMPLETE_EXEMPT_SLUGS = new Set([
+  'discovery',
+  'initiation',
+  'ready-to-start',
+  'on-hold',
+  'deferred',
+]);
+
+// True when a project's status should NOT be overridden to "Complete" once the
+// today line passes its end date. Resolves legacy hex via getStatusSlugByHex.
+export function isAutoCompleteExempt(statusColor: string | undefined): boolean {
+  if (!statusColor) return false;
+  const slug = getStatusSlugByHex(statusColor);
+  return !!slug && AUTO_COMPLETE_EXEMPT_SLUGS.has(slug);
+}
+
 // Default status color (Discovery — the first lifecycle stage)
 export const DEFAULT_STATUS_COLOR = STATUS_COLORS[0].hex;
 

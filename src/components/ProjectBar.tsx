@@ -11,7 +11,7 @@ import {
   formatShortDate,
   isDatePast
 } from '../utils/dateUtils';
-import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor, isOnHold } from '../utils/statusColors';
+import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor, isOnHold, isAutoCompleteExempt } from '../utils/statusColors';
 import { heightForSize, DEFAULT_SIZE, UNIT_HEIGHT } from '../utils/capacity';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
@@ -168,8 +168,10 @@ export function ProjectBar({
     dayWidth
   );
 
-  // Auto-blue rule: turn blue if project end date is past
-  const isPast = isDatePast(project.endDate);
+  // Auto-blue rule: turn blue if project end date is past — EXCEPT for pre-delivery
+  // or parked statuses (Discovery, Initiation, Ready to Start, On Hold, Deferred),
+  // whose chosen status is honoured even once the today line passes the end date.
+  const isPast = isDatePast(project.endDate) && !isAutoCompleteExempt(project.statusColor);
   const displayColor = isPast ? AUTO_COMPLETE_COLOR : normalizeStatusColor(project.statusColor);
 
   // Status label for badge and tooltip

@@ -1,8 +1,40 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ReactElement } from 'react';
 import type { Project, TeamMember, Dependency } from '../types';
 import { getExportOptions } from '../utils/exportUtils';
 import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './ExportMenu.module.css';
+
+// Minimal monochrome line icons for each export option, keyed by option id — same
+// visual language as the toolbar / "copy embed" icons (no emoji, per the app's
+// neutral style). Falls back to no icon for an unknown id.
+const EXPORT_ICONS: Record<string, ReactElement> = {
+  report: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="3.25" y="4.75" width="13.5" height="10.5" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="7.4" cy="8.4" r="1.15" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3.75 14.25l3.75-3.4 2.25 2 3.25-3 3.25 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  pdf: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M6 3.75h4.5L14.5 7.75V15.5a.75.75 0 0 1-.75.75h-7a.75.75 0 0 1-.75-.75v-11A.75.75 0 0 1 6 3.75z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M10.25 3.9V8h4.1" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M8.25 11.5h3.5M8.25 13.5h3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ),
+  json: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M9 4.75c-1.45 0-1.9.85-1.9 2.35 0 1.35-.2 2.3-1.45 2.9 1.25.6 1.45 1.55 1.45 2.9 0 1.5.45 2.35 1.9 2.35" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M11 4.75c1.45 0 1.9.85 1.9 2.35 0 1.35.2 2.3 1.45 2.9-1.25.6-1.45 1.55-1.45 2.9 0 1.5-.45 2.35-1.9 2.35" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  csv: (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="3.5" y="4.5" width="13" height="11" rx="1.25" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3.5 8.25h13M3.5 11.75h13M8 4.5v11M12 4.5v11" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ),
+};
 
 interface ExportMenuProps {
   projects: Project[];
@@ -51,7 +83,10 @@ export function ExportMenu({ projects, teamMembers, dependencies, embedMode = fa
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Brief in-menu confirmation after the "For report" export copies the image.
+  const [reportCopied, setReportCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Get platform-appropriate shortcut display
@@ -64,8 +99,18 @@ export function ExportMenu({ projects, teamMembers, dependencies, embedMode = fa
     setError(null);
     setBusyId(option.id);
     try {
-      await option.action();
-      setIsOpen(false);
+      const result = await option.action();
+      if (result === 'clipboard') {
+        // Confirm the copy in place, then auto-close after a beat.
+        setReportCopied(true);
+        if (reportTimerRef.current) clearTimeout(reportTimerRef.current);
+        reportTimerRef.current = setTimeout(() => {
+          setReportCopied(false);
+          setIsOpen(false);
+        }, 1600);
+      } else {
+        setIsOpen(false);
+      }
     } catch (err) {
       // Surface the failure instead of letting it become an unhandled rejection
       // with no user feedback (the menu used to just close on a failed PDF).
@@ -106,12 +151,15 @@ export function ExportMenu({ projects, teamMembers, dependencies, embedMode = fa
     if (!isOpen) {
       setError(null);
       setCopied(false);
+      setReportCopied(false);
+      if (reportTimerRef.current) clearTimeout(reportTimerRef.current);
     }
   }, [isOpen]);
 
-  // Clear the "Copied!" reset timer on unmount.
+  // Clear the copy-confirmation reset timers on unmount.
   useEffect(() => () => {
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    if (reportTimerRef.current) clearTimeout(reportTimerRef.current);
   }, []);
 
   // Keyboard shortcut (Cmd+E)
@@ -155,10 +203,14 @@ export function ExportMenu({ projects, teamMembers, dependencies, embedMode = fa
                 aria-busy={busyId === option.id}
                 onClick={() => { void runExport(option); }}
               >
-                <span className={styles.menuIcon}>{option.icon}</span>
+                <span className={styles.menuIcon}>{EXPORT_ICONS[option.id]}</span>
                 <div className={styles.menuItemContent}>
-                  <span className={styles.menuItemLabel}>
-                    {busyId === option.id ? 'Exporting…' : option.label}
+                  <span className={styles.menuItemLabel} aria-live="polite">
+                    {busyId === option.id
+                      ? 'Exporting…'
+                      : option.id === 'report' && reportCopied
+                        ? 'Copied to clipboard'
+                        : option.label}
                   </span>
                   <span className={styles.menuItemDesc}>{option.description}</span>
                 </div>
