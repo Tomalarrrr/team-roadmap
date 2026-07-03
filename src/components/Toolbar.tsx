@@ -29,6 +29,8 @@ interface ToolbarProps {
   isOnline: boolean;
   isLocked: boolean;
   onToggleLock: () => void;
+  // Read-only embed (e.g. framed in SharePoint): hides editor-only controls.
+  embedMode?: boolean;
   // Presence props
   presenceUsers?: PresenceUser[];
   currentUserId?: string;
@@ -54,6 +56,7 @@ export const Toolbar = memo(function Toolbar({
   isOnline,
   isLocked,
   onToggleLock,
+  embedMode = false,
   presenceUsers = [],
   currentUserId = ''
 }: ToolbarProps) {
@@ -97,53 +100,60 @@ export const Toolbar = memo(function Toolbar({
 
         <div className={styles.divider} />
 
-        {/* Actions — one consistent icon-button group */}
+        {/* Actions — one consistent icon-button group. Undo/redo and the lock
+            toggle are editor-only, so they're dropped in read-only embed mode;
+            Export stays useful to viewers. */}
         <div className={styles.actions}>
-          <button
-            className={styles.iconBtn}
-            onClick={onUndo}
-            disabled={!canUndo}
-            title={`Undo (${mod}Z)`}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 8H11C12.6569 8 14 9.34315 14 11C14 12.6569 12.6569 14 11 14H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M6 5L3 8L6 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-          <button
-            className={styles.iconBtn}
-            onClick={onRedo}
-            disabled={!canRedo}
-            title={`Redo (${isMac ? '⌘⇧Z' : 'Ctrl+Y'})`}
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M13 8H5C3.34315 8 2 9.34315 2 11C2 12.6569 3.34315 14 5 14H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              <path d="M10 5L13 8L10 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
+          {!embedMode && (
+            <>
+              <button
+                className={styles.iconBtn}
+                onClick={onUndo}
+                disabled={!canUndo}
+                title={`Undo (${mod}Z)`}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M3 8H11C12.6569 8 14 9.34315 14 11C14 12.6569 12.6569 14 11 14H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <path d="M6 5L3 8L6 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
+              <button
+                className={styles.iconBtn}
+                onClick={onRedo}
+                disabled={!canRedo}
+                title={`Redo (${isMac ? '⌘⇧Z' : 'Ctrl+Y'})`}
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M13 8H5C3.34315 8 2 9.34315 2 11C2 12.6569 3.34315 14 5 14H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  <path d="M10 5L13 8L10 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </button>
 
-          <button
-            className={`${styles.iconBtn} ${isLocked ? styles.locked : ''}`}
-            onClick={onToggleLock}
-            title={isLocked ? 'Unlock editing' : 'Lock for viewing only'}
-          >
-            {isLocked ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M5 7V5C5 3.34315 6.34315 2 8 2C9.65685 2 11 3.34315 11 5V7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-                <path d="M11 7V5C11 3.34315 9.65685 2 8 2C7.1 2 6.3 2.4 5.7 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-              </svg>
-            )}
-          </button>
+              <button
+                className={`${styles.iconBtn} ${isLocked ? styles.locked : ''}`}
+                onClick={onToggleLock}
+                title={isLocked ? 'Unlock editing' : 'Lock for viewing only'}
+              >
+                {isLocked ? (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M5 7V5C5 3.34315 6.34315 2 8 2C9.65685 2 11 3.34315 11 5V7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <rect x="3" y="7" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M11 7V5C11 3.34315 9.65685 2 8 2C7.1 2 6.3 2.4 5.7 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                )}
+              </button>
+            </>
+          )}
 
           <ExportMenu
             projects={projects}
             teamMembers={teamMembers}
             dependencies={dependencies}
+            embedMode={embedMode}
           />
         </div>
 

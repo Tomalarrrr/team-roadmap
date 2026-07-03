@@ -18,6 +18,7 @@ import { OfflineBanner } from './components/OfflineBanner';
 import { usePresence } from './hooks/usePresence';
 import { VaultUnlock } from './components/VaultUnlock';
 import { generateSessionId } from './utils/gameUtils';
+import { isEmbedMode } from './utils/embedMode';
 import styles from './App.module.css';
 
 // Lazy load form components (not needed until user clicks)
@@ -66,6 +67,10 @@ const getSessionInfo = () => {
 
 // Get session info once at module load
 const sessionInfo = getSessionInfo();
+
+// Whether this page is a framed, read-only embed (e.g. inside SharePoint).
+// Resolved once from the URL — it never changes over a page's lifetime.
+const embedMode = isEmbedMode();
 
 const formFallback = <div className={styles.formLoading}><span className={styles.spinner} /></div>;
 
@@ -228,12 +233,16 @@ function App() {
     projectsRef.current = data.projects;
   }, [data.projects]);
 
-  // View mode lock — always starts locked; unlock is session-only (resets on tab close)
+  // View mode lock — always starts locked; unlock is session-only (resets on tab close).
+  // In embed mode the lock is permanent: it starts on and there is no path to turn it off.
   const [isLocked, setIsLocked] = useState(true);
   const [showVaultUnlock, setShowVaultUnlock] = useState(false);
 
-  // Toggle lock — unlocking requires vault PIN entry
+  // Toggle lock — unlocking requires vault PIN entry. Disabled entirely in embed
+  // mode so a framed viewer can never open the vault (the toggle button is also
+  // hidden; this is the belt-and-braces guard behind it).
   const handleToggleLock = useCallback(() => {
+    if (embedMode) return;
     if (isLocked) {
       setShowVaultUnlock(true);
     } else {
@@ -947,6 +956,7 @@ function App() {
           isOnline={isOnline}
           isLocked={isLocked}
           onToggleLock={handleToggleLock}
+          embedMode={embedMode}
           presenceUsers={presenceUsers}
           currentUserId={sessionInfo.userId}
         />
@@ -1085,12 +1095,15 @@ function App() {
         <ShortcutsModal isOpen={showShortcuts} onClose={() => setShowShortcuts(false)} />
       </Suspense>
 
-      {/* Vault Unlock Overlay */}
-      <VaultUnlock
-        isOpen={showVaultUnlock}
-        onUnlocked={handleVaultUnlocked}
-        onCancel={handleVaultCancel}
-      />
+      {/* Vault Unlock Overlay — never mounted in embed mode, so a framed
+          viewer has no way to reach the unlock PIN. */}
+      {!embedMode && (
+        <VaultUnlock
+          isOpen={showVaultUnlock}
+          onUnlocked={handleVaultUnlocked}
+          onCancel={handleVaultCancel}
+        />
+      )}
     </div>
   );
 }

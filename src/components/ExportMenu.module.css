@@ -152,6 +152,12 @@
   opacity: 1;
 }
 
+.divider {
+  height: 1px;
+  margin: var(--space-2) var(--space-3);
+  background: var(--border-light);
+}
+
 .menuError {
   margin: 0 var(--space-2) var(--space-2);
   padding: var(--space-2) var(--space-3);

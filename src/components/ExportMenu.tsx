@@ -8,14 +8,50 @@ interface ExportMenuProps {
   projects: Project[];
   teamMembers: TeamMember[];
   dependencies: Dependency[];
+  // Hide the "copy embed code" action when the app is itself the embedded view —
+  // a framed viewer has no need to grab the embed snippet.
+  embedMode?: boolean;
 }
 
-export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuProps) {
+// The ready-to-paste SharePoint snippet. Built from the live origin the app is
+// served from, so clicking Copy on the deployed site always yields the correct
+// URL — nothing to hand-edit.
+function buildEmbedSnippet(): string {
+  const url = `${window.location.origin}/?embed=1`;
+  return `<iframe src="${url}" title="Digital Roadmap Overview" width="100%" height="800" style="border:0"></iframe>`;
+}
+
+// Clipboard write with a legacy fallback for browsers / contexts where the
+// async Clipboard API is unavailable.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export function ExportMenu({ projects, teamMembers, dependencies, embedMode = false }: ExportMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   // Which export is currently running (disables the list and shows progress),
   // and the last error message (so a failed export never fails silently).
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Get platform-appropriate shortcut display
@@ -40,6 +76,18 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
     }
   };
 
+  const copyEmbedCode = async () => {
+    const ok = await copyText(buildEmbedSnippet());
+    if (ok) {
+      setError(null);
+      setCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    } else {
+      setError('Could not copy automatically. Copy the link manually instead.');
+    }
+  };
+
   // Close on click outside
   useEffect(() => {
     if (!isOpen) return;
@@ -52,11 +100,19 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isOpen]);
 
-  // Drop any stale error message once the menu is closed, so it doesn't reappear
-  // on the next open.
+  // Drop any stale error / copied state once the menu is closed, so they don't
+  // reappear on the next open.
   useEffect(() => {
-    if (!isOpen) setError(null);
+    if (!isOpen) {
+      setError(null);
+      setCopied(false);
+    }
   }, [isOpen]);
+
+  // Clear the "Copied!" reset timer on unmount.
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
 
   // Keyboard shortcut (Cmd+E)
   useEffect(() => {
@@ -108,6 +164,37 @@ export function ExportMenu({ projects, teamMembers, dependencies }: ExportMenuPr
                 </div>
               </button>
             ))}
+
+            {/* Copy the SharePoint embed snippet. Hidden inside the embedded
+                view itself — only editors on the full app need it. */}
+            {!embedMode && (
+              <>
+                <div className={styles.divider} role="separator" />
+                <button
+                  className={styles.menuItem}
+                  onClick={() => { void copyEmbedCode(); }}
+                >
+                  <span className={styles.menuIcon}>
+                    {copied ? (
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <path d="M4 10.5L8 14.5L16 5.5" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <path d="M8.5 11.5a3 3 0 0 0 4.24 0l2.26-2.26a3 3 0 0 0-4.24-4.24l-1 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        <path d="M11.5 8.5a3 3 0 0 0-4.24 0L5 10.76a3 3 0 0 0 4.24 4.24l1-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
+                    )}
+                  </span>
+                  <div className={styles.menuItemContent}>
+                    <span className={styles.menuItemLabel} aria-live="polite">
+                      {copied ? 'Copied!' : 'Copy embed code'}
+                    </span>
+                    <span className={styles.menuItemDesc}>iFrame snippet for SharePoint</span>
+                  </div>
+                </button>
+              </>
+            )}
           </div>
           {error && <div className={styles.menuError} role="alert">{error}</div>}
         </div>
