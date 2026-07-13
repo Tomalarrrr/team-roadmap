@@ -7,6 +7,7 @@ import styles from './SearchFilter.module.css';
 
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
 import { GameErrorBoundary } from './GameErrorBoundary';
+import { CyclesiteEmbed } from './CyclesiteEmbed';
 
 interface SearchFilterProps {
   projects: Project[];
@@ -83,6 +84,10 @@ export const SearchFilter = memo(function SearchFilter({
     // get() returns "" for a valueless param, which is falsy.
     () => new URLSearchParams(window.location.search).has('ludo')
   );
+  // Hidden feature: full-screen Cyclesite traffic-flow embed (?cyclesite or search "cyclesite").
+  const [showCyclesite, setShowCyclesite] = useState(
+    () => new URLSearchParams(window.location.search).has('cyclesite')
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -124,6 +129,10 @@ export const SearchFilter = memo(function SearchFilter({
     const magic = filters.search.trim().toLowerCase();
     if (magic === 'ludo') {
       setShowLudo(true);
+      setFilters(f => ({ ...f, search: '' }));
+      setIsOpen(false);
+    } else if (magic === 'cyclesite') {
+      setShowCyclesite(true);
       setFilters(f => ({ ...f, search: '' }));
       setIsOpen(false);
     }
@@ -361,6 +370,10 @@ export const SearchFilter = memo(function SearchFilter({
             <LudoGame onClose={() => setShowLudo(false)} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
+        document.body
+      )}
+      {showCyclesite && createPortal(
+        <CyclesiteEmbed onClose={() => setShowCyclesite(false)} />,
         document.body
       )}
     </>
