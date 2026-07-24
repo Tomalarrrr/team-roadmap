@@ -1,6 +1,8 @@
 import { format, addMonths, addDays, differenceInDays } from 'date-fns';
 import type { Project, TeamMember, Dependency } from '../types';
 import { analytics } from './analytics';
+import { getStatusNameByHex } from './statusColors';
+import { SIZE_LABELS, DEFAULT_SIZE } from './capacity';
 
 interface ExportOption {
   id: string;
@@ -565,13 +567,17 @@ function escapeCSV(value: string | number): string {
 // CSV Export - exports projects as CSV
 function exportToCSV(projects: Project[]) {
   const today = format(new Date(), 'yyyy-MM-dd');
-  const headers = ['Title', 'Owner', 'Start Date', 'End Date', 'Status Color', 'Milestones Count'];
+  // Status/size go out as their human labels, not the stored hex and slug — a
+  // spreadsheet reading "#457028" tells nobody anything.
+  const headers = ['Title', 'Owner', 'Start Date', 'End Date', 'Status', 'Size', 'EPR', 'Milestones Count'];
   const rows = projects.map(p => [
     escapeCSV(p.title),
     escapeCSV(p.owner),
     p.startDate,
     p.endDate,
-    p.statusColor,
+    escapeCSV(getStatusNameByHex(p.statusColor) ?? p.statusColor),
+    escapeCSV(SIZE_LABELS[p.size ?? DEFAULT_SIZE]),
+    p.epr === true ? 'Yes' : 'No',
     p.milestones?.length ?? 0
   ]);
 

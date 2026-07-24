@@ -32,6 +32,9 @@ export const projectSchema = z.object({
     scores: z.record(z.string(), z.number().min(0).max(3)),
     total: z.number().min(0).max(21),
   }).optional(),
+  // EPR programme flag. Optional (absent = no) so legacy projects validate;
+  // must be declared here or Zod would strip it on load.
+  epr: z.boolean().optional(),
   milestones: z.array(milestoneSchema).max(100).default([]),
   dependencies: z.array(z.string().max(100)).optional().default([])
 }).refine(

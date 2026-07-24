@@ -19,7 +19,9 @@ export const projectSchema = z.object({
   scoring: z.object({
     scores: z.record(z.string(), z.number().min(0).max(3)),
     total: z.number().min(0).max(21),
-  }).optional()
+  }).optional(),
+  // EPR programme flag — declared so validateForm preserves it on submit.
+  epr: z.boolean().optional()
 }).refine(data => new Date(data.endDate) >= new Date(data.startDate), {
   message: 'End date must be on or after start date',
   path: ['endDate']

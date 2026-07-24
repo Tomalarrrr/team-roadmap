@@ -16,6 +16,41 @@
   transition: padding 200ms ease;
 }
 
+/* Shown in place of a silently blank board when the active filters match nothing.
+   A quiet strip under the toolbar rather than a takeover — the timeline's lanes
+   stay visible so the board doesn't appear to have lost the team. */
+.noMatches {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-6);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-light);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.noMatchesClear {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--accent-blue);
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+
+.noMatchesClear:hover {
+  text-decoration: underline;
+}
+
+.noMatchesClear:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+  border-radius: var(--radius-sm);
+}
+
 /* Fullscreen mode */
 .app.fullscreen {
   position: fixed;

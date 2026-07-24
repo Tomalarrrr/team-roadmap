@@ -35,6 +35,7 @@ interface ProjectWizardProps {
     endDate: string;
     statusColor: string;
     size: ProjectSize;
+    epr: boolean;
   }>;
   initialScoring?: ProjectScoring;
   // Existing milestones are preserved untouched on submit (not edited here).
@@ -52,6 +53,7 @@ interface ProjectWizardProps {
     statusColor: string;
     size: ProjectSize;
     scoring?: ProjectScoring;
+    epr?: boolean;
     milestones?: Milestone[];
   }) => void | Promise<void>;
   onCancel: () => void;
@@ -94,6 +96,7 @@ export function ProjectWizard({
   const [startDate, setStartDate] = useState(initialValues?.startDate || '');
   const [endDate, setEndDate] = useState(initialValues?.endDate || '');
   const [statusColor, setStatusColor] = useState(normalizeStatusColor(initialValues?.statusColor || DEFAULT_STATUS_COLOR));
+  const [epr, setEpr] = useState(initialValues?.epr ?? false);
   const [scores, setScores] = useState<Record<string, number | null>>(() => initialScores(initialScoring));
   const [highlightMissing, setHighlightMissing] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -173,6 +176,7 @@ export function ProjectWizard({
       statusColor,
       size,
       scoring: scoringToSave,
+      epr,
     });
 
     if (!result.success) { setErrors(result.errors); return; }
@@ -261,6 +265,19 @@ export function ProjectWizard({
           })}
         </div>
       </div>
+
+      {/* EPR programme flag */}
+      <label className={s.eprRow} htmlFor="pw-epr">
+        <input
+          id="pw-epr"
+          type="checkbox"
+          checked={epr}
+          onChange={(e) => setEpr(e.target.checked)}
+          className={s.eprBox}
+        />
+        <span className={s.eprLabel}>EPR project</span>
+        <span className={s.eprHint}>Electronic Patient Record programme</span>
+      </label>
 
       {/* Scoring matrix */}
       <div className={s.sectionTitle}>Capacity score</div>

@@ -1,10 +1,11 @@
 import { memo } from 'react';
-import { SearchFilter, type FilterState } from './SearchFilter';
+import { SearchFilter } from './SearchFilter';
+import { FilterMenu } from './FilterMenu';
 import { ExportMenu } from './ExportMenu';
 import { ZoomSlider } from './ZoomSlider';
 import { SaveStatus } from './SaveStatus';
 import { PresenceAvatars } from './PresenceAvatars';
-import type { Project, TeamMember, Dependency } from '../types';
+import type { Project, TeamMember, Dependency, FilterState } from '../types';
 import type { PresenceUser } from '../hooks/usePresence';
 import { isMacPlatform } from '../utils/platformUtils';
 import styles from './Toolbar.module.css';
@@ -13,7 +14,13 @@ interface ToolbarProps {
   projects: Project[];
   teamMembers: TeamMember[];
   dependencies: Dependency[];
-  onFilterChange: (filters: FilterState) => void;
+  filters: FilterState;
+  onFiltersChange: (filters: FilterState) => void;
+  onSearchChange: (search: string) => void;
+  /** Projects passing the active filters. Drives the filter panel's summary and
+   *  is what Export writes out — the image/PDF exports capture the rendered
+   *  board, so the data exports have to agree with it. */
+  filteredProjects: Project[];
   onProjectSelect: (projectId: string) => void;
   canUndo: boolean;
   canRedo: boolean;
@@ -40,7 +47,10 @@ export const Toolbar = memo(function Toolbar({
   projects,
   teamMembers,
   dependencies,
-  onFilterChange,
+  filters,
+  onFiltersChange,
+  onSearchChange,
+  filteredProjects,
   onProjectSelect,
   canUndo,
   canRedo,
@@ -76,10 +86,16 @@ export const Toolbar = memo(function Toolbar({
       <div className={styles.center}>
         <SearchFilter
           projects={projects}
-          teamMembers={teamMembers}
-          onFilterChange={onFilterChange}
+          onSearchChange={onSearchChange}
           onProjectSelect={onProjectSelect}
           isLocked={isLocked}
+        />
+        <FilterMenu
+          filters={filters}
+          teamMembers={teamMembers}
+          onFiltersChange={onFiltersChange}
+          filteredCount={filteredProjects.length}
+          totalCount={projects.length}
         />
       </div>
 
@@ -150,7 +166,7 @@ export const Toolbar = memo(function Toolbar({
           )}
 
           <ExportMenu
-            projects={projects}
+            projects={filteredProjects}
             teamMembers={teamMembers}
             dependencies={dependencies}
             embedMode={embedMode}

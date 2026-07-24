@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, memo, lazy, Suspense } from 'react';
 import { createPortal } from 'react-dom';
-import type { Project, TeamMember } from '../types';
-import { STATUS_CONFIG, normalizeStatusColor } from '../utils/statusColors';
+import type { Project } from '../types';
+import { normalizeStatusColor } from '../utils/statusColors';
 import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
 
@@ -9,31 +9,19 @@ const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGam
 import { GameErrorBoundary } from './GameErrorBoundary';
 import { CyclesiteEmbed } from './CyclesiteEmbed';
 
+/**
+ * Quick-find (Cmd+K): search projects by title or owner and jump to one.
+ * Typing also live-filters the board via onSearchChange; the text is cleared
+ * whenever the modal closes, so a hidden search can never keep filtering the
+ * board with no visible cue. The persistent filter dimensions live in the
+ * header FilterMenu, not here.
+ */
 interface SearchFilterProps {
   projects: Project[];
-  teamMembers: TeamMember[];
-  onFilterChange: (filters: FilterState) => void;
+  onSearchChange: (search: string) => void;
   onProjectSelect: (projectId: string) => void;
   isLocked?: boolean;
 }
-
-export type ProjectStatus = 'discovery' | 'initiation' | 'ready-to-start' | 'on-track' | 'at-risk' | 'off-track' | 'on-hold' | 'deferred' | 'complete';
-
-export interface FilterState {
-  search: string;
-  owners: string[];
-  tags: string[];
-  dateRange: { start: string; end: string } | null;
-  status: 'all' | ProjectStatus;
-}
-
-const INITIAL_FILTERS: FilterState = {
-  search: '',
-  owners: [],
-  tags: [],
-  dateRange: null,
-  status: 'all'
-};
 
 // Recent projects storage key
 const RECENT_PROJECTS_KEY = 'roadmap-recent-projects';
@@ -68,13 +56,12 @@ function saveRecentProjectId(projectId: string): void {
 
 export const SearchFilter = memo(function SearchFilter({
   projects,
-  teamMembers,
-  onFilterChange,
+  onSearchChange,
   onProjectSelect,
   isLocked = true
 }: SearchFilterProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
+  const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
   // Hidden features (Ludo game, Cyclesite traffic-flow embed). Deliberately NOT
@@ -106,10 +93,8 @@ export const SearchFilter = memo(function SearchFilter({
         setTimeout(() => inputRef.current?.focus(), 0);
       }
       if (e.key === 'Escape' && isOpen) {
-        // Only close modal, preserve active filters
         setIsOpen(false);
-        // Clear search text but keep filter selections
-        setFilters(f => ({ ...f, search: '' }));
+        setSearch('');
       }
     };
 
@@ -122,25 +107,25 @@ export const SearchFilter = memo(function SearchFilter({
   // matching branch immediately clears the search box, so the condition is
   // false on the next render. All state here is local.
   if (!isLocked) {
-    const magic = filters.search.trim().toLowerCase();
+    const magic = search.trim().toLowerCase();
     if (magic === 'ludo') {
       setShowLudo(true);
-      setFilters(f => ({ ...f, search: '' }));
+      setSearch('');
       setIsOpen(false);
     } else if (magic === 'cyclesite') {
       setShowCyclesite(true);
-      setFilters(f => ({ ...f, search: '' }));
+      setSearch('');
       setIsOpen(false);
     }
   }
 
   // Compute search results as derived state (no effect needed)
   const { searchResults, totalResultCount } = useMemo(() => {
-    if (!filters.search.trim()) {
+    if (!search.trim()) {
       return { searchResults: recentProjects, totalResultCount: recentProjects.length };
     }
 
-    const query = filters.search.toLowerCase();
+    const query = search.toLowerCase();
     const results = projects.filter(p => {
       const matchesTitle = p.title.toLowerCase().includes(query);
       const matchesOwner = p.owner.toLowerCase().includes(query);
@@ -148,13 +133,13 @@ export const SearchFilter = memo(function SearchFilter({
     });
 
     return { searchResults: results.slice(0, 8), totalResultCount: results.length };
-  }, [filters.search, projects, recentProjects]);
+  }, [search, projects, recentProjects]);
 
   // Reset selection when search changes — derived during render (search is a
   // string, so the comparison is stable and this converges immediately).
-  const [prevSearch, setPrevSearch] = useState(filters.search);
-  if (prevSearch !== filters.search) {
-    setPrevSearch(filters.search);
+  const [prevSearch, setPrevSearch] = useState(search);
+  if (prevSearch !== search) {
+    setPrevSearch(search);
     setSelectedIndex(0);
   }
 
@@ -164,7 +149,7 @@ export const SearchFilter = memo(function SearchFilter({
     setRecentProjectIds(loadRecentProjectIds());
     onProjectSelect(projectId);
     setIsOpen(false);
-    setFilters(f => ({ ...f, search: '' }));
+    setSearch('');
   }, [onProjectSelect]);
 
   // Navigate results with arrow keys
@@ -181,37 +166,32 @@ export const SearchFilter = memo(function SearchFilter({
     }
   }, [searchResults, selectedIndex, handleSelectProject]);
 
-  // Apply filters
+  // Propagate the live search text so the board filters as you type. An effect
+  // (rather than notifying inside each setter) keeps the render-phase easter-egg
+  // clearing above safe — parent state is never touched mid-render.
   useEffect(() => {
-    onFilterChange(filters);
-  }, [filters, onFilterChange]);
+    onSearchChange(search);
+  }, [search, onSearchChange]);
 
-  // Click outside to close
+  // Click outside closes AND clears — same contract as Escape/select, so a
+  // dismissed modal never leaves an invisible text filter on the board.
   useEffect(() => {
     if (!isOpen) return;
     const handleClick = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setIsOpen(false);
+        setSearch('');
       }
     };
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isOpen]);
 
-  const hasActiveFilters = filters.owners.length > 0 ||
-    filters.tags.length > 0 ||
-    filters.dateRange !== null ||
-    filters.status !== 'all';
-
-  const clearFilters = () => {
-    setFilters(INITIAL_FILTERS);
-  };
-
   return (
     <>
       {/* Trigger button */}
       <button
-        className={`${styles.trigger} ${hasActiveFilters ? styles.active : ''}`}
+        className={styles.trigger}
         onClick={() => {
           setIsOpen(true);
           setTimeout(() => inputRef.current?.focus(), 0);
@@ -225,7 +205,6 @@ export const SearchFilter = memo(function SearchFilter({
         <kbd className={styles.shortcut}>
           <span>{modifierKey}</span>K
         </kbd>
-        {hasActiveFilters && <span className={styles.filterBadge}>{filters.owners.length + filters.tags.length + (filters.status !== 'all' ? 1 : 0) + (filters.dateRange ? 1 : 0)}</span>}
       </button>
 
       {/* Modal */}
@@ -242,15 +221,15 @@ export const SearchFilter = memo(function SearchFilter({
                 ref={inputRef}
                 type="text"
                 placeholder="Search projects..."
-                value={filters.search}
-                onChange={(e) => setFilters(f => ({ ...f, search: e.target.value }))}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
                 onKeyDown={handleKeyDown}
                 className={styles.searchInput}
               />
-              {filters.search && (
+              {search && (
                 <button
                   className={styles.clearSearch}
-                  onClick={() => setFilters(f => ({ ...f, search: '' }))}
+                  onClick={() => setSearch('')}
                 >
                   <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                     <path d="M10.5 3.5L3.5 10.5M3.5 3.5L10.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -262,10 +241,10 @@ export const SearchFilter = memo(function SearchFilter({
             {/* Search results */}
             {searchResults.length > 0 ? (
               <div className={styles.results}>
-                {!filters.search.trim() && recentProjects.length > 0 && (
+                {!search.trim() && recentProjects.length > 0 && (
                   <div className={styles.resultCount}>Recent</div>
                 )}
-                {filters.search.trim() && totalResultCount > 8 && (
+                {search.trim() && totalResultCount > 8 && (
                   <div className={styles.resultCount}>
                     Showing 8 of {totalResultCount} results
                   </div>
@@ -289,68 +268,14 @@ export const SearchFilter = memo(function SearchFilter({
                   </button>
                 ))}
               </div>
-            ) : filters.search.trim() ? (
+            ) : search.trim() ? (
               <div className={styles.emptyResults}>
-                <span className={styles.emptyIcon}>🔍</span>
-                <span>No projects found for "{filters.search}"</span>
+                <span>No projects found for "{search}"</span>
               </div>
             ) : null}
 
-            {/* Filters */}
-            <div className={styles.filters}>
-              <div className={styles.filterSection}>
-                <span className={styles.filterLabel}>Owner</span>
-                <div className={styles.filterChips}>
-                  {teamMembers.map(member => (
-                    <button
-                      key={member.id}
-                      className={`${styles.chip} ${filters.owners.includes(member.name) ? styles.chipActive : ''}`}
-                      onClick={() => setFilters(f => ({
-                        ...f,
-                        owners: f.owners.includes(member.name)
-                          ? f.owners.filter(o => o !== member.name)
-                          : [...f.owners, member.name]
-                      }))}
-                    >
-                      {member.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className={styles.filterSection}>
-                <span className={styles.filterLabel}>Status</span>
-                <div className={styles.filterChips}>
-                  <button
-                    className={`${styles.chip} ${filters.status === 'all' ? styles.chipActive : ''}`}
-                    onClick={() => setFilters(f => ({ ...f, status: 'all' }))}
-                  >
-                    All
-                  </button>
-                  {(Object.entries(STATUS_CONFIG) as [ProjectStatus, { label: string; color: string }][]).map(([status, config]) => (
-                    <button
-                      key={status}
-                      className={`${styles.chip} ${styles.statusChip} ${filters.status === status ? styles.chipActive : ''}`}
-                      onClick={() => setFilters(f => ({ ...f, status }))}
-                    >
-                      <span
-                        className={styles.statusDot}
-                        style={{ backgroundColor: config.color }}
-                      />
-                      {config.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
             {/* Footer */}
             <div className={styles.footer}>
-              {hasActiveFilters && (
-                <button className={styles.clearBtn} onClick={clearFilters}>
-                  Clear filters
-                </button>
-              )}
               <div className={styles.hints}>
                 <span><kbd>↑↓</kbd> Navigate</span>
                 <span><kbd>↵</kbd> Select</span>

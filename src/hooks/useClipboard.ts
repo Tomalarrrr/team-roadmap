@@ -79,6 +79,7 @@ export function useClipboard({ onPasteProject, onShowToast }: UseClipboardOption
         endDate: toISODateString(addDays(now, duration)),
         statusColor: originalProject.statusColor,
         size: originalProject.size ?? DEFAULT_SIZE,
+        epr: originalProject.epr,
         milestones: milestonesOffset,
         dependencies: [] // Don't copy dependencies
       };

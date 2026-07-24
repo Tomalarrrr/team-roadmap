@@ -6,9 +6,10 @@ import { useToast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
 import { Timeline, type TimelineRef } from './components/Timeline';
 import { Modal } from './components/Modal';
-import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage } from './types';
+import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage, FilterState, ProjectStatus } from './types';
 import { isProject } from './types';
-import type { FilterState, ProjectStatus } from './components/SearchFilter';
+import { filterProjects, parseStoredFilters, hasActiveFilters, INITIAL_FILTERS } from './utils/projectFilters';
+import { revertPatch } from './utils/objectDiff';
 import { getSuggestedProjectDates, parseLocalDate, toDateString, isDatePast } from './utils/dateUtils';
 import { DEFAULT_SIZE } from './utils/capacity';
 import { getStatusSlugByHex, normalizeStatusColor, isAutoCompleteExempt } from './utils/statusColors';
@@ -172,33 +173,16 @@ function App() {
 
   // Ref for Timeline to call scrollToToday
   const timelineRef = useRef<TimelineRef>(null);
-  // Filter persistence - load from localStorage
+  // Filter persistence - load from localStorage (parseStoredFilters validates
+  // entries and migrates the legacy single-select status shape)
   const [filters, setFilters] = useState<FilterState>(() => {
     try {
       const stored = localStorage.getItem('roadmap-filters');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Validate structure and return, but always clear search on fresh load
-        if (parsed && typeof parsed === 'object') {
-          return {
-            search: '', // Always start with empty search
-            owners: Array.isArray(parsed.owners) ? parsed.owners : [],
-            tags: Array.isArray(parsed.tags) ? parsed.tags : [],
-            dateRange: parsed.dateRange || null,
-            status: parsed.status || 'all'
-          };
-        }
-      }
+      if (stored) return parseStoredFilters(JSON.parse(stored));
     } catch {
       // Ignore localStorage errors
     }
-    return {
-      search: '',
-      owners: [],
-      tags: [],
-      dateRange: null,
-      status: 'all'
-    };
+    return INITIAL_FILTERS;
   });
 
   // Save filters to localStorage when they change (debounced, excluding search)
@@ -208,9 +192,10 @@ function App() {
         // Don't persist search text, only the filter selections
         const toStore = {
           owners: filters.owners,
-          tags: filters.tags,
-          dateRange: filters.dateRange,
-          status: filters.status
+          sizes: filters.sizes,
+          statuses: filters.statuses,
+          epr: filters.epr,
+          timeframes: filters.timeframes
         };
         localStorage.setItem('roadmap-filters', JSON.stringify(toStore));
       } catch {
@@ -218,7 +203,13 @@ function App() {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [filters.owners, filters.tags, filters.dateRange, filters.status]);
+  }, [filters.owners, filters.sizes, filters.statuses, filters.epr, filters.timeframes]);
+
+  // Live search text from the search modal (kept out of Toolbar's setFilters
+  // path so SearchFilter's notify effect can't clobber menu-set filters)
+  const handleSearchChange = useCallback((search: string) => {
+    setFilters(f => (f.search === search ? f : { ...f, search }));
+  }, []);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const selectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -330,47 +321,16 @@ function App() {
     return 'on-track';
   }, []);
 
-  // Pre-compute filter Sets for O(1) lookups
-  const filterSets = useMemo(() => ({
-    owners: new Set(filters.owners),
-    tags: new Set(filters.tags),
-    searchQuery: filters.search.trim().toLowerCase()
-  }), [filters.owners, filters.tags, filters.search]);
-
-  // Filter projects based on current filters (optimized with Sets)
-  const filteredProjects = useMemo(() => {
-    const { owners, tags, searchQuery } = filterSets;
-    const hasOwnerFilter = owners.size > 0;
-    const hasTagFilter = tags.size > 0;
-    const hasStatusFilter = filters.status !== 'all';
-    const hasSearchFilter = searchQuery.length > 0;
-
-    // Early return if no filters
-    if (!hasOwnerFilter && !hasTagFilter && !hasStatusFilter && !hasSearchFilter) {
-      return data.projects;
-    }
-
-    return data.projects.filter(p => {
-      // Filter by owners (O(1) lookup)
-      if (hasOwnerFilter && !owners.has(p.owner)) {
-        return false;
-      }
-
-      // Filter by status
-      if (hasStatusFilter && getProjectDisplayStatus(p) !== filters.status) {
-        return false;
-      }
-
-      // Filter by search
-      if (hasSearchFilter) {
-        const titleMatch = p.title.toLowerCase().includes(searchQuery);
-        const ownerMatch = p.owner.toLowerCase().includes(searchQuery);
-        if (!titleMatch && !ownerMatch) return false;
-      }
-
-      return true;
-    });
-  }, [data.projects, filterSets, filters.status, getProjectDisplayStatus]);
+  // Apply the active filters (owners / sizes / statuses / EPR / timeframe /
+  // search) to the board. All the interpretation lives in utils/projectFilters
+  // so the Filter menu's badge and summary count can never disagree with what's
+  // shown. `today` is resolved once per render rather than inside the filter so
+  // the helper stays pure and testable.
+  const today = toDateString(new Date());
+  const filteredProjects = useMemo(
+    () => filterProjects(data.projects, filters, getProjectDisplayStatus, today),
+    [data.projects, filters, getProjectDisplayStatus, today]
+  );
 
   // Select a project from search and scroll to it. Selection is persistent (no
   // auto-clear) so the per-project shortcuts ([ ] / Cmd+D / Backspace) stay usable
@@ -640,7 +600,8 @@ function App() {
             startDate: newStart,
             endDate: newEnd,
             statusColor: normalizeStatusColor(project.statusColor),
-            size: project.size ?? DEFAULT_SIZE
+            size: project.size ?? DEFAULT_SIZE,
+            epr: project.epr
           }).then(() => {
             showToast('Project duplicated', 'success');
           }).catch(() => {
@@ -756,7 +717,15 @@ function App() {
           // redo target — `projectData`/`values` alone lack an `id`, so redo's
           // isProject() guard would reject it and silently do nothing.
           const afterState: Project = { ...beforeState, ...projectData };
-          recordAction('UPDATE_PROJECT', afterState, createInverse('UPDATE_PROJECT', beforeState, afterState));
+          // Undo applies its payload as a MERGE, so the inverse must name every
+          // field this edit wrote — including one the project didn't have before
+          // (ticking `epr` on a pre-EPR project). Absent keys would survive the
+          // merge and the undo would silently not revert them.
+          recordAction(
+            'UPDATE_PROJECT',
+            afterState,
+            createInverse('UPDATE_PROJECT', revertPatch(beforeState, projectData), afterState)
+          );
           closeModal();
         } catch (error) {
           showToast(`Failed to update project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
@@ -943,7 +912,10 @@ function App() {
           projects={data.projects}
           teamMembers={data.teamMembers}
           dependencies={data.dependencies || []}
-          onFilterChange={setFilters}
+          filters={filters}
+          onFiltersChange={setFilters}
+          onSearchChange={handleSearchChange}
+          filteredProjects={filteredProjects}
           onProjectSelect={handleProjectSelect}
           canUndo={canUndo}
           canRedo={canRedo}
@@ -963,6 +935,22 @@ function App() {
           presenceUsers={presenceUsers}
           currentUserId={sessionInfo.userId}
         />
+      )}
+
+      {/* Filters that match nothing would otherwise just leave a blank board with
+          no explanation of why. Scoped to the Filter menu's dimensions: a search
+          that matches nothing is reported inside the search modal, and the text
+          is cleared whenever that modal closes. */}
+      {!isFullscreen && hasActiveFilters(filters) && filteredProjects.length === 0 && data.projects.length > 0 && (
+        <div className={styles.noMatches}>
+          <span>No projects match the current filters.</span>
+          <button
+            className={styles.noMatchesClear}
+            onClick={() => setFilters(f => ({ ...INITIAL_FILTERS, search: f.search }))}
+          >
+            Clear filters
+          </button>
+        </div>
       )}
 
       <main className={styles.main}>
@@ -1071,7 +1059,8 @@ function App() {
                 startDate: modal.project.startDate,
                 endDate: modal.project.endDate,
                 statusColor: modal.project.statusColor,
-                size: modal.project.size
+                size: modal.project.size,
+                epr: modal.project.epr
               }}
               initialScoring={modal.project.scoring}
               initialMilestones={modal.project.milestones}

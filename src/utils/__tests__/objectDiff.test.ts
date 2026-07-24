@@ -1,5 +1,36 @@
 import { describe, it, expect } from 'vitest';
-import { changedFields } from '../objectDiff';
+import { changedFields, revertPatch } from '../objectDiff';
+
+// The merge an undo goes through (useRoadmap.updateProject).
+const applyUpdate = <T extends object>(existing: T, updates: Partial<T>): T => ({ ...existing, ...updates });
+
+describe('revertPatch', () => {
+  it('names a field the edit introduced so the merge actually clears it', () => {
+    // Regression: ticking `epr` on a project created before that field existed,
+    // then undoing, used to leave epr set — the inverse simply omitted the key,
+    // so the merge kept the new value.
+    const before = { id: '1', title: 'Legacy' };
+    const written = { title: 'Legacy', epr: true };
+    const after = applyUpdate(before as typeof before & { epr?: boolean }, written);
+    expect(after.epr).toBe(true);
+
+    const undone = applyUpdate(after, revertPatch(before, written));
+    expect(undone.epr).toBeUndefined();
+    // ...and the resulting Firebase patch deletes the path rather than dropping it.
+    expect(changedFields(after, undone)).toEqual({ epr: null });
+  });
+
+  it('leaves an existing field to the normal merge', () => {
+    const before = { id: '1', epr: false };
+    const undone = applyUpdate({ id: '1', epr: true }, revertPatch(before, { epr: true }));
+    expect(undone.epr).toBe(false);
+  });
+
+  it('does not invent keys the edit never wrote', () => {
+    expect(revertPatch({ a: 1 }, { a: 2 })).toEqual({ a: 1 });
+    expect(Object.keys(revertPatch({ a: 1 }, { a: 2 }))).toEqual(['a']);
+  });
+});
 
 describe('changedFields', () => {
   it('returns only the keys whose values changed', () => {

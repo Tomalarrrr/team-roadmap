@@ -1,0 +1,206 @@
+/* Anchor for the popover panel. */
+.container {
+  position: relative;
+}
+
+/* Trigger — same quiet chip language as the search trigger beside it. */
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.trigger:hover {
+  background: var(--bg-secondary);
+  border-color: var(--border-light);
+  color: var(--text-secondary);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+}
+
+.trigger:active {
+  transform: scale(0.98);
+}
+
+.trigger.active {
+  border-color: var(--accent-blue);
+  background: var(--accent-blue-light);
+  color: var(--accent-blue);
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--space-2);
+  background: var(--accent-blue);
+  color: white;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: var(--fw-semibold);
+}
+
+/* Panel — anchored dropdown, not a modal: filtering stays in view context. */
+.panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 1000;
+  width: 340px;
+  max-width: calc(100vw - 2 * var(--space-4));
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
+  animation: panelIn 0.15s ease;
+}
+
+.panel:focus {
+  outline: none;
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Once the toolbar wraps, the trigger sits far enough into a narrow viewport that
+   a 340px panel hanging off it overflows — off the right if left-anchored, off the
+   left if right-anchored. There's simply no room to open from the trigger, so drop
+   the anchor and span the toolbar instead: `position: static` on the container
+   hands the containing block to .toolbar (which is `position: relative`), and
+   `top: 100%` then sits below it whatever height it has wrapped to. */
+@media (max-width: 768px) {
+  .container {
+    position: static;
+  }
+
+  .panel {
+    top: 100%;
+    left: var(--space-4);
+    right: var(--space-4);
+    width: auto;
+    max-width: none;
+  }
+}
+
+/* Sections */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.sectionLabel {
+  font-size: var(--text-xs);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  font-size: var(--text-base);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.chip:hover {
+  border-color: var(--border-medium);
+  color: var(--text-primary);
+}
+
+.chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+}
+
+.chip.chipActive {
+  background: var(--accent-blue-light);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  font-weight: var(--fw-medium);
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+/* Footer — summary + clear, only rendered while something is active. */
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-light);
+}
+
+.count {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.clearBtn {
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.clearBtn:hover {
+  color: var(--text-primary);
+}
+
+.clearBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-blue);
+  border-radius: var(--radius-sm);
+}

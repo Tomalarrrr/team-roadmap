@@ -30,8 +30,45 @@ export interface Project {
   statusColor: string;
   size: ProjectSize; // Effort size; historic projects default to 'small' on load.
   scoring?: ProjectScoring; // Capacity-matrix answers that derived the size.
+  epr?: boolean; // Part of the EPR (Electronic Patient Record) programme. Absent = no.
   milestones: Milestone[];
   dependencies?: string[]; // IDs of projects this depends on
+}
+
+// Display status of a project — the status-colour slugs plus the derived
+// auto-complete state (see App's getProjectDisplayStatus).
+export type ProjectStatus =
+  | 'discovery'
+  | 'initiation'
+  | 'ready-to-start'
+  | 'on-track'
+  | 'at-risk'
+  | 'off-track'
+  | 'on-hold'
+  | 'deferred'
+  | 'complete';
+
+// EPR programme membership as a filter dimension: 'yes' matches projects with
+// the EPR box ticked, 'no' matches the rest (box unticked, or a project that
+// predates the field).
+export type EprFilter = 'yes' | 'no';
+
+// Where a project sits relative to today. A pure date fact, deliberately
+// independent of the workflow status: "Current" is about the bar crossing the
+// today line, "On Track" is about how the work is going. They AND together, so
+// "At Risk AND Current" is a question you can ask.
+export type Timeframe = 'current' | 'upcoming' | 'past';
+
+// Active view filters. `search` is transient (typed in the search modal, never
+// persisted); the rest are set from the header Filter menu and saved to
+// localStorage. An empty array means that dimension isn't filtered.
+export interface FilterState {
+  search: string;
+  owners: string[];
+  sizes: ProjectSize[];
+  statuses: ProjectStatus[];
+  epr: EprFilter[];
+  timeframes: Timeframe[];
 }
 
 export interface TeamMember {
