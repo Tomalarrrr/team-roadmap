@@ -45,6 +45,7 @@ import {
   DEFAULT_SIZE,
 } from '../utils/capacity';
 import { isOnHold } from '../utils/statusColors';
+import { getTimelineBounds } from '../utils/timelineBounds';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
@@ -115,6 +116,12 @@ function calculateProjectStacks(projects: Project[]): Map<string, number> {
 
 interface TimelineProps {
   projects: Project[];
+  // Every project, unfiltered. The timeline's date range is derived from this
+  // rather than from `projects` so that applying a filter can't move the axis
+  // underneath the viewport — the same scrollLeft would otherwise land on a
+  // different year and throw the user off the today line. Falls back to
+  // `projects` when omitted.
+  allProjects?: Project[];
   teamMembers: TeamMember[];
   dependencies: Dependency[];
   leaveBlocks?: LeaveBlockType[];
@@ -122,6 +129,12 @@ interface TimelineProps {
   dayWidth?: number; // Pixels per day (0.5 - 12)
   selectedProjectId?: string | null;
   filteredOwners?: string[]; // When set, only show swimlanes for these owners
+  // When true, a swimlane with nothing left to show collapses to a slim strip
+  // instead of reserving the full capacity frame. Set while a filter is active,
+  // so a filtered board doesn't become a column of tall empty lanes. Off
+  // otherwise, which keeps the roomy "+ Add Project" empty state for a member
+  // who genuinely has no work yet.
+  slimEmptyLanes?: boolean;
   newDependencyIds?: Set<string>; // IDs of newly created dependencies (for entrance animation)
   isLocked?: boolean; // When true, disable all editing actions (view mode)
   isFullscreen?: boolean; // When true, timeline takes full viewport
@@ -176,6 +189,9 @@ const LANE_PADDING = 16; // Padding top and bottom of lane
 const LANE_BOTTOM_BUFFER = 8; // Extra buffer at bottom to prevent spillover
 const MIN_LANE_HEIGHT = 110; // Minimum to fit sidebar content (name + title + add button)
 const COLLAPSED_LANE_HEIGHT = 40; // Height for collapsed lanes
+// Height for a lane a filter has emptied. Matches the collapsed height so a
+// filtered board reads as a consistent stack of slim strips.
+const EMPTY_LANE_HEIGHT = 40;
 
 // Stable empty defaults to avoid creating new references on each render
 const EMPTY_SET = new Set<string>();
@@ -189,6 +205,7 @@ export interface TimelineRef {
 
 export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline({
   projects,
+  allProjects,
   teamMembers,
   dependencies,
   leaveBlocks = EMPTY_LEAVE_BLOCKS,
@@ -196,6 +213,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   dayWidth: dayWidthProp,
   selectedProjectId,
   filteredOwners,
+  slimEmptyLanes = false,
   newDependencyIds,
   isLocked = false,
   isFullscreen = false,
@@ -319,25 +337,18 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     }
   }, [onUpdateProject]);
 
+  // Source for the date range: the unfiltered list when the parent supplies it,
+  // otherwise whatever we were rendered with.
+  const boundsProjects = allProjects ?? projects;
+
   const { timelineStart, timelineEnd, visibleFYs } = useMemo(() => {
-    // Default window: January 2025 to December 2030 (FY2025–FY2030). Extend it to
-    // cover any project dates that fall outside, so out-of-range projects never
-    // render off-screen with a negative offset / past the right edge.
-    let minYear = 2025;
-    let maxYear = 2030;
-    // Dates are ISO "YYYY-MM-DD" — read the calendar year directly (timezone-safe).
-    const consider = (iso?: string) => {
-      const year = iso ? parseInt(iso.slice(0, 4), 10) : NaN;
-      if (Number.isNaN(year)) return;
-      if (year < minYear) minYear = year;
-      if (year > maxYear) maxYear = year;
-    };
-    projects.forEach(p => { consider(p.startDate); consider(p.endDate); });
-    const start = new Date(minYear, 0, 1); // January 1
-    const end = new Date(maxYear, 11, 31); // December 31
+    // Measured over ALL projects, not the filtered subset, so the axis doesn't
+    // shift when a filter is applied (see allProjects). Shares one definition
+    // with the image exports — see utils/timelineBounds.
+    const { start, end, minYear, maxYear } = getTimelineBounds(boundsProjects);
     const fys = getVisibleFYs(minYear, maxYear - minYear + 1);
     return { timelineStart: start, timelineEnd: end, visibleFYs: fys };
-  }, [projects]);
+  }, [boundsProjects]);
 
   const totalDays = dateFnsDiff(timelineEnd, timelineStart);
   const totalWidth = totalDays * dayWidth;
@@ -915,6 +926,17 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   // is as tall as the lowest pill bottom — floored at the full 4-slot capacity
   // frame so light lanes still reserve it, and growing past it when a member is
   // over-allocated so every stacked pill stays visible.
+  // Lanes a filter has emptied. Only populated while `slimEmptyLanes` is on, so
+  // an unfiltered board keeps its full-height empty state.
+  const emptyLaneIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!slimEmptyLanes) return ids;
+    displayedTeamMembers.forEach(member => {
+      if ((projectsByOwner[member.name]?.length ?? 0) === 0) ids.add(member.id);
+    });
+    return ids;
+  }, [slimEmptyLanes, displayedTeamMembers, projectsByOwner]);
+
   const laneHeights = useMemo(() => {
     const heights: number[] = [];
     // The 4-slot frame: four stacked Smalls (3 gaps between them). This equals
@@ -926,6 +948,13 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       // Use collapsed height for collapsed lanes
       if (collapsedLanes.has(member.id)) {
         heights.push(COLLAPSED_LANE_HEIGHT);
+        return;
+      }
+
+      // Filtered down to nothing — don't reserve the capacity frame for a lane
+      // with no pills in it.
+      if (emptyLaneIds.has(member.id)) {
+        heights.push(EMPTY_LANE_HEIGHT);
         return;
       }
 
@@ -944,7 +973,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     });
 
     return heights;
-  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes]);
+  }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes, emptyLaneIds]);
 
   // Over-allocation markers per owner. Capacity is no longer a hard limit — a
   // member can be pushed past their 4 slots — so wherever their concurrent load
@@ -1138,6 +1167,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                     height={laneHeights[idx]}
                     isLocked={isLocked}
                     isCollapsed={collapsedLanes.has(member.id)}
+                    isEmpty={emptyLaneIds.has(member.id)}
                     railMode={sidebarCollapsed}
                     onToggleCollapse={onToggleLaneCollapse ? () => onToggleLaneCollapse(member.id) : undefined}
                     onEdit={() => onEditTeamMember(member)}

@@ -957,12 +957,14 @@ function App() {
         <Timeline
           ref={timelineRef}
           projects={filteredProjects}
+          allProjects={data.projects}
           teamMembers={data.teamMembers}
           dependencies={data.dependencies || []}
           leaveBlocks={data.leaveBlocks || []}
           dayWidth={dayWidth}
           selectedProjectId={selectedProjectId}
           filteredOwners={filters.owners.length > 0 ? filters.owners : undefined}
+          slimEmptyLanes={hasActiveFilters(filters)}
           newDependencyIds={newDependencyIds}
           isLocked={isLocked}
           isFullscreen={isFullscreen}

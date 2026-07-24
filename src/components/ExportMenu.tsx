@@ -43,6 +43,10 @@ interface ExportMenuProps {
   // Hide the "copy embed code" action when the app is itself the embedded view —
   // a framed viewer has no need to grab the embed snippet.
   embedMode?: boolean;
+  // Unfiltered project list, used only to derive the timeline's date range for
+  // the image exports so they match what Timeline rendered. Data exports still
+  // use `projects` (the filtered set), so JSON/CSV export what's on screen.
+  allProjects?: Project[];
 }
 
 // The ready-to-paste SharePoint snippet. Built from the live origin the app is
@@ -76,7 +80,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function ExportMenu({ projects, teamMembers, dependencies, embedMode = false }: ExportMenuProps) {
+export function ExportMenu({ projects, teamMembers, dependencies, embedMode = false, allProjects }: ExportMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   // Which export is currently running (disables the list and shows progress),
   // and the last error message (so a failed export never fails silently).
@@ -92,7 +96,7 @@ export function ExportMenu({ projects, teamMembers, dependencies, embedMode = fa
   // Get platform-appropriate shortcut display
   const exportShortcut = `${getModifierKeySymbol()}E`;
 
-  const exportOptions = getExportOptions(projects, teamMembers, dependencies);
+  const exportOptions = getExportOptions(projects, teamMembers, dependencies, allProjects ?? projects);
 
   const runExport = async (option: (typeof exportOptions)[number]) => {
     if (busyId) return; // one export at a time

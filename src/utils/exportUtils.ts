@@ -3,6 +3,7 @@ import type { Project, TeamMember, Dependency } from '../types';
 import { analytics } from './analytics';
 import { getStatusNameByHex } from './statusColors';
 import { SIZE_LABELS, DEFAULT_SIZE } from './capacity';
+import { getTimelineBounds } from './timelineBounds';
 
 interface ExportOption {
   id: string;
@@ -76,25 +77,6 @@ async function injectStylesheets(clone: HTMLElement): Promise<void> {
   const style = document.createElement('style');
   style.textContent = styleElements.join('\n');
   clone.insertBefore(style, clone.firstChild);
-}
-
-// Mirrors Timeline.tsx's timelineStart/timelineEnd: the roadmap spans FY2025–FY2030
-// by default but widens to cover any project whose dates fall outside that range.
-// The export must use the SAME bounds the component rendered with, otherwise the
-// per-day pixel width (derived from the header's rendered width) and every crop
-// offset are measured against the wrong origin and the window lands misaligned.
-function getTimelineBounds(projects: Project[]): { start: Date; end: Date } {
-  let minYear = 2025;
-  let maxYear = 2030;
-  // Dates are ISO "YYYY-MM-DD" — read the calendar year directly (timezone-safe).
-  const consider = (iso?: string) => {
-    const year = iso ? parseInt(iso.slice(0, 4), 10) : NaN;
-    if (Number.isNaN(year)) return;
-    if (year < minYear) minYear = year;
-    if (year > maxYear) maxYear = year;
-  };
-  projects.forEach(p => { consider(p.startDate); consider(p.endDate); });
-  return { start: new Date(minYear, 0, 1), end: new Date(maxYear, 11, 31) };
 }
 
 // PDF Export - uses dynamic imports to code-split heavy libraries
@@ -598,20 +580,28 @@ function exportToCSV(projects: Project[]) {
 export function getExportOptions(
   projects: Project[],
   teamMembers: TeamMember[],
-  dependencies: Dependency[]
+  dependencies: Dependency[],
+  // Projects the TIMELINE was rendered from (unfiltered). The image captures
+  // derive their date range from this, because getTimelineBounds must agree with
+  // what Timeline actually laid out — measuring the bounds off a filtered subset
+  // while the component rendered the full range puts every crop offset and the
+  // per-day pixel width against the wrong origin. Data exports below stay on
+  // `projects`, so JSON/CSV still export what you can see. Defaults to
+  // `projects` for callers that don't filter.
+  boundsProjects: Project[] = projects
 ): ExportOption[] {
   return [
     {
       id: 'report',
       label: 'For report',
       description: 'Copy a crisp image to paste into slides or docs',
-      action: () => copyTimelineForReport(projects)
+      action: () => copyTimelineForReport(boundsProjects)
     },
     {
       id: 'pdf',
       label: 'Export as PDF',
       description: 'Save as PDF with today\'s date',
-      action: () => exportTimelineToPDF(projects)
+      action: () => exportTimelineToPDF(boundsProjects)
     },
     {
       id: 'json',

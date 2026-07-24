@@ -167,6 +167,7 @@ export const Toolbar = memo(function Toolbar({
 
           <ExportMenu
             projects={filteredProjects}
+            allProjects={projects}
             teamMembers={teamMembers}
             dependencies={dependencies}
             embedMode={embedMode}

@@ -8,13 +8,18 @@ interface SortableMemberLaneProps {
   height: number;
   isLocked?: boolean; // When true, disable sorting and add project
   isCollapsed?: boolean; // When true, lane is collapsed to minimal height
+  // True when a filter has left this lane with nothing to show. Renders at the
+  // same slim height as a collapsed lane, but is NOT the user's collapse state —
+  // the chevron still reads "expanded", because expanding it wouldn't reveal
+  // anything and clearing the filter restores the lane on its own.
+  isEmpty?: boolean;
   railMode?: boolean; // When true, the whole sidebar is a thin vertical rail
   onToggleCollapse?: () => void;
   onEdit: () => void;
   onAddProject: () => void;
 }
 
-export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, railMode = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
+export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, isEmpty = false, railMode = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
   const {
     attributes,
     listeners,
@@ -58,7 +63,7 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
     <div
       ref={setNodeRef}
       style={style}
-      className={`${styles.memberLane} ${isDragging ? styles.dragging : ''} ${isCollapsed ? styles.collapsed : ''}`}
+      className={`${styles.memberLane} ${isDragging ? styles.dragging : ''} ${isCollapsed || isEmpty ? styles.collapsed : ''}`}
     >
       <div className={styles.memberLaneContent}>
         {/* Collapse toggle button */}
@@ -97,10 +102,10 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
         )}
         <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
           <span className={styles.memberName}>{member.name}</span>
-          {!isCollapsed && <span className={styles.memberTitle}>{member.jobTitle}</span>}
+          {!isCollapsed && !isEmpty && <span className={styles.memberTitle}>{member.jobTitle}</span>}
         </div>
       </div>
-      {!isCollapsed && (
+      {!isCollapsed && !isEmpty && (
         <button
           className={styles.addProjectBtn}
           onClick={onAddProject}
