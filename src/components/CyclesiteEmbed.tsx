@@ -6,7 +6,7 @@ interface CyclesiteEmbedProps {
 }
 
 // Hidden feature: full-screen embed of the Cyclesite traffic-flow dashboard.
-// Opened by searching "cyclesite" (see SearchFilter) or via the ?cyclesite URL param.
+// Opened only by searching "cyclesite" while unlocked (see SearchFilter).
 export function CyclesiteEmbed({ onClose }: CyclesiteEmbedProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

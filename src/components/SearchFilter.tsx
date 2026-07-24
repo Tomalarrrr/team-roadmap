@@ -77,17 +77,13 @@ export const SearchFilter = memo(function SearchFilter({
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
-  // Auto-open games from shareable URL params (?ludo) — initialised here
-  // instead of in a mount effect so there's no setState-after-mount.
-  const [showLudo, setShowLudo] = useState(
-    // .has() (not !!get()) so the intended shareable form "?ludo" opens the game —
-    // get() returns "" for a valueless param, which is falsy.
-    () => new URLSearchParams(window.location.search).has('ludo')
-  );
-  // Hidden feature: full-screen Cyclesite traffic-flow embed (?cyclesite or search "cyclesite").
-  const [showCyclesite, setShowCyclesite] = useState(
-    () => new URLSearchParams(window.location.search).has('cyclesite')
-  );
+  // Hidden features (Ludo game, Cyclesite traffic-flow embed). Deliberately NOT
+  // openable via URL params: the only entry point is the secret search term
+  // below, which is gated on the vault being unlocked — so a locked viewer or
+  // read-only embed can never reach them, and the URL can't be shared around
+  // the lock.
+  const [showLudo, setShowLudo] = useState(false);
+  const [showCyclesite, setShowCyclesite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
