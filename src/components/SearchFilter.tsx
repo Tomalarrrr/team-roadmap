@@ -6,6 +6,7 @@ import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
 
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
+const Ludo2Game = lazy(() => import('./ludo2/Ludo2Game').then(m => ({ default: m.Ludo2Game })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 import { CyclesiteEmbed } from './CyclesiteEmbed';
 
@@ -70,6 +71,7 @@ export const SearchFilter = memo(function SearchFilter({
   // read-only embed can never reach them, and the URL can't be shared around
   // the lock.
   const [showLudo, setShowLudo] = useState(false);
+  const [showLudo2, setShowLudo2] = useState(false);
   const [showCyclesite, setShowCyclesite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -102,22 +104,26 @@ export const SearchFilter = memo(function SearchFilter({
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen]);
 
-  // Easter egg: typing "ludo" opens the game (only when the site is unlocked).
-  // Handled during render rather than in an effect — it converges because the
-  // matching branch immediately clears the search box, so the condition is
-  // false on the next render. All state here is local.
-  if (!isLocked) {
+  // Easter eggs: typing a magic word opens a hidden feature (only when the
+  // site is unlocked). Matched after a short settle-debounce rather than
+  // per-keystroke because "ludo" is a strict prefix of "ludo2" — an eager
+  // exact match would open Ludo v1 on the fourth keystroke and eat the input
+  // before the "2" could ever land.
+  useEffect(() => {
+    if (isLocked) return;
     const magic = search.trim().toLowerCase();
-    if (magic === 'ludo') {
-      setShowLudo(true);
+    let open: (() => void) | null = null;
+    if (magic === 'ludo') open = () => setShowLudo(true);
+    else if (magic === 'ludo2') open = () => setShowLudo2(true);
+    else if (magic === 'cyclesite') open = () => setShowCyclesite(true);
+    if (!open) return;
+    const timer = setTimeout(() => {
+      open();
       setSearch('');
       setIsOpen(false);
-    } else if (magic === 'cyclesite') {
-      setShowCyclesite(true);
-      setSearch('');
-      setIsOpen(false);
-    }
-  }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [search, isLocked]);
 
   // Compute search results as derived state (no effect needed)
   const { searchResults, totalResultCount } = useMemo(() => {
@@ -289,6 +295,14 @@ export const SearchFilter = memo(function SearchFilter({
         <GameErrorBoundary gameName="Ludo" onClose={() => setShowLudo(false)}>
           <Suspense fallback={null}>
             <LudoGame onClose={() => setShowLudo(false)} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
+        document.body
+      )}
+      {showLudo2 && createPortal(
+        <GameErrorBoundary gameName="Ludo 2" onClose={() => setShowLudo2(false)}>
+          <Suspense fallback={null}>
+            <Ludo2Game onClose={() => setShowLudo2(false)} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
         document.body
