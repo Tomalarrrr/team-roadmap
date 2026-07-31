@@ -61,7 +61,7 @@
   white-space: nowrap;
   z-index: 10000;
   pointer-events: none;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-popover);
   border: 1px solid var(--border-light);
   display: flex;
   flex-direction: column;

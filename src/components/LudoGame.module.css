@@ -301,7 +301,10 @@
 
 .statsTable td {
   padding: 2px 0;
-  color: var(--text-tertiary);
+  /* --text-tertiary has never existed, so this declaration was invalid and the
+     cells silently inherited their parent's colour. --text-muted is the token
+     that was meant, and it is the lightest grey that still clears AA. */
+  color: var(--text-muted);
 }
 
 .statsColorDot {

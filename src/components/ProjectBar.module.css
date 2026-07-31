@@ -10,7 +10,7 @@
      is the costliest part of a cursor sweep across a dense board. The hover shadow
      still changes — it just snaps instantly, which is imperceptible next to the lift. */
   transition: transform 100ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)),
-              filter 150ms ease;
+              filter var(--transition-fast);
   box-shadow: var(--shadow-sm);
   z-index: 2;
   min-width: 80px;
@@ -141,7 +141,7 @@
   border-radius: 3px;
   z-index: 6;
   opacity: 0;
-  transition: opacity 0.15s, color 0.15s, background 0.15s;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
 }
 
 .projectBar:hover .laneHandle {
@@ -249,6 +249,11 @@
   color: rgba(255, 255, 255, 0.85);
   white-space: nowrap;
   flex-shrink: 0;
+  /* The most-repeated string on the board, and it re-renders on every frame of
+     a drag or resize. With proportional figures the date changed width as the
+     digits changed, so the label shifted under the cursor while dragging.
+     Matches .monthLabel, which already sets this. */
+  font-variant-numeric: tabular-nums;
 }
 
 .projectLabel {
@@ -277,7 +282,7 @@
   z-index: 9999;
   background: var(--bg-primary);
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-popover);
   border: 1px solid var(--border-light);
   overflow: hidden;
   /* Faster, snappier menu appearance */
@@ -433,7 +438,7 @@
   white-space: nowrap;
   z-index: 3;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: var(--tracking-caps);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 

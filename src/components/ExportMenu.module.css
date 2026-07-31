@@ -13,7 +13,7 @@
   color: var(--text-secondary);
   font-size: var(--text-md);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-fast);
 }
 
 .trigger:hover {
@@ -60,7 +60,7 @@
   font-size: var(--text-sm);
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-caps);
   color: var(--text-muted);
 }
 

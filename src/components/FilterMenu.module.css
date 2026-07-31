@@ -15,7 +15,7 @@
   color: var(--text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-fast);
 }
 
 .trigger:hover {
@@ -120,7 +120,7 @@
   font-size: var(--text-xs);
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-caps);
   color: var(--text-muted);
 }
 
@@ -141,7 +141,7 @@
   font-size: var(--text-base);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-fast);
 }
 
 .chip:hover {
@@ -192,7 +192,7 @@
   font-size: var(--text-sm);
   font-weight: var(--fw-medium);
   cursor: pointer;
-  transition: color 0.15s;
+  transition: color var(--transition-fast);
 }
 
 .clearBtn:hover {

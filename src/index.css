@@ -39,10 +39,18 @@
   /* Dependency connector — soft slate at rest so it recedes; turns accent-blue on
      hover / when its connected project is hovered. */
   --dependency-line: #9aa6b2;
+  /* Elevation ramp. sm→hover cover in-page surfaces; popover and modal were
+     missing, which is why every menu, dropdown and dialog had invented its own
+     — nine different recipes for two elevations, including the same geometry at
+     two different alphas sitting next to each other in the toolbar. The hairline
+     ring on --shadow-popover defines the panel's edge against a light page,
+     where a soft shadow alone leaves it looking unanchored. */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
   --shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.12);
+  --shadow-popover: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.3);
   /* Radius ramp. --radius-xs exists for hairline chips/swatches that looked
      pinched at 4px; anything larger than --radius-lg should use --radius-xl so
      nested corners stay concentric (outer radius = inner radius + padding). */
@@ -91,6 +99,12 @@
   --leading-tight: 1.2;
   --leading-snug: 1.35;
   --leading-normal: 1.5;
+  /* Tracking for the app's uppercase micro-labels — section headings and small
+     status badges. Capitals set at 9–11px need opening up or they read as a
+     solid block; 0.05em is the value most of them had already converged on by
+     hand, against outliers at 0.02, 0.03 and 0.06 that had no reason to differ.
+     (The vault dialog keeps its own wider, deliberately theatrical tracking.) */
+  --tracking-caps: 0.05em;
   /* Two-tier timeline header (FY/quarter band + month row). Shared by the
      sidebar header and timeline header so the two columns stay aligned. */
   --timeline-band-height: 22px;

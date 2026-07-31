@@ -11,7 +11,7 @@
   color: var(--text-muted);
   font-size: var(--text-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-fast);
 }
 
 .trigger:hover {
@@ -73,7 +73,7 @@
   max-width: 560px;
   background: var(--bg-primary);
   border-radius: var(--radius-lg);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-modal);
   overflow: hidden;
   animation: slideIn 0.2s ease;
 }
@@ -127,7 +127,7 @@
   border-radius: var(--radius-full);
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-fast);
 }
 
 .clearSearch:hover {

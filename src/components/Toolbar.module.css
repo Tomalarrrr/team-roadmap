@@ -31,11 +31,16 @@
 }
 
 .title {
-  font-size: var(--text-lg);
+  /* The product's own title sat at --text-lg: smaller than a modal's <h2> and
+     the same size and weight as a sidebar row label, so the top of the
+     hierarchy was outranked by a dialog and tied with a table heading.
+     --text-xl restores the order. Larger type needs proportionally tighter
+     tracking, hence -0.02em rather than the -0.01em used at body sizes. */
+  font-size: var(--text-xl);
   font-weight: var(--fw-semibold);
   color: var(--text-primary);
   margin: 0;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -130,7 +135,7 @@
   font-weight: var(--fw-medium);
   color: var(--accent-blue);
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: var(--tracking-caps);
   padding: var(--space-1) var(--space-2);
   background: var(--accent-blue-light);
   border-radius: var(--radius-full);

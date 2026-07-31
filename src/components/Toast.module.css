@@ -19,7 +19,7 @@
   color: var(--text-primary);
   border-radius: var(--radius-md);
   font-size: var(--text-lg);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-popover);
   animation: toastIn 0.2s ease;
   pointer-events: auto;
   border-left: 4px solid transparent;
@@ -45,7 +45,7 @@
   font-size: var(--text-md);
   font-weight: var(--fw-medium);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--transition-fast);
   flex-shrink: 0;
 }
 

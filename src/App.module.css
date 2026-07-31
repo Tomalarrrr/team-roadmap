@@ -25,7 +25,7 @@
      the edge. */
   padding: 0;
   overflow: hidden;
-  transition: padding 200ms ease;
+  transition: padding var(--transition-normal);
 }
 
 /* Shown in place of a silently blank board when the active filters match nothing.
@@ -177,7 +177,7 @@
   background: var(--warning-amber);
   color: white;
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-popover);
   font-size: 0.9rem;
   z-index: 1000;
   animation: slideUp 0.3s ease-out;
@@ -196,7 +196,7 @@
   background: var(--error-red-dark);
   color: white;
   border-radius: var(--radius-md);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-popover);
   font-size: 0.9rem;
   z-index: 1000;
   animation: slideUp 0.3s ease-out;

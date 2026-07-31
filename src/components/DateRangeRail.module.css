@@ -114,7 +114,7 @@
   background: var(--at-blue, #0b74e0);
   cursor: grab;
   z-index: 1;
-  transition: left 150ms var(--ease-out-quart), width 150ms var(--ease-out-quart);
+  transition: left var(--transition-fast), width var(--transition-fast);
 }
 
 /* Fatter invisible grab area for the thin fill bar. */
@@ -141,8 +141,8 @@
   /* Floating-disc shadow so the knob lifts off the line, not a flat ring. */
   box-shadow: 0 1px 2px rgba(16, 24, 40, 0.12), 0 2px 5px rgba(16, 24, 40, 0.1);
   z-index: 2;
-  transition: transform 120ms var(--ease-spring), box-shadow 120ms ease,
-              left 150ms var(--ease-out-quart);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+              left var(--transition-fast);
 }
 
 /* Expand the touch/click target without enlarging the visual dot. */

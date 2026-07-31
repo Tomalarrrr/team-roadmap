@@ -9,7 +9,7 @@
   border-radius: 0;
   overflow: hidden;
   min-height: 0;
-  transition: border-radius 200ms ease;
+  transition: border-radius var(--transition-normal);
 }
 
 /* Fullscreen mode */
@@ -62,7 +62,7 @@
   cursor: pointer;
   border-radius: var(--radius-sm);
   opacity: 0.6;
-  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .collapseSidebarBtn:hover {
@@ -118,7 +118,7 @@
   font-size: var(--text-sm);
   font-weight: var(--fw-semibold);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-caps);
   color: var(--text-muted);
   border-bottom: 1px solid var(--border-light);
   background: var(--bg-primary);
@@ -139,7 +139,7 @@
   cursor: pointer;
   border-radius: var(--radius-sm);
   opacity: 0.6;
-  transition: opacity 0.15s, background-color 0.15s, color 0.15s;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .addMemberHeaderBtn:hover {
@@ -204,7 +204,7 @@
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0.5;
-  transition: opacity 0.15s, color 0.15s, transform 0.15s;
+  transition: opacity var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
   flex-shrink: 0;
   margin-top: 2px;
   padding: 0;
@@ -277,7 +277,7 @@
 
 .memberInfo {
   cursor: pointer;
-  transition: opacity 0.15s;
+  transition: opacity var(--transition-fast);
 }
 
 .memberInfo:hover {
@@ -347,11 +347,11 @@
   border-radius: var(--radius-md);
   color: var(--text-muted);
   font-size: var(--text-base);
-  transition: transform 80ms ease,
-              border-color 120ms ease,
-              color 120ms ease,
-              background-color 120ms ease,
-              box-shadow 120ms ease;
+  transition: transform var(--transition-instant),
+              border-color var(--transition-fast),
+              color var(--transition-fast),
+              background-color var(--transition-fast),
+              box-shadow var(--transition-fast);
   flex-shrink: 0;
 }
 
@@ -448,7 +448,7 @@
 
 /* Smooth zoom animation for header */
 .header.zooming {
-  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--transition-slow);
 }
 
 .header:active {
@@ -495,9 +495,10 @@
   font-size: var(--text-2xs);
   font-weight: var(--fw-bold);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: var(--tracking-caps);
   color: var(--text-secondary);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Tier 2: months (sit below the quarter band) ──────────────────────── */
@@ -540,7 +541,7 @@
 
 /* Smooth zoom animation class */
 .lanes.zooming {
-  transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform var(--transition-slow);
 }
 
 .lane {
@@ -554,7 +555,7 @@
   /* Ensure positioned children are relative to this lane */
   isolation: isolate;
   /* Smooth background transitions */
-  transition: background-color 150ms ease;
+  transition: background-color var(--transition-fast);
   /* CSS containment for better performance - limits style/layout recalculations */
   contain: layout style;
 }
@@ -680,7 +681,7 @@
   font-size: var(--text-2xs);
   font-weight: var(--fw-bold);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: var(--tracking-caps);
   padding: 2px var(--space-2);
   border-radius: var(--radius-sm);
   white-space: nowrap;
@@ -718,11 +719,11 @@
   border-radius: var(--radius-full);
   font-size: var(--text-md);
   font-weight: var(--fw-medium);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-popover);
   cursor: pointer;
-  transition: transform 150ms var(--ease-out-quart, ease),
-              box-shadow 150ms ease,
-              background-color 150ms ease;
+  transition: transform var(--transition-fast),
+              box-shadow var(--transition-fast),
+              background-color var(--transition-fast);
 }
 
 .jumpToTodayBtn:hover {
@@ -749,7 +750,7 @@
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-full);
   padding: var(--space-1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--shadow-popover);
 }
 
 .fullscreenZoomBtn {
@@ -763,7 +764,7 @@
   color: var(--text-secondary);
   border-radius: 50%;
   cursor: pointer;
-  transition: background-color 150ms ease, color 150ms ease;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .fullscreenZoomBtn:hover {
