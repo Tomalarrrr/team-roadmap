@@ -1,11 +1,15 @@
 .container {
   display: flex;
-  height: calc(100vh - 60px);
+  /* Fills whatever the toolbar leaves (see .main in App.module.css) instead of
+     subtracting a hardcoded toolbar height. */
+  flex: 1;
   background: var(--bg-secondary);
-  border-radius: var(--radius-lg);
+  /* No radius: the board is full-bleed, so a rounded corner here only notched
+     the page background into the four corners of the grid. */
+  border-radius: 0;
   overflow: hidden;
   min-height: 0;
-  transition: height 200ms ease, border-radius 200ms ease;
+  transition: border-radius 200ms ease;
 }
 
 /* Fullscreen mode */
@@ -164,8 +168,13 @@
   background: var(--bg-primary);
   touch-action: none;
   overflow: visible;
-  min-height: 100px; /* Ensure enough space for name + title + button */
-  transition: background 0.2s ease;
+  /* Row height comes from the timeline via --lane-h (set per lane in
+     SortableMemberLane) so the sidebar stays locked row-for-row with the bars —
+     but as a property, not an inline style, so media queries can still override
+     it. Falls back to the old floor when the variable is absent. */
+  height: var(--lane-h, auto);
+  min-height: var(--lane-h, 100px);
+  transition: background var(--transition-normal);
 }
 
 .memberLane:hover {
@@ -241,10 +250,20 @@
   justify-content: center;
   color: var(--text-muted);
   cursor: grab;
-  opacity: 0.35;
-  transition: opacity 0.1s, color 0.1s;
+  /* 0.35 put the grip at ~1.6:1 — present in the DOM, absent to the eye. */
+  opacity: 0.6;
+  transition: opacity var(--transition-fast), color var(--transition-fast);
   flex-shrink: 0;
-  margin-top: 3px;
+  /* 2px to match .collapseBtn beside it; the two were nudged by different
+     amounts (2px vs 3px) so the pair sat a pixel out of level. */
+  margin-top: 2px;
+}
+
+/* Locked: the box still holds the gutter open so the lane name below never
+   reflows when the board is unlocked, but there is no grip to see or grab. */
+.dragHandleReserved {
+  visibility: hidden;
+  cursor: default;
 }
 
 .dragHandle:hover {
@@ -287,34 +306,37 @@
 
 .addProjectBtn {
   align-self: flex-start;
-  margin-left: var(--space-7); /* Align with member name (drag handle 18px + gap 8px) */
+  /* Sits directly under the lane name. Both the handle box and this share
+     --lane-gutter, so the two stay aligned in the locked and unlocked states
+     alike; the old magic 28px matched neither (the gutter is 18px + 8px = 26px)
+     and so was permanently 2px out. */
+  margin-left: var(--lane-gutter);
   padding: var(--space-1) var(--space-3);
   display: flex;
   align-items: center;
   gap: var(--space-1);
   background: transparent;
+  /* --text-muted is the lightest grey that still clears AA. Fading it to 60%
+     dropped this 9.6px label to ~2.3:1, so the one affordance for adding work
+     was the least legible text on the board. Full-strength muted instead: still
+     quiet, now readable. */
   color: var(--text-muted);
   border-radius: var(--radius-full);
   font-size: var(--text-xs);
   font-weight: var(--fw-medium);
-  transition: transform 80ms ease,
-              background-color 120ms ease,
-              color 120ms ease,
-              opacity 120ms ease;
+  transition: background-color var(--transition-fast),
+              color var(--transition-fast);
   border: none;
-  opacity: 0.6;
 }
 
 .addProjectBtn:hover {
-  background: rgba(107, 140, 174, 0.15);
+  background: var(--bg-tertiary);
   color: var(--text-primary);
-  opacity: 1;
-  transform: translateY(-1px);
 }
 
 .addProjectBtn:active {
-  transform: scale(0.94) translateY(0);
-  transition-duration: 40ms;
+  transform: scale(var(--press-scale));
+  transition-duration: var(--press-duration);
 }
 
 .addMemberBtn {
@@ -338,7 +360,7 @@
   color: var(--accent-blue);
   background: var(--accent-blue-light);
   transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.15);
+  box-shadow: 0 2px 8px rgba(var(--accent-rgb), 0.15);
 }
 
 .addMemberBtn:active {
@@ -525,7 +547,10 @@
   position: absolute;
   left: 0;
   right: 0;
-  border-bottom: 2px solid var(--border-light);
+  /* 1px to match .memberLane, the sidebar half of this same row. At 2px the
+     board's most-repeated horizontal rule visibly changed weight halfway across
+     the screen, at the seam between the two columns. */
+  border-bottom: 1px solid var(--border-light);
   /* Ensure positioned children are relative to this lane */
   isolation: isolate;
   /* Smooth background transitions */
@@ -546,7 +571,7 @@
   background: var(--accent-blue-light) !important;
   transition: background-color 100ms ease;
   /* Subtle glow effect when dragging over */
-  box-shadow: inset 0 0 20px rgba(59, 130, 246, 0.1);
+  box-shadow: inset 0 0 20px rgba(var(--accent-rgb), 0.1);
 }
 
 /* Drag-to-create state */
@@ -566,7 +591,7 @@
   height: calc(100% - 32px);
   background: var(--accent-blue-light);
   border: 2px dashed var(--accent-blue);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   opacity: 0.7;
   pointer-events: none;
   z-index: 3;
@@ -622,6 +647,15 @@
      color(srgb …), which html2canvas (the PDF / "For report" image export) cannot
      parse — it throws mid-capture, failing the export. */
   background: rgba(10, 99, 192, 0.9);
+  /* A hairline casing so the playhead survives the bars it crosses. Against a
+     project fill the blue alone is invisible — 1.01:1 on On Track green, 1.09:1
+     on Off Track — which hid "today" precisely where the work is. The 1px light
+     sheath either side restores separation on any fill and is imperceptible
+     against the pale page, where the blue already reads at 5.65:1.
+     Written as a spread box-shadow (not an outline) so it hugs the 1.5px line
+     exactly, and in rgba() rather than color-mix() because html2canvas — the
+     PDF / report export — cannot parse serialised color() values. */
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.55);
   z-index: 5;
 }
 
@@ -770,19 +804,38 @@
 @media (max-width: 768px) {
   .container {
     flex-direction: column;
-    height: calc(100vh - 60px);
+    /* Inherits its height from the flex shell (see .main). The old
+       calc(100vh - 60px) was most wrong exactly here: below 768px the toolbar
+       wraps to two rows and stands ~101px tall, so the board overhung the
+       viewport by ~40px and its last lane sat under the fold. */
   }
 
   .sidebar {
     width: 100%;
     min-width: 100%;
-    max-height: 200px;
+    /* Sized by its content — a single row of team chips — rather than pinned to
+       a 200px block that left most of the strip empty. */
+    max-height: none;
     flex-direction: row;
     flex-wrap: nowrap;
     overflow-x: auto;
     overflow-y: hidden;
     border-right: none;
     border-bottom: 1px solid var(--border-light);
+  }
+
+  /* The lanes live inside .sidebarContent, so the row layout has to be declared
+     here too — setting flex-direction on .sidebar alone laid out that single
+     wrapper in a row and left the lanes stacked vertically inside it, which is
+     why the mobile sidebar read as a tall column of near-empty blocks. */
+  .sidebarContent {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    /* The desktop scroll-sync transform is meaningless in the horizontal strip
+       and would drag the chips out of view as the board scrolls. */
+    transform: none !important;
+    will-change: auto;
   }
 
   /* The vertical rail is a desktop affordance — keep the full-width row layout
@@ -798,7 +851,11 @@
 
   .memberLane {
     min-width: 140px;
+    /* On a phone the sidebar is a horizontal strip of team chips, not rows
+       aligned to the bars, so each lane sizes to its own content instead of the
+       desktop row height it carries in --lane-h. */
     height: auto;
+    min-height: 0;
     padding: var(--space-3);
     border-bottom: none;
     border-right: 1px solid var(--border-light);

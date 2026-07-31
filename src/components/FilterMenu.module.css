@@ -25,8 +25,8 @@
 }
 
 .trigger:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .trigger:active {
@@ -150,8 +150,8 @@
 }
 
 .chip:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .chip.chipActive {
@@ -200,7 +200,7 @@
 }
 
 .clearBtn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
   border-radius: var(--radius-sm);
 }

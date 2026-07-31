@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeStatusColor, DEFAULT_STATUS_COLOR, isOnHold } from '../statusColors';
+import {
+  normalizeStatusColor,
+  DEFAULT_STATUS_COLOR,
+  isOnHold,
+  STATUS_COLORS,
+  getStatusNameByHex,
+  AUTO_COMPLETE_COLOR,
+} from '../statusColors';
 import { colorSchema } from '../../schemas/primitives';
 
 // Regression guard for the "edit doesn't save" bug: seed/imported data stored
@@ -23,11 +30,11 @@ describe('normalizeStatusColor', () => {
   });
 
   it('uppercases already-valid hex so swatch matching is exact', () => {
-    expect(normalizeStatusColor('#4a82be')).toBe('#4A82BE');
+    expect(normalizeStatusColor('#4179b5')).toBe('#4179B5');
   });
 
   it('maps legacy palette hex to the current equivalent', () => {
-    expect(normalizeStatusColor('#0070c0')).toBe('#4A82BE');
+    expect(normalizeStatusColor('#0070c0')).toBe('#4179B5');
   });
 
   it('falls back to the default for empty or unrecognized input', () => {
@@ -67,11 +74,46 @@ describe('isOnHold', () => {
   it('returns false for other statuses', () => {
     expect(isOnHold('#457028')).toBe(false); // On Track
     expect(isOnHold('#B5444A')).toBe(false); // Off Track
-    expect(isOnHold('#4A82BE')).toBe(false); // Complete
+    expect(isOnHold('#4179B5')).toBe(false); // Complete
   });
 
   it('returns false for empty/undefined input rather than defaulting to a status', () => {
     expect(isOnHold('')).toBe(false);
     expect(isOnHold(undefined)).toBe(false);
+  });
+});
+
+// Guards the palette contract itself. Two ways this has broken before:
+//  1. A status colour was chosen that its own white label text cannot sit on.
+//  2. A retired hex was added to LEGACY_COLOR_MAP with uppercase keys, while the
+//     lookup lowercases the input — so saved projects silently lost their status
+//     label (the pill rendered with no status at all).
+describe('status palette contract', () => {
+  const relLum = (hex: string) => {
+    const c = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const [r, g, b] = c.map(v => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  };
+  const contrastWithWhite = (hex: string) => 1.05 / (relLum(hex) + 0.05);
+
+  it('every status fill carries its white label at AA (4.5:1)', () => {
+    for (const { hex, name } of STATUS_COLORS) {
+      expect(
+        contrastWithWhite(hex),
+        `${name} (${hex}) is ${contrastWithWhite(hex).toFixed(2)}:1 against its white label`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('every retired hex still resolves to a real, named status', () => {
+    for (const legacy of ['#3e95ad', '#b571c0', '#6e7d89', '#a67a00', '#4a82be', '#0070c0']) {
+      const resolved = normalizeStatusColor(legacy);
+      expect(STATUS_COLORS.some(c => c.hex === resolved), `${legacy} → ${resolved}`).toBe(true);
+      expect(getStatusNameByHex(legacy)).toBeTruthy();
+    }
+  });
+
+  it('the auto-complete colour is a member of the palette', () => {
+    expect(STATUS_COLORS.some(c => c.hex === AUTO_COMPLETE_COLOR)).toBe(true);
   });
 });

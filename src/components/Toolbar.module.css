@@ -26,7 +26,8 @@
   width: auto;
   object-fit: contain;
   flex-shrink: 0;
-  opacity: 0.9;
+  /* Full strength: an organisation's mark should never be rendered at reduced
+     opacity — it reads as a faded or disabled asset. */
 }
 
 .title {
@@ -69,14 +70,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  /* 32px: the smallest comfortable pointer target, and on the 4pt ramp. The
+     toolbar previously mixed 30px and 24px boxes in the same row. */
+  width: var(--control-size);
+  height: var(--control-size);
   background: none;
   border: none;
-  border-radius: 6px;
+  /* 6px matched no token and sat beside 8px surfaces. */
+  border-radius: var(--radius-md);
   color: var(--text-secondary);
   cursor: pointer;
-  transition: all 0.15s;
+  /* Named properties rather than `all`, which also animated layout-affecting
+     properties on every state change. */
+  transition: background-color var(--transition-fast),
+              color var(--transition-fast);
 }
 
 .iconBtn:hover:not(:disabled) {
@@ -85,16 +92,18 @@
 }
 
 .iconBtn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent-blue);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .iconBtn:active:not(:disabled) {
-  transform: scale(0.94);
+  transform: scale(var(--press-scale));
 }
 
 .iconBtn:disabled {
-  opacity: 0.35;
+  /* 0.35 rendered undo/redo at ~1.6:1 — below the 3:1 a disabled control still
+     needs to be identifiable as a control. */
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
@@ -122,7 +131,7 @@
   color: var(--accent-blue);
   text-transform: uppercase;
   letter-spacing: 0.02em;
-  padding: 3px var(--space-2);
+  padding: var(--space-1) var(--space-2);
   background: var(--accent-blue-light);
   border-radius: var(--radius-full);
   margin-left: var(--space-1);

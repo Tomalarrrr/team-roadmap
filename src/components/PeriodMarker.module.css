@@ -30,7 +30,7 @@
   background: rgba(255, 255, 255, 0.95);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   padding: 2px var(--space-2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   /* Allow the chip to extend beyond a narrow band so short labels (e.g. a
      one-week "Christmas" marker) read in full rather than truncating to "C…". */
   max-width: 180px;
@@ -86,7 +86,7 @@
 .tooltipDot {
   width: 8px;
   height: 8px;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
 }
 

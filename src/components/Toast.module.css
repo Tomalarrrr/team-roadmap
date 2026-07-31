@@ -17,7 +17,7 @@
   padding: var(--space-3) var(--space-5);
   background: var(--bg-primary);
   color: var(--text-primary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: var(--text-lg);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
   animation: toastIn 0.2s ease;
@@ -40,7 +40,7 @@
   padding: var(--space-1) var(--space-3);
   background: rgba(255, 255, 255, 0.2);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: white;
   font-size: var(--text-md);
   font-weight: var(--fw-medium);
@@ -57,23 +57,28 @@
   background: rgba(255, 255, 255, 0.4);
 }
 
+/* Each toast is filled with the deeper shade that used to sit only on its left
+   edge. The lighter tokens (--success-green, --warning-amber) are tuned to be
+   read as dots and accents against a page, not as backgrounds for white text —
+   they carried it at 2.28:1 and 2.15:1. The deeper shades clear AA (5.02:1 and
+   5.02:1) while keeping each toast's hue instantly recognisable. */
 .toast.success {
-  background: var(--success-green);
-  border-left-color: #15803d;
+  background: #15803d;
+  border-left-color: #0f5f2e;
   color: white;
   border-color: transparent;
 }
 
 .toast.error {
-  background: var(--error-red);
-  border-left-color: #b91c1c;
+  background: #b91c1c;
+  border-left-color: #8f1515;
   color: white;
   border-color: transparent;
 }
 
 .toast.warning {
-  background: var(--warning-amber);
-  border-left-color: #d97706;
+  background: #b45309;
+  border-left-color: #8a3f07;
   color: white;
   border-color: transparent;
 }

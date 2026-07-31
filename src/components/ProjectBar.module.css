@@ -3,7 +3,7 @@
   /* Actual height is set inline per size (slot cost × UNIT_HEIGHT); this base
      just matches the smallest (Small = 28px) for the rare inline-less fallback. */
   min-height: 28px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
   /* Only transform (compositor-only) is transitioned. box-shadow is intentionally
      NOT animated: repainting a shadow every frame for 150ms on every hover in/out
@@ -77,10 +77,19 @@
 }
 
 /* On-hold pills are paused and excluded from the owner's 4-slot capacity total.
-   Dim them so a parked pill reads as "not counted" — otherwise a lane that still
-   stacks an on-hold pill could look full yet (correctly) show no over-capacity "!". */
+   They must read as "not counted" without becoming unreadable. Desaturating the
+   fill does that; fading the whole pill does not — opacity multiplies the white
+   label down with the background and dropped its contrast to 2.55:1 (from
+   5.67:1), far under the 4.5:1 the 13px bold title needs. saturate() leaves
+   achromatic white untouched, so the pill visibly recedes while the label
+   actually gets *more* legible. */
 .projectBar.onHold {
-  opacity: 0.6;
+  filter: saturate(0.4);
+}
+
+.projectBar.onHold:hover {
+  /* Keep the parked read on hover; brightness alone would re-saturate it. */
+  filter: saturate(0.4) brightness(1.05);
 }
 
 /* Dependency creation states */
@@ -110,7 +119,7 @@
   width: 12px;
   cursor: ew-resize;
   z-index: 5;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
 }
 
 .resizeHandle:hover {

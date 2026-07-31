@@ -18,8 +18,8 @@ interface PeriodMarkerContextMenuProps {
 }
 
 const MARKER_COLORS: { color: PeriodMarkerColor; label: string; bg: string }[] = [
-  { color: 'grey', label: 'Grey', bg: '#6E7D89' },
-  { color: 'yellow', label: 'Yellow', bg: '#A67A00' },
+  { color: 'grey', label: 'Grey', bg: '#697883' },
+  { color: 'yellow', label: 'Yellow', bg: '#986F00' },
   { color: 'orange', label: 'Orange', bg: '#e67635' },
   { color: 'red', label: 'Red', bg: '#B5444A' },
   { color: 'green', label: 'Green', bg: '#457028' }

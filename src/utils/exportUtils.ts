@@ -32,6 +32,39 @@ const EXPORT_CSS_PROPERTIES = [
   'vertical-align', 'text-overflow', 'word-break', 'overflow-wrap',
 ];
 
+/**
+ * Bake a CSS `filter: saturate(n)` into a literal background colour.
+ *
+ * html2canvas implements no CSS filter effects at all, so any element styled
+ * with one renders un-filtered in the export. On-hold pills rely on
+ * `saturate(0.4)` to read as "parked" (it replaced an `opacity` dim that was
+ * crushing their white label to 2.55:1), and without this they would print
+ * indistinguishable from active work — a real loss of meaning in a roadmap PDF
+ * that goes to stakeholders. Applying the same matrix the browser would use
+ * gives the export the identical colour, with no filter involved.
+ */
+function bakeSaturateIntoBackground(source: HTMLElement, target: HTMLElement): void {
+  const filter = window.getComputedStyle(source).filter;
+  const match = /saturate\(([\d.]+)\)/.exec(filter || '');
+  if (!match) return;
+
+  const rgb = /rgba?\(([^)]+)\)/.exec(window.getComputedStyle(source).backgroundColor);
+  if (!rgb) return;
+  const [r, g, b] = rgb[1].split(',').map(v => parseFloat(v));
+  if ([r, g, b].some(Number.isNaN)) return;
+
+  // SVG feColorMatrix type="saturate" — the same transform CSS applies.
+  const s = parseFloat(match[1]);
+  const ch = (wr: number, wg: number, wb: number) =>
+    Math.max(0, Math.min(255, Math.round(wr * r + wg * g + wb * b)));
+  const nr = ch(0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s);
+  const ng = ch(0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s);
+  const nb = ch(0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s);
+
+  target.style.backgroundColor = `rgb(${nr}, ${ng}, ${nb})`;
+  target.style.filter = 'none';
+}
+
 function inlineStyles(element: HTMLElement): HTMLElement {
   const clone = element.cloneNode(true) as HTMLElement;
   const elements = [element, ...Array.from(element.querySelectorAll('*'))];
@@ -48,6 +81,8 @@ function inlineStyles(element: HTMLElement): HTMLElement {
           clonedEl.style.setProperty(property, value);
         }
       }
+
+      bakeSaturateIntoBackground(el, clonedEl);
     }
   });
 

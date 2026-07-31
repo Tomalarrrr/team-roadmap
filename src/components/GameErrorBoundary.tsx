@@ -58,7 +58,7 @@ export class GameErrorBoundary extends Component<Props, State> {
               padding: '0.5rem 1.5rem',
               borderRadius: 6,
               border: 'none',
-              background: 'var(--accent, #4a90d9)',
+              background: 'var(--accent)',
               color: '#fff',
               cursor: 'pointer',
               fontSize: '0.9rem',

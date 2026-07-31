@@ -97,8 +97,8 @@
 }
 
 .status:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--at-blue-soft, #e9f2fd);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 /* Fixed-height zone so every bar shares a common BOTTOM baseline (the bottom of
@@ -182,9 +182,9 @@
 }
 
 .eprBox:focus-visible {
-  outline: none;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
   border-color: var(--at-blue);
-  box-shadow: 0 0 0 3px var(--at-blue-soft);
 }
 
 .eprLabel {

@@ -40,9 +40,9 @@
 }
 
 .chip:focus-visible {
-  outline: none;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
   border-color: var(--at-blue, #0b74e0);
-  box-shadow: 0 0 0 3px var(--at-blue-soft, #e9f2fd);
 }
 
 .span {
@@ -159,8 +159,8 @@
 }
 
 .handle:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px var(--at-blue-soft, #e9f2fd);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .handleActive {

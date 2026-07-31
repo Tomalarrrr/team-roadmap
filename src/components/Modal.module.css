@@ -23,7 +23,7 @@
 
 .modal {
   background: var(--bg-secondary);
-  border-radius: 16px;
+  border-radius: var(--radius-xl);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.05),
     0 25px 50px -12px rgba(0, 0, 0, 0.25);
@@ -74,7 +74,7 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-muted);
   transition: background-color 120ms ease,
               color 120ms ease,

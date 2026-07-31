@@ -31,12 +31,17 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
 
   const style = {
     transform: CSS.Transform.toString(transform),
-    transition: transition || 'transform 200ms cubic-bezier(0.25, 1, 0.5, 1)',
+    transition: transition || 'transform var(--transition-normal)',
     opacity: isDragging ? 0.9 : 1,
     zIndex: isDragging ? 100 : 'auto',
-    height,
-    minHeight: height,
-    boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.15)' : undefined,
+    // Published as a custom property rather than an inline `height`, so the
+    // stylesheet stays in charge of layout. As an inline height it beat every
+    // media query — the ≤768px rule that lays the sidebar out as a horizontal
+    // strip sets `height: auto`, which could never apply, so on a phone each
+    // lane kept its full desktop row height and the panel became an unusable
+    // 200px-tall column of gaps.
+    ['--lane-h' as string]: `${height}px`,
+    boxShadow: isDragging ? 'var(--shadow-hover)' : undefined,
     background: isDragging ? 'var(--bg-primary)' : undefined
   } as React.CSSProperties;
 
@@ -84,12 +89,17 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
             </svg>
           </button>
         )}
-        {!isLocked && (
-          <div
-            className={styles.dragHandle}
-            {...attributes}
-            {...listeners}
-          >
+        {/* The handle's box is always rendered — only its glyph and drag
+            listeners are conditional. Reserving the gutter in both states stops
+            the lane name from reflowing (and sometimes wrapping to a second
+            line) the instant the board is unlocked. */}
+        <div
+          className={`${styles.dragHandle} ${isLocked ? styles.dragHandleReserved : ''}`}
+          aria-hidden={isLocked || undefined}
+          {...(isLocked ? {} : attributes)}
+          {...(isLocked ? {} : listeners)}
+        >
+          {!isLocked && (
             <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
               <circle cx="3" cy="2" r="1.5" />
               <circle cx="9" cy="2" r="1.5" />
@@ -98,8 +108,8 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
               <circle cx="3" cy="10" r="1.5" />
               <circle cx="9" cy="10" r="1.5" />
             </svg>
-          </div>
-        )}
+          )}
+        </div>
         <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
           <span className={styles.memberName}>{member.name}</span>
           {!isCollapsed && !isEmpty && <span className={styles.memberTitle}>{member.jobTitle}</span>}

@@ -2,8 +2,13 @@
  * Centralized status color definitions used across the application.
  * These map to project/milestone health states.
  *
- * Palette inspired by Outlook calendar pill colors (slightly deeper
- * variants for white-text readability on narrow project bars).
+ * Palette inspired by Outlook calendar pill colors. Every hex below is held to
+ * a hard floor: ≥4.5:1 against the white label text that sits on it, since the
+ * bar title renders at 13px bold — below the WCAG "large text" threshold, so it
+ * needs the full body-text ratio. Five of these were previously 3.4–4.2:1 and
+ * were darkened by the minimum amount that clears the floor, holding hue and
+ * saturation constant so the palette's identity is unchanged.
+ * If you add or edit a colour, re-check it against #ffffff before committing.
  */
 
 export interface StatusColor {
@@ -17,15 +22,15 @@ export interface StatusColor {
 // states (On Hold / Deferred), then closed. The pickers and filter chips render
 // them in this order.
 export const STATUS_COLORS: StatusColor[] = [
-  { hex: '#3E95AD', name: 'Discovery', slug: 'discovery' },
-  { hex: '#B571C0', name: 'Initiation', slug: 'initiation' },
-  { hex: '#6E7D89', name: 'Ready to Start', slug: 'ready-to-start' },
+  { hex: '#357F94', name: 'Discovery', slug: 'discovery' },
+  { hex: '#A756B4', name: 'Initiation', slug: 'initiation' },
+  { hex: '#697883', name: 'Ready to Start', slug: 'ready-to-start' },
   { hex: '#457028', name: 'On Track', slug: 'on-track' },
-  { hex: '#A67A00', name: 'At Risk', slug: 'at-risk' },
+  { hex: '#986F00', name: 'At Risk', slug: 'at-risk' },
   { hex: '#B5444A', name: 'Off Track', slug: 'off-track' },
   { hex: '#7558A6', name: 'On Hold', slug: 'on-hold' },
   { hex: '#8A6D5B', name: 'Deferred', slug: 'deferred' },
-  { hex: '#4A82BE', name: 'Complete', slug: 'complete' },
+  { hex: '#4179B5', name: 'Complete', slug: 'complete' },
 ];
 
 // For SearchFilter's STATUS_CONFIG format
@@ -38,12 +43,21 @@ export const STATUS_CONFIG: Record<string, { label: string; color: string }> = O
 // continue to display correct status names, filter correctly, and show
 // the right swatch selected when editing.
 const LEGACY_COLOR_MAP: Record<string, string> = {
-  '#0070c0': '#4A82BE',
+  // Original (pre-Outlook-palette) values.
+  '#0070c0': '#4179B5',
   '#04b050': '#457028',
-  '#ffc002': '#A67A00',
+  '#ffc002': '#986F00',
   '#ff0100': '#B5444A',
   '#7612c3': '#7558A6',
-  '#9ca3af': '#6E7D89',
+  '#9ca3af': '#697883',
+  // Outlook-palette values, superseded when five colours were darkened to clear
+  // 4.5:1 against their white label text. Saved projects still carry these.
+  // NOTE: keys must be lowercase — the lookup is LEGACY_COLOR_MAP[hex.toLowerCase()].
+  '#3e95ad': '#357F94',
+  '#b571c0': '#A756B4',
+  '#6e7d89': '#697883',
+  '#a67a00': '#986F00',
+  '#4a82be': '#4179B5',
 };
 
 // Convert "rgb(r, g, b)" / "rgba(r, g, b, a)" → "#RRGGBB". Returns null if the
@@ -135,5 +149,8 @@ export function isAutoCompleteExempt(statusColor: string | undefined): boolean {
 // Default status color (Discovery — the first lifecycle stage)
 export const DEFAULT_STATUS_COLOR = STATUS_COLORS[0].hex;
 
-// Auto-complete color for past projects/milestones
-export const AUTO_COMPLETE_COLOR = '#4A82BE';
+// Auto-complete color for past projects/milestones. Derived from the palette
+// rather than repeated as a literal, so it can never fall out of step with the
+// Complete swatch again.
+export const AUTO_COMPLETE_COLOR =
+  STATUS_COLORS.find(c => c.slug === 'complete')!.hex;

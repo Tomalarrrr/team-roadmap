@@ -18,7 +18,11 @@
   --accent: #0b74e0;
   --accent-hover: #0a63c0;
   --accent-soft: #e9f2fd;        /* light tint for fills/hover backgrounds */
-  --accent-ring: rgba(11, 116, 224, 0.35);
+  /* Channels of --accent, so glows/rings can vary only their alpha and can never
+     drift out of sync with the accent again. Any rgba() tinted with the brand
+     blue must be written rgba(var(--accent-rgb), α). */
+  --accent-rgb: 11, 116, 224;
+  --accent-ring: rgba(var(--accent-rgb), 0.35);
   /* Back-compat aliases — existing components reference these names. */
   --accent-blue: var(--accent);
   --accent-blue-light: var(--accent-soft);
@@ -39,9 +43,14 @@
   --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
   --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
   --shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.12);
+  /* Radius ramp. --radius-xs exists for hairline chips/swatches that looked
+     pinched at 4px; anything larger than --radius-lg should use --radius-xl so
+     nested corners stay concentric (outer radius = inner radius + padding). */
+  --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 8px;
   --radius-lg: 12px;
+  --radius-xl: 16px;
   --radius-full: 9999px;
   /* 4pt spacing scale — every layout spacing value snaps to this ramp so the UI
      keeps a consistent rhythm. (Sub-4px micro values like 1–2px are intentional
@@ -87,6 +96,15 @@
   --timeline-band-height: 22px;
   --timeline-month-height: 30px;
   --timeline-header-height: 52px;
+  /* Left gutter inside a team lane: drag-handle box (18px) + its gap (8px).
+     Reserved in BOTH locked and unlocked states so revealing the handle can
+     never reflow the lane name, and used by anything that must align under
+     that name (e.g. "+ Add Project"). */
+  --lane-gutter: 26px;
+  /* Control sizing. 32px is the smallest comfortable pointer target and keeps
+     icon buttons on the 4pt ramp. */
+  --control-size: 32px;
+  --control-size-sm: 28px;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   /* Premium easing curves - slightly overshoots for springy feel */
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
@@ -99,6 +117,20 @@
   --transition-fast: 120ms var(--ease-out-quart);
   --transition-normal: 200ms var(--ease-out-expo);
   --transition-slow: 300ms var(--ease-out-expo);
+
+  /* The press gesture. One scale and one duration everywhere, so every control
+     in the product depresses by the same amount — there were eight different
+     scales (0.9 … 0.995) and four durations in circulation. */
+  --press-scale: 0.96;
+  --press-duration: 50ms;
+
+  /* The focus ring. Every component draws it from these three values rather than
+     inventing its own geometry — the app had five different ring treatments,
+     two of them tinted --accent-soft, which is 1.13:1 on white and so was not
+     visible at all. */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--accent);
 }
 
 * {
@@ -155,15 +187,13 @@ h1, h2, h3, h4 {
   scrollbar-color: var(--border-medium) var(--bg-tertiary);
 }
 
+/* The single focus ring for the whole product. Components must not re-implement
+   it — see --focus-ring-* above. It is deliberately not animated: transitioning
+   outline-offset made the ring pump outwards on every click, at the same moment
+   the button was scaling down, which read as a wobble rather than a focus cue. */
 :focus-visible {
-  outline: 2px solid var(--accent-blue);
-  outline-offset: 2px;
-  transition: outline-offset var(--transition-fast);
-}
-
-/* Animated focus ring */
-:focus-visible:not(:active) {
-  outline-offset: 3px;
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 button {
@@ -183,15 +213,21 @@ button {
   user-select: none;
 }
 
-button:hover:not(:disabled) {
-  /* Subtle lift on hover */
-  transform: translateY(-1px);
-}
+/* NOTE: there is deliberately no global `button:hover { transform }` rule.
+   A blanket 1px lift applied to every button in the product — menu rows, filter
+   chips, toolbar icons, timeline pills — which made list items twitch under the
+   cursor and forced at least three components to write rules purely to cancel
+   it. Lift is an affordance for raised, card-like controls only, so it is opted
+   into per component (see .lift below) rather than opted out of everywhere. */
 
 button:active:not(:disabled) {
-  /* Snappy press feedback */
-  transform: scale(0.96) translateY(0);
-  transition-duration: 50ms;
+  transform: scale(var(--press-scale));
+  transition-duration: var(--press-duration);
+}
+
+/* Opt-in hover lift for genuinely raised controls (primary actions, cards). */
+.lift:hover:not(:disabled) {
+  transform: translateY(-1px);
 }
 
 button:disabled {
@@ -282,14 +318,23 @@ html {
   color: var(--accent-blue-dark);
 }
 
-/* Reduced motion preference */
+/* Reduced motion preference. Delays and smooth scrolling are included: without
+   them a 0.01ms transition still waited out its full delay, and the app's
+   `scroll-behavior: smooth` kept animating every jump to a date. */
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
