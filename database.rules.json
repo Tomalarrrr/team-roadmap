@@ -212,8 +212,9 @@
         "singlePlayer": { ".validate": "newData.isBoolean()" },
         "paused": { ".validate": "newData.isBoolean()" },
         "pausedAt": { ".validate": "!newData.exists() || newData.val() === null || newData.isNumber()" },
+        "host": { ".validate": "!newData.exists() || newData.val() === null || (newData.isString() && (newData.val() == 'red' || newData.val() == 'green' || newData.val() == 'yellow'))" },
         "players": {
-          ".validate": "newData.hasChild('red')",
+          ".validate": "newData.hasChild('red') || newData.hasChild('green') || newData.hasChild('yellow')",
           "$color": {
             ".validate": "newData.hasChildren(['sessionId', 'name'])",
             "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },

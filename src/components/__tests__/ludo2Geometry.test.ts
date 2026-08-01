@@ -1,14 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
   CELL_PCT,
+  BASE_SPOT_PCT,
   TRACK_XY,
   FINAL_XY,
   BASE_XY,
-  BADGE_XY,
+  BASE_TRAY,
+  BASE_TRAY_SIZE,
+  ARM_RECT_SIZE,
+  HUB,
   trackCellSpec,
   computeMovePath,
   getTokenCoords,
 } from '../ludo2/ludo2Geometry';
+import { ARM_ANGLE } from '../ludo2/ludo2Geometry';
 import {
   TRACK_SIZE,
   PLAYER_COLORS,
@@ -40,7 +45,7 @@ describe('ludo2 board geometry', () => {
     }
   });
 
-  it('keeps base spots and badges inside the container', () => {
+  it('keeps base trays and their sockets inside the container', () => {
     for (const color of PLAYER_COLORS) {
       for (const [x, y] of BASE_XY[color]) {
         expect(x).toBeGreaterThan(2);
@@ -48,11 +53,45 @@ describe('ludo2 board geometry', () => {
         expect(y).toBeGreaterThan(0.5);
         expect(y).toBeLessThan(99.5);
       }
-      const [bx, by] = BADGE_XY[color];
-      expect(bx).toBeGreaterThan(8);
-      expect(bx).toBeLessThan(92);
-      expect(by).toBeGreaterThan(8);
-      expect(by).toBeLessThan(92);
+      // Each tray is rotated with its arm, so check its four actual corners
+      // rather than a bounding circle — the circle is far too pessimistic.
+      const tray = BASE_TRAY[color];
+      const a = (tray.rot * Math.PI) / 180;
+      const hw = BASE_TRAY_SIZE.w / 2;
+      const hh = BASE_TRAY_SIZE.h / 2;
+      for (const [sx, sy] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+        const cx = tray.x + sx * hw * Math.cos(a) - sy * hh * Math.sin(a);
+        const cy = tray.y + sx * hw * Math.sin(a) + sy * hh * Math.cos(a);
+        expect(cx).toBeGreaterThan(1);
+        expect(cx).toBeLessThan(99);
+        expect(cy).toBeGreaterThan(1);
+        expect(cy).toBeLessThan(99);
+      }
+    }
+  });
+
+  // The whole point of moving the tray beside the start cell: a resting pawn
+  // must never sit on top of the track.
+  it('keeps base sockets clear of every board cell', () => {
+    const clearance = (CELL_PCT + BASE_SPOT_PCT) / 2;
+    for (const color of PLAYER_COLORS) {
+      for (const spot of BASE_XY[color]) {
+        for (const cell of allCells()) {
+          expect(dist(spot, cell)).toBeGreaterThan(clearance);
+        }
+      }
+    }
+  });
+
+  it('keeps each base tray outside its own arm silhouette', () => {
+    for (const color of PLAYER_COLORS) {
+      const tray = BASE_TRAY[color];
+      const a = (ARM_ANGLE[color] * Math.PI) / 180;
+      // Project the tray centre back onto the arm-local lateral axis. The arms
+      // radiate from the hub, which is not quite the board centre.
+      const dx = (tray.x - HUB.x) * Math.cos(a) + (tray.y - HUB.y) * Math.sin(a);
+      const gutter = Math.abs(dx) - BASE_TRAY_SIZE.w / 2 - ARM_RECT_SIZE.w / 2;
+      expect(gutter).toBeGreaterThan(0.5);
     }
   });
 
@@ -102,10 +141,10 @@ describe('ludo2 board geometry', () => {
       const red = TRACK_XY[n];
       const green = TRACK_XY[n + 14];
       const yellow = TRACK_XY[n + 28];
-      // Same radial distance from center for all three
-      const r = Math.hypot(red[0] - 50, red[1] - 50);
-      expect(Math.hypot(green[0] - 50, green[1] - 50)).toBeCloseTo(r, 5);
-      expect(Math.hypot(yellow[0] - 50, yellow[1] - 50)).toBeCloseTo(r, 5);
+      // Same radial distance from the hub for all three
+      const r = Math.hypot(red[0] - HUB.x, red[1] - HUB.y);
+      expect(Math.hypot(green[0] - HUB.x, green[1] - HUB.y)).toBeCloseTo(r, 5);
+      expect(Math.hypot(yellow[0] - HUB.x, yellow[1] - HUB.y)).toBeCloseTo(r, 5);
     }
   });
 });
@@ -157,10 +196,10 @@ describe('getTokenCoords', () => {
     expect(seen.size).toBe(12);
   });
 
-  it('stacks finished tokens near the hub', () => {
+  it('stacks finished tokens inside the hub', () => {
     for (let i = 0; i < 12; i++) {
       const c = getTokenCoords('final-6', i)!;
-      expect(Math.hypot(c[0] - 50, c[1] - 50)).toBeLessThan(7);
+      expect(Math.hypot(c[0] - HUB.x, c[1] - HUB.y)).toBeLessThan(HUB.r);
     }
   });
 });

@@ -135,7 +135,7 @@
 
 .status.statusSel .statusBar {
   height: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 3px rgba(var(--shadow-rgb), 0.12);
 }
 
 .status.statusSel .statusLabel {
@@ -458,7 +458,10 @@
 }
 
 .primaryBtn:disabled {
-  opacity: 0.65;
+  /* Surface swap, not a faded fill — see --surface-disabled. */
+  background: var(--surface-disabled);
+  color: var(--text-disabled);
+  box-shadow: none;
   cursor: not-allowed;
 }
 

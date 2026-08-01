@@ -14,10 +14,13 @@ export type Ludo2Color = 'red' | 'green' | 'yellow';
 
 export interface Ludo2GameState {
   players: {
-    red: LudoPlayer;
+    red?: LudoPlayer | null;
     green?: LudoPlayer | null;
     yellow?: LudoPlayer | null;
   };
+  /** Which seat created the room. Seats are handed out at random, so the host
+   * is not necessarily red — legacy games without this field default to red. */
+  host?: Ludo2Color;
   tokens: string; // 12 tokens × 3 chars = 36
   currentTurn: Ludo2Color;
   turnPhase: TurnPhase;

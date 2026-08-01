@@ -11,7 +11,7 @@
      still changes — it just snaps instantly, which is imperceptible next to the lift. */
   transition: transform 100ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)),
               filter var(--transition-fast);
-  box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-raised);
   z-index: 2;
   min-width: 80px;
   /* Force GPU layer for smooth animations */
@@ -205,7 +205,7 @@
   font-size: var(--text-base);
   font-weight: var(--fw-semibold);
   color: white;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  text-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.2);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -439,7 +439,7 @@
   z-index: 3;
   text-transform: uppercase;
   letter-spacing: var(--tracking-caps);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  text-shadow: 0 1px 2px rgba(var(--shadow-rgb), 0.35);
 }
 
 .projectBar.dragging .statusBadge {
@@ -471,7 +471,7 @@
   background: #f5a623; /* amber alert */
   border: 1.5px solid rgba(255, 255, 255, 0.95);
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 1px 3px rgba(var(--shadow-rgb), 0.4);
   pointer-events: none;
   z-index: 5;
 }

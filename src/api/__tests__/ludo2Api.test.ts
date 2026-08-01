@@ -260,11 +260,16 @@ describe('createGame', () => {
       return Promise.resolve(res(null, { status: 200 }));
     });
 
-    const code = await createGame('sess', 'Player');
+    const { code, color } = await createGame('sess', 'Player');
 
     expect(typeof code).toBe('string');
+    // Seats are dealt at random — the creator is not always red
+    expect(['red', 'green', 'yellow']).toContain(color);
     const firstPut = fetchMock.mock.calls.find((c) => c[1]?.method === 'PUT');
     const body = JSON.parse(firstPut![1].body);
+    expect(body.host).toBe(color);
+    expect(body.players[color].sessionId).toBe('sess');
+    expect(Object.keys(body.players)).toHaveLength(1);
     expect(body.tokens).toHaveLength(36);
     expect(body.playerCount).toBe(3);
     expect(body.rollStats.split('|')).toHaveLength(3);

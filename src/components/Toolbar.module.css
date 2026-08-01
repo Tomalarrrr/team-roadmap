@@ -108,7 +108,7 @@
 .iconBtn:disabled {
   /* 0.35 rendered undo/redo at ~1.6:1 — below the 3:1 a disabled control still
      needs to be identifiable as a control. */
-  opacity: 0.45;
+  opacity: var(--disabled-opacity);
   cursor: not-allowed;
 }
 

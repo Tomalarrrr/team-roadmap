@@ -4,7 +4,7 @@
   background: var(--bg-primary);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 32px rgba(var(--shadow-rgb), 0.15);
   padding: var(--space-2);
   z-index: 10000;
   animation: menuFadeIn 0.15s ease-out;
@@ -151,6 +151,6 @@
 }
 
 .submitBtn:disabled {
-  opacity: 0.5;
+  opacity: var(--disabled-opacity);
   cursor: not-allowed;
 }

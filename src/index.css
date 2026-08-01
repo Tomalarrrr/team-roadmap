@@ -39,18 +39,62 @@
   /* Dependency connector — soft slate at rest so it recedes; turns accent-blue on
      hover / when its connected project is hovered. */
   --dependency-line: #9aa6b2;
+  /* Channels of the shadow colour, same idiom as --accent-rgb. Shadows are a
+     cool near-navy rather than neutral black: a pure-black shadow desaturates
+     whatever it falls on and reads flat and clinical, where a cool one reads as
+     light being blocked. It is the cheapest single change that separates a
+     rendered surface from a drawn one, and it must stay consistent — any
+     hand-written shadow in the app should use rgba(var(--shadow-rgb), α). */
+  --shadow-rgb: 22, 27, 45;
+
   /* Elevation ramp. sm→hover cover in-page surfaces; popover and modal were
      missing, which is why every menu, dropdown and dialog had invented its own
      — nine different recipes for two elevations, including the same geometry at
      two different alphas sitting next to each other in the toolbar. The hairline
      ring on --shadow-popover defines the panel's edge against a light page,
-     where a soft shadow alone leaves it looking unanchored. */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
-  --shadow-hover: 0 8px 25px rgba(0, 0, 0, 0.12);
-  --shadow-popover: 0 4px 12px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
-  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.3);
+     where a soft shadow alone leaves it looking unanchored.
+
+     Every step from md up is TWO stops: a tight, darker contact shadow that
+     seats the object, and a wider, fainter ambient one for the room. A single
+     medium blur doing both jobs is the classic tell of an un-art-directed UI —
+     it leaves objects hovering rather than resting. The negative spread on the
+     ambient stop keeps it from blooming out past the object's own footprint. */
+  --shadow-sm: 0 1px 2px rgba(var(--shadow-rgb), 0.06);
+  /* An object resting ON the board rather than floating above it: a tight,
+     slightly darker contact stop and no ambient bloom. Project bars and
+     milestones are the things the user physically arranges, and --shadow-sm is
+     too faint to seat them while --shadow-md lifts them off the grid entirely.
+     Deliberately cheap to paint — a dense board renders dozens of these. */
+  --shadow-raised:
+    0 1px 1px rgba(var(--shadow-rgb), 0.10),
+    0 2px 4px -1px rgba(var(--shadow-rgb), 0.10);
+  --shadow-md:
+    0 1px 2px rgba(var(--shadow-rgb), 0.06),
+    0 4px 8px -2px rgba(var(--shadow-rgb), 0.08);
+  --shadow-lg:
+    0 1px 3px rgba(var(--shadow-rgb), 0.07),
+    0 10px 20px -4px rgba(var(--shadow-rgb), 0.10);
+  --shadow-hover:
+    0 2px 4px rgba(var(--shadow-rgb), 0.08),
+    0 10px 24px -6px rgba(var(--shadow-rgb), 0.14);
+  --shadow-popover:
+    0 0 0 1px rgba(var(--shadow-rgb), 0.07),
+    0 2px 4px rgba(var(--shadow-rgb), 0.06),
+    0 12px 28px -8px rgba(var(--shadow-rgb), 0.18);
+  --shadow-modal:
+    0 2px 8px rgba(var(--shadow-rgb), 0.08),
+    0 24px 60px -12px rgba(var(--shadow-rgb), 0.28);
+
+  /* Disabled surface. A dark control faded with opacity turns muddy and often
+     ends up the heaviest thing on screen — the opposite of what disabled should
+     communicate. Disabled controls change surface, not transparency. */
+  --surface-disabled: var(--bg-tertiary);
+  --text-disabled: #a3a3a3;
+  /* Ghost controls (icon buttons, menu items) DO fade — there is no fill to
+     swap. One value, carried over from the toolbar's measured finding that 0.35
+     rendered undo/redo at ~1.6:1, below the 3:1 a disabled control still needs
+     to stay identifiable as a control. Was scattered across 0.3/0.45/0.5/0.55. */
+  --disabled-opacity: 0.45;
   /* Radius ramp. --radius-xs exists for hairline chips/swatches that looked
      pinched at 4px; anything larger than --radius-lg should use --radius-xl so
      nested corners stay concentric (outer radius = inner radius + padding). */

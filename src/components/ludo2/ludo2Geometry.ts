@@ -14,7 +14,9 @@
 //   n 13     next arm tip-middle (0, 7) — that color's corridor entry
 //   n 14     next arm in-lane tip (-1, 7)
 // The middle lane rows 6→1 is the final column (final-1..final-6); the (+1, 7)
-// tip spot is deliberately vacant and hosts the start-triangle decoration.
+// tip spot is deliberately vacant (the track cuts the corner) and renders as an
+// inert blank. Each color's base tray sits outside the arm, level with its
+// start cell at (-1, 6).
 
 import type { TokenPosition } from '../../ludoFirebase';
 import {
@@ -27,11 +29,22 @@ import {
   type Ludo2Color,
 } from '../../ludo2Board';
 
-/** Cell size as % of the (square) board container. */
-export const CELL_PCT = 5.0;
-/** Radial gap from board center to the inner edge of row 1. Below ~0.8×CELL_PCT
- * the three arms' innermost cells collide at the junction — don't shrink. */
-const HUB_GAP = 5.0;
+/** Cell size as % of the (square) board container. Everything else on the board
+ * is a multiple of this, so it is the single knob for how large the Y draws. */
+export const CELL_PCT = 5.6;
+/** Radial gap from the hub to the inner edge of row 1. At 1×CELL_PCT the
+ * arm-to-arm hop at the junction is 1.6 cells; shrink it and the three arms'
+ * innermost cells collide. */
+const HUB_GAP = CELL_PCT;
+
+/** Only the local player's tray is drawn, and the plate always turns so that
+ * tray lands bottom-left — so the figure every player actually sees is three
+ * arms plus one tray, which is not centred on the hub. Offsetting the hub up
+ * and a touch right squares that view up. (A spectator, who sees all three
+ * trays, gets a slightly looser fit; the numbers are held back from a perfect
+ * one-tray centring so their top tray never crowds the board edge.) */
+const ORIGIN_X = 49.6;
+const ORIGIN_Y = 44.2;
 
 export const ARM_ANGLE: Record<Ludo2Color, number> = { red: 0, green: 120, yellow: 240 };
 
@@ -41,15 +54,18 @@ export interface CellSpec {
   rot: number;
 }
 
-function place(color: Ludo2Color, lane: number, row: number): CellSpec {
+/** Arm-local frame → board %: dx is lateral (− is the start-cell side), dy radial. */
+function armPoint(color: Ludo2Color, dx: number, dy: number): CellSpec {
   const a = (ARM_ANGLE[color] * Math.PI) / 180;
-  const dx = lane * CELL_PCT;
-  const dy = HUB_GAP + (row - 0.5) * CELL_PCT;
   return {
-    x: 50 + dx * Math.cos(a) - dy * Math.sin(a),
-    y: 50 + dx * Math.sin(a) + dy * Math.cos(a),
+    x: ORIGIN_X + dx * Math.cos(a) - dy * Math.sin(a),
+    y: ORIGIN_Y + dx * Math.sin(a) + dy * Math.cos(a),
     rot: ARM_ANGLE[color],
   };
+}
+
+function place(color: Ludo2Color, lane: number, row: number): CellSpec {
+  return armPoint(color, lane * CELL_PCT, HUB_GAP + (row - 0.5) * CELL_PCT);
 }
 
 export function trackCellSpec(t: number): CellSpec {
@@ -66,21 +82,36 @@ export function finalCellSpec(color: Ludo2Color, f: number): CellSpec {
   return place(color, 0, 7 - f); // final-6 innermost, touching the hub
 }
 
+// --- Base tray -------------------------------------------------------------
+// The tray sits *beside* the start cell it feeds — level with (−1, 6), pushed
+// far enough sideways to clear the arm silhouette entirely, so a resting pawn
+// never overlaps the track. (It used to sit beyond the arm tip, where the two
+// inner sockets fouled the tip cells.)
+
+/** Lateral offset of the tray centre. The arm silhouette is 1.74 cells to each
+ * side and the tray 1.21, so 3.24 leaves a ~0.3-cell gutter between them. */
+const BASE_LATERAL = 3.24 * CELL_PCT;
+/** Radial offset: dead level with the start cell at (−1, 6). */
+const BASE_RADIAL = HUB_GAP + 5.5 * CELL_PCT;
+/** Centre-to-centre spacing of the four resting sockets. */
+const BASE_SPOT_GAP = CELL_PCT;
+/** Socket diameter. Deliberately smaller than a pawn (0.70 × CELL_PCT) so an
+ * occupied socket disappears completely under its piece and an empty one reads
+ * as a dimple in the tray — it used to be larger, which made every pawn look
+ * like it was floating in a hole and made empty sockets read as grey pieces. */
+export const BASE_SPOT_PCT = CELL_PCT * 0.58;
+
 export function baseSpotSpec(color: Ludo2Color, i: number): CellSpec {
-  const a = (ARM_ANGLE[color] * Math.PI) / 180;
-  const dx = (i % 2 === 0 ? -0.5 : 0.5) * CELL_PCT;
-  const dy = HUB_GAP + 7.5 * CELL_PCT + (i < 2 ? -0.5 : 0.5) * CELL_PCT;
-  return {
-    x: 50 + dx * Math.cos(a) - dy * Math.sin(a),
-    y: 50 + dx * Math.sin(a) + dy * Math.cos(a),
-    rot: ARM_ANGLE[color],
-  };
+  return armPoint(
+    color,
+    -BASE_LATERAL + (i % 2 === 0 ? -0.5 : 0.5) * BASE_SPOT_GAP,
+    BASE_RADIAL + (i < 2 ? -0.5 : 0.5) * BASE_SPOT_GAP
+  );
 }
 
-/** A point on the arm axis at radial distance `dy`, e.g. for pads/silhouettes. */
+/** A point on the arm axis at radial distance `dy`, e.g. for silhouettes. */
 function axisPoint(color: Ludo2Color, dy: number): CellSpec {
-  const a = (ARM_ANGLE[color] * Math.PI) / 180;
-  return { x: 50 - dy * Math.sin(a), y: 50 + dy * Math.cos(a), rot: ARM_ANGLE[color] };
+  return armPoint(color, 0, dy);
 }
 
 // --- Prebuilt lookup tables (mirror v1's TRACK_COORDS/FINAL_COORDS shape) ---
@@ -111,55 +142,48 @@ for (const color of PLAYER_COLORS) {
   }
 }
 
-/** Colored start-triangle decoration on the vacant (+1, 7) tip spot. */
-export const START_MARKER: Record<Ludo2Color, CellSpec> = {
+/** The vacant (+1, 7) tip spot — the track cuts the corner from (+1, 6) to the
+ * middle tip cell, so this slot is rendered as an inert blank. */
+export const TIP_BLANK: Record<Ludo2Color, CellSpec> = {
   red: place('red', +1, 7),
   green: place('green', +1, 7),
   yellow: place('yellow', +1, 7),
 };
 
-/** Colored rounded pad behind the four base spots, just beyond the arm tip. */
-export const BASE_PAD: Record<Ludo2Color, CellSpec> = {
-  red: axisPoint('red', 44.5),
-  green: axisPoint('green', 44.5),
-  yellow: axisPoint('yellow', 44.5),
+/** Neutral rounded tray holding the four base sockets, beside the start cell. */
+export const BASE_TRAY: Record<Ludo2Color, CellSpec> = {
+  red: armPoint('red', -BASE_LATERAL, BASE_RADIAL),
+  green: armPoint('green', -BASE_LATERAL, BASE_RADIAL),
+  yellow: armPoint('yellow', -BASE_LATERAL, BASE_RADIAL),
 };
-export const BASE_PAD_SIZE = { w: 12, h: 10 };
+const BASE_TRAY_SIDE = BASE_SPOT_GAP + BASE_SPOT_PCT + 0.6 * CELL_PCT;
+export const BASE_TRAY_SIZE = { w: BASE_TRAY_SIDE, h: BASE_TRAY_SIDE };
 
 /** Rounded-rect silhouette behind each arm's cells. */
 export const ARM_RECT: Record<Ludo2Color, CellSpec> = {
-  red: axisPoint('red', 22.5),
-  green: axisPoint('green', 22.5),
-  yellow: axisPoint('yellow', 22.5),
+  red: axisPoint('red', 4.5 * CELL_PCT),
+  green: axisPoint('green', 4.5 * CELL_PCT),
+  yellow: axisPoint('yellow', 4.5 * CELL_PCT),
 };
-export const ARM_RECT_SIZE = { w: 3 * CELL_PCT + 2.4, h: 38 };
+export const ARM_RECT_SIZE = { w: 3.48 * CELL_PCT, h: 7.6 * CELL_PCT };
 
-/** Per-player score badges, centered in the three empty wedges. */
-export const BADGE_XY: Record<Ludo2Color, [number, number]> = (() => {
-  const out = {} as Record<Ludo2Color, [number, number]>;
-  for (const color of PLAYER_COLORS) {
-    const a = ((ARM_ANGLE[color] - 60) * Math.PI) / 180;
-    out[color] = [50 - 33 * Math.sin(a), 50 + 33 * Math.cos(a)];
-  }
-  return out;
-})();
-
-export const HUB = { x: 50, y: 50, r: 7 };
+export const HUB = { x: ORIGIN_X, y: ORIGIN_Y, r: 1.4 * CELL_PCT };
 
 /** Anchor for each color's pile of finished tokens, just inside the hub —
- * offset toward the color's own arm so the house icon stays visible. */
+ * offset toward the color's own arm so the three piles never collide. */
 export const HOME_PILE: Record<Ludo2Color, [number, number]> = (() => {
   const out = {} as Record<Ludo2Color, [number, number]>;
   for (const color of PLAYER_COLORS) {
-    const p = axisPoint(color, 4.2);
+    const p = axisPoint(color, 0.62 * CELL_PCT);
     out[color] = [p.x, p.y];
   }
   return out;
 })();
 
 /** Tiny per-token offsets so a full home pile reads as four counters. */
+const PILE_OFF = 0.2 * CELL_PCT;
 export const HOME_PILE_OFFSETS: [number, number][] = [
-  [-0.8, -0.8], [0.8, -0.8], [-0.8, 0.8], [0.8, 0.8],
+  [-PILE_OFF, -PILE_OFF], [PILE_OFF, -PILE_OFF], [-PILE_OFF, PILE_OFF], [PILE_OFF, PILE_OFF],
 ];
 
 // --- Token positioning (all coords are cell CENTERS in % of the board) ---

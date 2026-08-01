@@ -1,6 +1,7 @@
-/* Ludo2 — Y-board styling. Popup chrome mirrors LudoGame.module.css idioms;
-   the board itself is the reference-image aesthetic: warm cream backdrop,
-   rounded-square cells, glossy dome pawns, circular score badges. */
+/* Ludo2 — Y-board styling. Flat and neutral: a white board, light-grey arm
+   trays, white cell tiles separated by gutters rather than borders, and colour
+   used only where it carries meaning (pawns, start cells, home corridors).
+   Radii inside the board use cq units so they scale with a resized popup. */
 
 .srOnly {
   position: absolute;
@@ -16,26 +17,58 @@
 
 /* --- Popup shell --- */
 
+/* A definite height (not just a min) is what lets the board size itself off the
+   popup: every box down to .boardWrapper stays definite, so the wrapper can be
+   a size container and the board can be min(100cqw, 100cqh). */
 .popup {
   position: fixed;
-  width: 780px;
-  min-width: 640px;
-  max-width: 95vw;
-  max-height: 95vh;
+  width: 900px;
+  height: 700px;
+  /* min() not a bare px: min-width beats max-width in CSS, so a flat 560px
+     would punch straight through 96vw and overflow a phone. */
+  min-width: min(560px, 94vw);
+  min-height: min(440px, 90vh);
+  max-width: 96vw;
+  max-height: 94vh;
   z-index: 11000;
   background: var(--bg-secondary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.08),
-    0 25px 60px rgba(0, 0, 0, 0.3);
+    0 0 0 1px rgba(28, 32, 56, 0.06),
+    0 2px 6px rgba(28, 32, 56, 0.06),
+    0 20px 50px -12px rgba(28, 32, 56, 0.24);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  resize: both;
   animation: popupIn 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
   transform: translateZ(0);
 }
 
+/* The native resize grip is an OS artefact and reads as "web app". Hide it and
+   draw our own: two tapered rules in the corner, only once you go looking. */
+.popup::-webkit-resizer { display: none; }
+
+.resizeGrip {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  color: var(--border-medium);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.popup:hover .resizeGrip { opacity: 0.85; }
+
+/* Lobby / waiting room has little content — size to it, in both axes, instead
+   of holding the board's footprint and looking sparse. */
 .popupCompact {
+  width: 440px;
+  min-width: min(360px, 94vw);
+  height: auto;
   min-height: 0;
 }
 
@@ -48,8 +81,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 5px 12px;
-  background: linear-gradient(to bottom, var(--bg-secondary), var(--bg-tertiary));
+  padding: 8px 10px 8px 16px;
   border-bottom: 1px solid var(--border-light);
   cursor: grab;
   user-select: none;
@@ -68,13 +100,13 @@
 }
 
 .titleCode {
-  font-size: 0.75rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--text-muted);
-  background: var(--bg-primary);
-  border-radius: var(--radius-sm);
-  padding: 1px 6px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  padding: 2px 9px;
 }
 
 .titleButtons {
@@ -101,7 +133,7 @@
   justify-content: center;
   width: 28px;
   height: 28px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
   border: none;
   background: none;
   color: var(--text-muted);
@@ -110,7 +142,7 @@
 }
 
 .closeBtn:hover {
-  background: var(--bg-primary);
+  background: var(--bg-tertiary);
   color: var(--text-primary);
 }
 
@@ -120,25 +152,26 @@
   position: absolute;
   inset: 0;
   z-index: 200;
-  background: rgba(10, 10, 15, 0.92);
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(9px) saturate(0.85);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   border-radius: inherit;
   cursor: pointer;
 }
 
 .pauseText {
-  color: #fff;
-  font-size: 1.4rem;
-  font-weight: 800;
-  letter-spacing: 0.3em;
+  color: var(--text-primary);
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
 }
 
 .pauseSubtext {
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-muted);
   font-size: 0.8rem;
 }
 
@@ -156,9 +189,14 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 28px 24px;
+  gap: 8px;
+  padding: 30px 24px 26px;
 }
+
+/* Groups are separated by space, not rules: 8px within, 20px between */
+.lobby > .playerList,
+.lobby > .createBtn,
+.lobby > .joinSection { margin-top: 12px; }
 
 .lobbyTitle {
   font-size: 0.85rem;
@@ -166,19 +204,23 @@
 }
 
 .createBtn {
-  padding: 8px 22px;
+  padding: 9px 24px;
   border: none;
-  border-radius: var(--radius-md);
-  background: #ea4330;
-  color: #fff;
-  font-size: 0.9rem;
+  border-radius: var(--radius-full);
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+  font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
-  transition: filter 120ms ease, transform 120ms ease;
+  transition: opacity 120ms ease, transform 120ms ease;
 }
 
-.createBtn:hover:not(:disabled) { filter: brightness(1.1); transform: translateY(-1px); }
-.createBtn:disabled { opacity: 0.5; cursor: default; }
+.createBtn:hover:not(:disabled) { opacity: 0.86; transform: translateY(-1px); }
+.createBtn:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: default;
+}
 
 .lobbyDivider {
   font-size: 0.75rem;
@@ -191,25 +233,30 @@
 }
 
 .codeInput {
-  width: 90px;
-  padding: 7px 10px;
+  width: 96px;
+  padding: 8px 12px;
   border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
-  background: var(--bg-primary);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   font-size: 0.9rem;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.2em;
   text-align: center;
   text-transform: uppercase;
 }
 
+.codeInput:focus {
+  outline: none;
+  border-color: var(--text-primary);
+}
+
 .joinBtn,
 .linkBtn {
-  padding: 7px 16px;
+  padding: 8px 18px;
   border: 1px solid var(--border-medium);
-  border-radius: var(--radius-md);
-  background: var(--bg-primary);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   font-size: 0.85rem;
   font-weight: 600;
@@ -220,19 +267,26 @@
 .joinBtn:hover:not(:disabled),
 .linkBtn:hover { background: var(--bg-tertiary); }
 
+/* Tertiary: an outline here would compete with the primary action */
+.lobby > .linkBtn:last-of-type {
+  border-color: transparent;
+  color: var(--text-muted);
+}
+
 .errorText {
   color: #ef4444;
   font-size: 0.8rem;
 }
 
 .gameCodeDisplay {
-  font-size: 1.8rem;
-  font-weight: 800;
+  font-size: 1.7rem;
+  font-weight: 700;
   letter-spacing: 0.35em;
-  padding: 8px 20px 8px 26px;
-  border-radius: var(--radius-md);
-  background: var(--bg-primary);
-  border: 1px dashed var(--border-medium);
+  width: 264px;
+  padding: 12px 16px 12px 24px;
+  text-align: center;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
   color: var(--text-primary);
   cursor: pointer;
   user-select: all;
@@ -246,35 +300,37 @@
 .playerList {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  width: 260px;
+  gap: 5px;
+  width: 264px;
 }
 
 .playerSlot {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 12px;
-  border-radius: var(--radius-md);
-  background: var(--bg-primary);
-  border: 1px solid var(--border-light);
+  gap: 10px;
+  padding: 9px 14px;
+  border-radius: var(--radius-full);
+  background: var(--bg-tertiary);
   font-size: 0.85rem;
   color: var(--text-primary);
 }
 
-.playerSlotEmpty { opacity: 0.6; }
+.playerSlotEmpty { color: var(--text-muted); }
+.playerSlotEmpty .playerDot { opacity: 0.35; box-shadow: none; }
 
 .playerSlotClickable { cursor: pointer; }
-.playerSlotClickable:hover { border-color: var(--border-medium); opacity: 0.9; }
+.playerSlotClickable:hover { background: var(--border-light); }
 
 .playerSlotName { flex: 1; }
 
 .playerDot {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: inset 0 -1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    inset 0 -1px 1px rgba(24, 16, 10, 0.28),
+    inset 0 1px 1px rgba(255, 255, 255, 0.35);
 }
 
 .removeBotBtn {
@@ -296,8 +352,8 @@
 
 .playingLayout {
   display: flex;
-  gap: 14px;
-  padding: 12px;
+  gap: 16px;
+  padding: 14px 16px 16px;
   flex: 1;
   min-height: 0;
   animation: boardIn 400ms ease;
@@ -308,72 +364,136 @@
   to { opacity: 1; transform: scale(1); }
 }
 
+/* Size container so the board can take the largest square that fits, whatever
+   the user drags the popup to. */
 .boardWrapper {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  container-type: size;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-/* --- The Y-board --- */
+/* --- The Y-board ---
+   The board is a slab floating above the popup, seen from in front and above.
+   The stage holds the camera; the board is the slab; the ellipse under it is
+   the contact shadow that sells the float. */
 
-.board {
+/* The camera. 22° is the angle a board actually reads at across a table — far
+   enough to feel like an object, short of the point where the far arm's cells
+   crowd. The long "lens" (3× the board width) keeps the keystone gentle: the
+   near edge ends up ~14% larger than the far one, not caricatured. */
+.boardStage {
   position: relative;
-  width: min(100%, 74vh);
+  /* Fallback first: without container query units the board still gets a
+     sensible square, it just stops tracking a resized popup exactly. */
+  width: min(93%, 70vh);
+  /* The projected slab is wider (near edge flares) and shorter (foreshortened)
+     than its own box, so it is sized down to fit — hence 90/95, not 100. */
+  width: min(93cqw, 98cqh);
   aspect-ratio: 1;
-  border-radius: var(--radius-md);
-  border: 2px solid rgba(0, 0, 0, 0.08);
-  background: #f7f2e9;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
-  overflow: hidden;
-  contain: layout style paint;
-  transform: translateZ(0);
+  --tilt: 22deg;
+  perspective: 300cqw;
+  /* Eye above the board's middle, looking down onto it */
+  perspective-origin: 50% 40%;
+  /* The projection also sits low in its box; lift it to the optical centre. */
+  transform: translateY(-2.2%);
 }
 
+/* The slab: tilted away from the viewer, and fixed — it never spins.
+   One light source for the whole scene, high and to the left. Every shadow on
+   this board is cool (#1c2038) and every highlight warm (#fffdf9): neutral
+   black shadows read clinical, and that single substitution is the most
+   recognisable difference between a rendered object and a flat one. */
+.board {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(125% 100% at 26% -10%, #fffdf9 0%, #ffffff 46%, #fafafc 100%);
+  border-radius: 4.5cqw;
+  overflow: hidden;
+  container-type: size;
+  contain: layout style paint;
+  transform: rotateX(var(--tilt));
+  box-shadow:
+    /* face edge, milled side wall, then the shadow it casts down-right */
+    inset 0 0 0 0.1cqw rgba(255, 255, 255, 0.9),
+    0 0 0 1px rgba(28, 32, 56, 0.07),
+    0 0.5cqw 0 rgba(28, 32, 56, 0.05),
+    0 1.1cqw 0 rgba(28, 32, 56, 0.06),
+    0.6cqw 3.5cqw 5cqw -2cqw rgba(28, 32, 56, 0.16);
+}
+
+/* Atmospheric depth: a whisper of haze over the receding third of the slab.
+   Sits above the board surface but below the pieces, so distance reads without
+   ever costing a pawn its clarity. */
+.boardHaze {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0) 28%);
+}
+
+/* The board face, which turns on the slab to face whoever is playing. */
+.boardPlate {
+  position: absolute;
+  inset: 0;
+  transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* Contact shadow on the "floor": screen-space, deliberately not part of the
+   tilted slab, so the board reads as hovering rather than resting. Shaped to
+   the slab's own footprint — an ellipse under a rounded rectangle reads as a
+   mismatch the moment the board gets large. Offset right, opposite the light. */
+.boardShadow {
+  position: absolute;
+  left: 9%;
+  right: 5%;
+  bottom: -3.5%;
+  height: 22%;
+  border-radius: 4.5cqw;
+  background: rgba(28, 32, 56, 0.15);
+  filter: blur(2.2cqw);
+  pointer-events: none;
+}
+
+/* Each arm is a channel milled into the slab and washed in its player's colour.
+   The inset top shadow is the occlusion of that recess; the bottom highlight is
+   light catching its far lip. Together they are what makes the arm a surface
+   rather than a printed area — and what lets a white tile sit *in* it. */
 .armRect {
   position: absolute;
-  border-radius: 26px;
-  background: #fffdf8;
-  box-shadow:
-    inset 0 0 0 1.5px rgba(0, 0, 0, 0.05),
-    0 3px 10px rgba(0, 0, 0, 0.09);
+  border-radius: 17px;
+  border-radius: 3.2cqw;
   z-index: 1;
 }
 
-/* Colored edge along each arm, matching the reference's colored outlines */
-.armRed { border-bottom: 4px solid #ea4330; }
-.armGreen { border-bottom: 4px solid #34a853; }
-.armYellow { border-bottom: 4px solid #fbbc05; }
+.armInactive { opacity: 0.4; }
 
-.armInactive { opacity: 0.45; }
-
+/* The shared goal: a well sunk into the slab where the three channels meet.
+   Deeper occlusion than the arms — it is the lowest point on the board. */
 .hub {
   position: absolute;
   z-index: 1;
   border-radius: 50%;
-  background: #fffdf8;
+  background: radial-gradient(circle at 50% 34%, #ececed 0%, #f4f4f6 78%);
   box-shadow:
-    inset 0 0 0 1.5px rgba(0, 0, 0, 0.06),
-    0 2px 8px rgba(0, 0, 0, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #a99f8f;
+    inset 0 0.34cqw 0.7cqw rgba(28, 32, 56, 0.13),
+    inset 0 -0.16cqw 0.3cqw rgba(255, 255, 255, 0.75);
 }
 
-.hubIcon {
-  width: 46%;
-  height: 46%;
-}
 
+/* Tiles are inlaid into the arm channel: a hair proud of it, catching light on
+   the top edge and dropping a tight contact shadow onto the surface below. */
 .cell {
   position: absolute;
   z-index: 2;
-  border-radius: 26%;
-  background: #fffdf8;
-  border: 1.5px solid rgba(0, 0, 0, 0.09);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  /* Overridden inline on start cells with that player's hue (see .cellStart) */
+  --ring: transparent;
+  border-radius: 20%;
+  background: var(--bg-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -381,114 +501,62 @@
   user-select: none;
 }
 
-.cellFinal,
+/* The tip corner the track skips. Sunk rather than raised — the same recess
+   language as an empty socket, so it reads as deliberately not a tile. */
+.cellBlank {
+  background: rgba(28, 32, 56, 0.035);
+  box-shadow: inset 0 0.12cqw 0.26cqw rgba(28, 32, 56, 0.07);
+}
+
+/* Start cells get a ring instead of a solid fill (--ring is set per cell). */
 .cellStart {
-  box-shadow: inset 0 -2px 4px rgba(0, 0, 0, 0.18), 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: inset 0 0 0 2px var(--ring);
+  box-shadow: inset 0 0 0 0.34cqw var(--ring);
 }
 
-.cellSafe::after {
-  content: '\2605';
-  color: #b7ada0;
-  font-size: 0.85em;
-  line-height: 1;
-}
-
-/* Star on a colored start cell needs to read against the fill */
-.cellStart.cellSafe::after {
-  color: rgba(255, 255, 255, 0.85);
-}
-
-.cellEntry {
-  opacity: 0.95;
+.safeStar {
+  width: 54%;
+  height: 54%;
 }
 
 .entryArrow {
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 0.7em;
-  line-height: 1;
+  width: 72%;
+  height: 72%;
 }
 
 .cellInactive { opacity: 0.35; }
 
-.startMarker {
-  position: absolute;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.95em;
-  pointer-events: none;
-  user-select: none;
-}
-
-.basePad {
+/* Holding area: a tray of four sockets alongside the start cell it feeds,
+   milled into the slab like the arm it belongs to. */
+.baseTray {
   position: absolute;
   z-index: 1;
-  border-radius: 22px;
-  box-shadow:
-    inset 0 -3px 6px rgba(0, 0, 0, 0.2),
-    0 3px 10px rgba(0, 0, 0, 0.12);
+  border-radius: 15px;
+  border-radius: 2.8cqw;
 }
 
-/* Empty resting spot: a flat recessed dimple, deliberately NOT pawn-like so a
-   vacated socket can't be mistaken for a white token. */
+/* Empty resting socket: a small dimple, smaller than a pawn so an occupied one
+   vanishes under its piece and a vacated one can never read as a counter. */
 .baseSpot {
   position: absolute;
   z-index: 2;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.1);
-  box-shadow: inset 0 1.5px 3px rgba(0, 0, 0, 0.18);
+  background: rgba(28, 32, 56, 0.05);
+  box-shadow:
+    inset 0 0.16cqw 0.3cqw rgba(28, 32, 56, 0.13),
+    0 0.06cqw 0 rgba(255, 255, 255, 0.6);
 }
 
-/* --- Score badges --- */
+/* --- Tokens --- */
 
-.scoreBadge {
-  position: absolute;
-  z-index: 3;
-  border-radius: 50%;
-  background: #fffdf8;
-  border: 3px solid;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1px;
-  pointer-events: none;
-  user-select: none;
-  transition: transform 200ms ease, box-shadow 200ms ease;
-}
-
-.scoreBadgeActive {
-  transform: scale(1.12);
-  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.2);
-}
-
-/* Marks the local player's badge with a soft halo ring */
-.scoreBadgeMe {
-  box-shadow: 0 0 0 3.5px rgba(0, 0, 0, 0.07), 0 3px 10px rgba(0, 0, 0, 0.12);
-}
-
-.scoreBadgeLabel {
-  font-size: 0.52rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.01em;
-  max-width: 94%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.scoreBadgeValue {
-  font-size: 1.05rem;
-  font-weight: 800;
-  color: #3d3a34;
-  line-height: 1;
-}
-
-/* --- Tokens (glossy dome pawns, same recipe as v1) --- */
-
+/* Counters are moulded pieces, not stickers. Four layers do the work:
+     · a body gradient lit from upper-left,
+     · an inset dark base + inset light crown, which is the dome,
+     · a hairline moulded edge where the plastic meets air,
+     · a two-stop ground shadow — tight dark core for contact, wide faint
+       ambient for the room. One blur for both is the classic amateur tell.
+   The old white outline is gone: form and contact keep a piece legible on a
+   cell of its own colour, which is what an outline was compensating for. */
 .token {
   position: absolute;
   border-radius: 50%;
@@ -496,38 +564,57 @@
   cursor: default;
   pointer-events: none;
   /* 200ms matches STEP_MS so post-animation settling is seamless */
-  transition: left 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              top 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transition: left 200ms cubic-bezier(0.33, 0, 0.15, 1),
+              top 200ms cubic-bezier(0.33, 0, 0.15, 1);
   box-shadow:
-    inset 0 -2px 4px rgba(0, 0, 0, 0.25),
-    inset 0 2px 4px rgba(255, 255, 255, 0.2),
-    0 2px 6px rgba(0, 0, 0, 0.3);
+    inset 0 -0.16cqw 0.3cqw rgba(24, 16, 10, 0.34),
+    inset 0 0.14cqw 0.26cqw rgba(255, 255, 255, 0.4),
+    0 0 0 0.07cqw rgba(28, 32, 56, 0.16),
+    0 0.11cqw 0.16cqw rgba(28, 32, 56, 0.36),
+    0 0.42cqw 0.8cqw rgba(28, 32, 56, 0.17);
   will-change: left, top, transform;
   transform: translateZ(0);
 }
 
-.tokenRed { background: radial-gradient(circle at 35% 35%, #ff6659 0%, #ea4330 40%, #c62828 100%); }
-.tokenGreen { background: radial-gradient(circle at 35% 35%, #66bb6a 0%, #34a853 40%, #1b5e20 100%); }
-.tokenYellow { background: radial-gradient(circle at 35% 35%, #ffe082 0%, #fbbc05 40%, #f57f17 100%); }
+/* Clear-coat hotspot. A separate, blurred, off-centre highlight is the single
+   detail that separates gloss from a flat gradient. */
+.token::after {
+  content: '';
+  position: absolute;
+  left: 22%;
+  top: 15%;
+  width: 36%;
+  height: 27%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
+}
 
+.tokenRed { background: radial-gradient(circle at 34% 26%, #ef7a63 0%, #e0452f 56%, #b8331f 100%); }
+.tokenGreen { background: radial-gradient(circle at 34% 26%, #63c493 0%, #31a566 56%, #1d7c49 100%); }
+.tokenYellow { background: radial-gradient(circle at 34% 26%, #ffc873 0%, #ef9f2b 56%, #c67a14 100%); }
+
+/* A movable piece lifts off the board. Height reads as "pick me up" far more
+   tactilely than a coloured glow, and keeps the board calm. */
 .tokenClickable {
   cursor: pointer;
   pointer-events: auto;
-  animation: tokenPulse 0.8s ease-in-out infinite alternate;
-  transition: left 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              top 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
-              filter 150ms ease, box-shadow 150ms ease;
+  animation: tokenLift 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
+  transition: left 200ms cubic-bezier(0.33, 0, 0.15, 1),
+              top 200ms cubic-bezier(0.33, 0, 0.15, 1),
+              box-shadow 180ms ease;
+  box-shadow:
+    inset 0 -0.16cqw 0.3cqw rgba(24, 16, 10, 0.34),
+    inset 0 0.14cqw 0.26cqw rgba(255, 255, 255, 0.4),
+    0 0 0 0.07cqw rgba(28, 32, 56, 0.16),
+    0 0.3cqw 0.34cqw rgba(28, 32, 56, 0.3),
+    0 0.85cqw 1.3cqw rgba(28, 32, 56, 0.2);
 }
 
-.tokenClickable.tokenRed { box-shadow: 0 0 14px 6px rgba(234, 67, 48, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenGreen { box-shadow: 0 0 14px 6px rgba(52, 168, 83, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
-.tokenClickable.tokenYellow { box-shadow: 0 0 14px 6px rgba(251, 188, 5, 0.6), 0 2px 4px rgba(0, 0, 0, 0.3); }
+.tokenClickable:hover { filter: brightness(1.06) saturate(1.04); }
 
-.tokenClickable:hover { filter: brightness(1.25); }
-
-@keyframes tokenPulse {
-  from { transform: scale(1); filter: brightness(1); }
-  to { transform: scale(1.25); filter: brightness(1.15); }
+@keyframes tokenLift {
+  from { transform: translateY(0) scale(1); }
+  to { transform: translateY(-5%) scale(1.035); }
 }
 
 .tokenArriving {
@@ -535,9 +622,11 @@
 }
 
 @keyframes tokenHop {
-  0% { transform: translateY(0) scale(1); }
-  40% { transform: translateY(-30%) scale(1.05); }
-  70% { transform: translateY(4%) scale(1.02, 0.96); }
+  0%   { transform: translateY(0) scale(1); }
+  34%  { transform: translateY(-32%) scale(1.06, 1.04); }
+  62%  { transform: translateY(3%) scale(1.07, 0.9); }
+  80%  { transform: translateY(-6%) scale(0.99, 1.02); }
+  92%  { transform: translateY(1%) scale(1.02, 0.98); }
   100% { transform: translateY(0) scale(1); }
 }
 
@@ -553,19 +642,21 @@
 
 @keyframes stepHopA {
   0%   { transform: translateY(0) scale(1, 1); }
-  28%  { transform: translateY(-20%) scale(0.96, 1.06); }
-  45%  { transform: translateY(-22%) scale(0.97, 1.05); }
-  75%  { transform: translateY(-4%) scale(1.01, 0.99); }
-  88%  { transform: translateY(2%) scale(1.04, 0.96); }
+  28%  { transform: translateY(-22%) scale(0.955, 1.065); }
+  45%  { transform: translateY(-24%) scale(0.97, 1.05); }
+  75%  { transform: translateY(-4%) scale(1.015, 0.988); }
+  88%  { transform: translateY(2%) scale(1.045, 0.958); }
   100% { transform: translateY(0) scale(1, 1); }
 }
 
+/* Identical curve to stepHopA on purpose: the parent alternates class names to
+   restart the animation on every cell, which a single name cannot do. */
 @keyframes stepHopB {
   0%   { transform: translateY(0) scale(1, 1); }
-  28%  { transform: translateY(-20%) scale(0.96, 1.06); }
-  45%  { transform: translateY(-22%) scale(0.97, 1.05); }
-  75%  { transform: translateY(-4%) scale(1.01, 0.99); }
-  88%  { transform: translateY(2%) scale(1.04, 0.96); }
+  28%  { transform: translateY(-22%) scale(0.955, 1.065); }
+  45%  { transform: translateY(-24%) scale(0.97, 1.05); }
+  75%  { transform: translateY(-4%) scale(1.015, 0.988); }
+  88%  { transform: translateY(2%) scale(1.045, 0.958); }
   100% { transform: translateY(0) scale(1, 1); }
 }
 
@@ -575,118 +666,198 @@
 }
 
 @keyframes tokenCapturedFade {
-  0% { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(0.3); }
+  0%   { opacity: 1; transform: scale(1) rotate(0deg); }
+  22%  { opacity: 1; transform: scale(1.16) rotate(-7deg); }
+  100% { opacity: 0; transform: scale(0.34) rotate(14deg); }
 }
 
 /* --- Side panel --- */
 
 .sidePanel {
-  width: 190px;
+  width: clamp(152px, 26%, 200px);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding-top: 8px;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .turnIndicator {
   display: flex;
   align-items: center;
-  gap: 7px;
-  font-size: 0.82rem;
+  gap: 10px;
+  padding: 0 12px;
+  font-size: 0.86rem;
   font-weight: 600;
   color: var(--text-primary);
-  min-height: 24px;
+  min-height: 22px;
 }
 
 .statusDot {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: inset 0 -1px 2px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    inset 0 -1px 1px rgba(24, 16, 10, 0.28),
+    inset 0 1px 1px rgba(255, 255, 255, 0.35);
 }
 
 .timer {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
   font-size: 0.78rem;
+  font-weight: 500;
   color: var(--text-muted);
+  opacity: 0.8;
 }
 
 .timerUrgent {
-  color: #ef4444;
+  color: var(--text-primary);
   font-weight: 700;
 }
+
+/* --- Player rows (replaces the on-board score badges) --- */
+
+.playerRows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.playerRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: var(--radius-full);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.playerRowActive {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.playerRowName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The score is the one number on this panel worth reading at a glance */
+.playerRowScore {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  opacity: 0.55;
+}
+
+.playerRowActive .playerRowScore { opacity: 1; }
 
 .sideDice {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
+  padding: 0 12px;
   min-height: 56px;
+  align-items: center;
 }
 
+/* A moulded die, lit from the same upper-left key as the board: warm crown,
+   cool contact. Same material language as the counters, one size smaller. */
 .dice {
-  width: 52px;
-  height: 52px;
-  border-radius: 12px;
-  border: 1.5px solid var(--border-medium);
-  background: #fffdf8;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 15px;
+  border: none;
+  background: linear-gradient(158deg, #ffffff 0%, #fbfbfd 52%, #f1f1f5 100%);
   cursor: default;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
-  transition: transform 150ms ease, box-shadow 150ms ease;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 -1px 0 rgba(28, 32, 56, 0.05),
+    0 0 0 1px rgba(28, 32, 56, 0.08),
+    0 1px 1px rgba(28, 32, 56, 0.1),
+    0 4px 10px -3px rgba(28, 32, 56, 0.16);
+  transition: transform 180ms cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 180ms ease;
 }
 
+/* Rollable: the die lifts, like a movable counter. Same affordance language. */
 .diceActive {
   cursor: pointer;
-  border-color: #ea4330;
-  animation: dicePulse 1s ease-in-out infinite alternate;
+  animation: diceLift 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
 }
 
-.diceActive:hover { transform: translateY(-2px); }
+.diceActive:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 1px rgba(28, 32, 56, 0.1),
+    0 8px 18px -4px rgba(28, 32, 56, 0.22);
+}
 
-@keyframes dicePulse {
-  from { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12); }
-  to { box-shadow: 0 0 12px 3px rgba(234, 67, 48, 0.35); }
+.diceActive:active {
+  transform: translateY(0) scale(0.97);
+  transition-duration: 60ms;
+}
+
+@keyframes diceLift {
+  from { transform: translateY(0); }
+  to { transform: translateY(-2.5px); }
 }
 
 .diceRolling {
-  animation: diceShake 120ms linear infinite;
+  animation: diceShake 260ms cubic-bezier(0.36, 0, 0.24, 1) infinite;
 }
 
+/* Tumble rather than vibrate: the old ±6° buzz read as an error state. */
 @keyframes diceShake {
-  0% { transform: rotate(-6deg); }
-  50% { transform: rotate(6deg); }
-  100% { transform: rotate(-6deg); }
+  0%   { transform: translateY(0) rotate(0deg) scale(1); }
+  25%  { transform: translateY(-7px) rotate(-9deg) scale(1.04); }
+  55%  { transform: translateY(-2px) rotate(7deg) scale(0.99); }
+  80%  { transform: translateY(-4px) rotate(-3deg) scale(1.01); }
+  100% { transform: translateY(0) rotate(0deg) scale(1); }
 }
 
 .diceFace {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
-  width: 34px;
-  height: 34px;
-  padding: 2px;
+  width: 32px;
+  height: 32px;
 }
 
+/* Pips are sunk into the face, not printed on it */
 .pip {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #3d3a34;
+  background: #33374a;
+  box-shadow:
+    inset 0 1px 1px rgba(var(--shadow-rgb), 0.4),
+    0 0.5px 0 rgba(255, 255, 255, 0.75);
   align-self: center;
   justify-self: center;
 }
 
-.diceIdle { font-size: 1.2rem; }
+/* Idle face: genuinely blank. Any mark at all read as a rolled 1. */
+.diceIdle { display: none; }
 
 .statusHint {
-  font-size: 0.75rem;
+  font-size: 0.76rem;
   font-weight: 600;
+  line-height: 1.35;
   color: var(--text-primary);
   animation: hintIn 150ms ease;
 }
@@ -700,13 +871,21 @@
 
 .statsTable {
   font-size: 0.7rem;
+  padding: 0 12px;
   color: var(--text-muted);
 }
 
+/* Wide enough to actually show the dot it exists for */
+.statsTable tbody td:first-child { width: 16px; }
+
 .statsLabel {
+  font-size: 0.68rem;
   font-weight: 600;
-  margin-bottom: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
   color: var(--text-muted);
+  opacity: 0.75;
 }
 
 .statsTable table {
@@ -717,14 +896,45 @@
 .statsTable th,
 .statsTable td {
   text-align: center;
-  padding: 2px 3px;
+  padding: 4px 2px;
   font-variant-numeric: tabular-nums;
 }
 
+.statsTable td { color: var(--text-primary); opacity: 0.6; }
+
 .statsTable th {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-muted);
+  opacity: 0.7;
+  padding-bottom: 6px;
+}
+
+/* One hairline under the header only — a full grid would out-shout the board */
+.statsTable thead tr {
   border-bottom: 1px solid var(--border-light);
+}
+
+.statsCaps { width: 26px; }
+
+/* The tilt itself is static and stays — it is the board's shape, not motion.
+   What goes is anything that moves on its own. */
+@media (prefers-reduced-motion: reduce) {
+  .popup,
+  .playingLayout,
+  .boardPlate,
+  .token,
+  .tokenClickable,
+  .tokenArriving,
+  .tokenSteppingA,
+  .tokenSteppingB,
+  .diceActive,
+  .diceRolling,
+  .gameOverCard,
+  .gameOverOverlay,
+  .reconnecting {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /* --- Game over --- */
@@ -733,7 +943,8 @@
   position: absolute;
   inset: 0;
   z-index: 150;
-  background: rgba(10, 10, 15, 0.55);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(9px) saturate(0.85);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -747,13 +958,13 @@
 
 .gameOverCard {
   background: var(--bg-secondary);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35);
-  padding: 26px 34px;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 0 0 1px rgba(var(--shadow-rgb), 0.06), 0 16px 40px rgba(var(--shadow-rgb), 0.18);
+  padding: 30px 38px 26px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 20px;
   animation: cardIn 350ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -763,22 +974,41 @@
 }
 
 .gameOverTitle {
-  font-size: 1.3rem;
-  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* Scaled to the heading it sits beside — a 9px dot next to 20px type reads as
+   a stray mark rather than the winner's colour. */
+.gameOverTitle .playerDot {
+  width: 13px;
+  height: 13px;
 }
 
 .finishOrder {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 7px;
   font-size: 0.85rem;
   color: var(--text-primary);
 }
 
 .finishRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: 14px 9px 1fr;
   align-items: center;
-  gap: 7px;
+  gap: 9px;
+}
+
+/* Fixed-width, right-aligned ordinal so 1. and 2. share a baseline column */
+.finishRow > span:first-child {
+  text-align: right;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .gameOverButtons {

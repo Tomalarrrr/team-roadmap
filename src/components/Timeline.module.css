@@ -153,7 +153,7 @@
 }
 
 .addMemberHeaderBtn:disabled {
-  opacity: 0.3;
+  opacity: var(--disabled-opacity);
   cursor: not-allowed;
 }
 
@@ -729,7 +729,7 @@
 .jumpToTodayBtn:hover {
   background: var(--bg-secondary);
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 6px 16px rgba(var(--shadow-rgb), 0.2), 0 0 0 1px rgba(var(--shadow-rgb), 0.05);
 }
 
 .jumpToTodayBtn:active {

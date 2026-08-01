@@ -29,6 +29,7 @@ import {
   INITIAL_TOKENS,
   getTokenColor,
   getColorTokenIndices,
+  getPlayerScore,
   colorIndex,
   initRollStats,
   deserializeRollStats,
@@ -55,8 +56,10 @@ const TURN_SECONDS = 30;
 const BACKUP_GRACE = 15;
 const STEP_MS = 200;
 
+// Kept in step with Ludo2Board's palette: a deliberate luminance ladder
+// (0.21 / 0.29 / 0.43) so the three players separate by lightness, not hue alone.
 const COLOR_HEX: Record<Ludo2Color, string> = {
-  red: '#ea4330', green: '#34a853', yellow: '#fbbc05',
+  red: '#d13a22', green: '#31a566', yellow: '#f2a838',
 };
 
 const COLOR_LABELS: Record<Ludo2Color, string> = {
@@ -108,6 +111,9 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   const [myColor, setMyColor] = useState<Ludo2Color | null>(null);
   const myColorRef = useRef<Ludo2Color | null>(null);
   const [playerNames, setPlayerNames] = useState<Partial<Record<Ludo2Color, string>>>({});
+  // Seats are dealt at random, so "host" is a stored colour rather than red.
+  // Games created before that field existed default to red.
+  const [hostColor, setHostColor] = useState<Ludo2Color>('red');
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isConnected, setIsConnected] = useState(true);
@@ -460,6 +466,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         if (player) names[color] = player.name;
       }
       setPlayerNames(names);
+      setHostColor(state.host ?? 'red');
 
       // Recompute valid moves on reconnect into a move phase
       if (state.turnPhase === 'move' && state.currentTurn === myColorRef.current && state.diceValue !== null) {
@@ -946,12 +953,13 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const code = await createGame(sessionId, userName);
+      const { code, color } = await createGame(sessionId, userName);
       resetLocalGameState();
       setGameCode(code);
       gameCodeRef.current = code;
-      setMyColor('red');
-      myColorRef.current = 'red';
+      setMyColor(color);
+      myColorRef.current = color;
+      setHostColor(color);
       setGamePhase('waiting');
       gamePhaseRef.current = 'waiting';
     } catch {
@@ -1109,6 +1117,17 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         </div>
       )}
 
+      {/* Our own resize affordance — the browser's native grip reads as a web
+          app, not a game. Purely decorative; the real handle is the corner. */}
+      <svg className={styles.resizeGrip} viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M14.5 8.5L8.5 14.5M14.5 13L13 14.5"
+          stroke="currentColor"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+        />
+      </svg>
+
       <div className={styles.gameArea}>
         {/* === LOBBY === */}
         {gamePhase === 'lobby' && (
@@ -1168,7 +1187,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                 const player = playerNames[color];
                 const isBot = player?.startsWith('Bot ');
                 const isEmpty = !player;
-                const isHost = myColor === 'red';
+                const isHost = myColor === hostColor;
                 return (
                   <div
                     key={color}
@@ -1202,12 +1221,12 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
             </div>
             {(() => {
               const filledCount = PLAYER_COLORS.filter(c => !!playerNames[c]).length;
-              const canStart = myColor === 'red' && filledCount >= 2;
+              const canStart = myColor === hostColor && filledCount >= 2;
               return (
                 <button className={styles.createBtn} onClick={handleStartGame} disabled={!canStart || isLoading}>
                   {isLoading ? 'Starting…'
                     : filledCount < 2 ? 'Need 2+ players'
-                    : myColor !== 'red' ? 'Waiting for host…'
+                    : myColor !== hostColor ? 'Waiting for host…'
                     : 'Start Game'}
                 </button>
               );
@@ -1225,15 +1244,12 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
               <Ludo2Board
                 tokens={tokens}
                 playerCount={activePlayerCount}
-                currentTurn={currentTurn}
-                winner={winner}
                 myColor={myColor}
                 validMoves={validMoves}
                 lastMovedToken={lastMovedToken}
                 animPos={tokenAnimPos.current}
                 animParity={tokenAnimParity.current}
                 capturedGhosts={capturedGhostsRef.current}
-                playerNames={playerNames}
                 onTokenClick={handleMoveToken}
               />
             </div>
@@ -1247,6 +1263,26 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                     {timeLeft}s
                   </span>
                 )}
+              </div>
+
+              {/* Standing/progress, replacing the score badges that used to sit
+                  on the board itself */}
+              <div className={styles.playerRows}>
+                {PLAYER_COLORS.slice(0, activePlayerCount).map(color => (
+                  <div
+                    key={color}
+                    className={[
+                      styles.playerRow,
+                      currentTurn === color && !winner ? styles.playerRowActive : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    <span className={styles.playerDot} style={{ background: COLOR_HEX[color] }} />
+                    <span className={styles.playerRowName}>
+                      {displayName(color)}{myColor === color ? ' (you)' : ''}
+                    </span>
+                    <span className={styles.playerRowScore}>{getPlayerScore(tokens, color)}</span>
+                  </div>
+                ))}
               </div>
 
               <div className={styles.sideDice}>
@@ -1265,7 +1301,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                   ) : diceValue && (turnPhase === 'move' || rolledThisTurn) ? (
                     <DiceFace value={diceValue} />
                   ) : (
-                    <span className={styles.diceIdle}>🎲</span>
+                    <span className={styles.diceIdle} />
                   )}
                 </button>
                 {statusHint && <span className={styles.statusHint}>{statusHint}</span>}
@@ -1279,7 +1315,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                     <tr>
                       <th></th>
                       {[1, 2, 3, 4, 5, 6].map(n => <th key={n}>{n}</th>)}
-                      <th title="Captures">{'⚔'}</th>
+                      <th className={styles.statsCaps} title="Captures">Cap</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1299,7 +1335,8 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
             {winner && showGameOver && (
               <div className={styles.gameOverOverlay}>
                 <div className={styles.gameOverCard}>
-                  <div className={styles.gameOverTitle} style={{ color: COLOR_HEX[winner] }}>
+                  <div className={styles.gameOverTitle}>
+                    <span className={styles.playerDot} style={{ background: COLOR_HEX[winner] }} />
                     {displayName(winner)} wins!
                   </div>
                   {finishOrder.length > 1 && (
@@ -1314,7 +1351,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                     </div>
                   )}
                   <div className={styles.gameOverButtons}>
-                    {myColor === 'red' && (
+                    {myColor === hostColor && (
                       <button className={styles.createBtn} onClick={handlePlayAgain}>Play Again</button>
                     )}
                     <button className={styles.linkBtn} onClick={handleBackToLobby}>Back to Lobby</button>

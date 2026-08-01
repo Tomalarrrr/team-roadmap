@@ -26,7 +26,6 @@ import {
 export { getServerTimestamp };
 export type { Ludo2Color, Ludo2GameState, Ludo2MoveUpdate, Unsubscribe };
 
-const JOIN_ORDER: Ludo2Color[] = ['green', 'yellow'];
 const STALE_GAME_AGE_MS = 24 * 60 * 60 * 1000;
 const BOT_NAMES: Record<Ludo2Color, string> = {
   red: 'Bot Red',
@@ -34,12 +33,26 @@ const BOT_NAMES: Record<Ludo2Color, string> = {
   yellow: 'Bot Yellow',
 };
 
-export async function createGame(sessionId: string, userName: string): Promise<string> {
+/** Seats are dealt at random rather than in board order, so creating a game
+ * doesn't hand you red every time. The starting player is drawn separately in
+ * startGame, so neither the colour nor the first move follows join order. */
+function randomColor(): Ludo2Color {
+  const arr = new Uint8Array(1);
+  crypto.getRandomValues(arr);
+  return PLAYER_COLORS[arr[0] % PLAYER_COLORS.length];
+}
+
+export async function createGame(
+  sessionId: string,
+  userName: string
+): Promise<{ code: string; color: Ludo2Color }> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateGameCode();
+    const color = randomColor();
 
     const initialState: Ludo2GameState = {
-      players: { red: { sessionId, name: userName } },
+      players: { [color]: { sessionId, name: userName } },
+      host: color,
       tokens: INITIAL_TOKENS,
       currentTurn: 'red',
       turnPhase: 'roll',
@@ -60,7 +73,7 @@ export async function createGame(sessionId: string, userName: string): Promise<s
     });
     if (result.committed) {
       cleanupStaleGames();
-      return code;
+      return { code, color };
     }
   }
   throw new Error('Failed to generate unique game code. Try again.');
@@ -167,8 +180,8 @@ export async function joinGame(
     }
 
     const openColors = current.startedAt
-      ? JOIN_ORDER.slice(0, current.playerCount - 1)
-      : JOIN_ORDER;
+      ? PLAYER_COLORS.slice(0, current.playerCount)
+      : PLAYER_COLORS;
     let foundColor: Ludo2Color | null = null;
     for (const color of openColors) {
       if (!current.players[color]) {

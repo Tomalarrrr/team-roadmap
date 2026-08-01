@@ -32,6 +32,8 @@ backup-firebase.sh
 # Local dev database (transient stand-in data) and its backups
 .local-db*.json
 
-# Local dev preview harness for ProjectWizard (scratch, not shipped)
+# Local dev preview harnesses (scratch, not shipped)
 wizard-preview.html
 src/wizardPreview.tsx
+ludo2-preview.html
+src/ludo2Preview.tsx
