@@ -3,7 +3,7 @@
 // three base rings and spokes, and the pieces. Movement is driven by the parent
 // via animPos/animParity overrides (the same imperative stepper as Ludo v1).
 
-import type { CSSProperties } from 'react';
+import { useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { TokenPosition } from '../../ludoFirebase';
 import {
   TRACK_SIZE,
@@ -37,6 +37,7 @@ import {
   getTokenCoords,
   getTokenOffset,
 } from './ludo2Geometry';
+import { pickNearestToken } from './ludo2HitTest';
 import styles from './Ludo2Game.module.css';
 
 // --- Palette ---------------------------------------------------------------
@@ -211,14 +212,48 @@ export function Ludo2Board({
   // of counters lying on their sides.
   const upright = `rotate(${-spin}deg)`;
 
-  // Where the offered moves land. Under the exact-landing rule "which of my
-  // counters can move" is only half the question — the other half is where it
-  // would end up, and that was previously nowhere on the board.
+  // Where the offered moves land. "Which of my counters can move" is only half
+  // the question — the other half is where it would end up, and that was
+  // previously nowhere on the board.
   const moveTargets = new Set<TokenPosition>(validMoves.values());
+
+  /* Presses land on the board, not on the counters.
+     A press used to go to whichever box the pointer was technically inside,
+     and a counter's box is a counter's width — 4.1% of the board, under 30px
+     at any realistic popup size, breathing up and down under the finger. The
+     board can ask a better question: which playable counter is *closest*. That
+     is what lets the catchment be opened past the size of the piece without
+     neighbours stealing each other's presses. Counters keep their keyboard
+     handling; this is the pointer half only. */
+  const pressRef = useRef<{ id: number; x: number; y: number } | null>(null);
+
+  const handleBoardPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    pressRef.current = e.button === 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY } : null;
+  };
+
+  const handleBoardPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const press = pressRef.current;
+    pressRef.current = null;
+    // Only a press that began on the board counts, and only if it stayed put.
+    // Without this, releasing a window drag over the board would move a piece,
+    // and so would a stray swipe across it.
+    if (!press || press.id !== e.pointerId) return;
+    if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) return;
+    if (!validMoves.size) return;
+    const idx = pickNearestToken(e.currentTarget, e.clientX, e.clientY);
+    if (idx !== null && validMoves.has(idx)) onTokenClick(idx);
+  };
 
   return (
     <div className={styles.boardStage}>
-      <div className={styles.board}>
+      <div
+        className={styles.board}
+        onPointerDown={handleBoardPointerDown}
+        onPointerUp={handleBoardPointerUp}
+        // The press may leave the board before it is released; that is a
+        // cancelled press, not a move somewhere else.
+        onPointerLeave={() => { pressRef.current = null; }}
+      >
         {/* The disc: a moulded puck with a visible side wall, bored through the
             middle. The wall sits a touch lower than the face, so inside the bore
             it shows up as the far inner wall — which is the only part of a hole
@@ -335,7 +370,7 @@ export function Ludo2Board({
                     inactive ? styles.cellInactive : '',
                     isTarget ? styles.cellTarget : '',
                   ].filter(Boolean).join(' ')}
-                  title={`${SEAT_LABEL[color]}'s run home — land on an empty cell exactly`}
+                  title={`${SEAT_LABEL[color]}'s run home — walk in, any depth; an overshoot stops on the last cell`}
                   style={{
                     ...box(spec.x, spec.y, SPOKE_CELL, SPOKE_CELL, spec.rot),
                     ...keyLight(spec.rot + spin),
@@ -365,19 +400,14 @@ export function Ludo2Board({
             className={styles.homeEdge}
             style={{ ...box(50, 50, HUB.r * 2), ...keyLight(spin) }}
           />
+          {/* Bare. The die rests in the hub and covers most of it, so the mark
+              that used to sit here was only ever seen as a rim of points
+              sticking out from behind the die — and it competed with the safe
+              stars out on the ring, which are the ones that mean something. */}
           <div
             className={styles.homeDisc}
             style={{ ...box(50, 50, HUB.r * 2), ...keyLight(spin) }}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              className={styles.homeStar}
-              style={{ transform: upright }}
-              aria-hidden="true"
-            >
-              <path d={STAR_PATH} />
-            </svg>
-          </div>
+          />
 
           {/* Yards — four bays on the apron, clear of the track. Same arc
               segment as a track tile so they read as part of the same board,
@@ -450,6 +480,9 @@ export function Ludo2Board({
                   stepping ? styles.tokenSlotStepping : '',
                   clickable ? styles.tokenSlotLifted : '',
                 ].filter(Boolean).join(' ')}
+                // Read back by the plate's hit test to find this counter's
+                // centre on screen, whatever the plate is doing to it.
+                data-token={clickable ? i : undefined}
                 style={{ ...box(coords[0] + ox, coords[1] + oy, size), transform: upright }}
               >
                 <div
@@ -459,7 +492,10 @@ export function Ludo2Board({
                     ['--body' as string]: COLOR_HEX[color],
                     ['--foot' as string]: COLOR_DARK[color],
                   } as CSSProperties}
-                  onClick={clickable ? () => onTokenClick(i) : undefined}
+                  // No onClick: presses are resolved by the plate, which can
+                  // pick the *nearest* counter instead of whichever box the
+                  // pointer happened to be inside. See pickNearestToken.
+                  //
                   // A counter carried role="button" but no way to reach it: the
                   // die could be rolled from the keyboard and then nothing could
                   // be moved with one. Tab to a playable piece, Enter to play it.

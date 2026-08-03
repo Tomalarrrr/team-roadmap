@@ -281,14 +281,25 @@ export function scoreBotMove(
   // Deploy from base: valuable but decreasing as more tokens are already in play.
   if (curPos === 'base') score += 90 - tokensInPlay * 20;
 
-  // Taking a cell in the run home is valuable (safe from all threats), and the
-  // deep cells are the ones that are hard to hit: take those while the roll
-  // allows it and leave the shallow ones, which anything can reach, for last.
   if (targetPos.startsWith('final-')) {
     const finalNum = parseInt(targetPos.split('-')[1]);
-    score += 100 + finalNum * 20;
-    // Arriving in the run home grants a bonus turn — worth ~35 points
-    if (!curPos.startsWith('final-')) score += 35;
+    if (curPos.startsWith('final-')) {
+      // Shuffling deeper *inside* the run home. Depth is worth nothing under
+      // the walk-in rule: winning is having all five counters in, at any depth,
+      // and a counter already in is already safe from everything. So this is a
+      // turn spent on nothing, and it has to rank below every move that isn't.
+      //
+      // It scored 100 + depth × 20, from back when a counter had to land on a
+      // distinct cell and the deep ones were the hard ones to claim. Left
+      // there, the bot preferred pushing a home counter from cell 1 to cell 4
+      // (180) over walking a second one home (155) — it was talking itself out
+      // of its own win, every time both were on offer.
+      score += 4 + finalNum;
+    } else {
+      // Arriving. This is the move that wins games: one of the five, safe from
+      // capture for good, and a bonus turn on top. Depth only breaks ties.
+      score += 150 + finalNum;
+    }
   }
 
   if (targetPos.startsWith('track-')) {

@@ -353,7 +353,7 @@ describe('startGame', () => {
       .mockResolvedValueOnce(res(state, { etag: 'e1' }))
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    await startGame('GAME');
+    await startGame('GAME', 's-red');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(putBody.playerCount).toBe(2);
@@ -376,7 +376,7 @@ describe('startGame', () => {
       .mockResolvedValueOnce(res(state, { etag: 'e1' }))
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    await startGame('GAME');
+    await startGame('GAME', 's-red');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(putBody.playerCount).toBe(2);
@@ -398,11 +398,32 @@ describe('startGame', () => {
       .mockResolvedValueOnce(res(state, { etag: 'e1' }))
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    await startGame('GAME');
+    await startGame('GAME', 's-yellow');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(putBody.host).toBe('green');
     expect(putBody.players.green.sessionId).toBe('s-yellow');
+  });
+
+  it('re-keys a bot onto the seat it slid into', async () => {
+    // The bot was added to yellow and yellow slides into green. Carried across
+    // untouched it spends the game as "Bot Blue" sitting behind a green dot.
+    const state = baseState({
+      players: {
+        red: { sessionId: 's-red', name: 'Red' },
+        yellow: { sessionId: 'bot-yellow', name: 'Bot Blue' },
+      },
+      startedAt: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(res(state, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await startGame('GAME', 's-red');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(putBody.players.green).toEqual({ sessionId: 'bot-green', name: 'Bot Green' });
+    expect(putBody.singlePlayer).toBe(true);
   });
 
   it('refuses to start with fewer than 2 players', async () => {
@@ -412,7 +433,19 @@ describe('startGame', () => {
     });
     fetchMock.mockResolvedValueOnce(res(state, { etag: 'e1' }));
 
-    await startGame('GAME');
+    await startGame('GAME', 's-red');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // aborted, no PUT
+  });
+
+  it('refuses to start for anyone but the host', async () => {
+    // The Start button is only ever shown to the host, but addBot and removeBot
+    // both check it where it can be relied on and this did not — so a second
+    // tab or a stale client could start somebody else's room for them.
+    const state = baseState({ startedAt: null });
+    fetchMock.mockResolvedValueOnce(res(state, { etag: 'e1' }));
+
+    await startGame('GAME', 's-green');
 
     expect(fetchMock).toHaveBeenCalledTimes(1); // aborted, no PUT
   });

@@ -6,11 +6,12 @@
 // zones sit on every start cell and start + 6. Token serialization reuses
 // serializeTokens/deserializeTokens from ludoFirebase (length-agnostic).
 //
-// The run home is five cells and a player has five counters, one per cell: a
-// counter is home only once it is standing in a cell of its own, which it can
-// only reach on an exact roll. There is no pile at the centre to overflow into,
-// so a counter that cannot land keeps waiting out on the track, where it can
-// still be sent back to the yard.
+// The run home is five cells deep and a player has five counters. Counters walk
+// in rather than having to land exactly: any number may share a cell, and a roll
+// that would carry one past the end stops it on the last cell. A player is
+// finished once all five are somewhere in the run home. (An earlier version
+// demanded an exact landing on an empty cell, which deadlocked the endgame — see
+// ludo2GameLogic.)
 
 import type { TokenPosition, TurnPhase, LudoPlayer } from './ludoFirebase';
 import { deserializeTokens } from './ludoFirebase';
@@ -146,16 +147,21 @@ export function deserializeLudo2Tokens(str: string): TokenPosition[] {
 }
 
 /**
- * The highest score getPlayerScore can return: every counter standing in a cell
- * of the run home, one per cell.
+ * The highest score getPlayerScore can return: every counter on the last cell
+ * of the run home.
  *
- * Not TOKENS_PER_PLAYER × (TRACK_SIZE + FINAL_SIZE) — only one counter can hold
- * the deepest cell, so the run-home half of the sum is 1+2+…+FINAL_SIZE rather
- * than FINAL_SIZE apiece. A progress meter scaled to that looser bound stops
- * short of full even for the player who has just won.
+ * FINAL_SIZE apiece, not 1+2+…+FINAL_SIZE. The triangular sum was right while
+ * the run home held one counter per cell; counters now walk in and may share a
+ * cell, so all of them can pile onto the deepest one. Left at the old bound
+ * this is not a ceiling at all — a player stacked deep scores past it and the
+ * progress meter runs off the end of its own track.
+ *
+ * The cost of a true ceiling is that a winner need not read 100%: finishing
+ * only means every counter is *in* the run home, so five on the first cell wins
+ * at 215 of 235. The bar is a race position, and the game announces the win
+ * itself; a bar that lies about the maximum is the worse of the two.
  */
-export const MAX_PLAYER_SCORE =
-  TOKENS_PER_PLAYER * TRACK_SIZE + (FINAL_SIZE * (FINAL_SIZE + 1)) / 2;
+export const MAX_PLAYER_SCORE = TOKENS_PER_PLAYER * (TRACK_SIZE + FINAL_SIZE);
 
 /**
  * A position in the words the board uses. 'track-17' is a storage detail; what

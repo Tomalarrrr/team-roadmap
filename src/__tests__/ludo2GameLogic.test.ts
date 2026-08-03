@@ -385,18 +385,37 @@ describe('a turn is never stuck with counters on the board', () => {
 });
 
 describe('MAX_PLAYER_SCORE', () => {
-  it('is exactly what a filled run home scores', () => {
+  it('is exactly what every counter on the last cell scores', () => {
+    // Counters share cells now, so this — not one per cell — is the ceiling.
     const t = [...BASE_TOKENS];
-    for (let f = 1; f <= FINAL_SIZE; f++) t[f - 1] = `final-${f}` as TokenPosition;
+    for (let i = 0; i < TOKENS_PER_PLAYER; i++) t[i] = `final-${FINAL_SIZE}` as TokenPosition;
     expect(getPlayerScore(t, 'red')).toBe(MAX_PLAYER_SCORE);
     expect(checkPlayerFinished(t, 'red')).toBe(true);
   });
 
+  it('is not exceeded by a whole run home stacked on the deepest cell', () => {
+    // The regression this exists for: the ceiling was the triangular sum
+    // 1+2+…+FINAL_SIZE, which was right while a cell held one counter. Once
+    // they could share, a stacked run home scored *past* the maximum and the
+    // seat's progress meter was handed a width above 100%.
+    for (let f = 1; f <= FINAL_SIZE; f++) {
+      const t = [...BASE_TOKENS];
+      for (let i = 0; i < TOKENS_PER_PLAYER; i++) t[i] = `final-${f}` as TokenPosition;
+      expect(getPlayerScore(t, 'red')).toBeLessThanOrEqual(MAX_PLAYER_SCORE);
+    }
+  });
+
   it('is never exceeded from any reachable position', () => {
-    // Sweep every single-counter placement; none may score above the ceiling.
-    for (let t = 1; t <= TRACK_SIZE; t++) {
-      expect(getPlayerScore(tokensWith({ 0: `track-${t}` }), 'red'))
-        .toBeLessThanOrEqual(MAX_PLAYER_SCORE);
+    // Every counter on the same cell is the worst case, so sweep the whole
+    // board that way rather than one counter at a time.
+    const everywhere: TokenPosition[] = [
+      ...Array.from({ length: TRACK_SIZE }, (_, i) => `track-${i + 1}` as TokenPosition),
+      ...Array.from({ length: FINAL_SIZE }, (_, i) => `final-${i + 1}` as TokenPosition),
+    ];
+    for (const pos of everywhere) {
+      const t = [...BASE_TOKENS];
+      for (let i = 0; i < TOKENS_PER_PLAYER; i++) t[i] = pos;
+      expect(getPlayerScore(t, 'red')).toBeLessThanOrEqual(MAX_PLAYER_SCORE);
     }
   });
 });

@@ -62,6 +62,12 @@ import styles from './Ludo2Game.module.css';
 const TURN_SECONDS = 30;
 const BACKUP_GRACE = 15;
 const STEP_MS = 200;
+/** How long each human seat waits for the seat ahead of it to throw the bot's
+ * die before throwing it itself (see the bot driver). Comfortably more than the
+ * ~1.2s poll, so the seat behind sees the roll rather than duplicating it, and
+ * comfortably less than the turn clock, so a missing client costs a beat rather
+ * than a skipped turn. */
+const BOT_HANDOFF_MS = 3000;
 
 // Kept in step with Ludo2Board's palette. The third seat is keyed 'yellow' in
 // the code and the database, but presents as blue to match the board — so games
@@ -338,6 +344,21 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     hintTimeoutRef.current = setTimeout(() => setStatusHint(null), 2000);
   }, []);
 
+  /**
+   * Copy, and say whether it worked.
+   *
+   * `navigator.clipboard` is absent outside a secure context and rejects when
+   * the document isn't focused. Called bare it threw into a click handler or
+   * left an unhandled rejection, and either way the player pressed the code,
+   * saw nothing happen, and had no idea the copy had failed rather than the
+   * button.
+   */
+  const copyToClipboard = useCallback((text: string, done: string) => {
+    const failed = () => showHint('Could not copy — select it by hand');
+    if (!navigator.clipboard) return failed();
+    navigator.clipboard.writeText(text).then(() => showHint(done), failed);
+  }, [showHint]);
+
   // --- Cell-by-cell animation stepper (ported from v1) ---
   const startTokenAnimation = useCallback((tokenIdx: number, rawWaypoints: [number, number][]) => {
     const existing = tokenAnimTimers.current.get(tokenIdx);
@@ -595,9 +616,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         break;
       }
 
-      // Recompute valid moves on reconnect into a move phase
+      // Recompute valid moves on reconnect into a move phase. Every counter
+      // that can move is offered, duplicates included — see the note on
+      // setValidMoves in handleRollDice.
       if (state.turnPhase === 'move' && state.currentTurn === myColorRef.current && state.diceValue !== null) {
-        const moves = getDistinctMoves(parsedTokens, state.currentTurn, state.diceValue);
+        const moves = getValidMoves(parsedTokens, state.currentTurn, state.diceValue);
         setValidMoves(new Map(moves.map(m => [m.tokenIndex, m.newPosition])));
       } else {
         setValidMoves(new Map());
@@ -824,6 +847,18 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     rollTimeoutRef.current = setTimeout(async () => {
       setIsRolling(false);
       isRollingRef.current = false;
+
+      // The die spends most of a second in the air, and the table does not stop
+      // while it is up there: another client's backup skip can carry the turn
+      // off this seat mid-throw. Everything below was written against
+      // `currentTurnRef` read *now*, so landing that roll would have played
+      // somebody else's turn with our die. Drop it instead — a lost roll costs
+      // a beat, a stolen turn costs the game.
+      if (currentTurnRef.current !== activeColor || turnPhaseRef.current !== 'roll' || winnerRef.current) {
+        moveInFlightRef.current = false;
+        return;
+      }
+
       setDiceValue(roll);
       setLastRoll(roll);
 
@@ -831,14 +866,25 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       rollStatsRef.current = updatedRollStats;
 
       const currentTokens = tokensRef.current;
-      const curColor = currentTurnRef.current;
+      const curColor = activeColor;
       const curSixes = consecutiveSixesRef.current;
       const curPlayerCount = activePlayerCountRef.current;
       const finishedColors = getFinishedColors(currentTokens, curPlayerCount);
 
-      // Interchangeable counters collapsed: five in the yard on a 6 is one
-      // decision, and offered raw it would never take the auto-play path below.
+      // Two different questions, and they need two different answers.
+      //
+      // *How many decisions is this?* — counters of a colour are
+      // interchangeable, so five in the yard on a 6 is one decision offered
+      // five times. Collapsed, or a forced move never takes the auto-play path
+      // below and the player is made to choose between identical options.
+      //
+      // *Which counters may I press?* — all of them. Collapsing that too meant
+      // exactly one counter in the yard was live and the other four were dead
+      // to the touch: you could bring a counter out, but not the one you had
+      // your finger on. They all go to the same square, so let any of them be
+      // the one that goes.
       const moves = getDistinctMoves(currentTokens, curColor, roll);
+      const playable = getValidMoves(currentTokens, curColor, roll);
 
       if (moves.length === 0) {
         let nextColor: Ludo2Color;
@@ -871,7 +917,12 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
           rollStats: serializeRollStats(updatedRollStats),
           lastRoll: roll,
         };
-        try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
+        // Cleared whether or not it landed: a write that aborts (the turn moved
+        // on, twelve conflicts in a row) used to leave this stuck true, and a
+        // client with it stuck true can neither roll nor move for the rest of
+        // the game.
+        await makeMove(gc, curColor, update).catch(() => false);
+        moveInFlightRef.current = false;
         return;
       }
 
@@ -885,7 +936,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         return;
       }
 
-      setValidMoves(new Map(moves.map(m => [m.tokenIndex, m.newPosition])));
+      setValidMoves(new Map(playable.map(m => [m.tokenIndex, m.newPosition])));
       const update: Ludo2MoveUpdate = {
         tokens: serializeTokens(currentTokens),
         currentTurn: curColor,
@@ -898,7 +949,18 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         rollStats: serializeRollStats(updatedRollStats),
         lastRoll: roll,
       };
-      try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
+      const committed = await makeMove(gc, curColor, update).catch(() => false);
+      moveInFlightRef.current = false;
+      if (committed) {
+        // Believe our own write rather than waiting to be told about it. The
+        // move phase only became true locally when the next poll came back —
+        // up to a second and a half in which the counters were already lit up
+        // and raised and every press on one was dropped on the floor, because
+        // the client still thought it was in the roll phase.
+        turnPhaseRef.current = 'move';
+        setTurnPhase('move');
+        diceValueRef.current = roll;
+      }
     }, rollAnimMs);
   }, [showHint]);
   const handleRollDiceRef = useRef(handleRollDice);
@@ -1009,7 +1071,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
             turnStartedAt: getServerTimestamp(),
             rollStats: serializeRollStats(rollStatsRef.current),
           };
-          makeMove(gc, curColor, update).catch(() => { moveInFlightRef.current = false; });
+          // Released either way — an aborted write must not leave this client
+          // unable to act for the rest of the game.
+          makeMove(gc, curColor, update)
+            .catch(() => false)
+            .then(() => { moveInFlightRef.current = false; });
         }
       }
     };
@@ -1024,22 +1090,33 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     if (!isSinglePlayer || gamePhase !== 'playing' || winner || gamePaused) return;
     if (!botColorsRef.current.has(currentTurn)) return;
 
-    // Exactly one client drives the bots. Every client used to run every bot's
-    // turn: two humans watching the same bot each threw it a die of their own,
-    // and because makeMove's guard only checks whose turn it is, both writes
-    // could land — the second quietly overwriting the first's roll. The pity
-    // counters below are per-tab refs, so they drifted apart between the two as
-    // well. The first human seat in board order is a choice every client makes
-    // identically from the same state, so it needs no election.
+    // Who throws the bot's die.
     //
-    // If there is no human seat left the room is being torn down anyway; fall
-    // through rather than let the table freeze.
-    const driver = PLAYER_COLORS.slice(0, activePlayerCountRef.current)
-      .find(c => !botColorsRef.current.has(c));
-    if (driver && myColorRef.current !== driver) return;
+    // Every client used to throw it: two humans watching the same bot each
+    // rolled one of their own, and because makeMove's guard only asks whose
+    // turn it is, both writes landed — the second quietly overwriting the
+    // first's roll. The pity counters are per-tab refs, so those drifted apart
+    // between the two as well.
+    //
+    // Electing a single driver fixes the race and introduces a worse one: a
+    // player who closes the window rather than leaving keeps their seat, and if
+    // that was the elected client the bots simply stop — every bot turn then
+    // runs down its clock and gets force-skipped, for the rest of the game.
+    //
+    // So it is an order, not an election. Human seats take the throw in board
+    // order and each waits its rank out first; the guards inside the timeout
+    // see the state the seat ahead has already written and stand down. Every
+    // client computes the same order from the same state, so nothing needs to
+    // be agreed, and a missing client costs one handoff rather than the game.
+    const humanSeats = PLAYER_COLORS.slice(0, activePlayerCountRef.current)
+      .filter(c => !botColorsRef.current.has(c));
+    const rank = myColorRef.current ? humanSeats.indexOf(myColorRef.current) : -1;
+    // Our seat has been taken over by a bot (we left, on this or another tab)
+    // while this tab is still watching. Not ours to play.
+    if (humanSeats.length > 0 && rank < 0) return;
 
     clearTimeout(botTimerRef.current);
-    const botDelay = 600 + Math.random() * 400;
+    const botDelay = 600 + Math.random() * 400 + Math.max(0, rank) * BOT_HANDOFF_MS;
 
     if (turnPhase === 'roll') {
       botTimerRef.current = setTimeout(() => {
@@ -1073,7 +1150,9 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
               finishOrder: finishOrderRef.current.join(','),
               turnStartedAt: getServerTimestamp(),
               rollStats: serializeRollStats(rollStatsRef.current),
-            }).catch(() => { moveInFlightRef.current = false; });
+            })
+              .catch(() => false)
+              .then(() => { moveInFlightRef.current = false; });
           }
           return;
         }
@@ -1086,8 +1165,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     }
 
     return () => clearTimeout(botTimerRef.current);
-    // tokens re-triggers after board-changing writes
-  }, [isSinglePlayer, gamePhase, winner, gamePaused, currentTurn, turnPhase, myColor, tokens]);
+    // `tokens` re-triggers after board-changing writes; `consecutiveSixes` after
+    // the one write that changes nothing else — a bot that rolls a 6 with no
+    // move keeps the turn, the phase and the board, so without it the bot rolled
+    // once and then sat there until the turn clock skipped it.
+  }, [isSinglePlayer, gamePhase, winner, gamePaused, currentTurn, turnPhase, myColor, tokens, consecutiveSixes]);
 
   // --- Lobby / room handlers ---
   const resetLocalGameState = useCallback(() => {
@@ -1366,10 +1448,14 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       )}
 
       {/* How to play. Everything unusual about this board lived only in code
-          comments: five counters against five run-home cells, the exact landing,
-          the havens. A player could lose a game without ever being told why a
-          counter would not move. Quiet type on the same blurred ground as the
-          pause screen — no icons, no boxes, nothing to look at twice. */}
+          comments: five counters against a five-cell run home, the stop on the
+          last cell, the havens. A player could lose a game without ever being
+          told how the end of it works. Quiet type on the same blurred ground as
+          the pause screen — no icons, no boxes, nothing to look at twice.
+
+          Keep this in step with ludo2GameLogic. It is the only statement of the
+          rules a player ever sees, so a rule change that skips it leaves the
+          game actively teaching the wrong thing. */}
       {showHelp && (
         <div className={styles.helpOverlay}>
           <div className={styles.helpCard}>
@@ -1380,11 +1466,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
               <li>Land on an opponent to send that counter back to its yard.</li>
               <li>Start spaces and starred spaces are safe. Nothing is captured there.</li>
               <li>
-                Your run home has five cells and you have five counters — one for each.
-                A counter has to land on an empty cell <em>exactly</em>; it may pass over
-                a taken one but never stop on it.
+                Your run home is the five cells on your own spoke. Counters walk in — no
+                exact roll needed, and any number of them may share a cell. A roll that
+                would carry one past the end simply stops it on the <em>last</em> cell.
               </li>
-              <li>Fill all five cells to win. A counter still out on the track can always be sent home.</li>
+              <li>Get all five counters into the run home to win. One still out on the track can always be sent back to your yard.</li>
             </ul>
             <div className={styles.helpKeys}>
               Space or Enter rolls. Tab to a raised counter and press Enter to move it.
@@ -1445,12 +1531,12 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
           <div className={styles.lobby}>
             <div
               className={styles.gameCodeDisplay}
-              onClick={() => gameCode && navigator.clipboard.writeText(gameCode).then(() => showHint('Copied!'))}
+              onClick={() => gameCode && copyToClipboard(gameCode, 'Copied!')}
               role="button"
               tabIndex={0}
               title="Click to copy"
               aria-label="Copy game code"
-              onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && gameCode) { e.preventDefault(); navigator.clipboard.writeText(gameCode).then(() => showHint('Copied!')); } }}
+              onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && gameCode) { e.preventDefault(); copyToClipboard(gameCode, 'Copied!'); } }}
             >
               {gameCode}
             </div>
@@ -1461,7 +1547,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                 onClick={() => {
                   const url = new URL(window.location.href);
                   url.searchParams.set('ludo2', gameCode);
-                  navigator.clipboard.writeText(url.toString()).then(() => showHint('Link copied!'));
+                  copyToClipboard(url.toString(), 'Link copied!');
                 }}
               >
                 Copy Link
@@ -1494,7 +1580,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                       <button
                         className={styles.removeBotBtn}
                         onClick={(e) => { e.stopPropagation(); if (gameCode) removeBot(gameCode, color, sessionId); }}
-                        aria-label={`Remove ${color} bot`}
+                        aria-label={`Remove ${COLOR_LABELS[color]} bot`}
                       >
                         <svg width="12" height="12" viewBox="0 0 12 12">
                           <path d="M9 3L3 9M3 3L9 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
