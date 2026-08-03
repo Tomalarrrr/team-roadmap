@@ -545,7 +545,15 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       if (state.turnPhase !== turnPhaseRef.current) setTurnPhase(state.turnPhase);
       const newDice = state.diceValue ?? null;
       if (newDice !== diceValueRef.current) setDiceValue(newDice);
-      if (state.lastRoll != null) setLastRoll(state.lastRoll);
+      // Mirrored, including its absence. Guarding this on `!= null` was meant
+      // to stop a write that omits the field from blanking the die — but no
+      // write can do that: makeMove spreads the update over the stored state,
+      // so an omitted lastRoll keeps the stored one and the stored one is
+      // always the truth. What the guard actually did was make the field
+      // impossible to clear: resetGame writes null, Firebase deletes the key,
+      // and every client except the one that pressed Play Again went on showing
+      // the previous game's last face.
+      setLastRoll(state.lastRoll ?? null);
       if (state.consecutiveSixes !== consecutiveSixesRef.current) setConsecutiveSixes(state.consecutiveSixes);
       if (state.playerCount !== activePlayerCountRef.current) setActivePlayerCount(state.playerCount);
       turnStartedAtRef.current = state.turnStartedAt;
