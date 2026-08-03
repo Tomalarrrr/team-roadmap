@@ -4,11 +4,15 @@
 // no doubled rolls (a bonus roll is a plain 6), three colors. Deterministic,
 // side-effect-free, independently testable.
 //
-// One rule of its own: the run home has FINAL_SIZE cells and each player has
-// exactly that many counters, so finishing means standing one counter in every
-// cell of it. A counter may pass over cells that are already taken but has to
-// land on an empty one, exactly — otherwise that counter simply cannot move,
-// and sits out on the track waiting to be sent home by an opponent.
+// The run home has FINAL_SIZE cells and each player has exactly that many
+// counters, so finishing means getting all of them into it. Counters walk in
+// rather than having to land exactly: any number of them may share a cell, and
+// a roll that would carry one past the end stops it on the last cell.
+//
+// An earlier version required an exact landing on an empty cell. It deadlocked:
+// five counters needing five distinct cells means the tail of a game is mostly
+// turns with no legal move at all, which reads as the dice doing nothing. Any
+// counter off the yard now always has somewhere to go.
 
 import type { TokenPosition } from './ludoFirebase';
 import {
@@ -21,27 +25,27 @@ import {
   PLAYER_COLORS,
   getTokenColor,
   getColorTokenIndices,
-  getOccupiedFinals,
   getPlayerScore,
   type Ludo2Color,
 } from './ludo2Board';
 
 /**
  * Calculate where a token lands after moving `steps` spaces.
- * Returns null if the move is invalid: overshooting the end of the run home, or
- * landing on a cell of it that one of this colour's own counters already holds.
+ *
+ * Returns null only for a counter still in the yard, which needs a 6 to come
+ * out and is handled by getValidMoves. Anything already on the board has a
+ * move: within the run home the roll is capped at the last cell rather than
+ * refused, so a counter can never be stranded by being unable to land.
  */
 export function calculateNewPosition(
   current: TokenPosition,
   steps: number,
-  color: Ludo2Color,
-  tokens: TokenPosition[]
+  color: Ludo2Color
 ): TokenPosition | null {
   if (current === 'base') return null;
 
-  const occupied = getOccupiedFinals(tokens, color);
-  const intoFinal = (cell: number): TokenPosition | null =>
-    cell > FINAL_SIZE || occupied.has(cell) ? null : `final-${cell}`;
+  const intoFinal = (cell: number): TokenPosition =>
+    `final-${Math.min(cell, FINAL_SIZE)}`;
 
   if (current.startsWith('final-')) {
     const currentFinal = parseInt(current.split('-')[1]);
@@ -89,8 +93,12 @@ export function getValidMoves(
       continue;
     }
 
-    const newPos = calculateNewPosition(current, diceValue, color, tokens);
+    const newPos = calculateNewPosition(current, diceValue, color);
     if (newPos === null) continue;
+    // Capping at the last cell means a counter standing on it "moves" to where
+    // it already is. That is not a move, and offering it would let a player
+    // burn a turn on nothing.
+    if (newPos === current) continue;
 
     moves.push({ tokenIndex: idx, newPosition: newPos });
   }
@@ -133,22 +141,6 @@ export function getDistinctMoves(
   return distinctMoves(tokens, getValidMoves(tokens, color, diceValue));
 }
 
-/** Why a roll produced nothing, in terms the player can act on. */
-export type NoMoveReason = 'need-six' | 'exact-roll';
-
-/**
- * Explain a turn with no moves in it.
- *
- * With nothing out of the yard the only thing that helps is a 6. Once anything
- * *is* out it always has a move somewhere on the ring, so a counter that is out
- * and still stuck can only be one blocked by the run-home landing rule — it has
- * to reach an empty cell exactly, and this roll doesn't.
- */
-export function getNoMoveReason(tokens: TokenPosition[], color: Ludo2Color): NoMoveReason {
-  const anyOut = getColorTokenIndices(color).some(i => tokens[i] !== 'base');
-  return anyOut ? 'exact-roll' : 'need-six';
-}
-
 /**
  * Apply a token move: update positions, check for captures, check if the piece
  * has taken a cell in its run home (which it can never be dislodged from).
@@ -183,10 +175,7 @@ export function applyMove(
   return { newTokens: result, captured, reachedHome };
 }
 
-/**
- * Check if a player has filled their run home — one counter in every cell.
- * Landing rules keep the cells distinct, so "all of them are in it" is enough.
- */
+/** Check if a player has got every counter into their run home. */
 export function checkPlayerFinished(tokens: TokenPosition[], color: Ludo2Color): boolean {
   return getColorTokenIndices(color).every(i => tokens[i].startsWith('final-'));
 }

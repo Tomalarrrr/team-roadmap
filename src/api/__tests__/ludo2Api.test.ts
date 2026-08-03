@@ -336,8 +336,12 @@ describe('joinGame', () => {
 });
 
 describe('startGame', () => {
-  it('fills gaps below the last human with bots and sets playerCount', async () => {
-    // Humans on red + yellow, green empty → playerCount 3 with a green bot.
+  it('closes the gap between seats instead of filling it with a bot', async () => {
+    // Seats are dealt at random, so two humans can easily land on red and
+    // yellow with green empty. The turn order is a rotation over the first
+    // `playerCount` seats, so the gap has to go: slide yellow down into green
+    // and it is a two-player game. Padding it out to three put a bot nobody
+    // asked for into a game between two people.
     const state = baseState({
       players: {
         red: { sessionId: 's-red', name: 'Red' },
@@ -352,10 +356,53 @@ describe('startGame', () => {
     await startGame('GAME');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(putBody.playerCount).toBe(3);
-    expect(putBody.players.green.sessionId).toBe('bot-green');
+    expect(putBody.playerCount).toBe(2);
+    expect(putBody.players.red.sessionId).toBe('s-red');
+    expect(putBody.players.green.sessionId).toBe('s-yellow');
+    expect(putBody.players.yellow).toBeUndefined();
+    expect(putBody.singlePlayer).toBeUndefined();
+    expect(['red', 'green']).toContain(putBody.currentTurn);
+  });
+
+  it('keeps a real bot and flags the game single-player', async () => {
+    const state = baseState({
+      players: {
+        red: { sessionId: 's-red', name: 'Red' },
+        green: { sessionId: 'bot-green', name: 'Bot Green' },
+      },
+      startedAt: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(res(state, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await startGame('GAME');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(putBody.playerCount).toBe(2);
     expect(putBody.singlePlayer).toBe(true);
-    expect(['red', 'green', 'yellow']).toContain(putBody.currentTurn);
+  });
+
+  it('moves the host seat along with the host', async () => {
+    // The host was on yellow and yellow slides into green. Following the colour
+    // would leave `host` pointing at the seat somebody else just moved into.
+    const state = baseState({
+      players: {
+        red: { sessionId: 's-red', name: 'Red' },
+        yellow: { sessionId: 's-yellow', name: 'Yellow' },
+      },
+      host: 'yellow',
+      startedAt: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(res(state, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await startGame('GAME');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(putBody.host).toBe('green');
+    expect(putBody.players.green.sessionId).toBe('s-yellow');
   });
 
   it('refuses to start with fewer than 2 players', async () => {

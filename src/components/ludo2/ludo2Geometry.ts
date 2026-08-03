@@ -10,8 +10,8 @@
 // Each colour owns a bearing (ARM_ANGLE) and everything of that colour lives in
 // that one wedge, at three different radii so nothing ever overlaps: its yard
 // (five sockets) out on the apron beyond the track, its entry cell on the track
-// itself, and its spoke running inward from there. Its start cell is two steps
-// further round, so a piece deploys just ahead of its own yard. Everything is
+// itself, and its spoke running inward from there. Its start cell is the next
+// one round, so a piece deploys just ahead of its own yard. Everything is
 // polar: degrees, and radius in % of the square container, with 0° pointing
 // down the screen so the plate can turn a player's own colour to face them.
 
@@ -109,10 +109,15 @@ function polar(angleDeg: number, radius: number): CellSpec {
 
 /** Bearing of track cell `t`.
  *
- * The offset is what puts each colour's *entry* cell on its own bearing, so the
- * foot of a bridge lands on the cell that bridge is for. Its start cell is then
- * the next one round — the haven you come out on sits at the foot of your own
- * run home, which is the whole point of the arrangement. */
+ * No offset is applied, and none is needed: with ENTRY_CELLS at start − 1, every
+ * entry cell is a multiple of 14 (42, 14, 28) and so lands exactly on 0°, 120°,
+ * 240° — its own colour's bearing, and the foot of the bridge that cell is for.
+ * Its start cell is then the next one round, which is why the haven you come out
+ * on sits at the foot of your own run home.
+ *
+ * That alignment is a consequence of ENTRY_CELLS, not of anything here. Move the
+ * entry cells off start − 1 and the bridges land between tiles: this function
+ * needs the matching offset back. */
 export function trackAngle(t: number): number {
   return t * STEP_DEG;
 }
@@ -201,14 +206,23 @@ export function getTokenCoords(pos: TokenPosition, tokenIndex: number): [number,
  * cell only ever holds one counter, so this only fires out on the track — where
  * a whole yard of five can pile onto one cell, hence the fifth slot in the
  * middle: four quadrants and modulo would draw two of them on top of each
- * other, which is the one thing the jitter exists to prevent. */
+ * other, which is the one thing the jitter exists to prevent.
+ *
+ * Sharing a *position* is not the same as sharing a *cell*. Track cells are one
+ * ring every colour walks, so `track-17` is one place; a run home belongs to its
+ * colour, so `final-3` is three different places and only counters of the same
+ * colour are actually stacked. Matching on the string alone nudged a red counter
+ * and a green one off-centre in run-home cells neither was sharing. */
 export function getTokenOffset(tokens: TokenPosition[], tokenIndex: number): [number, number] {
   const pos = tokens[tokenIndex];
   if (pos === 'base') return [0, 0];
 
+  const ownColor = pos.startsWith('final-') ? getTokenColor(tokenIndex) : null;
   const sameCell: number[] = [];
   for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i] === pos) sameCell.push(i);
+    if (tokens[i] !== pos) continue;
+    if (ownColor !== null && getTokenColor(i) !== ownColor) continue;
+    sameCell.push(i);
   }
   if (sameCell.length <= 1) return [0, 0];
 

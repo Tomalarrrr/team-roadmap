@@ -1,12 +1,14 @@
-// Simulation: does the "one counter per cell of the run home, landed on
-// exactly" rule still produce games that finish?
+// Simulation: play a few hundred full games with the shipped logic and the
+// shipped bot, and check they finish and stay playable.
 //
-// The rule's one real hazard is a stalemate — a player whose remaining counters
-// can never land on the cells they still need. Rather than argue about it, play
-// a few hundred full games with the shipped logic and the shipped bot and check
-// that every one of them ends, that no colour ever gets two counters onto one
-// cell of its run home, and that the exactness actually bites often enough to
-// leave counters out on the track where they can be taken.
+// This exists because of a live regression. A previous version of the run-home
+// rule required an exact landing on an empty cell, and an earlier version of
+// this file asserted only that games *terminate* — which they did, so it
+// passed. What it never asked was whether a player could take a turn: with five
+// counters needing five distinct cells, the endgame was mostly turns with no
+// legal move, and players reported the dice doing nothing. The invariant that
+// actually matters is therefore the one below: a player holding counters off
+// the yard always has a move.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -23,7 +25,6 @@ import {
   TOKENS_PER_PLAYER,
   FINAL_SIZE,
   getColorTokenIndices,
-  getOccupiedFinals,
   type Ludo2Color,
 } from '../ludo2Board';
 import type { TokenPosition } from '../ludoFirebase';
@@ -65,6 +66,8 @@ function playGame(seed: number, turnCap = 4000): Outcome {
     const finished = getFinishedColors(tokens, 3);
 
     if (moves.length === 0) {
+      // The regression, caught at its source: a colour with a counter out on
+      // the ring and nothing it can do with the roll.
       if (getColorTokenIndices(turn).some(i => tokens[i].startsWith('track-'))) {
         stuckWithPiecesOut++;
       }
@@ -86,13 +89,6 @@ function playGame(seed: number, turnCap = 4000): Outcome {
     tokens = applied.newTokens;
     if (applied.captured) captures++;
 
-    // Invariant: a colour never gets two counters onto one run-home cell.
-    for (const color of PLAYER_COLORS) {
-      const inRun = getColorTokenIndices(color)
-        .filter(i => tokens[i].startsWith('final-')).length;
-      expect(getOccupiedFinals(tokens, color).size).toBe(inRun);
-    }
-
     if (checkPlayerFinished(tokens, turn)) winner = turn;
     const nowFinished = getFinishedColors(tokens, 3);
     const next = getNextTurn(turn, roll, sixes, applied.captured, applied.reachedHome, 3, nowFinished);
@@ -103,22 +99,27 @@ function playGame(seed: number, turnCap = 4000): Outcome {
   return { turns, winner, captures, stuckWithPiecesOut, tokens };
 }
 
-describe('ludo2 run-home rule: full-game simulation', () => {
+describe('ludo2 run home: full-game simulation', () => {
   const GAMES = 200;
   const results: Outcome[] = [];
   for (let seed = 1; seed <= GAMES; seed++) results.push(playGame(seed));
 
-  it('every game reaches a winner — the exact-landing rule never stalemates', () => {
-    const unfinished = results.filter(r => !r.winner);
-    expect(unfinished).toHaveLength(0);
+  it('never leaves a player with counters out and no move — the live regression', () => {
+    const stuck = results.reduce((n, r) => n + r.stuckWithPiecesOut, 0);
+    expect(stuck).toBe(0);
   });
 
-  it('a winner is standing in every cell of its run home, one counter each', () => {
+  it('every game reaches a winner', () => {
+    expect(results.filter(r => !r.winner)).toHaveLength(0);
+  });
+
+  it('a winner has every counter in its run home', () => {
     for (const r of results) {
       const cells = getColorTokenIndices(r.winner!).map(i => r.tokens[i]);
+      expect(cells).toHaveLength(TOKENS_PER_PLAYER);
       expect(cells.every(c => c.startsWith('final-'))).toBe(true);
-      expect(new Set(cells).size).toBe(TOKENS_PER_PLAYER);
-      expect(new Set(cells).size).toBe(FINAL_SIZE);
+      // Cells are shared now, so the only bound is the size of the run home.
+      expect(new Set(cells).size).toBeLessThanOrEqual(FINAL_SIZE);
     }
   });
 
@@ -129,12 +130,8 @@ describe('ludo2 run-home rule: full-game simulation', () => {
     expect(turns[turns.length - 1]).toBeLessThan(1200);
   });
 
-  it('counters really do get stranded on the track and sent back', () => {
-    // Both halves of what the rule is for: a roll that cannot be used leaves a
-    // counter out in the open, and counters out in the open get taken.
-    const stuck = results.reduce((n, r) => n + r.stuckWithPiecesOut, 0);
+  it('counters still get caught out on the track', () => {
     const captures = results.reduce((n, r) => n + r.captures, 0);
-    expect(stuck / GAMES).toBeGreaterThan(1);
     expect(captures / GAMES).toBeGreaterThan(1);
   });
 });

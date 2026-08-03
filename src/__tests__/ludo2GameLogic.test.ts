@@ -4,7 +4,6 @@ import {
   getValidMoves,
   distinctMoves,
   getDistinctMoves,
-  getNoMoveReason,
   applyMove,
   checkPlayerFinished,
   getFinishedColors,
@@ -24,7 +23,6 @@ import {
   getPlayerScore,
   getStandings,
   describePosition,
-  getOccupiedFinals,
   deserializeLudo2Tokens,
   initRollStats,
   deserializeRollStats,
@@ -41,7 +39,7 @@ import type { TokenPosition } from '../ludoFirebase';
 // for its run home on the cell before its own start.
 // Safe zones: 1, 7, 15, 21, 29, 35
 // Token indices: red 0-4, green 5-9, yellow 10-14
-// Run home: five cells per colour, one counter each, landed on exactly.
+// Run home: five cells per colour, shared freely, walked into.
 //
 // Cell numbers are derived from START_POSITIONS/ENTRY_CELLS rather than written
 // in. Where the entry sits relative to the start is a live design decision — it
@@ -56,9 +54,8 @@ function tokensWith(overrides: Record<number, TokenPosition>): TokenPosition[] {
   return t;
 }
 
-/** calculateNewPosition against an otherwise-empty board. */
 function calc(from: TokenPosition, steps: number, color: 'red' | 'green' | 'yellow') {
-  return calculateNewPosition(from, steps, color, BASE_TOKENS);
+  return calculateNewPosition(from, steps, color);
 }
 
 type Seat = 'red' | 'green' | 'yellow';
@@ -147,12 +144,6 @@ describe('board constants', () => {
     expect(padded.every(p => p === 'base')).toBe(true);
   });
 
-  it('reads a colour’s occupied run-home cells, ignoring other colours', () => {
-    const t = tokensWith({ 0: 'final-2', 3: 'final-5', 5: 'final-1' });
-    expect(getOccupiedFinals(t, 'red')).toEqual(new Set([2, 5]));
-    expect(getOccupiedFinals(t, 'green')).toEqual(new Set([1]));
-    expect(getOccupiedFinals(t, 'yellow')).toEqual(new Set());
-  });
 });
 
 describe('calculateNewPosition', () => {
@@ -168,8 +159,8 @@ describe('calculateNewPosition', () => {
     expect(calc('final-3', 2, 'yellow')).toBe('final-5');
   });
 
-  it('rejects overshoot past the last cell', () => {
-    expect(calc('final-4', 2, 'green')).toBeNull();
+  it('stops on the last cell rather than overshooting it', () => {
+    expect(calc('final-4', 2, 'green')).toBe(`final-${FINAL_SIZE}`);
   });
 
   it('enters the run home from the entry cell', () => {
@@ -180,8 +171,8 @@ describe('calculateNewPosition', () => {
     expect(calc(atEntry('red'), FINAL_SIZE, 'red')).toBe(`final-${FINAL_SIZE}`);
   });
 
-  it('rejects a roll that would overshoot the run home entirely', () => {
-    expect(calc(atEntry('red'), FINAL_SIZE + 1, 'red')).toBeNull();
+  it('walks in on a roll that would carry past the run home', () => {
+    expect(calc(atEntry('red'), FINAL_SIZE + 1, 'red')).toBe(`final-${FINAL_SIZE}`);
   });
 
   it('enters green’s run home from green’s entry', () => {
@@ -221,31 +212,29 @@ describe('calculateNewPosition', () => {
     expect(calc(from, 3, 'yellow')).toBe(`track-${landing}`);
   });
 
-  // --- The exact-landing rule ---
+  // --- Walking into the run home ---
+  //
+  // These replace an exact-landing rule that shipped briefly and deadlocked:
+  // five counters needing five distinct cells left the tail of a game with no
+  // legal move on most turns. The point of each test below is that a counter
+  // off the yard is never stranded.
 
-  it('refuses a cell of the run home that is already taken', () => {
-    const entry = atEntry('red');
-    const t = tokensWith({ 0: 'final-3', 1: entry });
-    expect(calculateNewPosition(entry, 3, 'red', t)).toBeNull();
-    expect(calculateNewPosition(entry, 2, 'red', t)).toBe('final-2');
+  it('caps an overshoot at the last cell rather than refusing it', () => {
+    expect(calc('final-4', 6, 'red')).toBe(`final-${FINAL_SIZE}`);
+    expect(calc(atEntry('red'), 6, 'red')).toBe(`final-${FINAL_SIZE}`);
   });
 
-  it('refuses a taken cell when shuffling up the run home', () => {
-    const t = tokensWith({ 0: 'final-2', 1: 'final-4' });
-    expect(calculateNewPosition('final-2', 2, 'red', t)).toBeNull();
-    expect(calculateNewPosition('final-2', 1, 'red', t)).toBe('final-3');
+  it('lets counters of the same colour share a run-home cell', () => {
+    const t = tokensWith({ 0: 'final-3', 1: atEntry('red') });
+    expect(calculateNewPosition(t[1], 3, 'red')).toBe('final-3');
   });
 
-  it('passes over taken cells to land on a free one beyond them', () => {
-    const t = tokensWith({ 0: 'final-1', 1: 'final-2', 2: 'final-3' });
-    expect(calculateNewPosition('final-1', 3, 'red', t)).toBe('final-4');
-  });
-
-  it('is blocked only by its own colour', () => {
-    // Red holds its own final-2; green's final-2 is a different cell entirely.
-    const greenEntry = atEntry('green');
-    const t = tokensWith({ 0: 'final-2', 5: greenEntry });
-    expect(calculateNewPosition(greenEntry, 2, 'green', t)).toBe('final-2');
+  it('always has somewhere to go from anywhere in the run home', () => {
+    for (let cell = 1; cell < FINAL_SIZE; cell++) {
+      for (let roll = 1; roll <= 6; roll++) {
+        expect(calc(`final-${cell}`, roll, 'red')).not.toBeNull();
+      }
+    }
   });
 });
 
@@ -276,15 +265,15 @@ describe('getValidMoves', () => {
     expect(getValidMoves(t, 'green', 3)).toEqual([]);
   });
 
-  it('leaves a player stuck when the only space its roll reaches is taken', () => {
-    // Red's last counter waits on its entry cell; a 3 would land on final-3,
-    // which one of its own is standing in. No move — and it stays out on the
-    // track where it can be sent back to the yard.
+  it('lets the last counter in even when its cell is already occupied', () => {
+    // Red's last counter waits on its entry cell and a 3 takes it to final-3,
+    // where one of its own is already standing. Under the exact-landing rule
+    // this was no move at all, and the player sat there rolling.
     const t = tokensWith({
       0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'base',
     });
-    expect(getValidMoves(t, 'red', 3)).toEqual([]);
-    expect(getValidMoves(t, 'red', 2)).toEqual([{ tokenIndex: 3, newPosition: 'final-2' }]);
+    expect(getValidMoves(t, 'red', 3)).toContainEqual({ tokenIndex: 3, newPosition: 'final-3' });
+    expect(getValidMoves(t, 'red', 2)).toContainEqual({ tokenIndex: 3, newPosition: 'final-2' });
   });
 
   it('only returns moves for the given color', () => {
@@ -357,30 +346,41 @@ describe('distinctMoves / getDistinctMoves', () => {
   });
 });
 
-describe('getNoMoveReason', () => {
-  it('asks for a 6 when the whole yard is still full', () => {
-    expect(getNoMoveReason(BASE_TOKENS, 'red')).toBe('need-six');
+describe('a turn is never stuck with counters on the board', () => {
+  // The regression that took the live game down: with the exact-landing rule a
+  // player could hold counters on the ring and still have no legal move on any
+  // roll, turn after turn. It looked like the dice had stopped working.
+
+  it('offers a move on every roll while anything is off the yard', () => {
+    const boards: TokenPosition[][] = [
+      tokensWith({ 0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'base' }),
+      tokensWith({ 0: 'final-1', 4: atEntry('red') }),
+      tokensWith({ 0: 'final-2', 1: 'final-3', 2: 'final-4', 3: 'final-5', 4: 'track-3' }),
+      tokensWith({ 0: 'track-3' }),
+    ];
+    for (const t of boards) {
+      for (let roll = 1; roll <= 6; roll++) {
+        expect(getValidMoves(t, 'red', roll).length).toBeGreaterThan(0);
+      }
+    }
   });
 
-  it('blames the exact-landing rule once a counter is out', () => {
-    // Red waits on its entry cell; a 3 lands on a run-home cell of its own that
-    // is already taken, so the roll produces nothing at all.
+  it('only runs dry when every counter is in the yard or already home', () => {
+    // Four home on the last cell and one still in the yard: nothing to move
+    // without a 6, which is ordinary Ludo rather than a deadlock.
     const t = tokensWith({
-      0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'base',
+      0: 'final-5', 1: 'final-5', 2: 'final-5', 3: 'final-5', 4: 'base',
     });
-    expect(getValidMoves(t, 'red', 3)).toEqual([]);
-    expect(getNoMoveReason(t, 'red')).toBe('exact-roll');
+    for (let roll = 1; roll <= 5; roll++) {
+      expect(getValidMoves(t, 'red', roll)).toEqual([]);
+    }
+    expect(getValidMoves(t, 'red', 6)).toHaveLength(1);
   });
 
-  it('counts counters standing in the run home as out of the yard', () => {
-    const t = tokensWith({ 0: 'final-1' });
-    expect(getNoMoveReason(t, 'red')).toBe('exact-roll');
-  });
-
-  it('reads each colour independently', () => {
-    const t = tokensWith({ 0: 'track-3' });
-    expect(getNoMoveReason(t, 'red')).toBe('exact-roll');
-    expect(getNoMoveReason(t, 'green')).toBe('need-six');
+  it('does not offer a counter on the last cell a move to where it stands', () => {
+    const t = tokensWith({ 0: 'final-5', 1: 'track-3' });
+    const moves = getValidMoves(t, 'red', 4);
+    expect(moves.every(m => m.tokenIndex !== 0)).toBe(true);
   });
 });
 

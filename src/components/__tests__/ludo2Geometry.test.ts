@@ -22,10 +22,12 @@ import {
   trackAngle,
   computeMovePath,
   getTokenCoords,
+  getTokenOffset,
 } from '../ludo2/ludo2Geometry';
 import {
   TRACK_SIZE,
   TOTAL_TOKENS,
+  TOKENS_PER_PLAYER,
   FINAL_SIZE,
   PLAYER_COLORS,
   START_POSITIONS,
@@ -286,5 +288,50 @@ describe('getTokenCoords', () => {
       expect(seen.size).toBe(FINAL_SIZE);
     }
     expect(getTokenCoords(`final-${FINAL_SIZE + 1}` as TokenPosition, 0)).toBeNull();
+  });
+});
+
+/* The jitter exists so a stack on one cell stays countable. Sharing a position
+   *string* is not the same as sharing a cell, though: the ring is one road every
+   colour walks, so `track-17` is one place, but a run home belongs to its colour,
+   so `final-3` is three separate places on three separate bridges. */
+describe('getTokenOffset', () => {
+  const empty = (): TokenPosition[] => Array(TOTAL_TOKENS).fill('base') as TokenPosition[];
+  const RED = 0;
+  const GREEN = TOKENS_PER_PLAYER;
+  const YELLOW = TOKENS_PER_PLAYER * 2;
+
+  it('leaves a counter standing alone dead centre', () => {
+    const tokens = empty();
+    tokens[RED] = 'track-17';
+    expect(getTokenOffset(tokens, RED)).toEqual([0, 0]);
+  });
+
+  it('does not nudge run-home counters of different colours apart', () => {
+    // Regression: matching on the string alone treated red's third run-home cell
+    // and green's as one cell, and shoved a counter off-centre in each of them
+    // while both were in fact standing alone.
+    const tokens = empty();
+    tokens[RED] = 'final-3';
+    tokens[GREEN] = 'final-3';
+    tokens[YELLOW] = 'final-3';
+    for (const i of [RED, GREEN, YELLOW]) {
+      expect(getTokenOffset(tokens, i)).toEqual([0, 0]);
+    }
+  });
+
+  it('still separates opposing counters sharing one cell of the ring', () => {
+    const tokens = empty();
+    tokens[RED] = 'track-17';
+    tokens[GREEN] = 'track-17';
+    expect(getTokenOffset(tokens, RED)).not.toEqual(getTokenOffset(tokens, GREEN));
+  });
+
+  it('gives a whole yard piled onto one cell a distinct slot each', () => {
+    const tokens = empty();
+    const mine = Array.from({ length: TOKENS_PER_PLAYER }, (_, i) => RED + i);
+    for (const i of mine) tokens[i] = 'track-9';
+    const slots = new Set(mine.map(i => getTokenOffset(tokens, i).join(',')));
+    expect(slots.size).toBe(TOKENS_PER_PLAYER);
   });
 });

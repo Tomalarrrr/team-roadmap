@@ -66,8 +66,8 @@ export interface Ludo2MoveUpdate {
 // --- Board constants ---
 
 export const TRACK_SIZE = 42;
-/** Cells in a run home — and, deliberately, counters per player: every cell
- * has to end up with a counter standing in it for that player to be finished. */
+/** Cells in a run home, and counters per player. Counters may share a cell —
+ * a player is finished once all of theirs are somewhere in the run home. */
 export const FINAL_SIZE = 5;
 export const TOKENS_PER_PLAYER = FINAL_SIZE;
 export const TOTAL_TOKENS = TOKENS_PER_PLAYER * 3;
@@ -134,17 +134,6 @@ export function getTokenColor(index: number): Ludo2Color {
   if (index < COLOR_OFFSET.green) return 'red';
   if (index < COLOR_OFFSET.yellow) return 'green';
   return 'yellow';
-}
-
-/** Which cells of `color`'s run home already have a counter standing in them.
- * A counter may pass over an occupied cell but never stop on one. */
-export function getOccupiedFinals(tokens: TokenPosition[], color: Ludo2Color): Set<number> {
-  const occupied = new Set<number>();
-  for (const i of getColorTokenIndices(color)) {
-    const pos = tokens[i];
-    if (pos && pos.startsWith('final-')) occupied.add(parseInt(pos.split('-')[1]));
-  }
-  return occupied;
 }
 
 /** Deserialize a stored token string to exactly TOTAL_TOKENS entries. Rooms

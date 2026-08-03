@@ -48,7 +48,6 @@ import {
 import {
   getValidMoves,
   getDistinctMoves,
-  getNoMoveReason,
   applyMove,
   checkPlayerFinished,
   getFinishedColors,
@@ -183,6 +182,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   const [joinCode, setJoinCode] = useState(recallRoom);
   const [myColor, setMyColor] = useState<Ludo2Color | null>(null);
   const myColorRef = useRef<Ludo2Color | null>(null);
+  // Read once from sessionStorage above and constant thereafter, but the
+  // subscription closes over the first render — hold it in a ref so the seat
+  // lookup below can't go stale.
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
   const [playerNames, setPlayerNames] = useState<Partial<Record<Ludo2Color, string>>>({});
   // Seats are dealt at random, so "host" is a stored colour rather than red.
   // Games created before that field existed default to red.
@@ -577,6 +581,20 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       setPlayerNames(names);
       setHostColor(state.host ?? 'red');
 
+      // Seats are not fixed for the life of a room: startGame slides players
+      // down onto the first colours so the turn rotation has no gap in it. Our
+      // own colour therefore has to be read back off the state by session, not
+      // remembered from whatever join handed us, or the board spins to the
+      // wrong arm and every "is it my turn" test compares the wrong seat.
+      for (const color of PLAYER_COLORS) {
+        if (state.players[color]?.sessionId !== sessionIdRef.current) continue;
+        if (myColorRef.current !== color) {
+          myColorRef.current = color;
+          setMyColor(color);
+        }
+        break;
+      }
+
       // Recompute valid moves on reconnect into a move phase
       if (state.turnPhase === 'move' && state.currentTurn === myColorRef.current && state.diceValue !== null) {
         const moves = getDistinctMoves(parsedTokens, state.currentTurn, state.diceValue);
@@ -836,11 +854,10 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         } else {
           nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
           nextSixes = 0;
-          showHint(
-            getNoMoveReason(currentTokens, curColor) === 'need-six'
-              ? 'Need a 6 to come out'
-              : 'Need the exact roll for an empty space'
-          );
+          // Counters walk into the run home, so anything off the yard always
+          // has somewhere to go: a turn with no move at all can only be a yard
+          // waiting on a 6.
+          showHint('Need a 6 to come out');
         }
         const update: Ludo2MoveUpdate = {
           tokens: serializeTokens(currentTokens),
@@ -1007,6 +1024,20 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     if (!isSinglePlayer || gamePhase !== 'playing' || winner || gamePaused) return;
     if (!botColorsRef.current.has(currentTurn)) return;
 
+    // Exactly one client drives the bots. Every client used to run every bot's
+    // turn: two humans watching the same bot each threw it a die of their own,
+    // and because makeMove's guard only checks whose turn it is, both writes
+    // could land — the second quietly overwriting the first's roll. The pity
+    // counters below are per-tab refs, so they drifted apart between the two as
+    // well. The first human seat in board order is a choice every client makes
+    // identically from the same state, so it needs no election.
+    //
+    // If there is no human seat left the room is being torn down anyway; fall
+    // through rather than let the table freeze.
+    const driver = PLAYER_COLORS.slice(0, activePlayerCountRef.current)
+      .find(c => !botColorsRef.current.has(c));
+    if (driver && myColorRef.current !== driver) return;
+
     clearTimeout(botTimerRef.current);
     const botDelay = 600 + Math.random() * 400;
 
@@ -1132,11 +1163,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     if (!gc) return;
     setIsLoading(true);
     try {
-      await startGame(gc);
+      await startGame(gc, sessionId);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [sessionId]);
 
   const handlePlayAgain = useCallback(async () => {
     const gc = gameCodeRef.current;
@@ -1241,6 +1272,10 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   const offlineBanner = !isBrowserOnline || !isConnected;
   const isUrgent = timeLeft <= 10 && !winner && !gamePaused;
   const standings = winner ? getStandings(tokens, activePlayerCount, finishOrder) : [];
+  // The compact shell sizes itself to the lobby's handful of controls, which is
+  // far shorter than the rules — so while those are open the popup takes its
+  // full height rather than making the panel scroll inside a stub.
+  const isCompact = gamePhase !== 'playing' && !showHelp;
 
   // Which corner a seat's card belongs in. The plate spins so the local
   // player's arm points down (see Ludo2Board), which makes this fixed rather
@@ -1255,7 +1290,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   return (
     <div
       ref={popupRef}
-      className={`${styles.popup} ${gamePhase === 'playing' ? '' : styles.popupCompact}`}
+      className={`${styles.popup} ${isCompact ? styles.popupCompact : ''}`}
       style={{ left: position.x, top: position.y }}
     >
       <div className={styles.titleBar} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>

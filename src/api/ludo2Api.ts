@@ -34,13 +34,29 @@ const BOT_NAMES: Record<Ludo2Color, string> = {
   yellow: 'Bot Blue',
 };
 
+/**
+ * Uniform integer in [0, n).
+ *
+ * Not `arr[0] % n`: a byte covers 0..255, so for three seats 0 comes up
+ * eighty-six times against eighty-five each for 1 and 2. That is a half-percent
+ * thumb on the scale for red in both the seat deal and the opening move — small,
+ * but it is the one number in this file that is supposed to be even. Reject the
+ * short tail and the remainder is exact.
+ */
+function randomInt(n: number): number {
+  const limit = 256 - (256 % n);
+  const arr = new Uint8Array(1);
+  do {
+    crypto.getRandomValues(arr);
+  } while (arr[0] >= limit);
+  return arr[0] % n;
+}
+
 /** Seats are dealt at random rather than in board order, so creating a game
  * doesn't hand you red every time. The starting player is drawn separately in
  * startGame, so neither the colour nor the first move follows join order. */
 function randomColor(): Ludo2Color {
-  const arr = new Uint8Array(1);
-  crypto.getRandomValues(arr);
-  return PLAYER_COLORS[arr[0] % PLAYER_COLORS.length];
+  return PLAYER_COLORS[randomInt(PLAYER_COLORS.length)];
 }
 
 export async function createGame(
@@ -195,31 +211,54 @@ export async function leaveGame(code: string, sessionId: string): Promise<void> 
   }
 }
 
-export async function startGame(code: string): Promise<void> {
+/**
+ * Kick off.
+ *
+ * The turn rotation is a cycle over `PLAYER_COLORS.slice(0, playerCount)`, so
+ * the occupied seats have to be the first `playerCount` of them — a gap in the
+ * middle would be a seat nobody can play. Seats are dealt at random, though, so
+ * two people can easily end up on red and yellow with green empty between them.
+ *
+ * That gap used to be plugged with a bot, which meant a third of all two-player
+ * games silently acquired an opponent nobody asked for, decided entirely by
+ * which colour the creator happened to draw. Close the gap instead: the seated
+ * players slide down onto the first colours, keeping their order, and the count
+ * is simply how many of them there are. A player whose colour moves is told by
+ * the state they are already subscribed to.
+ *
+ * Bots still appear when the host actually adds one.
+ */
+export async function startGame(code: string, sessionId: string): Promise<void> {
   await proxyTransaction<Ludo2GameState>(`ludo2/${code}`, (current) => {
     if (!current) return current;
     if (current.startedAt) return undefined;
+    // The same rule as addBot/removeBot, in the one place it can be relied on.
+    // The Start button is only ever offered to the host; this is what stops a
+    // second tab or a stale client starting somebody else's room for them.
+    if (!isHost(current, sessionId)) return undefined;
 
-    const filledColors = PLAYER_COLORS.filter((c) => !!current.players[c]);
-    if (filledColors.length < 2) return undefined;
+    const seated = PLAYER_COLORS.filter((c) => !!current.players[c]);
+    if (seated.length < 2) return undefined;
 
-    const lastFilledIdx = Math.max(...filledColors.map((c) => PLAYER_COLORS.indexOf(c)));
-    const playerCount = lastFilledIdx + 1;
+    const playerCount = seated.length;
+    const newPlayers: Ludo2GameState['players'] = {};
+    seated.forEach((from, i) => {
+      const to = PLAYER_COLORS[i];
+      const player = current.players[from] as LudoPlayer;
+      // A bot carries its seat in both its name and its id. Slid across without
+      // re-keying, the green chair spends the rest of the game labelled "Bot
+      // Blue" beside a green dot.
+      newPlayers[to] = player.sessionId.startsWith('bot-')
+        ? { sessionId: `bot-${to}`, name: BOT_NAMES[to] }
+        : player;
+    });
 
-    const newPlayers = { ...current.players };
-    for (let i = 0; i < playerCount; i++) {
-      const c = PLAYER_COLORS[i];
-      if (!newPlayers[c]) newPlayers[c] = { sessionId: `bot-${c}`, name: BOT_NAMES[c] };
-    }
+    const hasBots = seated.some((c) => current.players[c]!.sessionId.startsWith('bot-'));
 
-    const hasBots = Object.entries(newPlayers)
-      .filter(([c]) => PLAYER_COLORS.indexOf(c as Ludo2Color) < playerCount)
-      .some(([, p]) => p && (p as LudoPlayer).sessionId.startsWith('bot-'));
-
+    // The host moved with everyone else; follow them by session rather than by
+    // colour, or the host seat is left pointing at whoever slid into it.
     const activePlayers = PLAYER_COLORS.slice(0, playerCount);
-    const arr = new Uint8Array(1);
-    crypto.getRandomValues(arr);
-    const randomFirst = activePlayers[arr[0] % activePlayers.length];
+    const host = activePlayers.find((c) => newPlayers[c]?.sessionId === sessionId);
 
     return {
       ...current,
@@ -227,7 +266,8 @@ export async function startGame(code: string): Promise<void> {
       playerCount,
       startedAt: Date.now(),
       turnStartedAt: getServerTimestamp() as unknown as number,
-      currentTurn: randomFirst,
+      currentTurn: activePlayers[randomInt(activePlayers.length)],
+      ...(host ? { host } : {}),
       ...(hasBots ? { singlePlayer: true } : {}),
     };
   });
@@ -337,9 +377,7 @@ export async function toggleGamePause(code: string): Promise<void> {
 
 export async function resetGame(code: string, playerCount: number): Promise<void> {
   const activePlayers = PLAYER_COLORS.slice(0, playerCount);
-  const arr = new Uint8Array(1);
-  crypto.getRandomValues(arr);
-  const randomFirst = activePlayers[arr[0] % activePlayers.length];
+  const randomFirst = activePlayers[randomInt(activePlayers.length)];
 
   await proxyTransaction<Ludo2GameState>(`ludo2/${code}`, (current) => {
     if (!current) return current;

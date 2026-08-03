@@ -82,3 +82,64 @@ describe('Firebase security rules cover every schema field', () => {
     expect(allowedFields(projectNode)).toContain('size');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The same guard for Ludo2. There is no Zod schema for the game state — it is a
+// TypeScript interface — so the field list is read straight out of the source
+// rather than restated here, which is the only version that cannot drift. The
+// `lastRoll` field is exactly the bug this catches: added to the interface and
+// written on every roll, but absent from the rules, so `$other: false` denied
+// every write in the game.
+// ---------------------------------------------------------------------------
+
+const ludo2Source = readFileSync(
+  resolve(process.cwd(), 'src/ludo2Board.ts'),
+  'utf-8',
+);
+
+/** Field names declared in `interface <name> { ... }`, comments stripped. */
+function interfaceFields(source: string, name: string): string[] {
+  const start = source.indexOf(`export interface ${name} {`);
+  if (start === -1) throw new Error(`interface ${name} not found`);
+  let depth = 0;
+  let end = start;
+  for (let i = source.indexOf('{', start); i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}' && --depth === 0) { end = i; break; }
+  }
+  const body = source
+    .slice(source.indexOf('{', start) + 1, end)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '');
+  // Only top-level members: skip anything nested inside an inline object type.
+  const fields: string[] = [];
+  let nest = 0;
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.trim();
+    const match = nest === 0 && /^([A-Za-z_$][\w$]*)\??\s*:/.exec(line);
+    if (match) fields.push(match[1]);
+    nest += (line.match(/\{/g) ?? []).length - (line.match(/\}/g) ?? []).length;
+  }
+  return fields;
+}
+
+describe('Firebase security rules cover every Ludo2 state field', () => {
+  const gameNode = ((rules.rules.ludo2 as RuleNode).$gameCode) as RuleNode;
+
+  it.each(['Ludo2GameState', 'Ludo2MoveUpdate'])(
+    '%s: every field is permitted by the rules',
+    (name) => {
+      const allowed = new Set(allowedFields(gameNode));
+      const missing = interfaceFields(ludo2Source, name).filter((k) => !allowed.has(k));
+      expect(missing).toEqual([]);
+    },
+  );
+
+  it('has the strict "$other" guard (so extra fields are caught)', () => {
+    expect((gameNode.$other as RuleNode)?.['.validate']).toBe(false);
+  });
+
+  it('the "lastRoll" field specifically is allowed (regression: every write 401d)', () => {
+    expect(allowedFields(gameNode)).toContain('lastRoll');
+  });
+});
