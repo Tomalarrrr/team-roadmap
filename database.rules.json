@@ -185,9 +185,9 @@
       ".read": true,
       "$gameCode": {
         ".write": true,
-        ".validate": "newData.hasChildren(['players', 'tokens', 'currentTurn', 'createdAt', 'playerCount']) && newData.child('playerCount').val() >= 1 && newData.child('playerCount').val() <= 3 && newData.child('tokens').val().length == 36",
+        ".validate": "newData.hasChildren(['players', 'tokens', 'currentTurn', 'createdAt', 'playerCount']) && newData.child('playerCount').val() >= 1 && newData.child('playerCount').val() <= 3 && newData.child('tokens').val().length == 45",
         "tokens": {
-          ".validate": "newData.isString() && newData.val().length == 36 && newData.val().matches(/^(bas|t[0-9]{2}|f[0-9]{2})+$/)"
+          ".validate": "newData.isString() && newData.val().length == 45 && newData.val().matches(/^(bas|t[0-9]{2}|f[0-9]{2})+$/)"
         },
         "currentTurn": {
           ".validate": "newData.isString() && (newData.val() == 'red' || newData.val() == 'green' || newData.val() == 'yellow')"

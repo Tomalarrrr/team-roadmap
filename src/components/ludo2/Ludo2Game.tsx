@@ -1,4 +1,4 @@
-// Ludo2 — three-player Ludo on a Y-shaped board. Hidden feature, reached by
+// Ludo2 — three-player Ludo on a circular board. Hidden feature, reached by
 // typing "ludo2" in the search palette while the vault is unlocked.
 //
 // Networking mirrors Ludo v1: state lives at ludo2/{code} behind the VPN-safe
@@ -17,19 +17,25 @@ import {
   addBot,
   removeBot,
   startGame,
+  leaveGame,
   requestDiceRoll,
   getServerTimestamp,
   type Ludo2GameState,
   type Ludo2MoveUpdate,
 } from '../../api/ludo2Api';
-import { serializeTokens, deserializeTokens, type TokenPosition, type TurnPhase } from '../../ludoFirebase';
+import { serializeTokens, type TokenPosition, type TurnPhase } from '../../ludoFirebase';
 import {
+  // A room written by an older client is shorter than TOTAL_TOKENS; pad it
+  // rather than let the board index off the end of the array.
+  deserializeLudo2Tokens as deserializeTokens,
   TOTAL_TOKENS,
   PLAYER_COLORS,
   INITIAL_TOKENS,
+  MAX_PLAYER_SCORE,
   getTokenColor,
   getColorTokenIndices,
   getPlayerScore,
+  getStandings,
   colorIndex,
   initRollStats,
   deserializeRollStats,
@@ -41,6 +47,8 @@ import {
 } from '../../ludo2Board';
 import {
   getValidMoves,
+  getDistinctMoves,
+  getNoMoveReason,
   applyMove,
   checkPlayerFinished,
   getFinishedColors,
@@ -48,7 +56,7 @@ import {
   getNextTurn,
   scoreBotMove,
 } from '../../ludo2GameLogic';
-import { computeMovePath, getTokenCoords } from './ludo2Geometry';
+import { computeMovePath, getTokenCoords, ARM_ANGLE } from './ludo2Geometry';
 import { Ludo2Board, type CapturedGhost } from './Ludo2Board';
 import styles from './Ludo2Game.module.css';
 
@@ -56,14 +64,21 @@ const TURN_SECONDS = 30;
 const BACKUP_GRACE = 15;
 const STEP_MS = 200;
 
-// Kept in step with Ludo2Board's palette: a deliberate luminance ladder
-// (0.21 / 0.29 / 0.43) so the three players separate by lightness, not hue alone.
+// Kept in step with Ludo2Board's palette. The third seat is keyed 'yellow' in
+// the code and the database, but presents as blue to match the board — so games
+// already stored under that key keep working.
 const COLOR_HEX: Record<Ludo2Color, string> = {
-  red: '#d13a22', green: '#31a566', yellow: '#f2a838',
+  red: '#b23a2f', green: '#417a4a', yellow: '#2f5f8f',
+};
+
+// Channels of the same three seats, so the standings bars can tint themselves
+// without a second hard-coded palette drifting out of step with COLOR_HEX.
+const COLOR_RGB: Record<Ludo2Color, string> = {
+  red: '178, 58, 47', green: '65, 122, 74', yellow: '47, 95, 143',
 };
 
 const COLOR_LABELS: Record<Ludo2Color, string> = {
-  red: 'Red', green: 'Green', yellow: 'Yellow',
+  red: 'Red', green: 'Green', yellow: 'Blue',
 };
 
 // Standard dice pip positions on a 3×3 grid [row, col]
@@ -87,6 +102,62 @@ function DiceFace({ value }: { value: number }) {
   );
 }
 
+// Which room this tab was last in. The game code lived only in component
+// state, so closing the window lost it outright: a player who shut the popup
+// mid-game had no way back in unless they had memorised four letters. Stored
+// rather than auto-rejoined — it prefills the code box and the player decides.
+const ROOM_KEY = 'ludo2-room';
+
+function rememberRoom(code: string) {
+  try {
+    sessionStorage.setItem(ROOM_KEY, code);
+  } catch {
+    // sessionStorage blocked (private browsing) — rejoin by hand, as before
+  }
+}
+
+function forgetRoom() {
+  try {
+    sessionStorage.removeItem(ROOM_KEY);
+  } catch {
+    // As above; nothing to clean up if it was never written
+  }
+}
+
+function recallRoom(): string {
+  try {
+    return sessionStorage.getItem(ROOM_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The strongest of a set of moves, by the bot heuristic.
+ *
+ * Shared by the bots and by the turn timer. A player whose clock runs out used
+ * to have a move drawn at random played for them, which could hand away a
+ * run-home cell or walk a counter into an opponent's guns — being away from the
+ * keyboard should cost you the choice, not the game.
+ */
+function pickBestMove(
+  moves: { tokenIndex: number; newPosition: TokenPosition }[],
+  tokens: TokenPosition[],
+  color: Ludo2Color,
+  playerCount: number
+): { tokenIndex: number; newPosition: TokenPosition } {
+  let best = moves[0];
+  let bestScore = -Infinity;
+  for (const move of moves) {
+    const score = scoreBotMove(move.tokenIndex, move.newPosition, tokens, color, playerCount);
+    if (score > bestScore) {
+      bestScore = score;
+      best = move;
+    }
+  }
+  return best;
+}
+
 interface Ludo2GameProps {
   onClose: () => void;
   isSearchOpen: boolean;
@@ -107,7 +178,9 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   const gamePhaseRef = useRef<'lobby' | 'waiting' | 'playing'>('lobby');
   const [gameCode, setGameCode] = useState<string | null>(null);
   const gameCodeRef = useRef<string | null>(null);
-  const [joinCode, setJoinCode] = useState('');
+  // Prefilled with the last room this tab was in, so reopening the game after
+  // closing it is one click rather than a memory test.
+  const [joinCode, setJoinCode] = useState(recallRoom);
   const [myColor, setMyColor] = useState<Ludo2Color | null>(null);
   const myColorRef = useRef<Ludo2Color | null>(null);
   const [playerNames, setPlayerNames] = useState<Partial<Record<Ludo2Color, string>>>({});
@@ -139,6 +212,8 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   const [diceValue, setDiceValue] = useState<number | null>(null);
   const diceValueRef = useRef(diceValue);
   diceValueRef.current = diceValue;
+  // The face the die keeps showing between turns (see Ludo2GameState.lastRoll)
+  const [lastRoll, setLastRoll] = useState<number | null>(null);
   const [consecutiveSixes, setConsecutiveSixes] = useState(0);
   const consecutiveSixesRef = useRef(consecutiveSixes);
   consecutiveSixesRef.current = consecutiveSixes;
@@ -159,9 +234,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   const [isRolling, setIsRolling] = useState(false);
   const isRollingRef = useRef(false);
   const [rollingFace, setRollingFace] = useState(1);
-  const [rolledThisTurn, setRolledThisTurn] = useState(false);
   const [lastMovedToken, setLastMovedToken] = useState<number | null>(null);
   const [showGameOver, setShowGameOver] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const showHelpRef = useRef(showHelp);
+  showHelpRef.current = showHelp;
   const [statusHint, setStatusHint] = useState<string | null>(null);
   const [timeLeft, setTimeLeft] = useState(TURN_SECONDS);
   const moveInFlightRef = useRef(false);
@@ -169,6 +246,9 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   const prevTokensRef = useRef(INITIAL_TOKENS);
   const turnStartedAtRef = useRef(0);
   const turnLocalStartRef = useRef(Date.now());
+  // When this client saw the pause begin, so resuming can give back exactly the
+  // time that was lost rather than a whole fresh turn.
+  const localPausedAtRef = useRef<number | null>(null);
 
   // Pity timer: guarantee a 6 for a player stuck with everything at base
   const homeStuckRolls = useRef<Record<string, number>>({});
@@ -204,8 +284,32 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     x: Math.max(12, (window.innerWidth - 760) / 2),
     y: Math.max(12, (window.innerHeight - 560) / 2 - 20),
   }));
+  const positionRef = useRef(position);
+  positionRef.current = position;
+  const popupRef = useRef<HTMLDivElement | null>(null);
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, posX: 0, posY: 0 });
   const dragCleanupRef = useRef<(() => void) | null>(null);
+
+  // Keep enough of the window on screen to grab it again. Only `y` was ever
+  // clamped, so the popup could be dragged clean off the side and left there —
+  // it is `position: fixed`, so nothing scrolls it back into view.
+  const clampToViewport = useCallback((x: number, y: number) => {
+    const rect = popupRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? 760;
+    const EDGE = 80; // a graspable strip of title bar, whichever side it leaves by
+    return {
+      x: Math.min(Math.max(x, EDGE - width), window.innerWidth - EDGE),
+      y: Math.min(Math.max(y, 0), Math.max(0, window.innerHeight - 40)),
+    };
+  }, []);
+
+  // A window sized to yesterday's viewport can end up off today's. Re-clamp on
+  // resize so shrinking the browser never strands the popup outside it.
+  useEffect(() => {
+    const onResize = () => setPosition(p => clampToViewport(p.x, p.y));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [clampToViewport]);
 
   // --- Cleanup on unmount ---
   useEffect(() => {
@@ -401,10 +505,6 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         rollStatsRef.current = parsed;
       }
 
-      if (state.turnPhase === 'roll' && !isRollingRef.current) {
-        setRolledThisTurn(false);
-      }
-
       if (state.currentTurn !== currentTurnRef.current) {
         isRollingRef.current = false;
         setIsRolling(false);
@@ -420,13 +520,22 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       if (state.turnPhase !== turnPhaseRef.current) setTurnPhase(state.turnPhase);
       const newDice = state.diceValue ?? null;
       if (newDice !== diceValueRef.current) setDiceValue(newDice);
+      if (state.lastRoll != null) setLastRoll(state.lastRoll);
       if (state.consecutiveSixes !== consecutiveSixesRef.current) setConsecutiveSixes(state.consecutiveSixes);
       if (state.playerCount !== activePlayerCountRef.current) setActivePlayerCount(state.playerCount);
       turnStartedAtRef.current = state.turnStartedAt;
 
       const isPaused = !!state.paused;
+      if (!gamePausedRef.current && isPaused) {
+        localPausedAtRef.current = Date.now();
+      }
       if (gamePausedRef.current && !isPaused) {
-        turnLocalStartRef.current = Date.now();
+        // Push the turn's start forward by exactly the time spent paused, so
+        // the clock resumes where it stopped. Restarting it at `now` handed the
+        // player a fresh thirty seconds, which made pause-resume an unlimited
+        // stall anyone at the table could pull.
+        turnLocalStartRef.current += Date.now() - (localPausedAtRef.current ?? Date.now());
+        localPausedAtRef.current = null;
       }
       setGamePaused(isPaused);
       gamePausedRef.current = isPaused;
@@ -470,7 +579,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
 
       // Recompute valid moves on reconnect into a move phase
       if (state.turnPhase === 'move' && state.currentTurn === myColorRef.current && state.diceValue !== null) {
-        const moves = getValidMoves(parsedTokens, state.currentTurn, state.diceValue);
+        const moves = getDistinctMoves(parsedTokens, state.currentTurn, state.diceValue);
         setValidMoves(new Map(moves.map(m => [m.tokenIndex, m.newPosition])));
       } else {
         setValidMoves(new Map());
@@ -575,7 +684,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     if (roll === 6 && curSixes >= 2) showHint('Three 6s — no bonus turn');
     else if (captured) showHint('Captured! Bonus turn');
     else if (reachedHome) showHint('Home! Bonus turn');
-    else if (roll === 6 && nextColor === curColor) showHint('Rolled 6! Bonus turn');
+    // Say which six it was. A player who has had two is one roll from losing
+    // the turn outright, and nothing else on the board tracks that for them.
+    else if (roll === 6 && nextColor === curColor) {
+      showHint(curSixes === 1 ? 'Second 6 — one more forfeits the turn' : 'Rolled 6! Bonus turn');
+    }
 
     setLastMovedToken(tokenIndex);
     clearTimeout(movedTimeoutRef.current);
@@ -593,6 +706,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       currentTurn: gameWinner ? curColor : nextColor,
       turnPhase: 'roll',
       diceValue: null,
+      // Publish the face this move was played on. When a roll has exactly one
+      // legal move we play it straight from the 'roll' phase, so this update is
+      // the *only* one the move produces — omit lastRoll and every other client
+      // keeps showing the previous turn's face in the hub.
+      lastRoll: roll,
       consecutiveSixes: nextSixes,
       winner: gameWinner,
       finishOrder: updatedFinishOrder.join(','),
@@ -663,9 +781,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     const originalFace = rolls[0];
     const indices = getColorTokenIndices(activeColor);
     const hasTokenAtHome = indices.some(i => tokensRef.current[i] === 'base');
+    // Nothing on the track to move: everything is either still in the yard or
+    // already standing in the run home.
     const allBaseOrFinished = indices.every(i => {
       const t = tokensRef.current[i];
-      return t === 'base' || t === 'final-6';
+      return t === 'base' || t.startsWith('final-');
     });
     const needsSix = hasTokenAtHome && allBaseOrFinished;
     const stuckCount = homeStuckRolls.current[activeColor] || 0;
@@ -687,7 +807,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       setIsRolling(false);
       isRollingRef.current = false;
       setDiceValue(roll);
-      setRolledThisTurn(true);
+      setLastRoll(roll);
 
       const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), originalFace);
       rollStatsRef.current = updatedRollStats;
@@ -698,13 +818,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       const curPlayerCount = activePlayerCountRef.current;
       const finishedColors = getFinishedColors(currentTokens, curPlayerCount);
 
-      const moves = getValidMoves(currentTokens, curColor, roll);
+      // Interchangeable counters collapsed: five in the yard on a 6 is one
+      // decision, and offered raw it would never take the auto-play path below.
+      const moves = getDistinctMoves(currentTokens, curColor, roll);
 
       if (moves.length === 0) {
-        const hasTokensInCorridor = getColorTokenIndices(curColor).some(i => {
-          const t = currentTokens[i];
-          return t.startsWith('final-') && t !== 'final-6';
-        });
         let nextColor: Ludo2Color;
         let nextSixes: number;
         if (roll === 6 && curSixes < 2) {
@@ -718,7 +836,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         } else {
           nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
           nextSixes = 0;
-          showHint(hasTokensInCorridor ? 'Need exact roll to finish' : 'No valid moves');
+          showHint(
+            getNoMoveReason(currentTokens, curColor) === 'need-six'
+              ? 'Need a 6 to come out'
+              : 'Need the exact roll for an empty space'
+          );
         }
         const update: Ludo2MoveUpdate = {
           tokens: serializeTokens(currentTokens),
@@ -730,6 +852,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
           finishOrder: finishOrderRef.current.join(','),
           turnStartedAt: getServerTimestamp(),
           rollStats: serializeRollStats(updatedRollStats),
+          lastRoll: roll,
         };
         try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
         return;
@@ -756,6 +879,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         finishOrder: finishOrderRef.current.join(','),
         turnStartedAt: getServerTimestamp(),
         rollStats: serializeRollStats(updatedRollStats),
+        lastRoll: roll,
       };
       try { await makeMove(gc, curColor, update); } catch { moveInFlightRef.current = false; }
     }, rollAnimMs);
@@ -789,8 +913,19 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
   // --- Keyboard shortcuts ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !isSearchOpen) onClose();
-      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat && gamePhase === 'playing' && myColorRef.current
+      if (e.key === 'Escape' && !isSearchOpen) {
+        // Escape shuts the top layer first. Opening the rules and pressing it
+        // to dismiss them should not also close the game out from under you.
+        if (showHelpRef.current) setShowHelp(false);
+        else onClose();
+        return;
+      }
+      // Not while the rules are up, and not while focus is on a control that
+      // wants the key itself — Space on a focused counter is that counter's.
+      const onControl = document.activeElement instanceof HTMLElement
+        && document.activeElement.matches('button, [role="button"], input');
+      if ((e.key === ' ' || e.key === 'Enter') && !e.repeat && !showHelpRef.current && !onControl
+        && gamePhase === 'playing' && myColorRef.current
         && !isRollingRef.current && !moveInFlightRef.current && !gamePausedRef.current
         && turnPhaseRef.current === 'roll' && currentTurnRef.current === myColorRef.current && !winnerRef.current) {
         e.preventDefault();
@@ -825,11 +960,13 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         } else if (turnPhaseRef.current === 'move') {
           const dice = diceValueRef.current;
           if (dice !== null) {
-            const moves = getValidMoves(tokensRef.current, currentTurnRef.current, dice);
+            const moves = getDistinctMoves(tokensRef.current, currentTurnRef.current, dice);
             if (moves.length > 0) {
               moveInFlightRef.current = true;
-              const randomMove = moves[Math.floor(Math.random() * moves.length)];
-              executeMoveRef.current(randomMove.tokenIndex, randomMove.newPosition, dice);
+              const move = pickBestMove(
+                moves, tokensRef.current, currentTurnRef.current, activePlayerCountRef.current
+              );
+              executeMoveRef.current(move.tokenIndex, move.newPosition, dice);
             }
           }
         }
@@ -886,7 +1023,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
 
         const dice = diceValueRef.current;
         if (dice === null) return;
-        const moves = getValidMoves(tokensRef.current, currentTurn, dice);
+        const moves = getDistinctMoves(tokensRef.current, currentTurn, dice);
         if (moves.length === 0) {
           // Force skip to prevent deadlock
           const gc = gameCodeRef.current;
@@ -910,18 +1047,10 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
           return;
         }
 
-        let bestIdx = moves[0].tokenIndex;
-        let bestScore = -Infinity;
-        for (const m of moves) {
-          const score = scoreBotMove(
-            m.tokenIndex, m.newPosition, tokensRef.current, currentTurn, activePlayerCountRef.current
-          );
-          if (score > bestScore) {
-            bestScore = score;
-            bestIdx = m.tokenIndex;
-          }
-        }
-        handleMoveTokenRef.current(bestIdx);
+        const best = pickBestMove(
+          moves, tokensRef.current, currentTurn, activePlayerCountRef.current
+        );
+        handleMoveTokenRef.current(best.tokenIndex);
       }, botDelay);
     }
 
@@ -936,12 +1065,12 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     setCurrentTurn('red');
     setTurnPhase('roll');
     setDiceValue(null);
+    setLastRoll(null);
     setConsecutiveSixes(0);
     setWinner(null);
     setFinishOrder([]);
     setValidMoves(new Map());
     setShowGameOver(false);
-    setRolledThisTurn(false);
     const stats = deserializeRollStats(initRollStats());
     setRollStats(stats);
     rollStatsRef.current = stats;
@@ -955,6 +1084,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     try {
       const { code, color } = await createGame(sessionId, userName);
       resetLocalGameState();
+      rememberRoom(code);
       setGameCode(code);
       gameCodeRef.current = code;
       setMyColor(color);
@@ -980,6 +1110,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     try {
       const { assignedColor, state } = await joinGame(code, sessionId, userName);
       resetLocalGameState();
+      rememberRoom(code);
       setGameCode(code);
       gameCodeRef.current = code;
       setMyColor(assignedColor);
@@ -1026,22 +1157,59 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     gamePhaseRef.current = 'lobby';
   }, [resetLocalGameState]);
 
+  /**
+   * Give up the seat properly.
+   *
+   * Closing the window only ever hid the game: the seat stayed occupied and
+   * every other player waited out a forty-five second timeout on your turn,
+   * every round, for the rest of the game. Telling the room lets a bot take the
+   * counters over instead.
+   */
+  const handleLeaveGame = useCallback(async () => {
+    const gc = gameCodeRef.current;
+    setShowHelp(false);
+    if (gc) {
+      forgetRoom();
+      try {
+        await leaveGame(gc, sessionId);
+      } catch {
+        // Best effort. Going back to the lobby matters more than the notice.
+      }
+    }
+    handleBackToLobby();
+  }, [sessionId, handleBackToLobby]);
+
   // --- Dragging ---
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
+  const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    // The title bar carries the close and pause buttons. Without this a press
+    // on either starts a drag, and the smallest wobble between press and
+    // release moves the window instead of pressing the button.
+    if ((e.target as HTMLElement).closest(`.${styles.closeBtn}`)) return;
     dragCleanupRef.current?.();
+
+    const point = 'touches' in e ? e.touches[0] : e;
     dragStartRef.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-      posX: position.x,
-      posY: position.y,
+      mouseX: point.clientX,
+      mouseY: point.clientY,
+      posX: positionRef.current.x,
+      posY: positionRef.current.y,
+    };
+
+    const moveTo = (clientX: number, clientY: number) => {
+      const dx = clientX - dragStartRef.current.mouseX;
+      const dy = clientY - dragStartRef.current.mouseY;
+      setPosition(clampToViewport(
+        dragStartRef.current.posX + dx,
+        dragStartRef.current.posY + dy
+      ));
     };
     const onMove = (ev: MouseEvent) => {
-      const dx = ev.clientX - dragStartRef.current.mouseX;
-      const dy = ev.clientY - dragStartRef.current.mouseY;
-      setPosition({
-        x: dragStartRef.current.posX + dx,
-        y: Math.max(0, dragStartRef.current.posY + dy),
-      });
+      ev.preventDefault(); // or the drag selects the page text underneath
+      moveTo(ev.clientX, ev.clientY);
+    };
+    const onTouchMove = (ev: TouchEvent) => {
+      if (ev.touches.length !== 1) return;
+      moveTo(ev.touches[0].clientX, ev.touches[0].clientY);
     };
     const onUp = () => {
       dragCleanupRef.current?.();
@@ -1049,11 +1217,15 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchmove', onTouchMove, { passive: true });
+    document.addEventListener('touchend', onUp);
     dragCleanupRef.current = () => {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onUp);
     };
-  }, [position.x, position.y]);
+  }, [clampToViewport]);
 
   // --- Derived display state ---
   const isMyTurn = myColor === currentTurn;
@@ -1063,25 +1235,66 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     ? `${displayName(winner)} wins!`
     : isMyTurn
       ? (turnPhase === 'roll' ? 'Your turn — roll!' : 'Choose a token')
-      : `${displayName(currentTurn)}'s turn…`;
+      // No trailing ellipsis: the countdown bar under this line already says
+      // "in progress", and the extra character only costs truncation room.
+      : `${displayName(currentTurn)}'s turn`;
   const offlineBanner = !isBrowserOnline || !isConnected;
+  const isUrgent = timeLeft <= 10 && !winner && !gamePaused;
+  const standings = winner ? getStandings(tokens, activePlayerCount, finishOrder) : [];
+
+  // Which corner a seat's card belongs in. The plate spins so the local
+  // player's arm points down (see Ludo2Board), which makes this fixed rather
+  // than a guess: you are at the bottom, and the other two seats sit 120° round
+  // to the upper left and upper right. Putting each card in the corner nearest
+  // its own arm means the panel never has to say which colour is where.
+  const seatCorner = (color: Ludo2Color) => {
+    const bearing = (ARM_ANGLE[color] - (myColor ? ARM_ANGLE[myColor] : 0) + 360) % 360;
+    return bearing === 0 ? styles.cornerBl : bearing === 120 ? styles.cornerTl : styles.cornerTr;
+  };
 
   return (
-    <div className={`${styles.popup} ${gamePhase === 'playing' ? '' : styles.popupCompact}`} style={{ left: position.x, top: position.y }}>
-      <div className={styles.titleBar} onMouseDown={handleDragStart}>
+    <div
+      ref={popupRef}
+      className={`${styles.popup} ${gamePhase === 'playing' ? '' : styles.popupCompact}`}
+      style={{ left: position.x, top: position.y }}
+    >
+      <div className={styles.titleBar} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
         <span className={styles.titleText}>
           Ludo 2
           {gameCode && <span className={styles.titleCode}>{gameCode}</span>}
           {offlineBanner && gamePhase !== 'lobby' && (
-            <span className={styles.reconnecting}>reconnecting…</span>
+            <span
+              className={styles.reconnecting}
+              title="Lost contact with the game server — retrying"
+            >
+              reconnecting…
+            </span>
           )}
         </span>
         <span className={styles.titleButtons}>
+          <button
+            className={`${styles.closeBtn} ${showHelp ? styles.helpBtnActive : ''}`}
+            onClick={() => setShowHelp(h => !h)}
+            aria-label="How to play"
+            aria-expanded={showHelp}
+            title="How to play"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M6.1 6.05a2 2 0 1 1 2.6 2.2c-.5.2-.75.6-.75 1.1v.4"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+              <circle cx="7.95" cy="12" r="0.85" fill="currentColor" />
+            </svg>
+          </button>
           {gamePhase === 'playing' && !winner && (
             <button
               className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`}
               onClick={() => gameCode && toggleGamePause(gameCode)}
               aria-label={gamePaused ? 'Resume game' : 'Pause game'}
+              title={gamePaused ? 'Resume game' : 'Pause game'}
             >
               {gamePaused ? (
                 <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -1117,6 +1330,44 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         </div>
       )}
 
+      {/* How to play. Everything unusual about this board lived only in code
+          comments: five counters against five run-home cells, the exact landing,
+          the havens. A player could lose a game without ever being told why a
+          counter would not move. Quiet type on the same blurred ground as the
+          pause screen — no icons, no boxes, nothing to look at twice. */}
+      {showHelp && (
+        <div className={styles.helpOverlay}>
+          <div className={styles.helpCard}>
+            <div className={styles.helpTitle}>How to play</div>
+            <ul className={styles.helpList}>
+              <li>Roll a 6 to bring a counter out of your yard.</li>
+              <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes.</li>
+              <li>Land on an opponent to send that counter back to its yard.</li>
+              <li>Start spaces and starred spaces are safe. Nothing is captured there.</li>
+              <li>
+                Your run home has five cells and you have five counters — one for each.
+                A counter has to land on an empty cell <em>exactly</em>; it may pass over
+                a taken one but never stop on it.
+              </li>
+              <li>Fill all five cells to win. A counter still out on the track can always be sent home.</li>
+            </ul>
+            <div className={styles.helpKeys}>
+              Space or Enter rolls. Tab to a raised counter and press Enter to move it.
+            </div>
+            <div className={styles.helpButtons}>
+              {gameCode && (
+                <button className={styles.linkBtn} onClick={handleLeaveGame}>
+                  Leave game
+                </button>
+              )}
+              <button className={styles.createBtn} onClick={() => setShowHelp(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Our own resize affordance — the browser's native grip reads as a web
           app, not a game. Purely decorative; the real handle is the corner. */}
       <svg className={styles.resizeGrip} viewBox="0 0 16 16" aria-hidden="true">
@@ -1132,7 +1383,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         {/* === LOBBY === */}
         {gamePhase === 'lobby' && (
           <div className={styles.lobby}>
-            <div className={styles.lobbyTitle}>Three-player Ludo on a Y-board</div>
+            <div className={styles.lobbyTitle}>Three-player Ludo, on the round</div>
             <button className={styles.createBtn} onClick={handleCreateGame} disabled={isLoading}>
               {isLoading ? 'Creating…' : 'Create Game'}
             </button>
@@ -1196,7 +1447,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                       isEmpty ? styles.playerSlotEmpty : '',
                       isEmpty && isHost ? styles.playerSlotClickable : '',
                     ].filter(Boolean).join(' ')}
-                    onClick={() => { if (isEmpty && isHost && gameCode) addBot(gameCode, color); }}
+                    onClick={() => { if (isEmpty && isHost && gameCode) addBot(gameCode, color, sessionId); }}
                     role={isEmpty && isHost ? 'button' : undefined}
                   >
                     <span className={styles.playerDot} style={{ background: COLOR_HEX[color] }} />
@@ -1207,7 +1458,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                     {isBot && isHost && (
                       <button
                         className={styles.removeBotBtn}
-                        onClick={(e) => { e.stopPropagation(); if (gameCode) removeBot(gameCode, color); }}
+                        onClick={(e) => { e.stopPropagation(); if (gameCode) removeBot(gameCode, color, sessionId); }}
                         aria-label={`Remove ${color} bot`}
                       >
                         <svg width="12" height="12" viewBox="0 0 12 12">
@@ -1240,6 +1491,9 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         {/* === PLAYING === */}
         {gamePhase === 'playing' && (
           <div className={styles.playingLayout}>
+            {/* The board takes the whole area; the chrome lives in the four
+                corners an inscribed circle necessarily leaves empty, and in the
+                hub at its centre. Nothing here costs the board a pixel. */}
             <div className={styles.boardWrapper}>
               <Ludo2Board
                 tokens={tokens}
@@ -1252,83 +1506,135 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                 capturedGhosts={capturedGhostsRef.current}
                 onTokenClick={handleMoveToken}
               />
-            </div>
 
-            <div className={styles.sidePanel}>
-              <div className={styles.turnIndicator}>
-                <span className={styles.statusDot} style={{ background: COLOR_HEX[winner ?? currentTurn] }} />
-                <span>{statusMessage}</span>
-                {!winner && (
-                  <span className={`${styles.timer} ${timeLeft <= 10 ? styles.timerUrgent : ''}`}>
-                    {timeLeft}s
-                  </span>
-                )}
-              </div>
-
-              {/* Standing/progress, replacing the score badges that used to sit
-                  on the board itself */}
-              <div className={styles.playerRows}>
-                {PLAYER_COLORS.slice(0, activePlayerCount).map(color => (
+              {/* One card per seat, in the corner nearest that seat's own arm */}
+              {PLAYER_COLORS.slice(0, activePlayerCount).map(color => {
+                const score = getPlayerScore(tokens, color);
+                const stats = rollStats[colorIndex(color)];
+                return (
                   <div
                     key={color}
                     className={[
-                      styles.playerRow,
-                      currentTurn === color && !winner ? styles.playerRowActive : '',
+                      styles.seatCard,
+                      seatCorner(color),
+                      currentTurn === color && !winner ? styles.seatCardActive : '',
                     ].filter(Boolean).join(' ')}
+                    style={{
+                      '--seat-rgb': COLOR_RGB[color],
+                      '--fill': `${(score / MAX_PLAYER_SCORE) * 100}%`,
+                    } as React.CSSProperties}
                   >
-                    <span className={styles.playerDot} style={{ background: COLOR_HEX[color] }} />
-                    <span className={styles.playerRowName}>
-                      {displayName(color)}{myColor === color ? ' (you)' : ''}
-                    </span>
-                    <span className={styles.playerRowScore}>{getPlayerScore(tokens, color)}</span>
+                    <div className={styles.seatLine}>
+                      <span className={styles.playerDot} style={{ background: COLOR_HEX[color] }} />
+                      {/* "You" rather than your own name plus a "(you)" suffix:
+                          the suffix is the part that matters and the part that
+                          got eaten first when a real name ran long. */}
+                      <span className={styles.seatName} title={displayName(color)}>
+                        {myColor === color ? 'You' : displayName(color)}
+                      </span>
+                      <span className={styles.seatScore}>{score}</span>
+                    </div>
+                    {/* How far round the board this seat has actually got */}
+                    <div className={styles.seatMeter} aria-hidden="true">
+                      <span className={styles.seatMeterFill} />
+                    </div>
+
+                    {/* This seat's own roll tally. Per-card rather than one
+                        shared table, so the fourth corner isn't needed at all
+                        and each player's luck sits next to their score. */}
+                    {/* role="img" so the label is actually announced: an
+                        aria-label on a bare div carries no role for it to
+                        attach to, and screen readers drop it. The cells below
+                        are hidden and this label speaks for all of them. */}
+                    <div
+                      className={styles.rollGrid}
+                      role="img"
+                      aria-label={`Rolls — ${stats.rolls.map((n, i) => `${i + 1}: ${n}`).join(', ')}; captures ${stats.captures}`}
+                    >
+                      {[1, 2, 3, 4, 5, 6].map(n => (
+                        <span key={`h${n}`} className={styles.rollHead} aria-hidden="true">{n}</span>
+                      ))}
+                      <span className={styles.rollHead} title="Captures" aria-hidden="true">C</span>
+                      {/* A middot, not a blank: an empty cell reads as a broken
+                          grid, where a placeholder reads as "none yet" and keeps
+                          the columns visibly lined up under their face. */}
+                      {stats.rolls.map((n, i) => (
+                        <span
+                          key={i}
+                          className={`${styles.rollVal} ${n ? '' : styles.statNil}`}
+                          aria-hidden="true"
+                        >
+                          {n || '·'}
+                        </span>
+                      ))}
+                      <span
+                        className={`${styles.rollVal} ${stats.captures ? '' : styles.statNil}`}
+                        aria-hidden="true"
+                      >
+                        {stats.captures || '·'}
+                      </span>
+                    </div>
                   </div>
-                ))}
-              </div>
+                );
+              })}
 
-              <div className={styles.sideDice}>
-                <button
-                  className={[
-                    styles.dice,
-                    isRolling ? styles.diceRolling : '',
-                    diceCanRoll ? styles.diceActive : '',
-                  ].filter(Boolean).join(' ')}
-                  onClick={handleRollDice}
-                  disabled={!diceCanRoll}
-                  aria-label="Roll dice"
+              {/* One status voice, on the board's vertical axis. The wedge
+                  straight above the hub is the only one with no arm in it —
+                  your own arm points down, the other two sit at ±120°. */}
+              <div className={styles.centreStatus}>
+                {/* Keyed on its own text so React remounts it and the fade
+                    replays every time the line actually changes. */}
+                <span key={statusHint ?? statusMessage} className={styles.centreStatusText}>
+                  {statusHint ?? statusMessage}
+                </span>
+                <div
+                  className={styles.turnTrack}
+                  title={winner ? undefined : `${timeLeft}s left on this turn`}
+                  aria-hidden="true"
                 >
-                  {isRolling ? (
-                    <DiceFace value={rollingFace} />
-                  ) : diceValue && (turnPhase === 'move' || rolledThisTurn) ? (
-                    <DiceFace value={diceValue} />
-                  ) : (
-                    <span className={styles.diceIdle} />
-                  )}
-                </button>
-                {statusHint && <span className={styles.statusHint}>{statusHint}</span>}
-                <div aria-live="polite" aria-atomic="true" className={styles.srOnly}>{statusHint ?? ''}</div>
+                  <span
+                    className={`${styles.turnTrackFill} ${isUrgent ? styles.turnTrackUrgent : ''}`}
+                    style={{ width: winner ? '0%' : `${(timeLeft / TURN_SECONDS) * 100}%` }}
+                  />
+                </div>
+                {/* The bar alone cannot separate eight seconds from three, and
+                    those are the only two the count actually matters for. So the
+                    number appears for the last ten and then goes away again,
+                    rather than sitting there counting all game. */}
+                {isUrgent && <span className={styles.turnCount}>{timeLeft}</span>}
+              </div>
+              {/* Turn changes and the result were never announced — this region
+                  only ever carried the transient hint, so a screen-reader player
+                  was never told the turn had come round to them. */}
+              <div aria-live="polite" aria-atomic="true" className={styles.srOnly}>
+                {statusHint ?? statusMessage}
               </div>
 
-              <div className={styles.statsTable}>
-                <div className={styles.statsLabel}>Dice Rolls</div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th></th>
-                      {[1, 2, 3, 4, 5, 6].map(n => <th key={n}>{n}</th>)}
-                      <th className={styles.statsCaps} title="Captures">Cap</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {PLAYER_COLORS.slice(0, activePlayerCount).map((color, ci) => (
-                      <tr key={color}>
-                        <td><span className={styles.playerDot} style={{ background: COLOR_HEX[color] }} /></td>
-                        {rollStats[ci].rolls.map((n, i) => <td key={i}>{n || ''}</td>)}
-                        <td>{rollStats[ci].captures || ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {/* A failed write mid-game used to be silent: `error` was rendered
+                  only in the lobby and the waiting room. */}
+              {error && <div className={styles.playError} role="alert">{error}</div>}
+
+              {/* The die, resting in the hub — where you would actually throw it */}
+              <button
+                className={[
+                  styles.dice,
+                  styles.centreDice,
+                  isRolling ? styles.diceRolling : '',
+                  diceCanRoll ? styles.diceActive : '',
+                ].filter(Boolean).join(' ')}
+                onClick={handleRollDice}
+                disabled={!diceCanRoll}
+                aria-label="Roll dice"
+                title={diceCanRoll ? 'Roll — or press Space' : undefined}
+              >
+                {isRolling ? (
+                  <DiceFace value={rollingFace} />
+                ) : (diceValue ?? lastRoll) ? (
+                  <DiceFace value={(diceValue ?? lastRoll) as number} />
+                ) : (
+                  <span className={styles.diceIdle} />
+                )}
+              </button>
             </div>
 
             {/* Game-over overlay */}
@@ -1339,21 +1645,31 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
                     <span className={styles.playerDot} style={{ background: COLOR_HEX[winner] }} />
                     {displayName(winner)} wins!
                   </div>
-                  {finishOrder.length > 1 && (
+                  {/* Final placings.
+                      This used to render `finishOrder`, which can only ever hold
+                      one name: the game ends the instant somebody fills their
+                      run home, so nobody else ever finishes and the whole block
+                      was unreachable. The seats behind the winner are separated
+                      by how far round they actually got. */}
+                  {standings.length > 1 && (
                     <div className={styles.finishOrder}>
-                      {finishOrder.map((c, i) => (
-                        <div key={c} className={styles.finishRow}>
+                      {standings.map((s, i) => (
+                        <div key={s.color} className={styles.finishRow}>
                           <span>{i + 1}.</span>
-                          <span className={styles.playerDot} style={{ background: COLOR_HEX[c] }} />
-                          <span>{displayName(c)}</span>
+                          <span className={styles.playerDot} style={{ background: COLOR_HEX[s.color] }} />
+                          <span>{displayName(s.color)}</span>
+                          <span className={styles.finishScore}>{s.score}</span>
                         </div>
                       ))}
                     </div>
                   )}
                   <div className={styles.gameOverButtons}>
-                    {myColor === hostColor && (
+                    {/* The host may well have shut the window by now — without
+                        this the table can never be restarted by anyone. */}
+                    {(myColor === hostColor || !playerNames[hostColor]) && (
                       <button className={styles.createBtn} onClick={handlePlayAgain}>Play Again</button>
                     )}
+                    <button className={styles.linkBtn} onClick={handleLeaveGame}>Leave</button>
                     <button className={styles.linkBtn} onClick={handleBackToLobby}>Back to Lobby</button>
                   </div>
                 </div>

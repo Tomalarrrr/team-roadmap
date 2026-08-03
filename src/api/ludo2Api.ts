@@ -1,6 +1,6 @@
 // Ludo2 (three-player) game data access via the Vercel proxy (api/proxy.ts).
 // Same VPN-safe transport as Ludo v1 (see dbProxy.ts); this module is the
-// game-specific layer on the `ludo2/{code}` namespace: three colors, 12
+// game-specific layer on the `ludo2/{code}` namespace: three colors, 15
 // tokens, classic rules only (no power-up fields).
 
 import type { LudoPlayer, TurnPhase } from '../ludoFirebase';
@@ -27,10 +27,11 @@ export { getServerTimestamp };
 export type { Ludo2Color, Ludo2GameState, Ludo2MoveUpdate, Unsubscribe };
 
 const STALE_GAME_AGE_MS = 24 * 60 * 60 * 1000;
+// 'yellow' is the stored key for the third seat; it presents as blue.
 const BOT_NAMES: Record<Ludo2Color, string> = {
   red: 'Bot Red',
   green: 'Bot Green',
-  yellow: 'Bot Yellow',
+  yellow: 'Bot Blue',
 };
 
 /** Seats are dealt at random rather than in board order, so creating a game
@@ -57,6 +58,7 @@ export async function createGame(
       currentTurn: 'red',
       turnPhase: 'roll',
       diceValue: null,
+      lastRoll: null,
       consecutiveSixes: 0,
       winner: null,
       finishOrder: '',
@@ -99,10 +101,19 @@ async function cleanupStaleGames(): Promise<void> {
   }
 }
 
-export async function addBot(code: string, color: Ludo2Color): Promise<void> {
+/** Whether `sessionId` holds the host seat. The UI already only offers the bot
+ * controls to the host; this is the same rule where it can actually be relied
+ * on, so a second tab or a stale client cannot reshape someone else's room. */
+function isHost(state: Ludo2GameState, sessionId: string): boolean {
+  const host = state.players[state.host ?? 'red'];
+  return !!host && host.sessionId === sessionId;
+}
+
+export async function addBot(code: string, color: Ludo2Color, sessionId: string): Promise<void> {
   await proxyTransaction<Ludo2GameState>(`ludo2/${code}`, (current) => {
     if (!current) return current;
     if (current.startedAt) return undefined;
+    if (!isHost(current, sessionId)) return undefined;
     if (current.players[color]) return undefined;
     return {
       ...current,
@@ -111,16 +122,77 @@ export async function addBot(code: string, color: Ludo2Color): Promise<void> {
   });
 }
 
-export async function removeBot(code: string, color: Ludo2Color): Promise<void> {
+export async function removeBot(code: string, color: Ludo2Color, sessionId: string): Promise<void> {
   await proxyTransaction<Ludo2GameState>(`ludo2/${code}`, (current) => {
     if (!current) return current;
     if (current.startedAt) return undefined;
+    if (!isHost(current, sessionId)) return undefined;
     const player = current.players[color];
     if (!player || !player.sessionId.startsWith('bot-')) return undefined;
     const newPlayers = { ...current.players };
     delete newPlayers[color];
     return { ...current, players: newPlayers };
   });
+}
+
+/**
+ * Give up a seat.
+ *
+ * Before the off this just empties the seat. Once play has started the seat
+ * cannot simply vanish — the turn order is a fixed rotation over playerCount,
+ * and an empty seat in it stalls every round until the other clients time it
+ * out. So a leaver is replaced by a bot, which takes over their counters and
+ * keeps the game moving. If the host leaves, the host seat moves to a remaining
+ * human so the room still has someone who can restart it.
+ */
+export async function leaveGame(code: string, sessionId: string): Promise<void> {
+  // Set by the updater so the caller can act on it once the write has landed.
+  // proxyTransaction treats a null return as an abort rather than a delete, so
+  // emptying the room has to be a separate step.
+  let roomIsEmpty = false;
+
+  await proxyTransaction<Ludo2GameState>(`ludo2/${code}`, (current) => {
+    roomIsEmpty = false;
+    if (!current) return current;
+
+    const seat = PLAYER_COLORS.find((c) => current.players[c]?.sessionId === sessionId);
+    if (!seat) return undefined; // Not at this table
+
+    const players = { ...current.players };
+    if (current.startedAt) {
+      players[seat] = { sessionId: `bot-${seat}`, name: BOT_NAMES[seat] };
+    } else {
+      delete players[seat];
+    }
+
+    const humansLeft = PLAYER_COLORS.filter(
+      (c) => players[c] && !players[c]!.sessionId.startsWith('bot-')
+    );
+    if (humansLeft.length === 0) {
+      roomIsEmpty = true;
+      return { ...current, players };
+    }
+
+    const hostSeat = current.host ?? 'red';
+    const nextHost = humansLeft.includes(hostSeat) ? hostSeat : humansLeft[0];
+
+    return {
+      ...current,
+      players,
+      host: nextHost,
+      ...(current.startedAt ? { singlePlayer: true } : {}),
+    };
+  });
+
+  // Nobody human left: drop the room rather than leave bots playing to an empty
+  // table until the stale-game sweep gets round to it a day later.
+  if (roomIsEmpty) {
+    try {
+      await proxyRemove(`ludo2/${code}`);
+    } catch (err) {
+      console.warn('[Ludo2] Could not remove empty game:', err);
+    }
+  }
 }
 
 export async function startGame(code: string): Promise<void> {
@@ -282,6 +354,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       currentTurn: randomFirst,
       turnPhase: 'roll' as TurnPhase,
       diceValue: null,
+      lastRoll: null,
       consecutiveSixes: 0,
       winner: null,
       finishOrder: '',

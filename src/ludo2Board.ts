@@ -1,12 +1,19 @@
-// Ludo2 (three-player, Y-board) — shared types, board constants, and helpers.
+// Ludo2 (three-player, circular board) — shared types, constants and helpers.
 //
 // Ludo2 runs on a 42-cell circular track (3 arms × 14 cells) mirroring the
 // numbering pattern of the original 56-cell board: each color starts at
-// start = 1 + 14·k, enters its final column at start − 2 (mod 42), and safe
-// zones sit on every start cell and start + 9. Token serialization reuses
+// start = 1 + 14·k, enters its final column at start − 1 (mod 42), and safe
+// zones sit on every start cell and start + 6. Token serialization reuses
 // serializeTokens/deserializeTokens from ludoFirebase (length-agnostic).
+//
+// The run home is five cells and a player has five counters, one per cell: a
+// counter is home only once it is standing in a cell of its own, which it can
+// only reach on an exact roll. There is no pile at the centre to overflow into,
+// so a counter that cannot land keeps waiting out on the track, where it can
+// still be sent back to the yard.
 
 import type { TokenPosition, TurnPhase, LudoPlayer } from './ludoFirebase';
+import { deserializeTokens } from './ludoFirebase';
 
 // --- Types ---
 
@@ -21,10 +28,14 @@ export interface Ludo2GameState {
   /** Which seat created the room. Seats are handed out at random, so the host
    * is not necessarily red — legacy games without this field default to red. */
   host?: Ludo2Color;
-  tokens: string; // 12 tokens × 3 chars = 36
+  tokens: string; // 15 tokens × 3 chars = 45
   currentTurn: Ludo2Color;
   turnPhase: TurnPhase;
   diceValue: number | null;
+  /** The face last rolled by anyone. diceValue is cleared the moment a move is
+   * committed, so on its own the die is blank almost all the time and an
+   * opponent's roll is never visible. This is never cleared mid-game. */
+  lastRoll?: number | null;
   consecutiveSixes: number;
   winner: Ludo2Color | null;
   finishOrder: string;
@@ -43,6 +54,8 @@ export interface Ludo2MoveUpdate {
   currentTurn: Ludo2Color;
   turnPhase: TurnPhase;
   diceValue: number | null;
+  /** Omit to preserve the stored value — makeMove spreads updates over current. */
+  lastRoll?: number | null;
   consecutiveSixes: number;
   winner: Ludo2Color | null;
   finishOrder: string;
@@ -53,25 +66,58 @@ export interface Ludo2MoveUpdate {
 // --- Board constants ---
 
 export const TRACK_SIZE = 42;
-export const TOKENS_PER_PLAYER = 4;
-export const TOTAL_TOKENS = 12;
+/** Cells in a run home — and, deliberately, counters per player: every cell
+ * has to end up with a counter standing in it for that player to be finished. */
+export const FINAL_SIZE = 5;
+export const TOKENS_PER_PLAYER = FINAL_SIZE;
+export const TOTAL_TOKENS = TOKENS_PER_PLAYER * 3;
 export const PLAYER_COLORS: Ludo2Color[] = ['red', 'green', 'yellow'];
 
 export const START_POSITIONS: Record<Ludo2Color, number> = {
   red: 1, green: 15, yellow: 29,
 };
 
+/**
+ * Where each colour turns off the ring for its run home: the cell immediately
+ * before its own start, so the haven you come out on sits at the foot of your
+ * own bridge rather than two cells round from it.
+ *
+ * One short of the start is as close as it can get. A counter standing *on* its
+ * entry cell goes into the run home on its next move — calculateNewPosition has
+ * no notion of laps — so start = entry would send a counter from the yard to
+ * home in two moves without it ever travelling the ring.
+ */
 export const ENTRY_CELLS: Record<Ludo2Color, number> = {
-  red: 41, green: 13, yellow: 27,
+  red: 42, green: 14, yellow: 28,
 };
 
-export const SAFE_ZONES = new Set([1, 10, 15, 24, 29, 38]);
+/**
+ * Havens: every start cell, and the cell six on from each start.
+ *
+ * The start cells have to be safe or deploying is suicide. That makes a counter
+ * parked on its own start the strongest square in the game — it cannot be taken,
+ * and it covers the six cells ahead of it. Those six are where every other
+ * colour is at its most exposed, because each arm's start is also the gate a
+ * third of the ring has to walk through on its way home. Putting the second
+ * haven at start + 6 takes the last of those six cells off the camper's guns and
+ * gives the runner something to aim at: an exact six carries a counter from one
+ * haven to the next, and a six buys another roll, so the leap is paid for.
+ *
+ * The spacing that falls out — 6, 8, 6, 8, 6, 8 — also lands each star a hair
+ * short of halfway between one arm's start cell and the next arm's entry cell
+ * (start + 6 against a midpoint of start + 6.5), near enough dead centre of the
+ * blank stretch between two yards. The alternative that mirrors the classic
+ * board, start + 9, sits four cells short of the next entry: it guards the
+ * arrival but leaves eight open cells after each start, six of them under the
+ * guns, and bunches every mark on the ring into three clumps.
+ */
+export const SAFE_ZONES = new Set([1, 7, 15, 21, 29, 35]);
 
 const COLOR_OFFSET: Record<Ludo2Color, number> = {
-  red: 0, green: 4, yellow: 8,
+  red: 0, green: TOKENS_PER_PLAYER, yellow: TOKENS_PER_PLAYER * 2,
 };
 
-export const INITIAL_TOKENS = 'bas'.repeat(TOTAL_TOKENS); // 36 chars
+export const INITIAL_TOKENS = 'bas'.repeat(TOTAL_TOKENS); // 45 chars
 
 // --- Helpers ---
 
@@ -81,13 +127,91 @@ export function colorIndex(color: Ludo2Color): number {
 
 export function getColorTokenIndices(color: Ludo2Color): number[] {
   const offset = COLOR_OFFSET[color];
-  return [offset, offset + 1, offset + 2, offset + 3];
+  return Array.from({ length: TOKENS_PER_PLAYER }, (_, i) => offset + i);
 }
 
 export function getTokenColor(index: number): Ludo2Color {
-  if (index < 4) return 'red';
-  if (index < 8) return 'green';
+  if (index < COLOR_OFFSET.green) return 'red';
+  if (index < COLOR_OFFSET.yellow) return 'green';
   return 'yellow';
+}
+
+/** Which cells of `color`'s run home already have a counter standing in them.
+ * A counter may pass over an occupied cell but never stop on one. */
+export function getOccupiedFinals(tokens: TokenPosition[], color: Ludo2Color): Set<number> {
+  const occupied = new Set<number>();
+  for (const i of getColorTokenIndices(color)) {
+    const pos = tokens[i];
+    if (pos && pos.startsWith('final-')) occupied.add(parseInt(pos.split('-')[1]));
+  }
+  return occupied;
+}
+
+/** Deserialize a stored token string to exactly TOTAL_TOKENS entries. Rooms
+ * written by an older client are shorter; pad rather than hand the board a
+ * sparse array it will read past the end of. */
+export function deserializeLudo2Tokens(str: string): TokenPosition[] {
+  const parsed = deserializeTokens(str).slice(0, TOTAL_TOKENS);
+  while (parsed.length < TOTAL_TOKENS) parsed.push('base');
+  return parsed;
+}
+
+/**
+ * The highest score getPlayerScore can return: every counter standing in a cell
+ * of the run home, one per cell.
+ *
+ * Not TOKENS_PER_PLAYER × (TRACK_SIZE + FINAL_SIZE) — only one counter can hold
+ * the deepest cell, so the run-home half of the sum is 1+2+…+FINAL_SIZE rather
+ * than FINAL_SIZE apiece. A progress meter scaled to that looser bound stops
+ * short of full even for the player who has just won.
+ */
+export const MAX_PLAYER_SCORE =
+  TOKENS_PER_PLAYER * TRACK_SIZE + (FINAL_SIZE * (FINAL_SIZE + 1)) / 2;
+
+/**
+ * A position in the words the board uses. 'track-17' is a storage detail; what
+ * a player is looking at is space 17. Used for piece labels and announcements,
+ * which are the two places the raw string would otherwise be read aloud.
+ */
+export function describePosition(pos: TokenPosition): string {
+  if (pos === 'base') return 'the yard';
+  if (pos.startsWith('final-')) return `home ${pos.split('-')[1]}`;
+  if (pos.startsWith('track-')) return `space ${pos.split('-')[1]}`;
+  return pos;
+}
+
+export interface Ludo2Standing {
+  color: Ludo2Color;
+  score: number;
+  finished: boolean;
+}
+
+/**
+ * Final placings. The game ends the moment one player fills their run home, so
+ * the seats behind them are separated by how far round they got rather than by
+ * the order they finished in — only the winner ever finishes.
+ *
+ * Anyone in `finishOrder` is placed first and in that order; the rest follow by
+ * race score, ties broken by seat order so every client renders the same board.
+ */
+export function getStandings(
+  tokens: TokenPosition[],
+  playerCount: number,
+  finishOrder: Ludo2Color[]
+): Ludo2Standing[] {
+  const active = PLAYER_COLORS.slice(0, playerCount);
+  const finished = finishOrder.filter(c => active.includes(c));
+  const rest = active
+    .filter(c => !finished.includes(c))
+    .sort((a, b) => {
+      const diff = getPlayerScore(tokens, b) - getPlayerScore(tokens, a);
+      return diff !== 0 ? diff : active.indexOf(a) - active.indexOf(b);
+    });
+  return [...finished, ...rest].map(color => ({
+    color,
+    score: getPlayerScore(tokens, color),
+    finished: finished.includes(color),
+  }));
 }
 
 /**
@@ -98,7 +222,6 @@ export function getPlayerScore(tokens: TokenPosition[], color: Ludo2Color): numb
   return getColorTokenIndices(color).reduce((sum, i) => {
     const pos = tokens[i];
     if (pos === 'base') return sum;
-    if (pos === 'final-6') return sum + TRACK_SIZE + 6;
     if (pos.startsWith('final-')) return sum + TRACK_SIZE + parseInt(pos.split('-')[1]);
     if (pos.startsWith('track-')) {
       const track = parseInt(pos.split('-')[1]);

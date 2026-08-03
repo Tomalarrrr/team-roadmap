@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import {
   calculateNewPosition,
   getValidMoves,
+  distinctMoves,
+  getDistinctMoves,
+  getNoMoveReason,
   applyMove,
   checkPlayerFinished,
   getFinishedColors,
@@ -11,9 +14,18 @@ import {
 } from '../ludo2GameLogic';
 import {
   SAFE_ZONES,
+  TRACK_SIZE,
+  TOTAL_TOKENS,
+  TOKENS_PER_PLAYER,
+  FINAL_SIZE,
   START_POSITIONS,
   ENTRY_CELLS,
+  MAX_PLAYER_SCORE,
   getPlayerScore,
+  getStandings,
+  describePosition,
+  getOccupiedFinals,
+  deserializeLudo2Tokens,
   initRollStats,
   deserializeRollStats,
   recordRoll,
@@ -25,12 +37,18 @@ import {
 import { deserializeTokens, serializeTokens } from '../ludoFirebase';
 import type { TokenPosition } from '../ludoFirebase';
 
-// Board: 42-cell track, 3 arms × 14.
-// Red: start=1, entry=41 | Green: start=15, entry=13 | Yellow: start=29, entry=27
-// Safe zones: 1, 10, 15, 24, 29, 38
-// Token indices: red 0-3, green 4-7, yellow 8-11
+// Board: 42-cell track, 3 arms × 14. Starts at 1, 15, 29; each colour turns off
+// for its run home on the cell before its own start.
+// Safe zones: 1, 7, 15, 21, 29, 35
+// Token indices: red 0-4, green 5-9, yellow 10-14
+// Run home: five cells per colour, one counter each, landed on exactly.
+//
+// Cell numbers are derived from START_POSITIONS/ENTRY_CELLS rather than written
+// in. Where the entry sits relative to the start is a live design decision — it
+// has already moved once — and a suite that hardcodes it fails as a block every
+// time, saying only "41 is not 42" about a board that is working perfectly.
 
-const BASE_TOKENS: TokenPosition[] = Array(12).fill('base');
+const BASE_TOKENS: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
 
 function tokensWith(overrides: Record<number, TokenPosition>): TokenPosition[] {
   const t = [...BASE_TOKENS];
@@ -38,101 +56,196 @@ function tokensWith(overrides: Record<number, TokenPosition>): TokenPosition[] {
   return t;
 }
 
+/** calculateNewPosition against an otherwise-empty board. */
+function calc(from: TokenPosition, steps: number, color: 'red' | 'green' | 'yellow') {
+  return calculateNewPosition(from, steps, color, BASE_TOKENS);
+}
+
+type Seat = 'red' | 'green' | 'yellow';
+
+/** The cell `n` steps back round the ring from `cell` (1-based, wrapping). */
+function cellBefore(cell: number, n: number): number {
+  return ((cell - 1 - n + TRACK_SIZE * 2) % TRACK_SIZE) + 1;
+}
+
+/** `track-N` for the cell `n` steps short of `color`'s run-home turning. */
+function beforeEntry(color: Seat, n: number): TokenPosition {
+  return `track-${cellBefore(ENTRY_CELLS[color], n)}`;
+}
+
+/** `track-N` for `color`'s own entry cell. */
+function atEntry(color: Seat): TokenPosition {
+  return `track-${ENTRY_CELLS[color]}`;
+}
+
 describe('board constants', () => {
-  it('entry cells are start - 2 mod 42', () => {
+  it('each colour turns for home on the cell before its own start', () => {
+    // One short is as close as the entry can get: calculateNewPosition has no
+    // notion of laps, so a counter standing on its entry goes home on its next
+    // move. Put the entry *on* the start and a counter would come out of the
+    // yard and turn straight for home without ever travelling the ring.
     for (const color of ['red', 'green', 'yellow'] as const) {
-      const expected = ((START_POSITIONS[color] - 3 + 42) % 42) + 1;
-      expect(ENTRY_CELLS[color]).toBe(expected);
+      expect(ENTRY_CELLS[color]).toBe(cellBefore(START_POSITIONS[color], 1));
     }
   });
 
-  it('safe zones are all starts plus start+9', () => {
-    expect([...SAFE_ZONES].sort((a, b) => a - b)).toEqual([1, 10, 15, 24, 29, 38]);
+  it('gives every colour the same distance to run', () => {
+    for (const color of ['red', 'green', 'yellow'] as const) {
+      const start = START_POSITIONS[color];
+      const entry = ENTRY_CELLS[color];
+      const lap = entry >= start ? entry - start : TRACK_SIZE - start + entry;
+      expect(lap).toBe(TRACK_SIZE - 1);
+    }
   });
 
-  it('initial tokens string is 36 chars of base', () => {
-    expect(INITIAL_TOKENS).toHaveLength(36);
+  it('safe zones are all starts plus start+6', () => {
+    expect([...SAFE_ZONES].sort((a, b) => a - b)).toEqual([1, 7, 15, 21, 29, 35]);
+  });
+
+  it('caps the reach of a counter camped on its own start', () => {
+    // A start cell is safe and is where counters keep arriving, so one parked
+    // there is the board's strongest ambush: it cannot be taken and it covers
+    // the six cells ahead. The next haven sits on the sixth of those, so the
+    // ambush only ever covers five open cells and the runner has a landing.
+    for (const start of Object.values(START_POSITIONS)) {
+      const covered = [1, 2, 3, 4, 5, 6].filter(
+        d => !SAFE_ZONES.has(((start - 1 + d) % TRACK_SIZE) + 1)
+      );
+      expect(covered).toEqual([1, 2, 3, 4, 5]);
+    }
+  });
+
+  it('leaves no run of open cells longer than seven', () => {
+    let longest = 0;
+    let run = 0;
+    for (let i = 0; i < TRACK_SIZE * 2; i++) {
+      run = SAFE_ZONES.has((i % TRACK_SIZE) + 1) ? 0 : run + 1;
+      if (i >= TRACK_SIZE) longest = Math.max(longest, run);
+    }
+    expect(longest).toBe(7);
+  });
+
+  it('gives each player exactly one counter per cell of the run home', () => {
+    expect(TOKENS_PER_PLAYER).toBe(FINAL_SIZE);
+    expect(TOTAL_TOKENS).toBe(FINAL_SIZE * 3);
+  });
+
+  it('initial tokens string is 45 chars of base', () => {
+    expect(INITIAL_TOKENS).toHaveLength(45);
     expect(deserializeTokens(INITIAL_TOKENS)).toEqual(BASE_TOKENS);
   });
 
-  it('token serialization round-trips at 12 tokens', () => {
-    const t = tokensWith({ 0: 'track-42', 5: 'final-3', 11: 'track-7' });
+  it('token serialization round-trips at 15 tokens', () => {
+    const t = tokensWith({ 0: 'track-42', 6: 'final-3', 14: 'track-7' });
     expect(deserializeTokens(serializeTokens(t))).toEqual(t);
+  });
+
+  it('pads a short token string from an older client', () => {
+    const legacy = 'bas'.repeat(12);
+    const padded = deserializeLudo2Tokens(legacy);
+    expect(padded).toHaveLength(TOTAL_TOKENS);
+    expect(padded.every(p => p === 'base')).toBe(true);
+  });
+
+  it('reads a colour’s occupied run-home cells, ignoring other colours', () => {
+    const t = tokensWith({ 0: 'final-2', 3: 'final-5', 5: 'final-1' });
+    expect(getOccupiedFinals(t, 'red')).toEqual(new Set([2, 5]));
+    expect(getOccupiedFinals(t, 'green')).toEqual(new Set([1]));
+    expect(getOccupiedFinals(t, 'yellow')).toEqual(new Set());
   });
 });
 
 describe('calculateNewPosition', () => {
   it('returns null for base position', () => {
-    expect(calculateNewPosition('base', 3, 'red')).toBeNull();
+    expect(calc('base', 3, 'red')).toBeNull();
   });
 
-  it('returns null for final-6 (already home)', () => {
-    expect(calculateNewPosition('final-6', 1, 'red')).toBeNull();
+  it('moves up the run home', () => {
+    expect(calc('final-2', 3, 'red')).toBe('final-5');
   });
 
-  it('moves within final corridor', () => {
-    expect(calculateNewPosition('final-2', 3, 'red')).toBe('final-5');
+  it('takes the last cell exactly', () => {
+    expect(calc('final-3', 2, 'yellow')).toBe('final-5');
   });
 
-  it('reaches home (final-6) exactly', () => {
-    expect(calculateNewPosition('final-4', 2, 'yellow')).toBe('final-6');
+  it('rejects overshoot past the last cell', () => {
+    expect(calc('final-4', 2, 'green')).toBeNull();
   });
 
-  it('rejects overshoot past final-6', () => {
-    expect(calculateNewPosition('final-4', 3, 'green')).toBeNull();
+  it('enters the run home from the entry cell', () => {
+    expect(calc(atEntry('red'), 3, 'red')).toBe('final-3');
   });
 
-  it('enters final corridor from entry cell (red entry=41)', () => {
-    expect(calculateNewPosition('track-41', 3, 'red')).toBe('final-3');
+  it('reaches the deepest cell from the entry cell with an exact 5', () => {
+    expect(calc(atEntry('red'), FINAL_SIZE, 'red')).toBe(`final-${FINAL_SIZE}`);
   });
 
-  it('enters final corridor from entry cell with exact 6', () => {
-    expect(calculateNewPosition('track-41', 6, 'red')).toBe('final-6');
+  it('rejects a roll that would overshoot the run home entirely', () => {
+    expect(calc(atEntry('red'), FINAL_SIZE + 1, 'red')).toBeNull();
   });
 
-  it('rejects > 6 steps from entry cell', () => {
-    expect(calculateNewPosition('track-41', 7, 'red')).toBeNull();
+  it('enters green’s run home from green’s entry', () => {
+    expect(calc(atEntry('green'), 2, 'green')).toBe('final-2');
   });
 
-  it('enters green corridor from green entry (13)', () => {
-    expect(calculateNewPosition('track-13', 2, 'green')).toBe('final-2');
-  });
-
-  it('enters yellow corridor from yellow entry (27)', () => {
-    expect(calculateNewPosition('track-27', 1, 'yellow')).toBe('final-1');
+  it('enters yellow’s run home from yellow’s entry', () => {
+    expect(calc(atEntry('yellow'), 1, 'yellow')).toBe('final-1');
   });
 
   it('moves forward on track', () => {
-    expect(calculateNewPosition('track-5', 3, 'green')).toBe('track-8');
+    expect(calc('track-5', 3, 'green')).toBe('track-8');
   });
 
   it('wraps around track (cell 42 → cell 1)', () => {
-    // Green entry is 13, no crossing: 42 + 1 = 1
-    expect(calculateNewPosition('track-42', 1, 'green')).toBe('track-1');
+    // Green's turning is nowhere near the seam, so this is a plain wrap.
+    expect(calc('track-42', 1, 'green')).toBe('track-1');
   });
 
   it('wraps around track across the seam', () => {
-    expect(calculateNewPosition('track-40', 4, 'green')).toBe('track-2');
+    expect(calc('track-40', 4, 'green')).toBe('track-2');
   });
 
-  it('crosses into corridor when passing own entry', () => {
-    // Red at track-39, entry 41. stepsToEntry = 2. Roll 5 → final-3.
-    expect(calculateNewPosition('track-39', 5, 'red')).toBe('final-3');
+  it('crosses into the run home when passing own entry', () => {
+    // Two cells short of the turning; a 5 carries it three cells in.
+    expect(calc(beforeEntry('red', 2), 5, 'red')).toBe('final-3');
   });
 
-  it('stops on own entry cell without entering corridor', () => {
-    // Landing exactly on the entry stays a track cell; corridor entry happens next turn
-    expect(calculateNewPosition('track-39', 2, 'red')).toBe('track-41');
+  it('stops on own entry cell without entering the run home', () => {
+    expect(calc(beforeEntry('red', 2), 2, 'red')).toBe(atEntry('red'));
   });
 
   it('non-owner passes over another color entry cell', () => {
-    // Yellow passing red's entry (41): 40 + 3 = 1 (wrap), no corridor
-    expect(calculateNewPosition('track-40', 3, 'yellow')).toBe('track-1');
+    // Yellow steps over red's turning without being offered it.
+    const from = beforeEntry('red', 1);
+    const landing = cellBefore(ENTRY_CELLS.red, -2); // two cells past red's entry
+    expect(calc(from, 3, 'yellow')).toBe(`track-${landing}`);
   });
 
-  it('rejects overshoot past own corridor from just before entry', () => {
-    // Red at track-40, entry 41 → stepsToEntry 1; roll 8 impossible, roll 6 → remaining 5 = final-5
-    expect(calculateNewPosition('track-40', 6, 'red')).toBe('final-5');
+  // --- The exact-landing rule ---
+
+  it('refuses a cell of the run home that is already taken', () => {
+    const entry = atEntry('red');
+    const t = tokensWith({ 0: 'final-3', 1: entry });
+    expect(calculateNewPosition(entry, 3, 'red', t)).toBeNull();
+    expect(calculateNewPosition(entry, 2, 'red', t)).toBe('final-2');
+  });
+
+  it('refuses a taken cell when shuffling up the run home', () => {
+    const t = tokensWith({ 0: 'final-2', 1: 'final-4' });
+    expect(calculateNewPosition('final-2', 2, 'red', t)).toBeNull();
+    expect(calculateNewPosition('final-2', 1, 'red', t)).toBe('final-3');
+  });
+
+  it('passes over taken cells to land on a free one beyond them', () => {
+    const t = tokensWith({ 0: 'final-1', 1: 'final-2', 2: 'final-3' });
+    expect(calculateNewPosition('final-1', 3, 'red', t)).toBe('final-4');
+  });
+
+  it('is blocked only by its own colour', () => {
+    // Red holds its own final-2; green's final-2 is a different cell entirely.
+    const greenEntry = atEntry('green');
+    const t = tokensWith({ 0: 'final-2', 5: greenEntry });
+    expect(calculateNewPosition(greenEntry, 2, 'green', t)).toBe('final-2');
   });
 });
 
@@ -143,7 +256,7 @@ describe('getValidMoves', () => {
 
   it('deploys all base tokens on a 6', () => {
     const moves = getValidMoves(BASE_TOKENS, 'red', 6);
-    expect(moves).toHaveLength(4);
+    expect(moves).toHaveLength(TOKENS_PER_PLAYER);
     expect(moves.every(m => m.newPosition === 'track-1')).toBe(true);
   });
 
@@ -152,21 +265,177 @@ describe('getValidMoves', () => {
     expect(getValidMoves(BASE_TOKENS, 'yellow', 6)[0].newPosition).toBe('track-29');
   });
 
-  it('skips finished tokens', () => {
-    const t = tokensWith({ 0: 'final-6', 1: 'track-5' });
+  it('skips counters that are already home and cannot go further', () => {
+    const t = tokensWith({ 0: 'final-5', 1: 'track-5' });
     const moves = getValidMoves(t, 'red', 3);
     expect(moves).toEqual([{ tokenIndex: 1, newPosition: 'track-8' }]);
   });
 
-  it('excludes corridor overshoots', () => {
-    const t = tokensWith({ 4: 'final-5' });
+  it('excludes run-home overshoots', () => {
+    const t = tokensWith({ 5: 'final-5' });
     expect(getValidMoves(t, 'green', 3)).toEqual([]);
   });
 
+  it('leaves a player stuck when the only space its roll reaches is taken', () => {
+    // Red's last counter waits on its entry cell; a 3 would land on final-3,
+    // which one of its own is standing in. No move — and it stays out on the
+    // track where it can be sent back to the yard.
+    const t = tokensWith({
+      0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'base',
+    });
+    expect(getValidMoves(t, 'red', 3)).toEqual([]);
+    expect(getValidMoves(t, 'red', 2)).toEqual([{ tokenIndex: 3, newPosition: 'final-2' }]);
+  });
+
   it('only returns moves for the given color', () => {
-    const t = tokensWith({ 0: 'track-3', 4: 'track-16', 8: 'track-30' });
+    const t = tokensWith({ 0: 'track-3', 5: 'track-16', 10: 'track-30' });
     const moves = getValidMoves(t, 'yellow', 2);
-    expect(moves).toEqual([{ tokenIndex: 8, newPosition: 'track-32' }]);
+    expect(moves).toEqual([{ tokenIndex: 10, newPosition: 'track-32' }]);
+  });
+});
+
+describe('distinctMoves / getDistinctMoves', () => {
+  it('collapses a whole yard deploying on a 6 into one choice', () => {
+    // Five counters in the yard, one 6: five moves, but only one decision.
+    expect(getValidMoves(BASE_TOKENS, 'red', 6)).toHaveLength(TOKENS_PER_PLAYER);
+    expect(getDistinctMoves(BASE_TOKENS, 'red', 6)).toEqual([
+      { tokenIndex: 0, newPosition: 'track-1' },
+    ]);
+  });
+
+  it('keeps a deploy and a run home apart on the same 6', () => {
+    // Red three cells short of its turning: a 6 carries it to final-3, and the
+    // same 6 would bring a counter out of the yard. Two real decisions — the
+    // four yard counters behind them are the only thing to collapse.
+    const t = tokensWith({ 0: beforeEntry('red', 3) });
+    expect(getValidMoves(t, 'red', 6)).toHaveLength(1 + (TOKENS_PER_PLAYER - 1));
+    expect(getDistinctMoves(t, 'red', 6)).toEqual([
+      { tokenIndex: 0, newPosition: 'final-3' },
+      { tokenIndex: 1, newPosition: `track-${START_POSITIONS.red}` },
+    ]);
+  });
+
+  it('never collapses counters standing on different cells', () => {
+    // Keying on origin *and* destination is what makes the collapse provably
+    // safe. It is also belt and braces: with a single die two counters on
+    // different cells can never reach the same one, so every duplicate a real
+    // game produces is a same-origin duplicate. Sweep the ring and confirm.
+    for (let cell = 1; cell <= TRACK_SIZE; cell++) {
+      const other = (cell % TRACK_SIZE) + 1;
+      const t = tokensWith({ 0: `track-${cell}` as TokenPosition, 1: `track-${other}` as TokenPosition });
+      for (let roll = 1; roll <= 6; roll++) {
+        const raw = getValidMoves(t, 'red', roll).filter(m => m.tokenIndex === 0 || m.tokenIndex === 1);
+        const collapsed = distinctMoves(t, raw);
+        expect(collapsed).toHaveLength(raw.length);
+      }
+    }
+  });
+
+  it('leaves genuinely different moves alone', () => {
+    const t = tokensWith({ 0: 'track-3', 1: 'track-9' });
+    expect(getDistinctMoves(t, 'red', 2)).toEqual([
+      { tokenIndex: 0, newPosition: 'track-5' },
+      { tokenIndex: 1, newPosition: 'track-11' },
+    ]);
+  });
+
+  it('collapses two counters stacked on one cell', () => {
+    const t = tokensWith({ 0: 'track-7', 1: 'track-7' });
+    expect(getDistinctMoves(t, 'red', 3)).toEqual([
+      { tokenIndex: 0, newPosition: 'track-10' },
+    ]);
+  });
+
+  it('preserves the first index of each equivalence class', () => {
+    const t = tokensWith({ 0: 'track-5', 1: 'base', 2: 'base' });
+    const collapsed = distinctMoves(t, getValidMoves(t, 'red', 6));
+    expect(collapsed.map(m => m.tokenIndex)).toEqual([0, 1]);
+  });
+
+  it('returns nothing when there is nothing to do', () => {
+    expect(getDistinctMoves(BASE_TOKENS, 'red', 3)).toEqual([]);
+  });
+});
+
+describe('getNoMoveReason', () => {
+  it('asks for a 6 when the whole yard is still full', () => {
+    expect(getNoMoveReason(BASE_TOKENS, 'red')).toBe('need-six');
+  });
+
+  it('blames the exact-landing rule once a counter is out', () => {
+    // Red waits on its entry cell; a 3 lands on a run-home cell of its own that
+    // is already taken, so the roll produces nothing at all.
+    const t = tokensWith({
+      0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'base',
+    });
+    expect(getValidMoves(t, 'red', 3)).toEqual([]);
+    expect(getNoMoveReason(t, 'red')).toBe('exact-roll');
+  });
+
+  it('counts counters standing in the run home as out of the yard', () => {
+    const t = tokensWith({ 0: 'final-1' });
+    expect(getNoMoveReason(t, 'red')).toBe('exact-roll');
+  });
+
+  it('reads each colour independently', () => {
+    const t = tokensWith({ 0: 'track-3' });
+    expect(getNoMoveReason(t, 'red')).toBe('exact-roll');
+    expect(getNoMoveReason(t, 'green')).toBe('need-six');
+  });
+});
+
+describe('MAX_PLAYER_SCORE', () => {
+  it('is exactly what a filled run home scores', () => {
+    const t = [...BASE_TOKENS];
+    for (let f = 1; f <= FINAL_SIZE; f++) t[f - 1] = `final-${f}` as TokenPosition;
+    expect(getPlayerScore(t, 'red')).toBe(MAX_PLAYER_SCORE);
+    expect(checkPlayerFinished(t, 'red')).toBe(true);
+  });
+
+  it('is never exceeded from any reachable position', () => {
+    // Sweep every single-counter placement; none may score above the ceiling.
+    for (let t = 1; t <= TRACK_SIZE; t++) {
+      expect(getPlayerScore(tokensWith({ 0: `track-${t}` }), 'red'))
+        .toBeLessThanOrEqual(MAX_PLAYER_SCORE);
+    }
+  });
+});
+
+describe('describePosition', () => {
+  it('speaks board words, not storage keys', () => {
+    expect(describePosition('base')).toBe('the yard');
+    expect(describePosition('track-17')).toBe('space 17');
+    expect(describePosition('final-3')).toBe('home 3');
+  });
+});
+
+describe('getStandings', () => {
+  it('places the finisher first and the rest by how far they got', () => {
+    const t = tokensWith({
+      0: 'final-1', 1: 'final-2', 2: 'final-3', 3: 'final-4', 4: 'final-5',
+      5: 'track-16',   // green: barely out
+      10: 'track-40',  // yellow: most of a lap in
+    });
+    const standings = getStandings(t, 3, ['red']);
+    expect(standings.map(s => s.color)).toEqual(['red', 'yellow', 'green']);
+    expect(standings[0].finished).toBe(true);
+    expect(standings[1].finished).toBe(false);
+  });
+
+  it('respects playerCount', () => {
+    const t = tokensWith({ 0: 'track-3', 5: 'track-20' });
+    expect(getStandings(t, 2, []).map(s => s.color)).toEqual(['green', 'red']);
+  });
+
+  it('breaks ties by seat order so every client agrees', () => {
+    const standings = getStandings(BASE_TOKENS, 3, []);
+    expect(standings.map(s => s.color)).toEqual(['red', 'green', 'yellow']);
+    expect(standings.every(s => s.score === 0)).toBe(true);
+  });
+
+  it('ignores a finish order naming a seat that is not playing', () => {
+    const t = tokensWith({ 0: 'track-3' });
+    expect(getStandings(t, 2, ['yellow']).map(s => s.color)).toEqual(['red', 'green']);
   });
 });
 
@@ -180,18 +449,18 @@ describe('applyMove', () => {
   });
 
   it('captures an opponent on the target cell', () => {
-    const t = tokensWith({ 0: 'track-3', 4: 'track-6' });
+    const t = tokensWith({ 0: 'track-3', 5: 'track-6' });
     const { newTokens, captured } = applyMove(t, 0, 'track-6');
     expect(captured).toBe(true);
-    expect(newTokens[4]).toBe('base');
+    expect(newTokens[5]).toBe('base');
   });
 
   it('captures multiple opponents on the same cell', () => {
-    const t = tokensWith({ 0: 'track-3', 4: 'track-6', 8: 'track-6' });
+    const t = tokensWith({ 0: 'track-3', 5: 'track-6', 10: 'track-6' });
     const { newTokens, captured } = applyMove(t, 0, 'track-6');
     expect(captured).toBe(true);
-    expect(newTokens[4]).toBe('base');
-    expect(newTokens[8]).toBe('base');
+    expect(newTokens[5]).toBe('base');
+    expect(newTokens[10]).toBe('base');
   });
 
   it('does not capture own tokens', () => {
@@ -202,42 +471,52 @@ describe('applyMove', () => {
   });
 
   it.each([...SAFE_ZONES])('does not capture on safe zone %i', cell => {
-    const t = tokensWith({ 0: 'track-2', 4: `track-${cell}` });
+    const t = tokensWith({ 0: 'track-2', 5: `track-${cell}` });
     const { newTokens, captured } = applyMove(t, 0, `track-${cell}`);
     expect(captured).toBe(false);
-    expect(newTokens[4]).toBe(`track-${cell}`);
+    expect(newTokens[5]).toBe(`track-${cell}`);
   });
 
-  it('reports reachedHome for final-6', () => {
-    const t = tokensWith({ 8: 'final-4' });
-    const { reachedHome } = applyMove(t, 8, 'final-6');
+  it('reports reachedHome when a counter first takes a run-home cell', () => {
+    const t = tokensWith({ 10: 'track-27' });
+    const { reachedHome } = applyMove(t, 10, 'final-2');
     expect(reachedHome).toBe(true);
   });
 
-  it('no capture inside final corridor', () => {
-    // Corridor positions are per-color namespaced; same string must not capture
-    const t = tokensWith({ 0: 'final-1', 4: 'final-3' });
+  it('does not report reachedHome for shuffling up the run home', () => {
+    const t = tokensWith({ 10: 'final-2' });
+    const { reachedHome } = applyMove(t, 10, 'final-4');
+    expect(reachedHome).toBe(false);
+  });
+
+  it('no capture inside the run home', () => {
+    // Run-home cells are per-color namespaced; the same string must not capture
+    const t = tokensWith({ 0: 'final-1', 5: 'final-3' });
     const { captured, newTokens } = applyMove(t, 0, 'final-3');
     expect(captured).toBe(false);
-    expect(newTokens[4]).toBe('final-3');
+    expect(newTokens[5]).toBe('final-3');
   });
 });
 
 describe('checkPlayerFinished / getFinishedColors', () => {
-  it('detects a finished player', () => {
-    const t = tokensWith({ 0: 'final-6', 1: 'final-6', 2: 'final-6', 3: 'final-6' });
+  it('detects a player whose run home is full', () => {
+    const t = tokensWith({
+      0: 'final-1', 1: 'final-2', 2: 'final-3', 3: 'final-4', 4: 'final-5',
+    });
     expect(checkPlayerFinished(t, 'red')).toBe(true);
     expect(checkPlayerFinished(t, 'green')).toBe(false);
   });
 
-  it('not finished with 3 of 4 home', () => {
-    const t = tokensWith({ 0: 'final-6', 1: 'final-6', 2: 'final-6', 3: 'final-5' });
+  it('not finished with one cell of the run home still empty', () => {
+    const t = tokensWith({
+      0: 'final-1', 1: 'final-2', 2: 'final-3', 3: 'final-4', 4: beforeEntry('red', 1),
+    });
     expect(checkPlayerFinished(t, 'red')).toBe(false);
   });
 
   it('getFinishedColors respects playerCount', () => {
     const t = tokensWith({
-      8: 'final-6', 9: 'final-6', 10: 'final-6', 11: 'final-6',
+      10: 'final-1', 11: 'final-2', 12: 'final-3', 13: 'final-4', 14: 'final-5',
     });
     expect(getFinishedColors(t, 3)).toEqual(new Set(['yellow']));
     expect(getFinishedColors(t, 2)).toEqual(new Set());
@@ -297,25 +576,31 @@ describe('getNextTurn', () => {
 
 describe('scoreBotMove', () => {
   it('prefers capturing over plain advancement', () => {
-    const t = tokensWith({ 4: 'track-16', 8: 'track-20' });
-    const capture = scoreBotMove(4, 'track-20', t, 'green', 3);
-    const advance = scoreBotMove(4, 'track-19', t, 'green', 3);
+    const t = tokensWith({ 5: 'track-16', 10: 'track-20' });
+    const capture = scoreBotMove(5, 'track-20', t, 'green', 3);
+    const advance = scoreBotMove(5, 'track-19', t, 'green', 3);
     expect(capture).toBeGreaterThan(advance);
   });
 
   it('does not score a capture on a safe zone', () => {
-    const t = tokensWith({ 4: 'track-22', 8: 'track-24' });
-    const ontoSafe = scoreBotMove(4, 'track-24', t, 'green', 3);
+    const t = tokensWith({ 5: 'track-19', 10: 'track-21' });
+    const ontoSafe = scoreBotMove(5, 'track-21', t, 'green', 3);
     // Safe-zone landing gets +15 but no capture bonus (>100)
     expect(ontoSafe).toBeLessThan(100);
   });
 
-  it('values corridor entry over track movement', () => {
-    const t = tokensWith({ 0: 'track-41' });
-    const corridor = scoreBotMove(0, 'final-3', t, 'red', 3);
+  it('values taking a run-home cell over track movement', () => {
+    const t = tokensWith({ 0: atEntry('red') });
+    const runHome = scoreBotMove(0, 'final-3', t, 'red', 3);
     const track = tokensWith({ 0: 'track-30' });
     const advance = scoreBotMove(0, 'track-33', track, 'red', 3);
-    expect(corridor).toBeGreaterThan(advance);
+    expect(runHome).toBeGreaterThan(advance);
+  });
+
+  it('takes the deeper free cell first — the shallow ones stay reachable', () => {
+    const t = tokensWith({ 0: atEntry('red') });
+    expect(scoreBotMove(0, 'final-5', t, 'red', 3))
+      .toBeGreaterThan(scoreBotMove(0, 'final-2', t, 'red', 3));
   });
 
   it('first deploy scores higher than later deploys', () => {
@@ -327,30 +612,30 @@ describe('scoreBotMove', () => {
 
   it('penalizes landing within reach of an opponent', () => {
     // Green token would land on 20 with red on 18 (2 behind, can capture)
-    const threatened = tokensWith({ 4: 'track-17', 0: 'track-18' });
-    const clear = tokensWith({ 4: 'track-17' });
-    const risky = scoreBotMove(4, 'track-20', threatened, 'green', 3);
-    const safe = scoreBotMove(4, 'track-20', clear, 'green', 3);
+    const threatened = tokensWith({ 5: 'track-17', 0: 'track-18' });
+    const clear = tokensWith({ 5: 'track-17' });
+    const risky = scoreBotMove(5, 'track-20', threatened, 'green', 3);
+    const safe = scoreBotMove(5, 'track-20', clear, 'green', 3);
     expect(risky).toBeLessThan(safe);
   });
 });
 
 describe('getPlayerScore', () => {
-  it('scores base as 0 and home as track+6', () => {
+  it('scores base as 0 and the deepest run-home cell as track+5', () => {
     expect(getPlayerScore(BASE_TOKENS, 'red')).toBe(0);
-    const t = tokensWith({ 0: 'final-6' });
-    expect(getPlayerScore(t, 'red')).toBe(48);
+    const t = tokensWith({ 0: 'final-5' });
+    expect(getPlayerScore(t, 'red')).toBe(TRACK_SIZE + FINAL_SIZE);
   });
 
   it('scores track distance from own start', () => {
     // Yellow start=29; track-31 → distance 2
-    const t = tokensWith({ 8: 'track-31' });
+    const t = tokensWith({ 10: 'track-31' });
     expect(getPlayerScore(t, 'yellow')).toBe(2);
   });
 
   it('wraps distance across the seam', () => {
     // Yellow start=29; track-2 → (42-29)+2 = 15
-    const t = tokensWith({ 8: 'track-2' });
+    const t = tokensWith({ 10: 'track-2' });
     expect(getPlayerScore(t, 'yellow')).toBe(15);
   });
 });

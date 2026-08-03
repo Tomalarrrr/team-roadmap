@@ -1,49 +1,57 @@
-// Pure game logic for Ludo2 (three-player, 42-cell Y-board).
+// Pure game logic for Ludo2 (three-player, 42-cell circular track).
 //
 // Forked from ludoGameLogic.ts and simplified for classic rules: no power-ups,
 // no doubled rolls (a bonus roll is a plain 6), three colors. Deterministic,
 // side-effect-free, independently testable.
+//
+// One rule of its own: the run home has FINAL_SIZE cells and each player has
+// exactly that many counters, so finishing means standing one counter in every
+// cell of it. A counter may pass over cells that are already taken but has to
+// land on an empty one, exactly — otherwise that counter simply cannot move,
+// and sits out on the track waiting to be sent home by an opponent.
 
 import type { TokenPosition } from './ludoFirebase';
 import {
   TRACK_SIZE,
   TOTAL_TOKENS,
+  FINAL_SIZE,
   START_POSITIONS,
   ENTRY_CELLS,
   SAFE_ZONES,
   PLAYER_COLORS,
   getTokenColor,
   getColorTokenIndices,
+  getOccupiedFinals,
   getPlayerScore,
   type Ludo2Color,
 } from './ludo2Board';
 
 /**
  * Calculate where a token lands after moving `steps` spaces.
- * Returns null if the move is invalid (overshooting, etc.).
+ * Returns null if the move is invalid: overshooting the end of the run home, or
+ * landing on a cell of it that one of this colour's own counters already holds.
  */
 export function calculateNewPosition(
   current: TokenPosition,
   steps: number,
-  color: Ludo2Color
+  color: Ludo2Color,
+  tokens: TokenPosition[]
 ): TokenPosition | null {
   if (current === 'base') return null;
-  if (current === 'final-6') return null;
+
+  const occupied = getOccupiedFinals(tokens, color);
+  const intoFinal = (cell: number): TokenPosition | null =>
+    cell > FINAL_SIZE || occupied.has(cell) ? null : `final-${cell}`;
 
   if (current.startsWith('final-')) {
     const currentFinal = parseInt(current.split('-')[1]);
-    const newFinal = currentFinal + steps;
-    if (newFinal > 6) return null;
-    return `final-${newFinal}`;
+    return intoFinal(currentFinal + steps);
   }
 
   const currentTrack = parseInt(current.split('-')[1]);
   const entry = ENTRY_CELLS[color];
 
-  if (currentTrack === entry) {
-    if (steps > 6) return null;
-    return `final-${steps}`;
-  }
+  if (currentTrack === entry) return intoFinal(steps);
 
   let stepsToEntry: number;
   if (currentTrack < entry) {
@@ -55,11 +63,8 @@ export function calculateNewPosition(
   if (steps <= stepsToEntry) {
     const newTrack = ((currentTrack - 1 + steps) % TRACK_SIZE) + 1;
     return `track-${newTrack}`;
-  } else {
-    const remaining = steps - stepsToEntry;
-    if (remaining > 6) return null;
-    return `final-${remaining}`;
   }
+  return intoFinal(steps - stepsToEntry);
 }
 
 /**
@@ -84,9 +89,7 @@ export function getValidMoves(
       continue;
     }
 
-    if (current === 'final-6') continue;
-
-    const newPos = calculateNewPosition(current, diceValue, color);
+    const newPos = calculateNewPosition(current, diceValue, color, tokens);
     if (newPos === null) continue;
 
     moves.push({ tokenIndex: idx, newPosition: newPos });
@@ -96,7 +99,59 @@ export function getValidMoves(
 }
 
 /**
- * Apply a token move: update positions, check for captures, check if reached home.
+ * Collapse moves that are the same move.
+ *
+ * Counters of a colour are interchangeable — nothing downstream reads a
+ * counter's identity, only its position — so two moves sharing an origin and a
+ * destination leave the board in the same state. The five counters in a yard on
+ * a 6 are one choice offered five times: presented raw they turn a forced move
+ * into a menu of identical options, and they stop the single-move auto-play
+ * from ever firing on a deploy.
+ */
+export function distinctMoves(
+  tokens: TokenPosition[],
+  moves: { tokenIndex: number; newPosition: TokenPosition }[]
+): { tokenIndex: number; newPosition: TokenPosition }[] {
+  const seen = new Set<string>();
+  const out: { tokenIndex: number; newPosition: TokenPosition }[] = [];
+  for (const move of moves) {
+    const key = `${tokens[move.tokenIndex]}>${move.newPosition}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(move);
+  }
+  return out;
+}
+
+/** getValidMoves with interchangeable duplicates collapsed — what the player is
+ * actually being asked to choose between. */
+export function getDistinctMoves(
+  tokens: TokenPosition[],
+  color: Ludo2Color,
+  diceValue: number
+): { tokenIndex: number; newPosition: TokenPosition }[] {
+  return distinctMoves(tokens, getValidMoves(tokens, color, diceValue));
+}
+
+/** Why a roll produced nothing, in terms the player can act on. */
+export type NoMoveReason = 'need-six' | 'exact-roll';
+
+/**
+ * Explain a turn with no moves in it.
+ *
+ * With nothing out of the yard the only thing that helps is a 6. Once anything
+ * *is* out it always has a move somewhere on the ring, so a counter that is out
+ * and still stuck can only be one blocked by the run-home landing rule — it has
+ * to reach an empty cell exactly, and this roll doesn't.
+ */
+export function getNoMoveReason(tokens: TokenPosition[], color: Ludo2Color): NoMoveReason {
+  const anyOut = getColorTokenIndices(color).some(i => tokens[i] !== 'base');
+  return anyOut ? 'exact-roll' : 'need-six';
+}
+
+/**
+ * Apply a token move: update positions, check for captures, check if the piece
+ * has taken a cell in its run home (which it can never be dislodged from).
  */
 export function applyMove(
   tokens: TokenPosition[],
@@ -104,9 +159,11 @@ export function applyMove(
   newPosition: TokenPosition
 ): { newTokens: TokenPosition[]; captured: boolean; reachedHome: boolean } {
   const result = [...tokens] as TokenPosition[];
+  const previous = tokens[tokenIndex];
   result[tokenIndex] = newPosition;
   let captured = false;
-  const reachedHome = newPosition === 'final-6';
+  // One bonus per counter: shuffling up the run home is not arriving in it.
+  const reachedHome = newPosition.startsWith('final-') && !previous.startsWith('final-');
 
   if (newPosition.startsWith('track-')) {
     const trackNum = parseInt(newPosition.split('-')[1]);
@@ -127,10 +184,11 @@ export function applyMove(
 }
 
 /**
- * Check if all 4 tokens for a player have reached home (final-6).
+ * Check if a player has filled their run home — one counter in every cell.
+ * Landing rules keep the cells distinct, so "all of them are in it" is enough.
  */
 export function checkPlayerFinished(tokens: TokenPosition[], color: Ludo2Color): boolean {
-  return getColorTokenIndices(color).every(i => tokens[i] === 'final-6');
+  return getColorTokenIndices(color).every(i => tokens[i].startsWith('final-'));
 }
 
 /**
@@ -228,18 +286,20 @@ export function scoreBotMove(
   const botIndices = getColorTokenIndices(botColor);
   const tokensInPlay = botIndices.filter(i => {
     const p = currentTokens[i];
-    return p !== 'base' && p !== 'final-6';
+    return p !== 'base' && !p.startsWith('final-');
   }).length;
 
   // Deploy from base: valuable but decreasing as more tokens are already in play.
   if (curPos === 'base') score += 90 - tokensInPlay * 20;
 
-  // Moving into final corridor is very valuable (safe from all threats)
+  // Taking a cell in the run home is valuable (safe from all threats), and the
+  // deep cells are the ones that are hard to hit: take those while the roll
+  // allows it and leave the shallow ones, which anything can reach, for last.
   if (targetPos.startsWith('final-')) {
     const finalNum = parseInt(targetPos.split('-')[1]);
     score += 100 + finalNum * 20;
-    // Reaching home grants a bonus turn — worth ~35 points
-    if (finalNum === 6) score += 35;
+    // Arriving in the run home grants a bonus turn — worth ~35 points
+    if (!curPos.startsWith('final-')) score += 35;
   }
 
   if (targetPos.startsWith('track-')) {

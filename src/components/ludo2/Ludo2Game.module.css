@@ -1,7 +1,10 @@
-/* Ludo2 — Y-board styling. Flat and neutral: a white board, light-grey arm
-   trays, white cell tiles separated by gutters rather than borders, and colour
-   used only where it carries meaning (pawns, start cells, home corridors).
-   Radii inside the board use cq units so they scale with a resized popup. */
+/* Ludo2 — circular-board styling. A moulded ivory puck seen slightly from
+   above: a side wall, a raised band holding the 42-cell track, three yards on
+   the apron outside it, three spokes running in, and a brass-ringed home at the
+   centre. Each colour owns one wedge and sits at three different radii within
+   it, so no part of the board is ever drawn over another. Warm ivory and aged
+   brass throughout; the three seats are the only saturated colour. Radii inside
+   the board use cq units so every detail scales with a resized popup. */
 
 .srOnly {
   position: absolute;
@@ -15,15 +18,28 @@
   border: 0;
 }
 
+/* One focus ring for the whole feature. :focus-visible, so it only ever shows
+   for the keyboard — a mouse player never sees it, and a keyboard player is
+   never left guessing which counter they are on. Stated once here rather than
+   per control so nothing can be added later without one. */
+.popup :focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
 /* --- Popup shell --- */
 
 /* A definite height (not just a min) is what lets the board size itself off the
    popup: every box down to .boardWrapper stays definite, so the wrapper can be
    a size container and the board can be min(100cqw, 100cqh). */
+/* Near-square by default. The board is the whole product here and it can only
+   ever be as big as the shorter axis, so a 900×700 popup spent 200px of width
+   on letterboxing. The extra 43px of height is the title bar plus padding, so
+   the board area itself comes out square. */
 .popup {
   position: fixed;
-  width: 900px;
-  height: 700px;
+  width: min(94vw, 760px);
+  height: min(94vh, 803px);
   /* min() not a bare px: min-width beats max-width in CSS, so a flat 560px
      would punch straight through 96vw and overflow a phone. */
   min-width: min(560px, 94vw);
@@ -148,6 +164,13 @@
 
 .pauseBtnActive { color: #ef4444; }
 
+/* Held down while the rules are up, so the button reads as a toggle rather than
+   as something that did nothing the second time you pressed it. */
+.helpBtnActive {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
 .pauseOverlay {
   position: absolute;
   inset: 0;
@@ -173,6 +196,73 @@
 .pauseSubtext {
   color: var(--text-muted);
   font-size: 0.8rem;
+}
+
+/* --- How to play ---
+   The same blurred ground as the pause screen, so the two read as one idea:
+   the board is still there, just set back. Inside it, type and nothing else —
+   no rules, no panels, no icons. Six lines is the whole game. */
+
+.helpOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 210;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(9px) saturate(0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 22px;
+  border-radius: inherit;
+  overflow-y: auto;
+  animation: overlayIn 200ms ease;
+}
+
+.helpCard {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  /* A measure, not a width: much past this and the eye loses the line it is on
+     coming back to the left edge. */
+  max-width: 38ch;
+}
+
+.helpTitle {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.helpList {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  /* No bullets. Each rule is one sentence with air around it, which separates
+     them perfectly well and leaves the left edge clean. */
+  list-style: none;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.helpList em {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.helpKeys {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.helpButtons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
 }
 
 .gameArea {
@@ -323,7 +413,13 @@
 
 .playerSlotName { flex: 1; }
 
+/* inline-block, not the default inline: width/height do not apply to a
+   non-replaced inline element, so inside a table cell this span collapsed to
+   0×0 and the roll tally lost its colour key entirely. Flex/grid parents
+   blockify their children, which is why it only ever broke in the table. */
 .playerDot {
+  display: inline-block;
+  vertical-align: middle;
   width: 9px;
   height: 9px;
   border-radius: 50%;
@@ -366,7 +462,42 @@
 
 /* Size container so the board can take the largest square that fits, whatever
    the user drags the popup to. */
+/* Also the positioning context for the corner chrome and the centre die. One
+   --stage expression, used by the board and by everything that has to line up
+   with it, so the two can never drift apart. */
 .boardWrapper {
+  /* Back to 99 now the puck casts nothing onto the card: the margin only ever
+     existed to give that shadow somewhere to land, and without it the gap is
+     just wasted board. */
+  --stage: min(99cqw, 99cqh);
+
+  /* --- One lamp, stated once, for the board and everything sitting on it ---
+     Upper left and high. --cast is the unit vector in *screen* space pointing
+     away from it, i.e. where every shadow here falls. Nothing below writes its
+     own x/y pair: an offset is this vector times how far the thing stands off
+     whatever is under it, so no layer can quietly drift onto its own angle.
+     That drift — the hub throwing straight down, a counter at 63°, a tile at
+     57° — is what reads as "drawn" rather than "lit".
+
+     Height is the only free variable, and it sets the blur as well: a
+     millimetre of standoff gives a tight dark edge, a centimetre a wide pale
+     one. Alpha falls as blur grows, because it is the same blocked light spread
+     over more area. Stack a tight stop, a mid and a wide one and the falloff
+     comes out roughly inverse-square, which is the only reason a flat shape
+     ever reads as sitting on something.
+
+     It lives here rather than on .board because the die is a sibling of the
+     board, not a child, and it is lit by the same lamp. */
+  --cast-x: 0.541;
+  --cast-y: 0.841;
+  /* The board's own hue taken right down, rather than a grey (which goes blue
+     against cream) or a stronger brown (which reads as a stain). One shadow
+     colour for the whole scene, at whatever alpha the height calls for. */
+  --shade: 58, 48, 32;
+  /* The same shade lifted, for insets on pale stock where full strength blocks
+     up the tile's own tone. */
+  --shade-soft: 120, 102, 70;
+  position: relative;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -376,250 +507,503 @@
   justify-content: center;
 }
 
-/* --- The Y-board ---
-   The board is a slab floating above the popup, seen from in front and above.
-   The stage holds the camera; the board is the slab; the ellipse under it is
-   the contact shadow that sells the float. */
+/* --- The circular board ---
+   A moulded ivory puck seen slightly from above: a side wall, a raised band
+   holding the 42-cell track, three outlined base rings straddling it, three
+   spokes running in, and a brass-ringed home at the centre. Warm ivory and
+   aged brass throughout; the three seats are the only saturated colour. */
 
-/* The camera. 22° is the angle a board actually reads at across a table — far
-   enough to feel like an object, short of the point where the far arm's cells
-   crowd. The long "lens" (3× the board width) keeps the keystone gentle: the
-   near edge ends up ~14% larger than the far one, not caricatured. */
 .boardStage {
   position: relative;
-  /* Fallback first: without container query units the board still gets a
-     sensible square, it just stops tracking a resized popup exactly. */
-  width: min(93%, 70vh);
-  /* The projected slab is wider (near edge flares) and shorter (foreshortened)
-     than its own box, so it is sized down to fit — hence 90/95, not 100. */
-  width: min(93cqw, 98cqh);
+  width: min(96%, 72vh);
+  width: var(--stage);
   aspect-ratio: 1;
-  --tilt: 22deg;
-  perspective: 300cqw;
-  /* Eye above the board's middle, looking down onto it */
-  perspective-origin: 50% 40%;
-  /* The projection also sits low in its box; lift it to the optical centre. */
-  transform: translateY(-2.2%);
+  --tilt: 15deg;
+  perspective: 340cqw;
+  perspective-origin: 50% 44%;
+  transform: translateY(-1.5%);
 }
 
-/* The slab: tilted away from the viewer, and fixed — it never spins.
-   One light source for the whole scene, high and to the left. Every shadow on
-   this board is cool (#1c2038) and every highlight warm (#fffdf9): neutral
-   black shadows read clinical, and that single substitution is the most
-   recognisable difference between a rendered object and a flat one. */
 .board {
   position: absolute;
   inset: 0;
-  background: radial-gradient(125% 100% at 26% -10%, #fffdf9 0%, #ffffff 46%, #fafafc 100%);
-  border-radius: 4.5cqw;
-  overflow: hidden;
   container-type: size;
-  contain: layout style paint;
+  contain: layout style;
   transform: rotateX(var(--tilt));
-  box-shadow:
-    /* face edge, milled side wall, then the shadow it casts down-right */
-    inset 0 0 0 0.1cqw rgba(255, 255, 255, 0.9),
-    0 0 0 1px rgba(28, 32, 56, 0.07),
-    0 0.5cqw 0 rgba(28, 32, 56, 0.05),
-    0 1.1cqw 0 rgba(28, 32, 56, 0.06),
-    0.6cqw 3.5cqw 5cqw -2cqw rgba(28, 32, 56, 0.16);
+  transform-style: preserve-3d;
+
+  /* The lit lip (--hx/--hy) and the shaded one (--sx/--sy), as offsets along
+     the lamp's vector. Lengths, so they live here where cqw means "of the
+     board" — the direction itself is on .boardWrapper, which the die outside
+     this element needs to see too. Ludo2Board overrides these per cell,
+     turning the one
+     screen direction back into that cell's own rotated frame; these are the
+     untuned values, so a cell still bevels correctly if it is ever drawn
+     without them. */
+  --hx: -0.097cqw;
+  --hy: -0.151cqw;
+  --sx: 0.18cqw;
+  --sy: 0.28cqw;
+  /* The board's paper tooth, held once so the face and the bridge decks are
+     cut from the same stock. */
+  --tooth: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.12'/%3E%3C/svg%3E");
 }
 
-/* Atmospheric depth: a whisper of haze over the receding third of the slab.
-   Sits above the board surface but below the pieces, so distance reads without
-   ever costing a pawn its clarity. */
-.boardHaze {
+/* The puck's side wall — a second disc sitting a touch lower and darker */
+.discEdge {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  border-radius: 50%;
   pointer-events: none;
-  background: linear-gradient(to bottom, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0) 28%);
+  /* Dropped straight down by the camera, shaded at 147deg by the lamp — see
+     .homeEdge, which is the same wall one size down. */
+  background: linear-gradient(147deg, #e8dfcc 0%, #dbd1bc 55%, #c9bda6 100%);
+  transform: translateY(2.6%);
 }
 
-/* The board face, which turns on the slab to face whoever is playing. */
+/* The face. Key light is upper-left throughout the board — every highlight and
+   every contact shadow on this board answers to that one lamp. */
+.disc {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    radial-gradient(115% 105% at 30% 6%, #fdfaf2 0%, #f7f1e3 46%, #efe7d5 100%);
+  box-shadow:
+    inset 0 0 0 0.35cqw rgba(255, 255, 255, 0.75),
+    inset 0 -1.2cqw 2cqw rgba(120, 102, 70, 0.13);
+}
+
+/* Two things flat colour cannot fake: paper tooth, and the concentric turning
+   marks a pressed board carries. Both sit at a few percent — you should never
+   catch them looking, only miss them when they go.
+
+   It is one layer over the whole face, above the band and the well and below
+   the cells, because a finish that stops at the edge of the track is what tells
+   you the rings are three separate discs stacked up. */
+.boardFinish {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-image:
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      rgba(120, 102, 70, 0.016) 0 0.1cqw,
+      rgba(255, 255, 255, 0.02) 0.1cqw 1.5cqw
+    ),
+    var(--tooth);
+  /* Fine enough that it never resolves into visible speckle at any board size */
+  background-size: auto, 11% 11%;
+  mix-blend-mode: multiply;
+  opacity: 1;
+  pointer-events: none;
+}
+
+/* Every layer of the board is decoration; the only thing on it worth clicking
+   is a counter you can move, and that turns its own pointer events back on. It
+   matters because a masked-away region still hit-tests: without this the bore
+   would swallow clicks meant for whatever is centred in it. */
 .boardPlate {
   position: absolute;
   inset: 0;
+  pointer-events: none;
   transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-/* Contact shadow on the "floor": screen-space, deliberately not part of the
-   tilted slab, so the board reads as hovering rather than resting. Shaped to
-   the slab's own footprint — an ellipse under a rounded rectangle reads as a
-   mismatch the moment the board gets large. Offset right, opposite the light. */
-.boardShadow {
+/* The channel the track sits in. It is kept only a little wider than a tile:
+   a band much wider than what it holds reads as an empty moat, and the eye
+   stops seeing the forty-two cells as a path. Two brass hairlines, not four —
+   the old well + field pair drew three near-identical cream rings. */
+.ringBand {
   position: absolute;
-  left: 9%;
-  right: 5%;
-  bottom: -3.5%;
-  height: 22%;
-  border-radius: 4.5cqw;
-  background: rgba(28, 32, 56, 0.15);
-  filter: blur(2.2cqw);
-  pointer-events: none;
-}
-
-/* Each arm is a channel milled into the slab and washed in its player's colour.
-   The inset top shadow is the occlusion of that recess; the bottom highlight is
-   light catching its far lip. Together they are what makes the arm a surface
-   rather than a printed area — and what lets a white tile sit *in* it. */
-.armRect {
-  position: absolute;
-  border-radius: 17px;
-  border-radius: 3.2cqw;
-  z-index: 1;
-}
-
-.armInactive { opacity: 0.4; }
-
-/* The shared goal: a well sunk into the slab where the three channels meet.
-   Deeper occlusion than the arms — it is the lowest point on the board. */
-.hub {
-  position: absolute;
-  z-index: 1;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 34%, #ececed 0%, #f4f4f6 78%);
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 30%, #f0e7d1 0%, #e7dcc2 100%);
   box-shadow:
-    inset 0 0.34cqw 0.7cqw rgba(28, 32, 56, 0.13),
-    inset 0 -0.16cqw 0.3cqw rgba(255, 255, 255, 0.75);
+    inset 0 0 0 0.22cqw rgba(184, 148, 78, 0.6),
+    /* The apron overhanging the band, so the step is shaded on the side the
+       lamp cannot reach rather than uniformly around the ring. */
+    inset calc(var(--cast-x) * -0.5cqw) calc(var(--cast-y) * -0.5cqw) 1.1cqw
+      rgba(var(--shade-soft), 0.15);
 }
 
+/* Not a disc any more — the lip of the bore. A brass hairline on the inside
+   edge, a hairline of light on the outside of it, and a short shadow falling
+   inward off the cut so the ring reads as having thickness. */
+.ringWell {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 0.2cqw rgba(184, 148, 78, 0.62),
+    inset calc(var(--sx) * 1.6) calc(var(--sy) * 1.6) 0.8cqw rgba(70, 56, 30, 0.24),
+    0 0 0 0.12cqw rgba(255, 255, 255, 0.55);
+}
 
-/* Tiles are inlaid into the arm channel: a hair proud of it, catching light on
-   the top edge and dropping a tight contact shadow onto the surface below. */
+/* --- Track tiles --- */
+
 .cell {
   position: absolute;
-  z-index: 2;
-  /* Overridden inline on start cells with that player's hue (see .cellStart) */
-  --ring: transparent;
-  border-radius: 20%;
-  background: var(--bg-secondary);
+  /* A true arc segment: the outer edge of a ring tile is wider than the inner
+     one (41.1/36.1 ≈ 1.139). clip-path drops any outer box-shadow, so the
+     raised read comes from inset shading instead. */
+  clip-path: polygon(6.1% 0%, 93.9% 0%, 100% 100%, 0% 100%);
+  border-radius: 16%;
+  background: #fffdf7;
+  /* The tiles carry the whole point of the board, so they are the lightest
+     thing on it against a band that is now clearly darker — near-white on
+     cream, which is what this was, cannot be counted at a glance. */
+  /* Lit from the upper left, so the highlight and the shade are offset on both
+     axes rather than straight up and down — a purely vertical bevel is what
+     makes a tile read as a rectangle with a gradient in it. */
+  box-shadow:
+    inset var(--hx) var(--hy) 0 rgba(255, 255, 255, 0.95),
+    inset var(--sx) var(--sy) 0.44cqw rgba(var(--shade-soft), 0.2),
+    /* Just enough to hold the tile's outline against the band. It used to be
+       twice this, and an even dark line all the way round a tile cancels the
+       bevel inside it — the eye reads the outline first and the tile goes
+       flat. Shade belongs on the side away from the lamp, not everywhere. */
+    inset 0 0 0 0.09cqw rgba(var(--shade-soft), 0.11);
   display: flex;
   align-items: center;
   justify-content: center;
-  pointer-events: none;
+  /* Hoverable, so the three cells that carry a rule — start, haven, way home —
+     can name themselves. Nothing here is clickable and the counters sit above
+     on their own layer, so this costs no hit-testing anywhere else. */
+  pointer-events: auto;
   user-select: none;
 }
 
-/* The tip corner the track skips. Sunk rather than raised — the same recess
-   language as an empty socket, so it reads as deliberately not a tile. */
-.cellBlank {
-  background: rgba(28, 32, 56, 0.035);
-  box-shadow: inset 0 0.12cqw 0.26cqw rgba(28, 32, 56, 0.07);
-}
-
-/* Start cells get a ring instead of a solid fill (--ring is set per cell). */
-.cellStart {
-  box-shadow: inset 0 0 0 2px var(--ring);
-  box-shadow: inset 0 0 0 0.34cqw var(--ring);
-}
-
+/* Struck into the tile rather than printed on it: a dark face with a hairline
+   of light dropped just below, which is what an engraved mark does under a
+   lamp above and to the left. */
 .safeStar {
-  width: 54%;
-  height: 54%;
+  width: 56%;
+  height: 56%;
+  fill: #8d8674;
+  /* The lit edge of an engraved mark is the far wall of the groove, so it shows
+     up opposite the lamp — along the same cast vector as everything else. */
+  filter: drop-shadow(
+    calc(var(--cast-x) * 0.13cqw) calc(var(--cast-y) * 0.13cqw) 0
+      rgba(255, 255, 255, 0.9)
+  );
+  opacity: 0.8;
+  /* Turned back against both the tile's own bearing and the board's spin, so a
+     star reads as a star from every seat instead of a tipped-over one. */
+  transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-.entryArrow {
-  width: 72%;
-  height: 72%;
-}
+.cellInactive { opacity: 0.32; }
 
-.cellInactive { opacity: 0.35; }
-
-/* Holding area: a tray of four sockets alongside the start cell it feeds,
-   milled into the slab like the arm it belongs to. */
-.baseTray {
-  position: absolute;
-  z-index: 1;
-  border-radius: 15px;
-  border-radius: 2.8cqw;
-}
-
-/* Empty resting socket: a small dimple, smaller than a pawn so an occupied one
-   vanishes under its piece and a vacated one can never read as a counter. */
-.baseSpot {
-  position: absolute;
-  z-index: 2;
-  border-radius: 50%;
-  background: rgba(28, 32, 56, 0.05);
+/* Where the offered move lands.
+   Under the exact-landing rule "which counter can move" is only half the
+   question — the other half is where it ends up, and the board never said. A
+   hairline struck inside the cell in the mover's own colour, in the same inset
+   language the start cells already speak but a weight lighter: enough to find
+   at a glance, not enough to argue with the counter about to stand on it. It
+   is deliberately still — the playable counters already carry the only
+   animation this moment needs.
+   Doubled selectors, not source order: this has to outrank .cell and
+   .spokeCell, both of which set box-shadow and one of which comes later. */
+.cell.cellTarget,
+.spokeCell.cellTarget {
+  --target: var(--text-primary);
+  /* Heavier than the start cell's own ring (0.34cqw) on purpose. A deploy
+     targets the start cell, which is already ringed in the same colour — at
+     matching weights the mark simply vanished on the one cell it most needed
+     to be legible against. */
   box-shadow:
-    inset 0 0.16cqw 0.3cqw rgba(28, 32, 56, 0.13),
-    0 0.06cqw 0 rgba(255, 255, 255, 0.6);
+    inset var(--hx) var(--hy) 0 rgba(255, 255, 255, 0.55),
+    inset 0 0 0 0.55cqw var(--target),
+    inset var(--sx) var(--sy) 0.4cqw rgba(120, 102, 70, 0.14);
 }
 
-/* --- Tokens --- */
+/* --- Bridges ---
+   The deck the run home is laid on: board material, not seat colour, so it
+   belongs to the board rather than to the player. It carries the two-stop
+   shadow the counters use — a tight core under the deck plus a wide faint one
+   further out — because that is what tells you it is spanning a hole rather
+   than sitting on a surface. */
+.bridge {
+  position: absolute;
+  border-radius: 0.5cqw;
+  background: var(--tooth), #f5eede;
+  background-size: 11% auto, auto;
+  /* --sx/--sy is the key light's shade direction turned into this deck's own
+     frame, so the extruded side wall lands on the same side for all three
+     bridges however the plate is turned. The wall is hard-edged: it is material,
+     not shade, and there is no floor under a bridge to catch a cast shadow.
 
-/* Counters are moulded pieces, not stickers. Four layers do the work:
-     · a body gradient lit from upper-left,
-     · an inset dark base + inset light crown, which is the dome,
-     · a hairline moulded edge where the plastic meets air,
-     · a two-stop ground shadow — tight dark core for contact, wide faint
-       ambient for the room. One blur for both is the classic amateur tell.
-   The old white outline is gone: form and contact keep a piece legible on a
-   cell of its own colour, which is what an outline was compensating for. */
+     Two steps rather than one, and no dark inset where the deck meets them.
+     A hard inset line there was the thing killing this: on a real extrusion the
+     top face runs straight into the side wall, and drawing a shadow *between*
+     them says instead that the wall is a separate slab lying behind the deck.
+     Stepping the wall in two tones also gives it the falloff a flat plane
+     turned away from a lamp actually has. */
+  box-shadow:
+    inset var(--hx) var(--hy) 0 rgba(255, 255, 255, 0.8),
+    inset var(--sx) var(--sy) 0.55cqw rgba(var(--shade-soft), 0.13),
+    calc(var(--sx) * 0.45) calc(var(--sy) * 0.45) 0 #e3d9c3,
+    var(--sx) var(--sy) 0 #cfc3a8,
+    calc(var(--sx) * 1.15) calc(var(--sy) * 1.15) 0.5cqw
+      rgba(var(--shade), 0.16);
+  pointer-events: none;
+}
+
+/* --- The run home --- */
+
+/* A track cell in the owner's colour. Same square, same radius, same bevel
+   answering the same lamp — so the five of them read as the track carrying on
+   inward rather than as a separate widget bolted to the middle. */
+.spokeCell {
+  position: absolute;
+  border-radius: 16%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Hoverable for the same reason as a track cell: the run home is where the
+     one rule nobody guesses lives, so it has to be able to say so. */
+  pointer-events: auto;
+  /* Saturated stock, so the shade has to go darker than the board's to show at
+     all — but the all-round line gets the same cut as a track tile's, for the
+     same reason: an even outline flattens whatever bevel is inside it. */
+  box-shadow:
+    inset var(--hx) var(--hy) 0 rgba(255, 255, 255, 0.26),
+    inset var(--sx) var(--sy) 0.42cqw rgba(24, 16, 10, 0.3),
+    inset 0 0 0 0.09cqw rgba(24, 16, 10, 0.1);
+}
+
+.spokeArrow {
+  width: 46%;
+  height: 46%;
+  stroke: rgba(255, 255, 255, 0.62);
+}
+
+/* --- Centre home --- */
+
+/* The island's side wall: same trick as the puck's, a shade lower and darker,
+   so the hub has thickness where it stands over the bore.
+
+   The wall drops straight down because that is the *camera* — the plate is
+   tilted back, so what we see under the island is its far side. Its shading
+   runs at 147deg, which is the lamp: darkest where the cylinder turns away,
+   toward the lower right. Offset by the camera, shaded by the light, and the
+   two are not the same axis.
+
+   No cast shadow: under most of this island there is no floor at all — only
+   the bore and the three bridge decks — and a shadow thrown across a hole is
+   what made the hub look pasted on. The wall carries the thickness by itself. */
+.homeEdge {
+  position: absolute;
+  border-radius: 50%;
+  background: linear-gradient(147deg, #e8dfcc 0%, #dbd0ba 52%, #c6b99f 100%);
+  transform: translateY(5%);
+  pointer-events: none;
+}
+
+.homeDisc {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  background:
+    var(--tooth),
+    radial-gradient(circle at 34% 24%, #fdfaf1 0%, #f5eede 58%, #eae1cb 100%);
+  background-size: 42% auto, auto;
+  box-shadow:
+    inset 0 0 0 0.3cqw rgba(194, 160, 92, 0.85),
+    inset 0.14cqw 0.2cqw 0 rgba(255, 255, 255, 0.7),
+    inset -0.2cqw -0.34cqw 0.7cqw rgba(120, 102, 70, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Small: twelve finished pieces park around this, and the old 62% star was
+   both the loudest mark on the board and the first thing covered up. */
+.homeStar {
+  width: 28%;
+  height: 28%;
+  fill: none;
+  stroke: rgba(184, 148, 78, 0.95);
+  stroke-width: 2.6;
+  stroke-linejoin: round;
+  transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+/* --- Yards ---
+   Four bays on the apron outside the track, washed and rimmed in the owner's
+   colour. The enclosing circle this replaces had to be big enough to hold four
+   pieces, and so cut across the track band, the track tiles and that colour's
+   own entry cell — three things a yard has no business covering. */
+
+.baseBay {
+  position: absolute;
+  pointer-events: none;
+  --rim: rgba(90, 76, 50, 0.4);
+  clip-path: polygon(6.1% 0%, 93.9% 0%, 100% 100%, 0% 100%);
+  border-radius: 16%;
+  /* A scribed socket ring, not a soft blob: it says "a piece belongs here"
+     rather than "another cell you can land on", and unlike a blurred dimple it
+     stays a drawn line instead of turning into a smudge up close. */
+  background-image: radial-gradient(
+    closest-side at 50% 50%,
+    rgba(90, 76, 50, 0) 0 58%,
+    rgba(90, 76, 50, 0.16) 60% 66%,
+    rgba(90, 76, 50, 0) 68%
+  );
+  box-shadow:
+    inset 0 0 0 0.22cqw var(--rim),
+    inset var(--sx) var(--sy) 0.5cqw rgba(90, 76, 50, 0.16),
+    inset var(--hx) var(--hy) 0 rgba(255, 255, 255, 0.5);
+  opacity: 0.8;
+}
+
+/* --- Pieces ---
+   The counter from the main Ludo board: a round glossy disc with its hotspot at
+   35%/35%, lipped light at the top and dark at the bottom, over a ground
+   shadow. Same form, this board's muted palette — the seats have to keep
+   matching their own run home and their own yard. */
+
+/* The slot holds where a piece is and which way is up; the piece inside holds
+   how it looks and how it hops. Split because both wanted `transform`: the
+   board plate turns to face the local player, and without a counter-turn on
+   the slot every counter on a spun board lies on its side. */
+.tokenSlot {
+  position: absolute;
+  z-index: 10;
+  pointer-events: none;
+  transition: left 200ms cubic-bezier(0.33, 0, 0.15, 1),
+              top 200ms cubic-bezier(0.33, 0, 0.15, 1),
+              transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+  will-change: left, top;
+}
+
+/* The counter's shadow on the board.
+   Not a box-shadow on the counter, for two reasons. A box-shadow off a circle
+   is a circle, and a sphere on a surface lit from above throws an *ellipse* —
+   the round blob is most of why these read as stickers rather than pieces. And
+   a shadow that belongs to the counter travels with it, so a hopping piece
+   carried its own shadow into the air; this one is on the slot, which does not
+   hop, so the piece leaves the ground and the shadow stays where it fell.
+
+   Drawn as a gradient rather than a blur so the falloff can be shaped: dense
+   under the point of contact and thinning fast, which is what a small object
+   close to a surface actually does. */
+.tokenSlot::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(
+    closest-side circle at 50% 50%,
+    rgba(var(--shade), 0.34) 0%,
+    rgba(var(--shade), 0.26) 38%,
+    rgba(var(--shade), 0.1) 66%,
+    rgba(var(--shade), 0) 100%
+  );
+  /* Flattened to the board's plane and slid down the one cast vector. The 0.42
+     squash is the same tilt the plate is drawn at; the 1.06 is a shadow being
+     very slightly larger than the thing casting it, because the lamp is not
+     infinitely far away. */
+  transform:
+    translate(calc(var(--cast-x) * 15%), calc(var(--cast-y) * 15%))
+    scale(1.06, 0.42);
+}
+
+/* Alternating step: a snappier ease while a piece is walking cell to cell */
+.tokenSlotStepping {
+  transition: left 190ms cubic-bezier(0.33, 1, 0.68, 1),
+              top 190ms cubic-bezier(0.33, 1, 0.68, 1),
+              transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
 .token {
   position: absolute;
+  inset: 0;
+  /* Set per piece from the palette in Ludo2Board. Declared here so the counter
+     still reads as a counter without them. */
+  --lit: #cfcfd6;
+  --body: #a8a8b2;
+  --foot: #7c7c86;
   border-radius: 50%;
-  z-index: 10;
+  background:
+    radial-gradient(circle at 35% 35%,
+      var(--lit) 0%, var(--body) 40%, var(--foot) 100%);
+  /* The ground shadow lives on the slot; what is left here is the counter's own
+     form. The terminator (dark, opposite the lamp) and the bounce off the pale
+     board coming back up at it (light, toward the lamp) — a sphere needs both,
+     and neither of them is a shadow on anything else.
+
+     What used to sit here as well was `0 0 0 0.07cqw` — a dark ring at zero
+     offset and zero blur, i.e. the same weight of shade on the lit side as on
+     the dark one. That is an outline, not a shadow, and an outline all the way
+     round a ball is what was flattening these into discs. */
+  box-shadow:
+    inset calc(var(--cast-x) * 0.36cqw) calc(var(--cast-y) * 0.36cqw) 0.62cqw
+      rgba(24, 16, 10, 0.32),
+    inset calc(var(--cast-x) * -0.3cqw) calc(var(--cast-y) * -0.3cqw) 0.6cqw
+      rgba(255, 255, 255, 0.22);
   cursor: default;
   pointer-events: none;
-  /* 200ms matches STEP_MS so post-animation settling is seamless */
-  transition: left 200ms cubic-bezier(0.33, 0, 0.15, 1),
-              top 200ms cubic-bezier(0.33, 0, 0.15, 1);
-  box-shadow:
-    inset 0 -0.16cqw 0.3cqw rgba(24, 16, 10, 0.34),
-    inset 0 0.14cqw 0.26cqw rgba(255, 255, 255, 0.4),
-    0 0 0 0.07cqw rgba(28, 32, 56, 0.16),
-    0 0.11cqw 0.16cqw rgba(28, 32, 56, 0.36),
-    0 0.42cqw 0.8cqw rgba(28, 32, 56, 0.17);
-  will-change: left, top, transform;
+  will-change: transform;
   transform: translateZ(0);
 }
 
-/* Clear-coat hotspot. A separate, blurred, off-centre highlight is the single
-   detail that separates gloss from a flat gradient. */
+/* The clear-coat hotspot: a small, tight, off-centre glint sitting on top of
+   the body gradient. It is what separates gloss from a coloured circle. */
 .token::after {
   content: '';
   position: absolute;
-  left: 22%;
-  top: 15%;
-  width: 36%;
-  height: 27%;
+  left: 14%;
+  top: 11%;
+  width: 42%;
+  height: 34%;
   border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0));
+  background: radial-gradient(closest-side at 42% 38%,
+    rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0) 100%);
 }
 
-.tokenRed { background: radial-gradient(circle at 34% 26%, #ef7a63 0%, #e0452f 56%, #b8331f 100%); }
-.tokenGreen { background: radial-gradient(circle at 34% 26%, #63c493 0%, #31a566 56%, #1d7c49 100%); }
-.tokenYellow { background: radial-gradient(circle at 34% 26%, #ffc873 0%, #ef9f2b 56%, #c67a14 100%); }
+.tokenRed, .tokenGreen, .tokenYellow { /* hues come from --lit/--body/--foot */ }
 
-/* A movable piece lifts off the board. Height reads as "pick me up" far more
-   tactilely than a coloured glow, and keeps the board calm. */
 .tokenClickable {
   cursor: pointer;
   pointer-events: auto;
   animation: tokenLift 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
-  transition: left 200ms cubic-bezier(0.33, 0, 0.15, 1),
-              top 200ms cubic-bezier(0.33, 0, 0.15, 1),
-              box-shadow 180ms ease;
-  box-shadow:
-    inset 0 -0.16cqw 0.3cqw rgba(24, 16, 10, 0.34),
-    inset 0 0.14cqw 0.26cqw rgba(255, 255, 255, 0.4),
-    0 0 0 0.07cqw rgba(28, 32, 56, 0.16),
-    0 0.3cqw 0.34cqw rgba(28, 32, 56, 0.3),
-    0 0.85cqw 1.3cqw rgba(28, 32, 56, 0.2);
 }
 
-.tokenClickable:hover { filter: brightness(1.06) saturate(1.04); }
+.tokenClickable:hover { filter: brightness(1.07) saturate(1.04); }
 
 @keyframes tokenLift {
   from { transform: translateY(0) scale(1); }
   to { transform: translateY(-5%) scale(1.035); }
 }
 
-.tokenArriving {
-  animation: tokenHop 500ms ease;
+/* A playable counter breathes up and down, and its shadow has to answer: as the
+   piece rises the contact patch slides out from under it, spreads and goes pale.
+   Run off the same clock and the same curve as tokenLift, so the two stay locked
+   — a shadow that drifts out of phase with the thing casting it is worse than no
+   animation at all. */
+.tokenSlotLifted::before {
+  animation: tokenShadowLift 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
 }
+
+@keyframes tokenShadowLift {
+  from {
+    transform:
+      translate(calc(var(--cast-x) * 15%), calc(var(--cast-y) * 15%))
+      scale(1.06, 0.42);
+    opacity: 1;
+  }
+  to {
+    transform:
+      translate(calc(var(--cast-x) * 26%), calc(var(--cast-y) * 26%))
+      scale(1.2, 0.47);
+    opacity: 0.62;
+  }
+}
+
+.tokenArriving { animation: tokenHop 500ms ease; }
 
 @keyframes tokenHop {
   0%   { transform: translateY(0) scale(1); }
@@ -630,13 +1014,7 @@
   100% { transform: translateY(0) scale(1); }
 }
 
-/* Alternating step-hop so each cell hop restarts the animation */
-.tokenSteppingA,
-.tokenSteppingB {
-  transition: left 190ms cubic-bezier(0.33, 1, 0.68, 1),
-              top 190ms cubic-bezier(0.33, 1, 0.68, 1) !important;
-}
-
+/* Alternating names so each cell hop restarts the animation */
 .tokenSteppingA { animation: stepHopA 200ms ease forwards; }
 .tokenSteppingB { animation: stepHopB 200ms ease forwards; }
 
@@ -649,8 +1027,6 @@
   100% { transform: translateY(0) scale(1, 1); }
 }
 
-/* Identical curve to stepHopA on purpose: the parent alternates class names to
-   restart the animation on every cell, which a single name cannot do. */
 @keyframes stepHopB {
   0%   { transform: translateY(0) scale(1, 1); }
   28%  { transform: translateY(-22%) scale(0.955, 1.065); }
@@ -665,131 +1041,273 @@
   z-index: 9;
 }
 
+/* The ghost's shadow goes with it. Without this the counter shrinks away and
+   leaves its shadow lying on the board at full strength until the node
+   unmounts, which is the one frame that would give the whole trick away. */
+.tokenSlotCaptured::before {
+  animation: tokenCapturedShadowFade 500ms ease forwards;
+}
+
+@keyframes tokenCapturedShadowFade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 @keyframes tokenCapturedFade {
   0%   { opacity: 1; transform: scale(1) rotate(0deg); }
   22%  { opacity: 1; transform: scale(1.16) rotate(-7deg); }
   100% { opacity: 0; transform: scale(0.34) rotate(14deg); }
 }
 
-/* --- Side panel --- */
+/* --- Corner chrome ---
+   A circle inscribed in a square leaves four corners no board can ever use, so
+   that is where everything that is not the board goes. The blocks are absolute
+   over .boardWrapper and cost the board nothing: it stays the largest square
+   the popup can hold.
 
-.sidePanel {
-  width: clamp(152px, 26%, 200px);
-  flex-shrink: 0;
+   Corner geometry, for anyone changing these sizes: a block hugging a corner
+   clears the disc while (w - S/2)² + (h - S/2)² > (S/2)², S being the stage.
+   A card carrying its own roll tally runs about 62px tall, which caps it at
+   roughly 0.20S wide — go wider and its inner corner starts to sit on the
+   apron, where the yards are. */
+
+.cornerTl { position: absolute; top: 0; left: 0; }
+.cornerTr { position: absolute; top: 0; right: 0; }
+.cornerBl { position: absolute; bottom: 0; left: 0; }
+
+.seatCard {
+  --seat-rgb: 0, 0, 0;
+  --fill: 0%;
+  /* 0.215 is measured, not guessed: at a square board area the cards clear the
+     disc up to 0.223 of the stage and start to sit on the apron at 0.231. */
+  width: clamp(122px, calc(var(--stage) * 0.215), 156px);
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  min-height: 0;
-  overflow-y: auto;
-  scrollbar-width: thin;
+  gap: 4px;
+  padding: 4px 7px 5px;
+  border-radius: var(--radius-md);
+  transition: background-color 150ms ease;
 }
 
-.turnIndicator {
+/* Whose turn it is, said by position rather than by another line of text. */
+.seatCardActive { background: var(--bg-tertiary); }
+
+/* 5px gaps, not the 8px ramp step: at this width every pixel spent between the
+   dot, the pips and the score comes straight out of the name. */
+.seatLine {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  font-size: 0.86rem;
-  font-weight: 600;
-  color: var(--text-primary);
-  min-height: 22px;
+  gap: 5px;
+  font-size: var(--text-base);
+  color: var(--text-secondary);
 }
 
-.statusDot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  box-shadow:
-    inset 0 -1px 1px rgba(24, 16, 10, 0.28),
-    inset 0 1px 1px rgba(255, 255, 255, 0.35);
-}
-
-.timer {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.78rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  opacity: 0.8;
-}
-
-.timerUrgent {
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-/* --- Player rows (replaces the on-board score badges) --- */
-
-.playerRows {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.playerRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 7px 12px;
-  border-radius: var(--radius-full);
-  font-size: 0.8rem;
-  color: var(--text-muted);
-  transition: background-color 150ms ease, color 150ms ease;
-}
-
-.playerRowActive {
-  background: var(--bg-tertiary);
+.seatCardActive .seatLine {
   color: var(--text-primary);
   font-weight: 600;
 }
 
-.playerRowName {
+.seatName {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The score is the one number on this panel worth reading at a glance */
-.playerRowScore {
+/* Reserved for three digits so the number stays on the same right edge across
+   all three cards as scores climb into the hundreds.
+   Recede by colour, not by opacity: --text-primary at 0.55 measured 3.89:1,
+   under the 4.5:1 this codebase holds itself to. --text-secondary is the same
+   weight of grey and clears it at 5.74:1. */
+.seatScore {
   font-variant-numeric: tabular-nums;
-  font-size: 0.8rem;
   font-weight: 600;
-  color: var(--text-primary);
-  opacity: 0.55;
+  color: var(--text-secondary);
+  min-width: 24px;
+  text-align: right;
 }
 
-.playerRowActive .playerRowScore { opacity: 1; }
+.seatCardActive .seatScore { color: var(--text-primary); }
 
-.sideDice {
+/* How far round the board this seat has got. A rail rather than a tinted row
+   fill: over the board's own corners there is no reliable backdrop for a fill
+   to read against, but a 3px rail with its own track always does. */
+.seatMeter {
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+  overflow: hidden;
+}
+
+.seatMeterFill {
+  display: block;
+  width: var(--fill);
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--seat-rgb));
+  opacity: 0.55;
+  transition: width 300ms ease;
+}
+
+.seatCardActive .seatMeterFill { opacity: 0.9; }
+
+/* This seat's roll tally: six faces and captures, counts under their face. The
+   header is a scale rather than content — faint, and the same seven columns as
+   the row under it, so the numbers never need reading twice to place them. */
+.rollGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr) 1.3fr;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  text-align: center;
+}
+
+/* The scale. --text-muted at full strength rather than a lighter grey faded:
+   at opacity 0.5 it measured 1.99:1 and the faces were effectively unreadable. */
+.rollHead { color: var(--text-muted); }
+
+.rollVal { color: var(--text-secondary); }
+
+.seatCardActive .rollVal { color: var(--text-primary); }
+
+/* Placeholder for a zero — deliberately below text contrast, and aria-hidden
+   with the real counts on the grid's own label, because what it has to say is
+   "nothing here". Present enough to keep the columns reading as a grid. */
+.rollGrid .statNil { color: var(--text-disabled); }
+
+/* --- Centre status ---
+   On the board's vertical axis, in the one wedge with no arm in it: the local
+   player's arm is spun to point down, so the other two sit at ±120° and the
+   space straight above the hub is always clear. */
+
+.centreStatus {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - var(--stage) * 0.215);
+  width: calc(var(--stage) * 0.42);
+  transform: translateX(-50%);
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
-  padding: 0 12px;
-  min-height: 56px;
-  align-items: center;
+  gap: 7px;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* One voice: the turn line normally, the roll's feedback while it lasts. Two
+   separate slots for those meant one of them was always empty. */
+.centreStatusText {
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  animation: hintIn 150ms ease;
+}
+
+/* Much narrower than the text it sits under. At anything like the full width of
+   the wedge it stops reading as this line's clock and starts reading as a rule
+   drawn across the board. */
+.centreStatus .turnTrack { width: 38%; }
+
+.turnTrack {
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--border-light);
+  overflow: hidden;
+}
+
+.turnTrackFill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--text-muted);
+  /* Linear over exactly the tick interval, so the bar drains continuously
+     instead of stepping once a second. */
+  transition: width 1s linear;
+}
+
+.turnTrackUrgent { background: var(--text-primary); }
+
+/* Only present for the last ten seconds — see the note where it is rendered.
+   Tabular figures so 10 → 9 does not shift the digit that is left. */
+.turnCount {
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
+/* A write that failed mid-game. Sits under the status line on the same axis,
+   quiet enough to ignore and specific enough to act on. */
+.playError {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  max-width: 80%;
+  text-align: center;
+  font-size: 0.75rem;
+  color: #ef4444;
+  pointer-events: none;
+}
+
+/* --- The die ---
+   In the hub, which is where you would actually throw it. It sits above the
+   board rather than in it: the plate is tilted and the die is not, so the
+   shadow has to do the work of seating it. */
+
+.centreDice {
+  position: absolute;
+  left: 50%;
+  /* The stage is nudged up 1.5% of its own height (see .boardStage), so the
+     hub's centre is that far above the wrapper's. */
+  top: calc(50% - var(--stage) * 0.015);
+  /* The `translate` property, not a transform: `transform` is already spoken
+     for by the lift, hover and tumble, and a transform here would be wiped by
+     the first of them to fire — dropping the die into the board's corner. */
+  translate: -50% -50%;
+  z-index: 12;
 }
 
 /* A moulded die, lit from the same upper-left key as the board: warm crown,
-   cool contact. Same material language as the counters, one size smaller. */
+   cool contact. Same material language as the counters. Scaled off the stage
+   so it keeps filling the hub at any popup size, with the pips as fractions of
+   the face rather than fixed pixels. */
 .dice {
-  width: 56px;
-  height: 56px;
+  --die: clamp(42px, calc(var(--stage) * 0.088), 66px);
+  width: var(--die);
+  height: var(--die);
   flex-shrink: 0;
-  border-radius: 15px;
+  border-radius: calc(var(--die) * 0.27);
   border: none;
   background: linear-gradient(158deg, #ffffff 0%, #fbfbfd 52%, #f1f1f5 100%);
   cursor: default;
   display: flex;
   align-items: center;
   justify-content: center;
+  /* The die is the one thing here that is genuinely lying on the board rather
+     than being part of it, so its shadow is the scene's — the board's warm
+     shade along the board's cast vector, not the cool straight-down drop the
+     app's chrome uses. A cool shadow thrown due south onto warm cream was what
+     made this read as a UI chip pasted over the hub. The hairline stays cool:
+     that is the die's own edge, not a shadow. */
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
     inset 0 -1px 0 rgba(28, 32, 56, 0.05),
-    0 0 0 1px rgba(28, 32, 56, 0.08),
-    0 1px 1px rgba(28, 32, 56, 0.1),
-    0 4px 10px -3px rgba(28, 32, 56, 0.16);
+    0 0 0 1px rgba(28, 32, 56, 0.07),
+    calc(var(--cast-x) * 1.5px) calc(var(--cast-y) * 1.5px) 1.5px
+      rgba(var(--shade), 0.2),
+    calc(var(--cast-x) * 5px) calc(var(--cast-y) * 5px) 9px -1px
+      rgba(var(--shade), 0.22),
+    calc(var(--cast-x) * 12px) calc(var(--cast-y) * 12px) 20px -6px
+      rgba(var(--shade), 0.16);
   transition: transform 180ms cubic-bezier(0.34, 1.4, 0.64, 1), box-shadow 180ms ease;
 }
 
@@ -799,12 +1317,17 @@
   animation: diceLift 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate;
 }
 
+/* Picked up: the contact stop lets go and the wide one takes over, which is
+   what raising something off a surface actually does to its shadow. */
 .diceActive:hover {
   transform: translateY(-3px);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.95),
-    0 0 0 1px rgba(28, 32, 56, 0.1),
-    0 8px 18px -4px rgba(28, 32, 56, 0.22);
+    0 0 0 1px rgba(28, 32, 56, 0.09),
+    calc(var(--cast-x) * 9px) calc(var(--cast-y) * 9px) 14px -2px
+      rgba(var(--shade), 0.18),
+    calc(var(--cast-x) * 20px) calc(var(--cast-y) * 20px) 32px -8px
+      rgba(var(--shade), 0.18);
 }
 
 .diceActive:active {
@@ -834,14 +1357,15 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, 1fr);
-  width: 32px;
-  height: 32px;
+  width: 58%;
+  height: 58%;
 }
 
-/* Pips are sunk into the face, not printed on it */
+/* Pips are sunk into the face, not printed on it. Sized off the face so they
+   stay in proportion as the die scales with the board. */
 .pip {
-  width: 7px;
-  height: 7px;
+  width: 22%;
+  height: 22%;
   border-radius: 50%;
   background: #33374a;
   box-shadow:
@@ -854,67 +1378,10 @@
 /* Idle face: genuinely blank. Any mark at all read as a rolled 1. */
 .diceIdle { display: none; }
 
-.statusHint {
-  font-size: 0.76rem;
-  font-weight: 600;
-  line-height: 1.35;
-  color: var(--text-primary);
-  animation: hintIn 150ms ease;
-}
-
 @keyframes hintIn {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
-
-/* --- Stats table --- */
-
-.statsTable {
-  font-size: 0.7rem;
-  padding: 0 12px;
-  color: var(--text-muted);
-}
-
-/* Wide enough to actually show the dot it exists for */
-.statsTable tbody td:first-child { width: 16px; }
-
-.statsLabel {
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin-bottom: 8px;
-  color: var(--text-muted);
-  opacity: 0.75;
-}
-
-.statsTable table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.statsTable th,
-.statsTable td {
-  text-align: center;
-  padding: 4px 2px;
-  font-variant-numeric: tabular-nums;
-}
-
-.statsTable td { color: var(--text-primary); opacity: 0.6; }
-
-.statsTable th {
-  font-weight: 500;
-  color: var(--text-muted);
-  opacity: 0.7;
-  padding-bottom: 6px;
-}
-
-/* One hairline under the header only — a full grid would out-shout the board */
-.statsTable thead tr {
-  border-bottom: 1px solid var(--border-light);
-}
-
-.statsCaps { width: 26px; }
 
 /* The tilt itself is static and stays — it is the board's shape, not motion.
    What goes is anything that moves on its own. */
@@ -922,6 +1389,8 @@
   .popup,
   .playingLayout,
   .boardPlate,
+  .tokenSlot,
+  .tokenSlotStepping,
   .token,
   .tokenClickable,
   .tokenArriving,
@@ -931,6 +1400,9 @@
   .diceRolling,
   .gameOverCard,
   .gameOverOverlay,
+  .turnTrackFill,
+  .seatMeterFill,
+  .centreStatusText,
   .reconnecting {
     animation: none !important;
     transition: none !important;
@@ -997,9 +1469,11 @@
   color: var(--text-primary);
 }
 
+/* Fourth column for the score the placing was decided on — without it second
+   and third are an assertion the card never backs up. */
 .finishRow {
   display: grid;
-  grid-template-columns: 14px 9px 1fr;
+  grid-template-columns: 14px 9px 1fr auto;
   align-items: center;
   gap: 9px;
 }
@@ -1011,7 +1485,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+.finishScore {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .gameOverButtons {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 8px;
 }

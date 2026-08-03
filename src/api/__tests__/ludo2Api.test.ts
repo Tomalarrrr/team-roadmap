@@ -12,9 +12,11 @@ vi.mock('../../utils/fetchWithTimeout', () => ({
 import {
   makeMove,
   addBot,
+  removeBot,
   createGame,
   joinGame,
   startGame,
+  leaveGame,
   type Ludo2GameState,
 } from '../ludo2Api';
 import { deserializeRollStats } from '../../ludo2Board';
@@ -138,7 +140,7 @@ describe('makeMove', () => {
   });
 });
 
-describe('addBot', () => {
+describe('addBot / removeBot', () => {
   it('adds a bot to an empty slot before the game starts', async () => {
     fetchMock
       .mockResolvedValueOnce(
@@ -146,7 +148,7 @@ describe('addBot', () => {
       )
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    await addBot('GAME', 'green');
+    await addBot('GAME', 'green', 's-red');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(putBody.players.green.sessionId).toBe('bot-green');
@@ -155,9 +157,125 @@ describe('addBot', () => {
   it('does not write if the slot is already taken', async () => {
     fetchMock.mockResolvedValueOnce(res(baseState({ startedAt: null }), { etag: 'e1' }));
 
-    await addBot('GAME', 'green');
+    await addBot('GAME', 'green', 's-red');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses to seat a bot for anyone but the host', async () => {
+    // The lobby only offers the control to the host; this is the same rule
+    // somewhere a second tab or a stale client cannot talk its way around.
+    fetchMock.mockResolvedValueOnce(
+      res(baseState({ players: { red: { sessionId: 's-red', name: 'Red' } }, startedAt: null }), { etag: 'e1' })
+    );
+
+    await addBot('GAME', 'green', 's-green');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // aborted, no PUT
+  });
+
+  it('honours a stored host that is not red', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        res(
+          baseState({
+            players: { green: { sessionId: 's-green', name: 'Green' } },
+            host: 'green',
+            startedAt: null,
+          }),
+          { etag: 'e1' }
+        )
+      )
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await addBot('GAME', 'red', 's-green');
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).players.red.sessionId).toBe('bot-red');
+  });
+
+  it('removes a bot for the host and refuses to remove a human', async () => {
+    const withBot = baseState({
+      players: {
+        red: { sessionId: 's-red', name: 'Red' },
+        green: { sessionId: 'bot-green', name: 'Bot Green' },
+      },
+      startedAt: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(res(withBot, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await removeBot('GAME', 'green', 's-red');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).players.green).toBeUndefined();
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(res(baseState({ startedAt: null }), { etag: 'e2' }));
+    await removeBot('GAME', 'green', 's-red'); // green is a human here
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('leaveGame', () => {
+  it('empties the seat outright before the game starts', async () => {
+    const waiting = baseState({ startedAt: null });
+    fetchMock
+      .mockResolvedValueOnce(res(waiting, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await leaveGame('GAME', 's-green');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(putBody.players.green).toBeUndefined();
+    expect(putBody.players.red.sessionId).toBe('s-red');
+  });
+
+  it('leaves a bot behind mid-game so the rotation keeps turning', async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(baseState(), { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await leaveGame('GAME', 's-green');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(putBody.players.green.sessionId).toBe('bot-green');
+    expect(putBody.singlePlayer).toBe(true);
+  });
+
+  it('hands the host seat to a remaining human', async () => {
+    fetchMock
+      .mockResolvedValueOnce(res(baseState({ host: 'red' }), { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await leaveGame('GAME', 's-red');
+
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).host).toBe('green');
+  });
+
+  it('removes the room once the last human walks away', async () => {
+    const soloWithBot = baseState({
+      players: {
+        red: { sessionId: 's-red', name: 'Red' },
+        green: { sessionId: 'bot-green', name: 'Bot Green' },
+      },
+    });
+    fetchMock
+      .mockResolvedValueOnce(res(soloWithBot, { etag: 'e1' })) // txn GET
+      .mockResolvedValueOnce(res(null, { status: 200 })) // txn PUT
+      .mockResolvedValueOnce(res(null, { status: 200 })); // DELETE
+
+    await leaveGame('GAME', 's-red');
+
+    const del = fetchMock.mock.calls.find((c) => c[1]?.method === 'DELETE');
+    expect(del).toBeDefined();
+    expect(del![0]).toContain('/api/db/ludo2/GAME');
+  });
+
+  it('does nothing for someone who is not at the table', async () => {
+    fetchMock.mockResolvedValueOnce(res(baseState(), { etag: 'e1' }));
+
+    await leaveGame('GAME', 's-stranger');
+
+    expect(fetchMock).toHaveBeenCalledTimes(1); // aborted, no PUT
   });
 });
 
@@ -254,7 +372,7 @@ describe('startGame', () => {
 });
 
 describe('createGame', () => {
-  it('creates a 3-seat classic game with 36-char tokens', async () => {
+  it('creates a 3-seat classic game with 45-char tokens', async () => {
     fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
       if (!init || init.method === 'GET') return Promise.resolve(res(null, { etag: 'null_etag' }));
       return Promise.resolve(res(null, { status: 200 }));
@@ -270,7 +388,7 @@ describe('createGame', () => {
     expect(body.host).toBe(color);
     expect(body.players[color].sessionId).toBe('sess');
     expect(Object.keys(body.players)).toHaveLength(1);
-    expect(body.tokens).toHaveLength(36);
+    expect(body.tokens).toHaveLength(45);
     expect(body.playerCount).toBe(3);
     expect(body.rollStats.split('|')).toHaveLength(3);
     expect(firstPut?.[1].headers['if-match']).toBe('null_etag');

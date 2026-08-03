@@ -65,11 +65,12 @@ export const SearchFilter = memo(function SearchFilter({
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
-  // Hidden features (Ludo game, Cyclesite traffic-flow embed). Deliberately NOT
-  // openable via URL params: the only entry point is the secret search term
-  // below, which is gated on the vault being unlocked — so a locked viewer or
-  // read-only embed can never reach them, and the URL can't be shared around
-  // the lock.
+  // Hidden features (Ludo game, Cyclesite traffic-flow embed). Reached by the
+  // secret search term below, which is gated on the vault being unlocked — so a
+  // locked viewer or read-only embed can never reach them.
+  //
+  // The one exception is a Ludo 2 invite link, handled further down, and it sits
+  // behind the same unlock: a URL still cannot carry anyone around the lock.
   const [showLudo, setShowLudo] = useState(false);
   const [showLudo2, setShowLudo2] = useState(false);
   const [showCyclesite, setShowCyclesite] = useState(false);
@@ -124,6 +125,32 @@ export const SearchFilter = memo(function SearchFilter({
     }, 400);
     return () => clearTimeout(timer);
   }, [search, isLocked]);
+
+  // Ludo 2 invite links. The waiting room offers a "Copy Link" button that
+  // writes ?ludo2=CODE, but nothing ever read the parameter at this level — so
+  // the popup had to already be open for the link to do anything, which meant
+  // the recipient needed the secret word anyway and the link was inert.
+  //
+  // Gated on the unlock exactly like the magic word above: a locked viewer
+  // following one of these gets the roadmap and nothing else. Ludo2Game reads
+  // the code itself and strips it from the URL once it has joined.
+  //
+  // Derived rather than an effect that opens the popup: `isLocked` starts true
+  // and flips when the vault opens, so this has to be able to react to that,
+  // and reading the URL into state on a later render is a cascading render for
+  // something that is a pure function of the URL and the lock.
+  const inviteCode = useMemo(() => {
+    const code = new URLSearchParams(window.location.search).get('ludo2');
+    // Codes are four characters from a 32-char alphabet that includes digits
+    // (see generateGameCode) — a letters-only test would drop most of them.
+    return code && /^[a-z0-9]{4}$/i.test(code) ? code : null;
+  }, []);
+  const [inviteDismissed, setInviteDismissed] = useState(false);
+  const ludo2Open = showLudo2 || (!isLocked && inviteCode !== null && !inviteDismissed);
+  const closeLudo2 = useCallback(() => {
+    setShowLudo2(false);
+    setInviteDismissed(true);
+  }, []);
 
   // Compute search results as derived state (no effect needed)
   const { searchResults, totalResultCount } = useMemo(() => {
@@ -299,10 +326,10 @@ export const SearchFilter = memo(function SearchFilter({
         </GameErrorBoundary>,
         document.body
       )}
-      {showLudo2 && createPortal(
-        <GameErrorBoundary gameName="Ludo 2" onClose={() => setShowLudo2(false)}>
+      {ludo2Open && createPortal(
+        <GameErrorBoundary gameName="Ludo 2" onClose={closeLudo2}>
           <Suspense fallback={null}>
-            <Ludo2Game onClose={() => setShowLudo2(false)} isSearchOpen={isOpen} />
+            <Ludo2Game onClose={closeLudo2} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
         document.body
