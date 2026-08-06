@@ -356,8 +356,12 @@ describe('startGame', () => {
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(putBody.playerCount).toBe(2);
-    expect(putBody.players.red.sessionId).toBe('s-red');
-    expect(putBody.players.green.sessionId).toBe('s-blue');
+    // Both players end up on the first two colours, one each. *Which* of them
+    // takes red is a coin flip (see startGame) — the seats are not equivalent
+    // when only two of three arms are in play, so the favoured one is dealt at
+    // random rather than always going to whoever joined second.
+    expect([putBody.players.red.sessionId, putBody.players.green.sessionId].sort())
+      .toEqual(['s-blue', 's-red']);
     expect(putBody.players.blue).toBeUndefined();
     expect(putBody.singlePlayer).toBeUndefined();
     expect(['red', 'green']).toContain(putBody.currentTurn);
@@ -398,8 +402,10 @@ describe('startGame', () => {
     await startGame('GAME', 's-blue');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(putBody.host).toBe('green');
-    expect(putBody.players.green.sessionId).toBe('s-blue');
+    // Wherever the shuffle put them, the host field points at the seat their
+    // session actually holds — following them by colour instead would leave it
+    // pointing at whoever landed on the colour they used to have.
+    expect(putBody.players[putBody.host].sessionId).toBe('s-blue');
   });
 
   it('re-keys a bot onto the seat it slid into', async () => {
@@ -417,8 +423,45 @@ describe('startGame', () => {
     await startGame('GAME', 's-red');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(putBody.players.green).toEqual({ sessionId: 'bot-green', name: 'Bot Green' });
+    // A bot carries its seat in both its id and its name, so whichever colour
+    // the shuffle deals it has to be re-keyed to match — slid across untouched,
+    // a green chair spends the game labelled "Bot Blue" beside a green dot.
+    const botSeat = Object.keys(putBody.players).find(
+      (c) => putBody.players[c].sessionId.startsWith('bot-')
+    );
+    expect(botSeat).toBeDefined();
+    expect(putBody.players[botSeat!]).toEqual({
+      sessionId: `bot-${botSeat}`,
+      name: `Bot ${botSeat![0].toUpperCase()}${botSeat!.slice(1)}`,
+    });
     expect(putBody.singlePlayer).toBe(true);
+  });
+
+  /* The seats are not equivalent when fewer people play than the board has
+     arms, so which player gets the favoured one has to be a coin flip. Board
+     order made it the joiner's two games in three: the creator draws a colour
+     at random and the joiner takes the first free one, so the joiner was on the
+     first colour whenever the creator had not drawn it. */
+  it('deals the seats at random, not in board order', async () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(res(baseState({
+          players: {
+            red: { sessionId: 's-red', name: 'Red' },
+            green: { sessionId: 's-green', name: 'Green' },
+          },
+          startedAt: null,
+        }), { etag: 'e1' }))
+        .mockResolvedValueOnce(res(null, { status: 200 }));
+      await startGame('GAME', 's-red');
+      const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+      seen.add(putBody.players.red.sessionId);
+    }
+    // Both players land on red across 60 starts. A board-order slide would only
+    // ever produce one of these (odds of a fair deal failing this: 2^-59).
+    expect([...seen].sort()).toEqual(['s-green', 's-red']);
   });
 
   it('refuses to start with fewer than 2 players', async () => {

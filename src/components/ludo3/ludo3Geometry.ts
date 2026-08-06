@@ -1,8 +1,7 @@
-// Ludo2 circular-board geometry.
+// Ludo3 circular-board geometry.
 //
-// The rules were always played on a 42-cell *ring* (3 players × 14) — the
-// Y-board was only one way of drawing it. This lays the same 42 cells out as
-// the ring they actually are, so nothing in ludo2GameLogic changes.
+// The same ring as Ludo4's, one seat narrower: 42 track cells (3 players × 14)
+// laid out as the ring they are, so nothing in ludo3GameLogic changes.
 //
 //   track  t = 1..42   one full turn of the ring, one step = 360/42
 //   final  f = 1..5    a radial spoke running from the ring into the centre
@@ -14,6 +13,15 @@
 // one round, so a piece deploys just ahead of its own yard. Everything is
 // polar: degrees, and radius in % of the square container, with 0° pointing
 // down the screen so the plate can turn a player's own colour to face them.
+//
+// Like Ludo4 the board is drawn flat — no bore, no bridges, no moulding — so
+// this module carries only positions and sizes, not lighting.
+//
+// Three arms rather than four is not just one fewer wedge: 42 cells on the same
+// ring sit 5.86% apart instead of 4.40%, so every cell, counter and bay here is
+// drawn a little larger than Ludo4's. The centre pays for that — five run-home
+// cells stepping inward from the ring leave a smaller hub — so the hub is 12.3
+// against Ludo4's 13.4, and the die and status line in it are sized to match.
 
 import type { TokenPosition } from '../../ludoFirebase';
 import {
@@ -24,71 +32,113 @@ import {
   ENTRY_CELLS,
   PLAYER_COLORS,
   getTokenColor,
-  type Ludo2Color,
-} from '../../ludo2Board';
+  type Ludo3Color,
+} from '../../ludo3Board';
 
 /** Degrees between neighbouring track cells. */
 export const STEP_DEG = 360 / TRACK_SIZE;
 
 /** Radius of the track ring, to tile centres. */
 export const R_RING = 39.2;
-/** The raised band the track sits in. It hugs the tiles: a band much wider than
- * what it holds reads as a blank moat, not as a track. */
-export const RING_OUTER = 42.6;
-export const RING_INNER = 35.8;
 
-/** Track tile. Arc spacing at R_RING is 2πR/42 ≈ 5.86, so 5.0 leaves a gap. */
-export const CELL_PCT = 5.0;
-/** A piece. Sized against a ring tile's *inner* edge, not its width: the tiles
- * are arc segments, so a counter cut to the outer edge overhangs the narrow
- * end and covers the rim of the cell it is standing on. */
-export const TOKEN_PCT = 4.1;
+/** Track tile. Arc spacing at R_RING is 2πR/42 ≈ 5.86; 4.30 leaves a clear gap
+ * between tiles without letting them float apart. Larger than Ludo4's 3.95
+ * because the pitch is larger — the track is the board's main subject, and tile
+ * weight is a large part of what says so — but not the full pitch: the five
+ * run-home cells are drawn in this same size and have to fit inside the ring
+ * with a hub left over. */
+export const CELL_PCT = 4.3;
+/** A piece — sized against a cell in the same ratio as Ludo4's counters, so a
+ * counter covers its cell without burying the cell's own border. */
+export const TOKEN_PCT = 3.55;
+
+/** The band the track sits in: a flat toned annulus hugging the ring of cells.
+ * The tiles are the whitest thing on the board and the band is what makes them
+ * so. Cell half-width plus a little air each side. */
+export const TRACK_BAND = { inner: 36.3, outer: 42.1 };
 
 /** The run home is drawn in the same square cells as the ring: five of them
- * stepping inward on the colour's bearing. Long thin bars sitting in a washed
- * channel read as a different kind of object; the run home is just the track
- * turning a corner, so it is drawn as track. Everything downstream is sized off
- * that one decision — five squares plus the hub have to fit inside the ring. */
+ * stepping inward on the colour's bearing, solid seat colour like the classic
+ * board's corridors. Five squares plus the hub have to fit inside the ring. */
 export const SPOKE_CELL = CELL_PCT;
-const R_SPOKE_OUT = 32.3;
-const SPOKE_STEP = 5.2;
+const R_SPOKE_OUT = 33.1;
+const SPOKE_STEP = 4.6;
 
-/** The hub the three runs home land on. Whatever the five cells leave: no
- * counter ever stands here, so it only has to carry the mark. */
-export const HUB = { x: 50, y: 50, r: 7.6 };
-
-/** The board is cut away inside the track. What is left is a ring, a hub island
- * floating at its centre, and three bridges carrying the runs home across the
- * gap — which is what the runs home always were. */
-export const APERTURE = RING_INNER;
-
-/** A bridge deck: wider than the cells it carries, and long enough to land on
- * the ring at one end and tuck under the hub at the other. A deck that stops
- * short of either is not a bridge, it is a plank lying in a hole. */
-export const BRIDGE_W = SPOKE_CELL + 1.9;
-/** Both ends run well past what you see of them, because both are drawn *under*
- * the thing they land on — the ring band at one end, the hub island at the
- * other. A deck that stopped at the edge of the bore would put its own straight
- * end across the band's curve, and a straight cut across an arc is the ugliest
- * join on a round board. Let the arc do the cutting. */
-const BRIDGE_OUT = APERTURE + 2.6;
-const BRIDGE_IN = HUB.r - 1.6;
-export const BRIDGE_LEN = BRIDGE_OUT - BRIDGE_IN;
+/** The hub the three runs home point at. No counter ever stands here — it holds
+ * the die, the status line and the turn ring. Whatever the five run-home cells
+ * leave: R_SPOKE_OUT − 4·SPOKE_STEP is the innermost cell's centre, and this
+ * clears its inner edge by a hair. Everything the player reads mid-turn lives
+ * at the centre, so nothing else may grow at its expense. */
+export const HUB = { x: 50, y: 50, r: 12.3 };
 
 /** The yard: one bay per counter, in a shallow arc on the apron *outside* the
  * track, centred on the colour's own bearing. Off the ring entirely — a yard
  * drawn across the track buries that colour's entry and start cells, which are
- * the two cells its owner most needs to see. Bays rather than loose sockets,
- * because five circles adrift on an apron read as five stray marks. */
+ * the two cells its owner most needs to see. */
 const R_BASE = 45.9;
-/** A bay is a track cell's twin, so a piece looks the same size everywhere. */
-export const BASE_BAY_PCT = CELL_PCT;
+/** A bay, drawn a little wider than a track cell.
+ *
+ * A piece is the same size everywhere — what changes is what it stands in. A
+ * track cell is a square, so a round counter has the corners to breathe into
+ * and the flats read as clearance. A bay is a *ring*, concentric with the
+ * counter all the way round, so the only clearance it has is the difference in
+ * radius — and at a cell's width that came to half a device pixel, which the
+ * renderer then rounded to one pixel on one side and none on the other. The
+ * counters were dead centre; the sockets just looked like they were not.
+ *
+ * Sized so the white between counter and ring survives rounding at any board
+ * size: BASE_BAY_PCT − 2·BASE_RING_PCT − TOKEN_PCT is a clear 0.29 of the
+ * board, a couple of pixels at a normal popup. */
+export const BASE_BAY_PCT = CELL_PCT + 0.35;
+
+/** The socket ring's own thickness, in board %. Kept in step with the
+ * `box-shadow` inset on `.baseBay` in Ludo3Game.module.css — the test suite
+ * reads the stylesheet and checks the two agree, because the clearance above is
+ * only correct if they do. */
+export const BASE_RING_PCT = 0.26;
 /** Degrees between neighbouring bays: one bay plus a hair, at R_BASE. */
-const BASE_SPOT_STEP = 7.4;
+const BASE_SPOT_STEP = 6.3;
 /** Half the yard's angular span, sockets included. */
 export const BASE_ARC_DEG = ((TOKENS_PER_PLAYER - 1) / 2) * BASE_SPOT_STEP;
 
-export const ARM_ANGLE: Record<Ludo2Color, number> = { red: 0, green: 120, yellow: 240 };
+export const ARM_ANGLE: Record<Ludo3Color, number> = {
+  red: 0, green: 120, blue: 240,
+};
+
+// --- The rim ----------------------------------------------------------------
+// The board's silhouette is not a circle: the rim dips in between the arms and
+// swells back out around each yard, so the shape itself houses the counters.
+// One smooth three-lobed curve, r(θ) = mid + amp·cos(3θ) — its period is 120°,
+// so it is invariant under the plate's third-turns and never needs to spin.
+
+/** Rim radius between arms (the dip) and over each yard (the swell). */
+export const RIM_DIP = 45.4;
+export const RIM_BULGE = 49.6;
+
+/** Rim radius at a board bearing, in % of the container. */
+export function rimRadiusAt(bearingDeg: number): number {
+  const mid = (RIM_DIP + RIM_BULGE) / 2;
+  const amp = (RIM_BULGE - RIM_DIP) / 2;
+  return mid + amp * Math.cos((3 * bearingDeg * Math.PI) / 180);
+}
+
+/** The rim as points, dense enough (2.5° steps) that the polyline reads as a
+ * continuous curve at any board size. */
+const RIM_POINTS: [number, number][] = Array.from({ length: 144 }, (_, i) => {
+  const b = (i * 360) / 144;
+  const r = rimRadiusAt(b);
+  const a = (b * Math.PI) / 180;
+  return [50 - r * Math.sin(a), 50 + r * Math.cos(a)];
+});
+
+/** SVG path for the rim, in the board's 0–100 viewBox. */
+export const RIM_OUTLINE_PATH =
+  `M ${RIM_POINTS.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(' L ')} Z`;
+
+/** The same outline as a CSS clip-path, for layers (the apron wash) that have
+ * to stop at the rim rather than run on to the old circle. */
+export const RIM_CLIP_PATH =
+  `polygon(${RIM_POINTS.map(([x, y]) => `${x.toFixed(2)}% ${y.toFixed(2)}%`).join(', ')})`;
 
 export interface CellSpec {
   x: number;
@@ -109,15 +159,15 @@ function polar(angleDeg: number, radius: number): CellSpec {
 
 /** Bearing of track cell `t`.
  *
- * No offset is applied, and none is needed: with ENTRY_CELLS at start − 1, every
- * entry cell is a multiple of 14 (42, 14, 28) and so lands exactly on 0°, 120°,
- * 240° — its own colour's bearing, and the foot of the bridge that cell is for.
- * Its start cell is then the next one round, which is why the haven you come out
- * on sits at the foot of your own run home.
+ * No offset is applied, and none is needed: with ENTRY_CELLS at start − 1,
+ * every entry cell is a multiple of 14 (42, 14, 28) and so lands exactly on 0°,
+ * 120°, 240° — its own colour's bearing, and the foot of the spoke that cell
+ * is for. Its start cell is then the next one round, which is why the haven you
+ * come out on sits at the foot of your own run home.
  *
- * That alignment is a consequence of ENTRY_CELLS, not of anything here. Move the
- * entry cells off start − 1 and the bridges land between tiles: this function
- * needs the matching offset back. */
+ * That alignment is a consequence of ENTRY_CELLS, not of anything here. Move
+ * the entry cells off start − 1 and the spokes land between tiles: this
+ * function needs the matching offset back. */
 export function trackAngle(t: number): number {
   return t * STEP_DEG;
 }
@@ -126,12 +176,12 @@ export function trackCellSpec(t: number): CellSpec {
   return polar(trackAngle(t), R_RING);
 }
 
-export function finalCellSpec(color: Ludo2Color, f: number): CellSpec {
+export function finalCellSpec(color: Ludo3Color, f: number): CellSpec {
   return polar(ARM_ANGLE[color], R_SPOKE_OUT - (f - 1) * SPOKE_STEP);
 }
 
 /** The bays spread along the apron arc, centred on the colour's bearing. */
-export function baseSpotSpec(color: Ludo2Color, i: number): CellSpec {
+export function baseSpotSpec(color: Ludo3Color, i: number): CellSpec {
   return polar(ARM_ANGLE[color] + (i - (TOKENS_PER_PLAYER - 1) / 2) * BASE_SPOT_STEP, R_BASE);
 }
 
@@ -144,10 +194,9 @@ for (let t = 1; t <= TRACK_SIZE; t++) {
 }
 
 /** The run home, cell by cell. There is no pile beyond it: a counter is home
- * once it stands in a cell of its own, so the hub is the thing the bridges land
- * on rather than a tray that counters end up in. */
-export const FINAL_XY: Record<Ludo2Color, [number, number][]> = {
-  red: [], green: [], yellow: [],
+ * once it stands in a cell of its own, so the hub only carries the die. */
+export const FINAL_XY: Record<Ludo3Color, [number, number][]> = {
+  red: [], green: [], blue: [],
 };
 for (const color of PLAYER_COLORS) {
   for (let f = 1; f <= FINAL_SIZE; f++) {
@@ -156,11 +205,11 @@ for (const color of PLAYER_COLORS) {
   }
 }
 
-export const BASE_SPEC: Record<Ludo2Color, CellSpec[]> = {
-  red: [], green: [], yellow: [],
+export const BASE_SPEC: Record<Ludo3Color, CellSpec[]> = {
+  red: [], green: [], blue: [],
 };
-export const BASE_XY: Record<Ludo2Color, [number, number][]> = {
-  red: [], green: [], yellow: [],
+export const BASE_XY: Record<Ludo3Color, [number, number][]> = {
+  red: [], green: [], blue: [],
 };
 for (const color of PLAYER_COLORS) {
   for (let i = 0; i < TOKENS_PER_PLAYER; i++) {
@@ -170,17 +219,11 @@ for (const color of PLAYER_COLORS) {
   }
 }
 
-export const BRIDGE_RECT: Record<Ludo2Color, CellSpec> = {
-  red: polar(ARM_ANGLE.red, (BRIDGE_IN + BRIDGE_OUT) / 2),
-  green: polar(ARM_ANGLE.green, (BRIDGE_IN + BRIDGE_OUT) / 2),
-  yellow: polar(ARM_ANGLE.yellow, (BRIDGE_IN + BRIDGE_OUT) / 2),
-};
-
 /** Midpoint of each colour's yard arc — where its label or tint is anchored. */
-export const BASE_CENTRE: Record<Ludo2Color, CellSpec> = {
+export const BASE_CENTRE: Record<Ludo3Color, CellSpec> = {
   red: polar(ARM_ANGLE.red, R_BASE),
   green: polar(ARM_ANGLE.green, R_BASE),
-  yellow: polar(ARM_ANGLE.yellow, R_BASE),
+  blue: polar(ARM_ANGLE.blue, R_BASE),
 };
 
 // --- Token positioning (all coords are cell CENTRES in % of the board) ------
@@ -202,17 +245,16 @@ export function getTokenCoords(pos: TokenPosition, tokenIndex: number): [number,
   return null;
 }
 
-/** Jitter co-located pieces into quadrants so stacks stay readable. A run-home
- * cell only ever holds one counter, so this only fires out on the track — where
- * a whole yard of five can pile onto one cell, hence the fifth slot in the
- * middle: four quadrants and modulo would draw two of them on top of each
- * other, which is the one thing the jitter exists to prevent.
+/** Jitter co-located pieces into quadrants so stacks stay readable, with the
+ * fifth slot in the middle — four quadrants and modulo would draw two of a full
+ * yard's five on top of each other, the one thing the jitter exists to prevent.
+ * A run-home cell only ever holds one counter (exact landing), so this only
+ * fires out on the track.
  *
  * Sharing a *position* is not the same as sharing a *cell*. Track cells are one
  * ring every colour walks, so `track-17` is one place; a run home belongs to its
- * colour, so `final-3` is three different places and only counters of the same
- * colour are actually stacked. Matching on the string alone nudged a red counter
- * and a green one off-centre in run-home cells neither was sharing. */
+ * colour, so `final-3` is three different places. Matching on the string alone
+ * would nudge counters off-centre in run-home cells they are not sharing. */
 export function getTokenOffset(tokens: TokenPosition[], tokenIndex: number): [number, number] {
   const pos = tokens[tokenIndex];
   if (pos === 'base') return [0, 0];
@@ -240,7 +282,7 @@ export function getTokenOffset(tokens: TokenPosition[], tokenIndex: number): [nu
 export function computeMovePath(
   from: TokenPosition,
   to: TokenPosition,
-  color: Ludo2Color
+  color: Ludo3Color
 ): [number, number][] {
   if (to === 'base') return [];
 

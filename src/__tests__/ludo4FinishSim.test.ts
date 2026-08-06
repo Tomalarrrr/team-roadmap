@@ -4,7 +4,7 @@
 // The run-home rule asks for an exact landing on an empty cell, so a counter
 // that cannot land waits out on the ring where it can be sent back to the yard.
 // That is the point of the rule, not a fault in it, and this file keeps the
-// difference measurable on the four-seat board the same way ludo2FinishSim does
+// difference measurable on the four-seat board the same way ludo3FinishSim does
 // on the three-seat one — because the rule was once reverted on the belief that
 // it left "the endgame mostly turns with no legal move".
 
@@ -150,7 +150,7 @@ describe('ludo4 run home: full-game simulation', () => {
   });
 
   it('games stay a sane length', () => {
-    // A fourth seat and a longer ring make these games longer than Ludo2's;
+    // A fourth seat and a longer ring make these games longer than Ludo3's;
     // the bounds are set off the measured distribution, wide enough to hold
     // under any seed but tight enough to catch a stalled rotation.
     const turns = results.map(r => r.turns).sort((a, b) => a - b);

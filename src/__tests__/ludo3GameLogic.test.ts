@@ -12,7 +12,7 @@ import {
   findNextActivePlayer,
   getNextTurn,
   scoreBotMove,
-} from '../ludo2GameLogic';
+} from '../ludo3GameLogic';
 import {
   SAFE_ZONES,
   TRACK_SIZE,
@@ -26,7 +26,7 @@ import {
   getStandings,
   describePosition,
   getOccupiedFinals,
-  deserializeLudo2Tokens,
+  deserializeLudo3Tokens,
   initRollStats,
   deserializeRollStats,
   recordRoll,
@@ -34,14 +34,14 @@ import {
   serializeRollStats,
   mergeRollStats,
   INITIAL_TOKENS,
-} from '../ludo2Board';
+} from '../ludo3Board';
 import { deserializeTokens, serializeTokens } from '../ludoFirebase';
 import type { TokenPosition } from '../ludoFirebase';
 
 // Board: 42-cell track, 3 arms × 14. Starts at 1, 15, 29; each colour turns off
 // for its run home on the cell before its own start.
 // Safe zones: 1, 7, 15, 21, 29, 35
-// Token indices: red 0-4, green 5-9, yellow 10-14
+// Token indices: red 0-4, green 5-9, blue 10-14
 // Run home: five cells per colour, one counter each, landed on exactly.
 //
 // Cell numbers are derived from START_POSITIONS/ENTRY_CELLS rather than written
@@ -58,11 +58,11 @@ function tokensWith(overrides: Record<number, TokenPosition>): TokenPosition[] {
 }
 
 /** calculateNewPosition against an otherwise-empty board. */
-function calc(from: TokenPosition, steps: number, color: 'red' | 'green' | 'yellow') {
+function calc(from: TokenPosition, steps: number, color: 'red' | 'green' | 'blue') {
   return calculateNewPosition(from, steps, color, BASE_TOKENS);
 }
 
-type Seat = 'red' | 'green' | 'yellow';
+type Seat = 'red' | 'green' | 'blue';
 
 /** The cell `n` steps back round the ring from `cell` (1-based, wrapping). */
 function cellBefore(cell: number, n: number): number {
@@ -85,13 +85,13 @@ describe('board constants', () => {
     // notion of laps, so a counter standing on its entry goes home on its next
     // move. Put the entry *on* the start and a counter would come out of the
     // yard and turn straight for home without ever travelling the ring.
-    for (const color of ['red', 'green', 'yellow'] as const) {
+    for (const color of ['red', 'green', 'blue'] as const) {
       expect(ENTRY_CELLS[color]).toBe(cellBefore(START_POSITIONS[color], 1));
     }
   });
 
   it('gives every colour the same distance to run', () => {
-    for (const color of ['red', 'green', 'yellow'] as const) {
+    for (const color of ['red', 'green', 'blue'] as const) {
       const start = START_POSITIONS[color];
       const entry = ENTRY_CELLS[color];
       const lap = entry >= start ? entry - start : TRACK_SIZE - start + entry;
@@ -143,7 +143,7 @@ describe('board constants', () => {
 
   it('pads a short token string from an older client', () => {
     const legacy = 'bas'.repeat(12);
-    const padded = deserializeLudo2Tokens(legacy);
+    const padded = deserializeLudo3Tokens(legacy);
     expect(padded).toHaveLength(TOTAL_TOKENS);
     expect(padded.every(p => p === 'base')).toBe(true);
   });
@@ -152,7 +152,7 @@ describe('board constants', () => {
     const t = tokensWith({ 0: 'final-2', 3: 'final-5', 5: 'final-1' });
     expect(getOccupiedFinals(t, 'red')).toEqual(new Set([2, 5]));
     expect(getOccupiedFinals(t, 'green')).toEqual(new Set([1]));
-    expect(getOccupiedFinals(t, 'yellow')).toEqual(new Set());
+    expect(getOccupiedFinals(t, 'blue')).toEqual(new Set());
   });
 });
 
@@ -166,7 +166,7 @@ describe('calculateNewPosition', () => {
   });
 
   it('takes the last cell exactly', () => {
-    expect(calc('final-3', 2, 'yellow')).toBe('final-5');
+    expect(calc('final-3', 2, 'blue')).toBe('final-5');
   });
 
   it('rejects overshoot past the last cell', () => {
@@ -189,8 +189,8 @@ describe('calculateNewPosition', () => {
     expect(calc(atEntry('green'), 2, 'green')).toBe('final-2');
   });
 
-  it('enters yellow’s run home from yellow’s entry', () => {
-    expect(calc(atEntry('yellow'), 1, 'yellow')).toBe('final-1');
+  it('enters blue’s run home from blue’s entry', () => {
+    expect(calc(atEntry('blue'), 1, 'blue')).toBe('final-1');
   });
 
   it('moves forward on track', () => {
@@ -216,10 +216,10 @@ describe('calculateNewPosition', () => {
   });
 
   it('non-owner passes over another color entry cell', () => {
-    // Yellow steps over red's turning without being offered it.
+    // Blue steps over red's turning without being offered it.
     const from = beforeEntry('red', 1);
     const landing = cellBefore(ENTRY_CELLS.red, -2); // two cells past red's entry
-    expect(calc(from, 3, 'yellow')).toBe(`track-${landing}`);
+    expect(calc(from, 3, 'blue')).toBe(`track-${landing}`);
   });
 
   // --- The exact-landing rule ---
@@ -261,9 +261,9 @@ describe('getValidMoves', () => {
     expect(moves.every(m => m.newPosition === 'track-1')).toBe(true);
   });
 
-  it('deploys green to track-15 and yellow to track-29', () => {
+  it('deploys green to track-15 and blue to track-29', () => {
     expect(getValidMoves(BASE_TOKENS, 'green', 6)[0].newPosition).toBe('track-15');
-    expect(getValidMoves(BASE_TOKENS, 'yellow', 6)[0].newPosition).toBe('track-29');
+    expect(getValidMoves(BASE_TOKENS, 'blue', 6)[0].newPosition).toBe('track-29');
   });
 
   it('skips counters that are already home and cannot go further', () => {
@@ -290,7 +290,7 @@ describe('getValidMoves', () => {
 
   it('only returns moves for the given color', () => {
     const t = tokensWith({ 0: 'track-3', 5: 'track-16', 10: 'track-30' });
-    const moves = getValidMoves(t, 'yellow', 2);
+    const moves = getValidMoves(t, 'blue', 2);
     expect(moves).toEqual([{ tokenIndex: 10, newPosition: 'track-32' }]);
   });
 });
@@ -443,10 +443,10 @@ describe('getStandings', () => {
     const t = tokensWith({
       0: 'final-1', 1: 'final-2', 2: 'final-3', 3: 'final-4', 4: 'final-5',
       5: 'track-16',   // green: barely out
-      10: 'track-40',  // yellow: most of a lap in
+      10: 'track-40',  // blue: most of a lap in
     });
     const standings = getStandings(t, 3, ['red']);
-    expect(standings.map(s => s.color)).toEqual(['red', 'yellow', 'green']);
+    expect(standings.map(s => s.color)).toEqual(['red', 'blue', 'green']);
     expect(standings[0].finished).toBe(true);
     expect(standings[1].finished).toBe(false);
   });
@@ -458,13 +458,13 @@ describe('getStandings', () => {
 
   it('breaks ties by seat order so every client agrees', () => {
     const standings = getStandings(BASE_TOKENS, 3, []);
-    expect(standings.map(s => s.color)).toEqual(['red', 'green', 'yellow']);
+    expect(standings.map(s => s.color)).toEqual(['red', 'green', 'blue']);
     expect(standings.every(s => s.score === 0)).toBe(true);
   });
 
   it('ignores a finish order naming a seat that is not playing', () => {
     const t = tokensWith({ 0: 'track-3' });
-    expect(getStandings(t, 2, ['yellow']).map(s => s.color)).toEqual(['red', 'green']);
+    expect(getStandings(t, 2, ['blue']).map(s => s.color)).toEqual(['red', 'green']);
   });
 });
 
@@ -547,16 +547,16 @@ describe('checkPlayerFinished / getFinishedColors', () => {
     const t = tokensWith({
       10: 'final-1', 11: 'final-2', 12: 'final-3', 13: 'final-4', 14: 'final-5',
     });
-    expect(getFinishedColors(t, 3)).toEqual(new Set(['yellow']));
+    expect(getFinishedColors(t, 3)).toEqual(new Set(['blue']));
     expect(getFinishedColors(t, 2)).toEqual(new Set());
   });
 });
 
 describe('findNextActivePlayer', () => {
-  it('rotates red → green → yellow → red with 3 players', () => {
+  it('rotates red → green → blue → red with 3 players', () => {
     expect(findNextActivePlayer('red', 3, new Set())).toBe('green');
-    expect(findNextActivePlayer('green', 3, new Set())).toBe('yellow');
-    expect(findNextActivePlayer('yellow', 3, new Set())).toBe('red');
+    expect(findNextActivePlayer('green', 3, new Set())).toBe('blue');
+    expect(findNextActivePlayer('blue', 3, new Set())).toBe('red');
   });
 
   it('rotates red → green → red with 2 players', () => {
@@ -565,12 +565,12 @@ describe('findNextActivePlayer', () => {
   });
 
   it('skips finished players', () => {
-    expect(findNextActivePlayer('red', 3, new Set(['green']))).toBe('yellow');
+    expect(findNextActivePlayer('red', 3, new Set(['green']))).toBe('blue');
   });
 });
 
 describe('getNextTurn', () => {
-  const none = new Set<never>() as Set<'red' | 'green' | 'yellow'>;
+  const none = new Set<never>() as Set<'red' | 'green' | 'blue'>;
 
   it('advances on a normal roll', () => {
     expect(getNextTurn('red', 3, 0, false, false, 3, none))
@@ -593,8 +593,8 @@ describe('getNextTurn', () => {
   });
 
   it('bonus turn on reaching home', () => {
-    expect(getNextTurn('yellow', 2, 0, false, true, 3, none))
-      .toEqual({ nextColor: 'yellow', nextSixes: 0 });
+    expect(getNextTurn('blue', 2, 0, false, true, 3, none))
+      .toEqual({ nextColor: 'blue', nextSixes: 0 });
   });
 
   it('always advances when the player just finished', () => {
@@ -657,15 +657,15 @@ describe('getPlayerScore', () => {
   });
 
   it('scores track distance from own start', () => {
-    // Yellow start=29; track-31 → distance 2
+    // Blue start=29; track-31 → distance 2
     const t = tokensWith({ 10: 'track-31' });
-    expect(getPlayerScore(t, 'yellow')).toBe(2);
+    expect(getPlayerScore(t, 'blue')).toBe(2);
   });
 
   it('wraps distance across the seam', () => {
-    // Yellow start=29; track-2 → (42-29)+2 = 15
+    // Blue start=29; track-2 → (42-29)+2 = 15
     const t = tokensWith({ 10: 'track-2' });
-    expect(getPlayerScore(t, 'yellow')).toBe(15);
+    expect(getPlayerScore(t, 'blue')).toBe(15);
   });
 });
 

@@ -1,7 +1,7 @@
-/* Ludo4 — circular-board styling, drawn flat. The layout is Ludo3's circle one
-   seat wider — a 56-cell ring, four run-home spokes, yards on the apron, the
-   die in the hub, seat cards in the corners — but the look is Ludo v1's: flat
-   white cells with
+/* Ludo3 — circular-board styling, drawn flat. The layout is Ludo4's circle
+   with one arm taken off — a 42-cell ring, three run-home spokes, yards on the
+   apron, the die in the hub, seat cards in three of the four corners — and the
+   look is Ludo v1's: flat white cells with
    hairline borders, solid-colour start cells and corridors, glossy counters.
    Deliberately 2D: no tilt, no lighting model, no moulded shadows. Radii inside
    the board use cq units so every detail scales with a resized popup. */
@@ -466,7 +466,7 @@
   /* The die's size, declared here rather than on .dice: the status line under
      it has to be positioned off the same number, and two copies of it would
      drift the first time one was tuned. */
-  --die: clamp(42px, calc(var(--stage) * 0.098), 72px);
+  --die: clamp(38px, calc(var(--stage) * 0.090), 66px);
   position: relative;
   flex: 1;
   min-width: 0;
@@ -500,7 +500,7 @@
    is the board's shape — a second circle drawn around them read as a border on
    a border. The disc itself stays as the press surface and the white ground. */
 /* The plate. Its shape comes from the SVG path it holds (see RIM_OUTLINE_PATH
-   in ludo4Geometry): a dip between arms, a swell around each yard. The stroke
+   in ludo3Geometry): a dip between arms, a swell around each yard. The stroke
    is deliberately lighter than the cells' #ccc — it is a moulded edge being
    traced, not a border being drawn. */
 .disc {
@@ -539,33 +539,35 @@
   transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
 }
 
-/* Territory: v1's four colour blocks, bent around the ring. A conic gradient
-   with a quadrant per seat — red centred on bearing 0 (CSS conic 180°, the
-   bottom), then 90° steps — masked to the apron outside the track so the wash
-   never touches the cells, corridors or the open middle, and clipped (inline)
-   to the sculpted rim. Each seam blends over 24° rather than cutting: the
-   boundaries fall exactly in the rim's dips, so soft colour meets soft colour
-   in the pinch of the curve. Yellow runs a touch stronger because it is the
-   lightest of the four and vanished at the others' strength. */
+/* Territory: v1's colour blocks, bent around the ring. A conic gradient with a
+   third per seat — red centred on bearing 0 (CSS conic 180°, the bottom), then
+   120° steps — masked to the apron outside the track so the wash never touches
+   the cells, corridors or the open middle, and clipped (inline) to the
+   sculpted rim. Each seam blends over 16° rather than cutting: the boundaries
+   fall exactly in the rim's dips, so soft colour meets soft colour in the pinch
+   of the curve. */
 .apronWash {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  /* Three 120° wedges. 0deg of the cone is twelve o'clock and board bearing 0
+     points down, so a seat at bearing b owns the cone from 180 + b: starting
+     the cone at 120deg puts red's wedge first and each seat's wash under its
+     own arm. */
   background: conic-gradient(
-    from 135deg,
-    rgba(234, 67, 48, 0.06) 0deg 78deg,
-    rgba(52, 168, 83, 0.06) 102deg 168deg,
-    rgba(251, 188, 5, 0.09) 192deg 258deg,
-    rgba(66, 133, 244, 0.06) 282deg 348deg,
+    from 120deg,
+    rgba(234, 67, 48, 0.06) 0deg 104deg,
+    rgba(52, 168, 83, 0.06) 120deg 224deg,
+    rgba(66, 133, 244, 0.06) 240deg 344deg,
     rgba(234, 67, 48, 0.06) 360deg
   );
   /* From the track band's outer edge (see .trackBand) to the rim. */
-  -webkit-mask: radial-gradient(closest-side, transparent 0 83.8%, #000 83.8%);
-  mask: radial-gradient(closest-side, transparent 0 83.8%, #000 83.8%);
+  -webkit-mask: radial-gradient(closest-side, transparent 0 84.2%, #000 84.2%);
+  mask: radial-gradient(closest-side, transparent 0 84.2%, #000 84.2%);
 }
 
 /* Whose turn it is, on the board itself: a short arc at the rim of the active
-   seat's arm. One element rotated to the seat rather than four toggled, so the
+   seat's arm. One element rotated to the seat rather than three toggled, so the
    turn passing reads as the tick sweeping round the rim to the next player. */
 .rimTick {
   position: absolute;
@@ -782,7 +784,6 @@
 
 .tokenRed { background: radial-gradient(circle at 35% 35%, #ff6659 0%, #ea4330 40%, #c62828 100%); }
 .tokenGreen { background: radial-gradient(circle at 35% 35%, #66bb6a 0%, #34a853 40%, #1b5e20 100%); }
-.tokenYellow { background: radial-gradient(circle at 35% 35%, #ffe082 0%, #fbbc05 40%, #f57f17 100%); }
 .tokenBlue { background: radial-gradient(circle at 35% 35%, #64b5f6 0%, #4285f4 40%, #0d47a1 100%); }
 
 /* A movable counter lights up (v1's glow) and breathes — the two cues the user
@@ -797,19 +798,17 @@
 
 .tokenClickable.tokenRed { box-shadow: 0 0 14px 6px rgba(234, 67, 48, 0.6), 0 1px 3px rgba(var(--shadow-rgb), 0.25); }
 .tokenClickable.tokenGreen { box-shadow: 0 0 14px 6px rgba(52, 168, 83, 0.6), 0 1px 3px rgba(var(--shadow-rgb), 0.25); }
-.tokenClickable.tokenYellow { box-shadow: 0 0 14px 6px rgba(251, 188, 5, 0.6), 0 1px 3px rgba(var(--shadow-rgb), 0.25); }
 .tokenClickable.tokenBlue { box-shadow: 0 0 14px 6px rgba(66, 133, 244, 0.6), 0 1px 3px rgba(var(--shadow-rgb), 0.25); }
 
 .tokenClickable:hover { filter: brightness(1.08); }
 
 .tokenClickable.tokenRed:hover { box-shadow: 0 0 18px 8px rgba(234, 67, 48, 0.7), 0 1px 3px rgba(var(--shadow-rgb), 0.3); }
 .tokenClickable.tokenGreen:hover { box-shadow: 0 0 18px 8px rgba(52, 168, 83, 0.7), 0 1px 3px rgba(var(--shadow-rgb), 0.3); }
-.tokenClickable.tokenYellow:hover { box-shadow: 0 0 18px 8px rgba(251, 188, 5, 0.7), 0 1px 3px rgba(var(--shadow-rgb), 0.3); }
 .tokenClickable.tokenBlue:hover { box-shadow: 0 0 18px 8px rgba(66, 133, 244, 0.7), 0 1px 3px rgba(var(--shadow-rgb), 0.3); }
 
 /* A wider hand than eye: the press itself is resolved by the board, which picks
    the nearest playable counter within HIT_RADIUS_FACTOR of its width (see
-   ludo4HitTest). This halo exists so the cursor turns to a hand over the same
+   ludo3HitTest). This halo exists so the cursor turns to a hand over the same
    area that actually answers to it. Kept in step with HIT_RADIUS_FACTOR
    (0.85 of the width as a radius → 170% of the width across → inset -35%). */
 .tokenClickable::before {
@@ -996,7 +995,7 @@
 
 /* --- Centre status ---
    Under the die, inside the hub. With the local player's arm spun to the
-   bottom, the wedge above the hub belongs to the opposite seat's corridor — so
+   bottom, the space above the hub belongs to the other two seats' wedges — so
    the status cannot float out there, and everything the player reads mid-turn
    (die, status, clock) lives together at the centre. */
 
@@ -1006,9 +1005,9 @@
   /* Hung off the die's own height, so it clears the face by the same hair
      whatever the popup is dragged to. */
   top: calc(50% + var(--die) / 2 + 5px);
-  /* Narrow enough that the line still sits inside the hub circle (r 13.4% of
-     the stage) with a centred die above it. */
-  width: calc(var(--stage) * 0.19);
+  /* Narrow enough for this board's smaller hub (r 12.3% of the stage), under
+     a centred die. */
+  width: calc(var(--stage) * 0.175);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;

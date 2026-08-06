@@ -122,7 +122,7 @@ function interfaceFields(source: string, name: string): string[] {
 }
 
 const LUDO_CASES = [
-  { game: 'ludo2', source: 'src/ludo2Board.ts', interfaces: ['Ludo2GameState', 'Ludo2MoveUpdate'] },
+  { game: 'ludo3', source: 'src/ludo3Board.ts', interfaces: ['Ludo3GameState', 'Ludo3MoveUpdate'] },
   { game: 'ludo4', source: 'src/ludo4Board.ts', interfaces: ['Ludo4GameState', 'Ludo4MoveUpdate'] },
 ];
 

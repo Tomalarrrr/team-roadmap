@@ -1,15 +1,15 @@
 // Ludo4 — four-player Ludo on a circular board, drawn flat. Hidden feature,
 // reached by typing "ludo4" in the search palette while the vault is unlocked.
 //
-// Networking mirrors Ludo v1/Ludo2: state lives at ludo4/{code} behind the
+// Networking mirrors Ludo v1/Ludo3: state lives at ludo4/{code} behind the
 // VPN-safe proxy (src/api/ludo4Api.ts), polled ~1.2s; moves are optimistic with
 // rollback. Classic rules only — no power-ups. Bots run client-side on
 // whichever client observes a bot's turn (the makeMove turn guard dedupes
 // concurrent writers).
 //
-// One deliberate difference from v1 and Ludo2: there is NO pity timer. Those
-// boards quietly swap a stuck player's roll for a 6 after a few failed
-// deploys, which makes 6 the most common face over a game. Here the die is
+// One deliberate difference from v1: there is NO pity timer. That board quietly
+// swaps a stuck player's roll for a 6 after a few failed deploys, which makes 6
+// the most common face over a game. Here the die is
 // exactly uniform (see requestDiceRoll in ludo4Api) and the face rolled is
 // always the face played, so the tallies on the seat cards are honest.
 
@@ -762,8 +762,8 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
    * state that only moves when a poll comes back. So for the second or so after
    * a write that ends our turn, the client still believed it was ours and still
    * in the roll phase — and handed the player a second roll they had not earned.
-   * (See Ludo2's history: it showed up hardest at the start of a game, where
-   * every face but a 6 ends the turn with no move.) The extra roll could not
+   * (It showed up hardest at the start of a game, where every face but a 6
+   * ends the turn with no move.) The extra roll could not
    * commit, but the dice tumbled and the turn appeared to be taken twice.
    */
   const applyTurnLocally = useCallback((nextColor: Ludo4Color, nextSixes: number) => {
@@ -1160,8 +1160,8 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
     if (!isSinglePlayer || gamePhase !== 'playing' || winner || gamePaused) return;
     if (!botColorsRef.current.has(currentTurn)) return;
 
-    // Who throws the bot's die: an order, not an election (see Ludo2's history
-    // here). Human seats take the throw in board order and each waits its rank
+    // Who throws the bot's die: an order, not an election. Human seats take
+    // the throw in board order and each waits its rank
     // out first; the guards inside the timeout see the state the seat ahead has
     // already written and stand down. Every client computes the same order from
     // the same state, so nothing needs to be agreed, and a missing client costs
@@ -1711,7 +1711,12 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                       <span className={styles.seatName} title={displayName(color)}>
                         {myColor === color ? 'You' : displayName(color)}
                       </span>
-                      <span className={styles.seatScore}>{score}</span>
+                      {/* Keyed on the score itself: React remounts it when
+                          the number changes and the tick plays, and never on a
+                          re-render that left it alone. */}
+                      <span className={styles.seatScore}>
+                        <span key={score} className={styles.seatScoreTick}>{score}</span>
+                      </span>
                     </div>
                     {/* How far round the board this seat has actually got */}
                     <div className={styles.seatMeter} aria-hidden="true">
@@ -1755,14 +1760,17 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
               })}
 
               {/* The turn clock: a thin ring around the die, draining as the
-                  turn runs down. It replaces Ludo2's straight bar — with the
+                  turn runs down. A ring rather than a bar — with the
                   local player's arm at the bottom, the wedge above the hub
                   belongs to the opposite seat's corridor, so everything the
                   player reads mid-turn lives in the hub, and a circular clock
-                  is the one that fits there. */}
+                  is the one that fits there. It is drawn in whoever's turn it
+                  is; once there is a winner the ring is empty anyway, so a
+                  finished game is never left wearing the last seat's colour. */}
               <svg
                 className={styles.timerRing}
                 viewBox="0 0 100 100"
+                style={{ '--turn': COLOR_HEX[currentTurn] } as React.CSSProperties}
                 aria-hidden="true"
               >
                 <circle className={styles.timerRingTrack} cx="50" cy="50" r={TIMER_RING_R} />
@@ -1783,11 +1791,6 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                 <span key={statusHint ?? statusMessage} className={styles.centreStatusText}>
                   {statusHint ?? statusMessage}
                 </span>
-                {/* The ring alone cannot separate eight seconds from three, and
-                    those are the only two the count actually matters for. So the
-                    number appears for the last ten and then goes away again,
-                    rather than sitting there counting all game. */}
-                {isUrgent && <span className={styles.turnCount}>{timeLeft}</span>}
               </div>
               {/* Turn changes and the result, announced for screen readers. */}
               <div aria-live="polite" aria-atomic="true" className={styles.srOnly}>
@@ -1811,9 +1814,16 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                 title={diceCanRoll ? 'Roll — or press Space' : undefined}
               >
                 {isRolling ? (
+                  // Not keyed: mid-tumble the faces are a blur by design, and
+                  // remounting each one would fight the shake.
                   <DiceFace value={rollingFace} />
                 ) : (diceValue ?? lastRoll) ? (
-                  <DiceFace value={(diceValue ?? lastRoll) as number} />
+                  // Keyed, so the face that comes up is a new element and plays
+                  // its landing (see .diceFace) instead of swapping in place.
+                  <DiceFace
+                    key={(diceValue ?? lastRoll) as number}
+                    value={(diceValue ?? lastRoll) as number}
+                  />
                 ) : (
                   <span className={styles.diceIdle} />
                 )}

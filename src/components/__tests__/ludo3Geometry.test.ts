@@ -1,29 +1,30 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   CELL_PCT,
   TOKEN_PCT,
   STEP_DEG,
   R_RING,
-  RING_OUTER,
-  RING_INNER,
   BASE_BAY_PCT,
+  BASE_RING_PCT,
   BASE_CENTRE,
   BASE_ARC_DEG,
-  APERTURE,
-  BRIDGE_RECT,
-  BRIDGE_W,
-  BRIDGE_LEN,
   TRACK_XY,
   FINAL_XY,
   BASE_XY,
   HUB,
   ARM_ANGLE,
+  RIM_DIP,
+  RIM_BULGE,
+  TRACK_BAND,
+  rimRadiusAt,
   trackCellSpec,
   trackAngle,
   computeMovePath,
   getTokenCoords,
   getTokenOffset,
-} from '../ludo2/ludo2Geometry';
+} from '../ludo3/ludo3Geometry';
 import {
   TRACK_SIZE,
   TOTAL_TOKENS,
@@ -34,7 +35,7 @@ import {
   ENTRY_CELLS,
   SAFE_ZONES,
   colorIndex,
-} from '../../ludo2Board';
+} from '../../ludo3Board';
 import type { TokenPosition } from '../../ludoFirebase';
 
 const dist = (a: [number, number], b: [number, number]) =>
@@ -44,7 +45,7 @@ const fromCentre = (p: [number, number]) => Math.hypot(p[0] - 50, p[1] - 50);
 /** Chord between neighbouring ring cells: 2·R·sin(step/2). */
 const RING_PITCH = 2 * R_RING * Math.sin((STEP_DEG * Math.PI) / 360);
 
-describe('ludo2 circular board geometry', () => {
+describe('ludo3 circular board geometry', () => {
   it('lays all 42 track cells on the ring, evenly spaced', () => {
     for (let t = 1; t <= TRACK_SIZE; t++) {
       expect(fromCentre(TRACK_XY[t])).toBeCloseTo(R_RING, 6);
@@ -55,10 +56,21 @@ describe('ludo2 circular board geometry', () => {
     }
   });
 
-  it('keeps the track band inside the disc and the tiles inside the band', () => {
-    expect(RING_OUTER).toBeLessThan(50);
-    expect(R_RING + CELL_PCT / 2).toBeLessThan(RING_OUTER);
-    expect(R_RING - CELL_PCT / 2).toBeGreaterThan(RING_INNER);
+  it('keeps the ring tiles inside the disc with a gap between neighbours', () => {
+    expect(R_RING + CELL_PCT / 2).toBeLessThan(50);
+    // A tile is narrower than the pitch, so neighbouring tiles never touch.
+    expect(CELL_PCT).toBeLessThan(RING_PITCH);
+  });
+
+  it('seats the tiles inside the band, and the band inside the dip', () => {
+    // The band exists to frame the tiles; a band that any tile (or the run
+    // home's first cell) pokes out of frames nothing.
+    expect(TRACK_BAND.inner).toBeLessThan(R_RING - CELL_PCT / 2);
+    expect(TRACK_BAND.outer).toBeGreaterThan(R_RING + CELL_PCT / 2);
+    expect(TRACK_BAND.outer).toBeLessThan(RIM_DIP);
+    for (const color of PLAYER_COLORS) {
+      expect(fromCentre(FINAL_XY[color][0]) + CELL_PCT / 2).toBeLessThan(TRACK_BAND.inner);
+    }
   });
 
   it('never overlaps two cells', () => {
@@ -72,17 +84,17 @@ describe('ludo2 circular board geometry', () => {
     }
   });
 
-  it('runs each spoke inward from the ring to the centre', () => {
+  it('runs each spoke inward from the ring toward the hub', () => {
     for (const color of PLAYER_COLORS) {
       const spoke = FINAL_XY[color];
-      // strictly inward, ending inside the home disc's reach
+      // strictly inward, starting clear of the ring tiles
       for (let f = 0; f < spoke.length - 1; f++) {
         expect(fromCentre(spoke[f + 1])).toBeLessThan(fromCentre(spoke[f]));
       }
       expect(spoke).toHaveLength(FINAL_SIZE);
-      expect(fromCentre(spoke[0])).toBeLessThan(RING_INNER);
-      // The last cell stops clear of the hub — no counter ever stands on it,
-      // so a run home that reached it would have nothing to land against.
+      expect(fromCentre(spoke[0]) + CELL_PCT / 2).toBeLessThan(R_RING - CELL_PCT / 2);
+      // The last cell stops clear of the hub — the hub is the die's, and a
+      // corridor that ran under it would bury its own deepest cell.
       const last = fromCentre(spoke[FINAL_SIZE - 1]);
       expect(last - CELL_PCT / 2).toBeGreaterThan(HUB.r);
       expect(last).toBeLessThan(HUB.r + CELL_PCT * 2);
@@ -95,25 +107,6 @@ describe('ludo2 circular board geometry', () => {
     }
   });
 
-  /* The middle of the board is bored out, so the runs home are carried on
-     bridges. A deck that fails to reach the ring at one end or the hub at the
-     other is a plank lying in a hole, and it looks like one. */
-  it('lands every bridge on the ring at one end and the hub at the other', () => {
-    for (const color of PLAYER_COLORS) {
-      const mid = fromCentre([BRIDGE_RECT[color].x, BRIDGE_RECT[color].y]);
-      expect(mid + BRIDGE_LEN / 2).toBeGreaterThan(APERTURE);
-      expect(mid - BRIDGE_LEN / 2).toBeLessThan(HUB.r);
-      // and it is wide enough to carry the cells laid on it
-      expect(BRIDGE_W).toBeGreaterThan(CELL_PCT);
-      // every run-home cell sits over its own deck, none hanging off the side
-      for (const p of FINAL_XY[color]) {
-        const r = fromCentre(p);
-        expect(r + CELL_PCT / 2).toBeLessThan(mid + BRIDGE_LEN / 2);
-        expect(r - CELL_PCT / 2).toBeGreaterThan(mid - BRIDGE_LEN / 2);
-      }
-    }
-  });
-
   it('puts each entry cell one hop from its spoke', () => {
     for (const color of PLAYER_COLORS) {
       const entry = TRACK_XY[ENTRY_CELLS[color]];
@@ -121,11 +114,11 @@ describe('ludo2 circular board geometry', () => {
     }
   });
 
-  /* The foot of a bridge has to land on the cell that bridge is for, and the
-     haven you come out on has to sit right at it. One cell apart is as close as
-     the two can get: a counter standing *on* its entry cell turns for home on
-     its next move, so start = entry would take a counter from the yard to home
-     in two moves without it ever travelling the ring. */
+  /* The spoke has to point at the cell it is entered from, and the haven you
+     come out on has to sit right at it. One cell apart is as close as the two
+     can get: a counter standing *on* its entry cell turns for home on its next
+     move, so start = entry would take a counter from the yard to home in two
+     moves without it ever travelling the ring. */
   it('lands each entry cell on its own arm, with the start cell next to it', () => {
     for (const color of PLAYER_COLORS) {
       const entryDelta = trackAngle(ENTRY_CELLS[color]) - ARM_ANGLE[color];
@@ -151,15 +144,39 @@ describe('ludo2 circular board geometry', () => {
     for (const color of PLAYER_COLORS) {
       for (const spot of BASE_XY[color]) {
         const r = fromCentre(spot);
-        // Outside the band entirely — a yard drawn across the track buries that
-        // colour's entry and start cells, the two it most needs to see.
-        expect(r - TOKEN_PCT / 2).toBeGreaterThan(RING_OUTER);
+        // Clear of the ring tiles entirely — a yard drawn across the track
+        // buries that colour's entry and start cells, the two it most needs
+        // to see.
+        expect(r - TOKEN_PCT / 2).toBeGreaterThan(R_RING + CELL_PCT / 2);
         expect(r + TOKEN_PCT / 2).toBeLessThan(49);
       }
       // and centred on the colour's own bearing
       const c = BASE_CENTRE[color];
       expect(fromCentre([c.x, c.y])).toBeCloseTo(fromCentre(BASE_XY[color][0]), 6);
     }
+  });
+
+  /* A counter standing in a bay is a circle inside a ring, concentric all the
+     way round — so unlike a square track cell the bay has no corners to hide a
+     tight fit in. When the white between the two came to half a device pixel it
+     rounded to one pixel on one side and none on the other, and every socket
+     looked as though its counter had been dropped in askew. It had not: the
+     clearance just has to be big enough to survive rounding. */
+  it('leaves a counter real white on every side of its socket', () => {
+    const clearance = (BASE_BAY_PCT - 2 * BASE_RING_PCT - TOKEN_PCT) / 2;
+    expect(clearance).toBeGreaterThan(0.12);
+  });
+
+  it('draws the socket ring at the width the bay is sized around', () => {
+    // The ring lives in CSS and the bay that has to clear it lives here; the
+    // two only agree by being checked.
+    const css = readFileSync(
+      resolve(process.cwd(), 'src/components/ludo3/Ludo3Game.module.css'),
+      'utf-8'
+    );
+    const inset = /\.baseBay\s*\{[^}]*box-shadow:\s*inset 0 0 0 ([\d.]+)cqw/.exec(css);
+    expect(inset).not.toBeNull();
+    expect(Number(inset![1])).toBeCloseTo(BASE_RING_PCT, 6);
   });
 
   it('keeps yards, and the pieces in them, from touching each other', () => {
@@ -218,6 +235,38 @@ describe('ludo2 circular board geometry', () => {
       const r = fromCentre(TRACK_XY[n]);
       expect(fromCentre(TRACK_XY[n + 14])).toBeCloseTo(r, 6);
       expect(fromCentre(TRACK_XY[n + 28])).toBeCloseTo(r, 6);
+    }
+  });
+
+  it('holds everything inside the sculpted rim', () => {
+    // The rim dips between arms and swells over the yards; nothing drawn may
+    // poke through it. The ring lives inside the dip, the yards inside the
+    // swell — with real margin, because a bay kissing the edge reads as a
+    // mistake even when it technically fits.
+    expect(rimRadiusAt(60)).toBeCloseTo(RIM_DIP, 6);
+    expect(rimRadiusAt(0)).toBeCloseTo(RIM_BULGE, 6);
+    expect(R_RING + CELL_PCT / 2).toBeLessThan(RIM_DIP - 1);
+    for (const color of PLAYER_COLORS) {
+      for (const spot of BASE_XY[color]) {
+        const r = fromCentre(spot);
+        const bearing = (Math.atan2(50 - spot[0], spot[1] - 50) * 180) / Math.PI;
+        expect(r + BASE_BAY_PCT / 2).toBeLessThan(rimRadiusAt(bearing) - 0.5);
+      }
+    }
+  });
+
+  it('spins every seat onto an axis, with the local player at the bottom', () => {
+    // The plate turns by −ARM_ANGLE[me], so your own arm always lands at
+    // bearing 0 (pointing down at you, the way you would sit at the table) and
+    // the other two at 120° steps. There is deliberately no clear wedge above
+    // the hub — the status line and clock live inside the hub, which is sized
+    // for them (see HUB).
+    for (const my of PLAYER_COLORS) {
+      const bearings = PLAYER_COLORS.map(
+        other => (ARM_ANGLE[other] - ARM_ANGLE[my] + 360) % 360
+      );
+      expect(bearings[PLAYER_COLORS.indexOf(my)]).toBe(0);
+      expect([...bearings].sort((a, b) => a - b)).toEqual([0, 120, 240]);
     }
   });
 });
@@ -294,12 +343,12 @@ describe('getTokenCoords', () => {
 /* The jitter exists so a stack on one cell stays countable. Sharing a position
    *string* is not the same as sharing a cell, though: the ring is one road every
    colour walks, so `track-17` is one place, but a run home belongs to its colour,
-   so `final-3` is three separate places on three separate bridges. */
+   so `final-3` is three separate places on three separate arms. */
 describe('getTokenOffset', () => {
   const empty = (): TokenPosition[] => Array(TOTAL_TOKENS).fill('base') as TokenPosition[];
   const RED = 0;
   const GREEN = TOKENS_PER_PLAYER;
-  const YELLOW = TOKENS_PER_PLAYER * 2;
+  const BLUE = TOKENS_PER_PLAYER * 2;
 
   it('leaves a counter standing alone dead centre', () => {
     const tokens = empty();
@@ -308,14 +357,14 @@ describe('getTokenOffset', () => {
   });
 
   it('does not nudge run-home counters of different colours apart', () => {
-    // Regression: matching on the string alone treated red's third run-home cell
-    // and green's as one cell, and shoved a counter off-centre in each of them
-    // while both were in fact standing alone.
+    // Regression: matching on the string alone treated each colour's third
+    // run-home cell as one shared cell and shoved a counter off-centre in each
+    // of them while all were in fact standing alone.
     const tokens = empty();
     tokens[RED] = 'final-3';
     tokens[GREEN] = 'final-3';
-    tokens[YELLOW] = 'final-3';
-    for (const i of [RED, GREEN, YELLOW]) {
+    tokens[BLUE] = 'final-3';
+    for (const i of [RED, GREEN, BLUE]) {
       expect(getTokenOffset(tokens, i)).toEqual([0, 0]);
     }
   });

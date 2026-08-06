@@ -1,22 +1,16 @@
-// Pure game logic for Ludo2 (three-player, 42-cell circular track).
+// Pure game logic for Ludo3 (three-player, 42-cell circular track).
 //
-// Forked from ludoGameLogic.ts and simplified for classic rules: no power-ups,
-// no doubled rolls (a bonus roll is a plain 6), three colors. Deterministic,
-// side-effect-free, independently testable.
+// Forked from ludo4GameLogic and re-pointed at the three-seat board constants:
+// classic rules, no power-ups, no doubled rolls (a bonus roll is a plain 6).
+// Deterministic, side-effect-free, independently testable.
 //
-// One rule of its own: the run home has FINAL_SIZE cells and each player has
-// exactly that many counters, so finishing means standing one counter in every
-// cell of it. A counter may pass over cells that are already taken but has to
-// land on an empty one, exactly — otherwise that counter simply cannot move, and
-// sits out on the track waiting to be sent home by an opponent. Being stuck in
-// the open is the whole tension of the endgame, not a fault in it.
-//
-// This was once replaced with a walk-in rule on the grounds that it left the
-// endgame with no legal moves. It does not: simulated over 300 games it costs
-// 12.9% of turns against the walk-in rule's 11.9%, only 1.3% of turns are a
-// counter stranded out on the ring, and every game still finishes. What actually
-// stopped play at the time was the database rules rejecting every write that
-// carried `lastRoll` — a different fault entirely, fixed separately.
+// One rule of its own, shared with Ludo4: the run home has FINAL_SIZE cells
+// and each player has exactly that many counters, so finishing means standing
+// one counter in every cell of it. A counter may pass over cells that are
+// already taken but has to land on an empty one, exactly — otherwise that
+// counter simply cannot move, and sits out on the track waiting to be sent home
+// by an opponent. Being stuck in the open is the whole tension of the endgame,
+// not a fault in it (see ludo3FinishSim for the simulation numbers).
 
 import type { TokenPosition } from './ludoFirebase';
 import {
@@ -31,8 +25,8 @@ import {
   getColorTokenIndices,
   getOccupiedFinals,
   getPlayerScore,
-  type Ludo2Color,
-} from './ludo2Board';
+  type Ludo3Color,
+} from './ludo3Board';
 
 /**
  * Calculate where a token lands after moving `steps` spaces.
@@ -42,7 +36,7 @@ import {
 export function calculateNewPosition(
   current: TokenPosition,
   steps: number,
-  color: Ludo2Color,
+  color: Ludo3Color,
   tokens: TokenPosition[]
 ): TokenPosition | null {
   if (current === 'base') return null;
@@ -80,7 +74,7 @@ export function calculateNewPosition(
  */
 export function getValidMoves(
   tokens: TokenPosition[],
-  color: Ludo2Color,
+  color: Ludo3Color,
   diceValue: number
 ): { tokenIndex: number; newPosition: TokenPosition }[] {
   const indices = getColorTokenIndices(color);
@@ -135,7 +129,7 @@ export function distinctMoves(
  * actually being asked to choose between. */
 export function getDistinctMoves(
   tokens: TokenPosition[],
-  color: Ludo2Color,
+  color: Ludo3Color,
   diceValue: number
 ): { tokenIndex: number; newPosition: TokenPosition }[] {
   return distinctMoves(tokens, getValidMoves(tokens, color, diceValue));
@@ -150,7 +144,7 @@ export function getDistinctMoves(
  * capture will free it. Those want different things said to the player, and the
  * only honest way to tell them apart is to ask the rules — so ask all six.
  */
-export function helpfulRolls(tokens: TokenPosition[], color: Ludo2Color): number[] {
+export function helpfulRolls(tokens: TokenPosition[], color: Ludo3Color): number[] {
   const faces: number[] = [];
   for (let face = 1; face <= 6; face++) {
     if (getValidMoves(tokens, color, face).length > 0) faces.push(face);
@@ -163,17 +157,17 @@ export function helpfulRolls(tokens: TokenPosition[], color: Ludo2Color): number
  *
  * Naming the face they need is the difference between a rule that feels sharp
  * and one that feels broken. "No moves" invites the reading that the dice are
- * ignoring you — which is exactly what players reported the last time this rule
- * shipped, and is what got it reverted.
+ * ignoring you — which is exactly what players reported the last time this
+ * rule shipped without it.
  */
-export function describeNoMove(tokens: TokenPosition[], color: Ludo2Color): string {
+export function describeNoMove(tokens: TokenPosition[], color: Ludo3Color): string {
   const faces = helpfulRolls(tokens, color);
   if (faces.length === 0) {
     // Defensive. No reachable position has all six faces dead: a counter short
     // of its turning can always walk on down the ring, and one standing on the
     // turning has at most four of its own ahead of it, so a cell is always free
     // and the roll that reaches it is legal. Asserted over every seat on every
-    // turn of 300 simulated games in ludo2FinishSim.
+    // turn of the simulated games in ludo3FinishSim.
     return 'Nothing can move — an opponent has to send one of yours back';
   }
   const allInYard = getColorTokenIndices(color).every(i => tokens[i] === 'base');
@@ -219,15 +213,15 @@ export function applyMove(
 }
 
 /** Check if a player has got every counter into their run home. */
-export function checkPlayerFinished(tokens: TokenPosition[], color: Ludo2Color): boolean {
+export function checkPlayerFinished(tokens: TokenPosition[], color: Ludo3Color): boolean {
   return getColorTokenIndices(color).every(i => tokens[i].startsWith('final-'));
 }
 
 /**
  * Get the set of colors that have finished all their tokens.
  */
-export function getFinishedColors(tokens: TokenPosition[], playerCount: number): Set<Ludo2Color> {
-  const finished = new Set<Ludo2Color>();
+export function getFinishedColors(tokens: TokenPosition[], playerCount: number): Set<Ludo3Color> {
+  const finished = new Set<Ludo3Color>();
   for (const color of PLAYER_COLORS.slice(0, playerCount)) {
     if (checkPlayerFinished(tokens, color)) finished.add(color);
   }
@@ -238,10 +232,10 @@ export function getFinishedColors(tokens: TokenPosition[], playerCount: number):
  * Find the next active (non-finished) player after the current one.
  */
 export function findNextActivePlayer(
-  current: Ludo2Color,
+  current: Ludo3Color,
   playerCount: number,
-  finishedColors: Set<Ludo2Color>
-): Ludo2Color {
+  finishedColors: Set<Ludo3Color>
+): Ludo3Color {
   const activePlayers = PLAYER_COLORS.slice(0, playerCount);
   let idx = activePlayers.indexOf(current);
   for (let i = 0; i < activePlayers.length; i++) {
@@ -255,14 +249,14 @@ export function findNextActivePlayer(
  * Determine the next turn: who plays next and how many consecutive sixes.
  */
 export function getNextTurn(
-  currentColor: Ludo2Color,
+  currentColor: Ludo3Color,
   diceValue: number,
   consecutiveSixes: number,
   captured: boolean,
   reachedHome: boolean,
   playerCount: number,
-  finishedColors: Set<Ludo2Color>
-): { nextColor: Ludo2Color; nextSixes: number } {
+  finishedColors: Set<Ludo3Color>
+): { nextColor: Ludo3Color; nextSixes: number } {
   // If current player just finished all tokens, always advance
   if (finishedColors.has(currentColor)) {
     return {
@@ -308,9 +302,9 @@ export function scoreBotMove(
   tokenIdx: number,
   targetPos: TokenPosition,
   currentTokens: TokenPosition[],
-  botColor: Ludo2Color,
+  botColor: Ludo3Color,
   playerCount: number,
-  leaderColor?: Ludo2Color | null,
+  leaderColor?: Ludo3Color | null,
 ): number {
   let score = 0;
   const curPos = currentTokens[tokenIdx];
@@ -325,18 +319,9 @@ export function scoreBotMove(
   if (curPos === 'base') score += 90 - tokensInPlay * 20;
 
   // Taking a cell in the run home is valuable — safe from everything, and one of
-  // the five a player needs. The `finalNum` term prefers the deep cells.
-  //
-  // That preference is a tie-break, not an edge, and the comment here used to
-  // claim otherwise. The argument for it is good: a counter `k` steps short of
-  // its entry needs a roll of k + n to reach cell n, so it can only reach cells
-  // with n ≤ 6 − k, and leaving a deep cell for last leaves the hardest shot for
-  // the counter with the fewest chances at it. Played out, it is worth nothing
-  // measurable — deep-first scores 32.3% against a bot with no depth preference
-  // at all and 33.1% against an explicitly shallow-first one, both a fair share
-  // of 33.3% within one standard deviation over 2400 games. Kept because it
-  // orders the choice deterministically and costs nothing; don't reach for it as
-  // an explanation of why the bot is any good.
+  // the five a player needs. The `finalNum` term prefers the deep cells: a
+  // deterministic tie-break, not a measured edge (see ludo4GameLogic's note on
+  // the 2400-game measurement).
   if (targetPos.startsWith('final-')) {
     const finalNum = parseInt(targetPos.split('-')[1]);
     score += 100 + finalNum * 20;

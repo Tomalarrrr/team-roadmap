@@ -2,7 +2,7 @@
 //
 // Its own module rather than part of Ludo4Board because it is not a component
 // and not board geometry either — it works in screen pixels, off what the
-// browser actually laid out. Same design as Ludo2's hit test; see that module
+// browser actually laid out. Same design as Ludo3's hit test; see that module
 // for the full derivation of the nearest-centre approach.
 
 /**

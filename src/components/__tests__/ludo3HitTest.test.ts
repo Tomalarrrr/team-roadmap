@@ -1,6 +1,6 @@
 // The board's press resolution.
 //
-// A counter is 4.1% of the board — under 30px at any realistic popup size, and
+// A counter is 3.55% of the board — under 30px at any realistic popup size, and
 // breathing up and down under the finger. Sized as a plain box the target
 // cannot be grown past about 1.4× the piece, because the ring puts neighbouring
 // cell centres only 5.86% apart and the boxes would start stealing each other's
@@ -11,7 +11,7 @@
 // press that is not near anything does nothing at all.
 
 import { describe, it, expect } from 'vitest';
-import { pickNearestToken, HIT_RADIUS_FACTOR } from '../ludo2/ludo2HitTest';
+import { pickNearestToken, HIT_RADIUS_FACTOR } from '../ludo3/ludo3HitTest';
 
 const W = 30; // a counter's rendered width, near enough to the real thing
 const RADIUS = W * HIT_RADIUS_FACTOR;

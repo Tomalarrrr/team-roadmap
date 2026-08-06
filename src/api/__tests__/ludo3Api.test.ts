@@ -17,9 +17,9 @@ import {
   joinGame,
   startGame,
   leaveGame,
-  type Ludo2GameState,
-} from '../ludo2Api';
-import { deserializeRollStats } from '../../ludo2Board';
+  type Ludo3GameState,
+} from '../ludo3Api';
+import { deserializeRollStats } from '../../ludo3Board';
 
 type FakeRes = {
   ok: boolean;
@@ -38,7 +38,7 @@ function res(body: unknown, opts: { status?: number; etag?: string | null } = {}
   };
 }
 
-const baseState = (over: Partial<Ludo2GameState> = {}): Ludo2GameState =>
+const baseState = (over: Partial<Ludo3GameState> = {}): Ludo3GameState =>
   ({
     players: { red: { sessionId: 's-red', name: 'Red' }, green: { sessionId: 's-green', name: 'Green' } },
     tokens: 'bas'.repeat(12),
@@ -53,7 +53,7 @@ const baseState = (over: Partial<Ludo2GameState> = {}): Ludo2GameState =>
     turnStartedAt: 1,
     playerCount: 2,
     ...over,
-  }) as Ludo2GameState;
+  }) as Ludo3GameState;
 
 const moveUpdates = {
   tokens: 'bas'.repeat(12),
@@ -77,7 +77,7 @@ afterEach(() => {
 });
 
 describe('makeMove', () => {
-  it('commits against the ludo2 namespace with the read ETag', async () => {
+  it('commits against the ludo3 namespace with the read ETag', async () => {
     fetchMock
       .mockResolvedValueOnce(res(baseState({ currentTurn: 'red' }), { etag: 'e1' }))
       .mockResolvedValueOnce(res(null, { status: 200 }));
@@ -85,7 +85,7 @@ describe('makeMove', () => {
     const ok = await makeMove('GAME', 'red', moveUpdates);
 
     expect(ok).toBe(true);
-    expect(fetchMock.mock.calls[0][0]).toContain('/api/db/ludo2/GAME');
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/db/ludo3/GAME');
     const putInit = fetchMock.mock.calls[1][1];
     expect(putInit.method).toBe('PUT');
     expect(putInit.headers['if-match']).toBe('e1');
@@ -102,7 +102,7 @@ describe('makeMove', () => {
   });
 
   it('aborts when the game is already won', async () => {
-    fetchMock.mockResolvedValueOnce(res(baseState({ currentTurn: 'red', winner: 'yellow' }), { etag: 'e1' }));
+    fetchMock.mockResolvedValueOnce(res(baseState({ currentTurn: 'red', winner: 'blue' }), { etag: 'e1' }));
 
     const ok = await makeMove('GAME', 'red', moveUpdates);
 
@@ -124,9 +124,9 @@ describe('makeMove', () => {
   });
 
   it('merges rollStats per-cell max so a stale writer cannot wipe rolls', async () => {
-    // 3 colour groups: red|green|yellow, each "r1..r6,captures"
-    const stats = (redSixes: number, greenSixes: number) =>
-      `0,0,0,0,0,${redSixes},0|0,0,0,0,0,${greenSixes},0|0,0,0,0,0,0,0`;
+    // 3 colour groups: red|green|blue, each "r1..r6,captures"
+    const stats = (redSixes: number, blueSixes: number) =>
+      `0,0,0,0,0,${redSixes},0|0,0,0,0,0,0,0|0,0,0,0,0,${blueSixes},0`;
     fetchMock
       .mockResolvedValueOnce(res(baseState({ rollStats: stats(5, 2) }), { etag: 'e1' }))
       .mockResolvedValueOnce(res(null, { status: 200 }));
@@ -136,7 +136,7 @@ describe('makeMove', () => {
     expect(ok).toBe(true);
     const merged = deserializeRollStats(JSON.parse(fetchMock.mock.calls[1][1].body).rollStats);
     expect(merged[0].rolls[5]).toBe(5); // red sixes: max(5,3)
-    expect(merged[1].rolls[5]).toBe(4); // green sixes: max(2,4)
+    expect(merged[2].rolls[5]).toBe(4); // blue sixes: max(2,4)
   });
 });
 
@@ -148,10 +148,11 @@ describe('addBot / removeBot', () => {
       )
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    await addBot('GAME', 'green', 's-red');
+    await addBot('GAME', 'blue', 's-red');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(putBody.players.green.sessionId).toBe('bot-green');
+    expect(putBody.players.blue.sessionId).toBe('bot-blue');
+    expect(putBody.players.blue.name).toBe('Bot Blue');
   });
 
   it('does not write if the slot is already taken', async () => {
@@ -163,8 +164,6 @@ describe('addBot / removeBot', () => {
   });
 
   it('refuses to seat a bot for anyone but the host', async () => {
-    // The lobby only offers the control to the host; this is the same rule
-    // somewhere a second tab or a stale client cannot talk its way around.
     fetchMock.mockResolvedValueOnce(
       res(baseState({ players: { red: { sessionId: 's-red', name: 'Red' } }, startedAt: null }), { etag: 'e1' })
     );
@@ -179,8 +178,8 @@ describe('addBot / removeBot', () => {
       .mockResolvedValueOnce(
         res(
           baseState({
-            players: { green: { sessionId: 's-green', name: 'Green' } },
-            host: 'green',
+            players: { blue: { sessionId: 's-blue', name: 'Blue' } },
+            host: 'blue',
             startedAt: null,
           }),
           { etag: 'e1' }
@@ -188,7 +187,7 @@ describe('addBot / removeBot', () => {
       )
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    await addBot('GAME', 'red', 's-green');
+    await addBot('GAME', 'red', 's-blue');
 
     expect(JSON.parse(fetchMock.mock.calls[1][1].body).players.red.sessionId).toBe('bot-red');
   });
@@ -267,7 +266,7 @@ describe('leaveGame', () => {
 
     const del = fetchMock.mock.calls.find((c) => c[1]?.method === 'DELETE');
     expect(del).toBeDefined();
-    expect(del![0]).toContain('/api/db/ludo2/GAME');
+    expect(del![0]).toContain('/api/db/ludo3/GAME');
   });
 
   it('does nothing for someone who is not at the table', async () => {
@@ -280,7 +279,7 @@ describe('leaveGame', () => {
 });
 
 describe('joinGame', () => {
-  it('assigns green first, then yellow', async () => {
+  it('assigns the first open seat in board order', async () => {
     const oneHuman = baseState({
       players: { red: { sessionId: 's-red', name: 'Red' } },
       startedAt: null,
@@ -317,15 +316,15 @@ describe('joinGame', () => {
     // The write must not have moved the player to a different slot
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(putBody.players.green.sessionId).toBe('s-green');
-    expect(putBody.players.yellow).toBeUndefined();
+    expect(putBody.players.blue).toBeUndefined();
   });
 
-  it('throws when the game is full', async () => {
+  it('throws when all three seats are taken', async () => {
     const full = baseState({
       players: {
         red: { sessionId: 'a', name: 'A' },
         green: { sessionId: 'b', name: 'B' },
-        yellow: { sessionId: 'c', name: 'C' },
+        blue: { sessionId: 'c', name: 'C' },
       },
       startedAt: null,
     });
@@ -337,15 +336,14 @@ describe('joinGame', () => {
 
 describe('startGame', () => {
   it('closes the gap between seats instead of filling it with a bot', async () => {
-    // Seats are dealt at random, so two humans can easily land on red and
-    // yellow with green empty. The turn order is a rotation over the first
-    // `playerCount` seats, so the gap has to go: slide yellow down into green
-    // and it is a two-player game. Padding it out to three put a bot nobody
-    // asked for into a game between two people.
+    // Seats are dealt at random, so two humans can easily land on red and blue
+    // with two empty seats between them. The turn order is a rotation over the
+    // first `playerCount` seats, so the gaps have to go: slide blue down into
+    // green and it is a two-player game.
     const state = baseState({
       players: {
         red: { sessionId: 's-red', name: 'Red' },
-        yellow: { sessionId: 's-yellow', name: 'Yellow' },
+        blue: { sessionId: 's-blue', name: 'Blue' },
       },
       startedAt: null,
     });
@@ -357,9 +355,13 @@ describe('startGame', () => {
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
     expect(putBody.playerCount).toBe(2);
-    expect(putBody.players.red.sessionId).toBe('s-red');
-    expect(putBody.players.green.sessionId).toBe('s-yellow');
-    expect(putBody.players.yellow).toBeUndefined();
+    // Both players end up on the first two colours, one each. *Which* of them
+    // takes red is a coin flip (see startGame) — the seats are not equivalent
+    // when only two of three arms are in play, so the favoured one is dealt at
+    // random rather than always going to whoever joined second.
+    expect([putBody.players.red.sessionId, putBody.players.green.sessionId].sort())
+      .toEqual(['s-blue', 's-red']);
+    expect(putBody.players.blue).toBeUndefined();
     expect(putBody.singlePlayer).toBeUndefined();
     expect(['red', 'green']).toContain(putBody.currentTurn);
   });
@@ -384,34 +386,32 @@ describe('startGame', () => {
   });
 
   it('moves the host seat along with the host', async () => {
-    // The host was on yellow and yellow slides into green. Following the colour
-    // would leave `host` pointing at the seat somebody else just moved into.
     const state = baseState({
       players: {
         red: { sessionId: 's-red', name: 'Red' },
-        yellow: { sessionId: 's-yellow', name: 'Yellow' },
+        blue: { sessionId: 's-blue', name: 'Blue' },
       },
-      host: 'yellow',
+      host: 'blue',
       startedAt: null,
     });
     fetchMock
       .mockResolvedValueOnce(res(state, { etag: 'e1' }))
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    await startGame('GAME', 's-yellow');
+    await startGame('GAME', 's-blue');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(putBody.host).toBe('green');
-    expect(putBody.players.green.sessionId).toBe('s-yellow');
+    // Wherever the shuffle put them, the host field points at the seat their
+    // session actually holds — following them by colour instead would leave it
+    // pointing at whoever landed on the colour they used to have.
+    expect(putBody.players[putBody.host].sessionId).toBe('s-blue');
   });
 
   it('re-keys a bot onto the seat it slid into', async () => {
-    // The bot was added to yellow and yellow slides into green. Carried across
-    // untouched it spends the game as "Bot Blue" sitting behind a green dot.
     const state = baseState({
       players: {
         red: { sessionId: 's-red', name: 'Red' },
-        yellow: { sessionId: 'bot-yellow', name: 'Bot Blue' },
+        blue: { sessionId: 'bot-blue', name: 'Bot Blue' },
       },
       startedAt: null,
     });
@@ -422,8 +422,45 @@ describe('startGame', () => {
     await startGame('GAME', 's-red');
 
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(putBody.players.green).toEqual({ sessionId: 'bot-green', name: 'Bot Green' });
+    // A bot carries its seat in both its id and its name, so whichever colour
+    // the shuffle deals it has to be re-keyed to match — slid across untouched,
+    // a green chair spends the game labelled "Bot Blue" beside a green dot.
+    const botSeat = Object.keys(putBody.players).find(
+      (c) => putBody.players[c].sessionId.startsWith('bot-')
+    );
+    expect(botSeat).toBeDefined();
+    expect(putBody.players[botSeat!]).toEqual({
+      sessionId: `bot-${botSeat}`,
+      name: `Bot ${botSeat![0].toUpperCase()}${botSeat!.slice(1)}`,
+    });
     expect(putBody.singlePlayer).toBe(true);
+  });
+
+  /* The seats are not equivalent when fewer people play than the board has
+     arms, so which player gets the favoured one has to be a coin flip. Board
+     order made it the joiner's two games in three: the creator draws a colour
+     at random and the joiner takes the first free one, so the joiner was on the
+     first colour whenever the creator had not drawn it. */
+  it('deals the seats at random, not in board order', async () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      fetchMock.mockReset();
+      fetchMock
+        .mockResolvedValueOnce(res(baseState({
+          players: {
+            red: { sessionId: 's-red', name: 'Red' },
+            green: { sessionId: 's-green', name: 'Green' },
+          },
+          startedAt: null,
+        }), { etag: 'e1' }))
+        .mockResolvedValueOnce(res(null, { status: 200 }));
+      await startGame('GAME', 's-red');
+      const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+      seen.add(putBody.players.red.sessionId);
+    }
+    // Both players land on red across 60 starts. A board-order slide would only
+    // ever produce one of these (odds of a fair deal failing this: 2^-59).
+    expect([...seen].sort()).toEqual(['s-green', 's-red']);
   });
 
   it('refuses to start with fewer than 2 players', async () => {
@@ -439,9 +476,6 @@ describe('startGame', () => {
   });
 
   it('refuses to start for anyone but the host', async () => {
-    // The Start button is only ever shown to the host, but addBot and removeBot
-    // both check it where it can be relied on and this did not — so a second
-    // tab or a stale client could start somebody else's room for them.
     const state = baseState({ startedAt: null });
     fetchMock.mockResolvedValueOnce(res(state, { etag: 'e1' }));
 
@@ -462,7 +496,7 @@ describe('createGame', () => {
 
     expect(typeof code).toBe('string');
     // Seats are dealt at random — the creator is not always red
-    expect(['red', 'green', 'yellow']).toContain(color);
+    expect(['red', 'green', 'blue']).toContain(color);
     const firstPut = fetchMock.mock.calls.find((c) => c[1]?.method === 'PUT');
     const body = JSON.parse(firstPut![1].body);
     expect(body.host).toBe(color);
@@ -472,6 +506,6 @@ describe('createGame', () => {
     expect(body.playerCount).toBe(3);
     expect(body.rollStats.split('|')).toHaveLength(3);
     expect(firstPut?.[1].headers['if-match']).toBe('null_etag');
-    expect(firstPut?.[0]).toContain('/api/db/ludo2/');
+    expect(firstPut?.[0]).toContain('/api/db/ludo3/');
   });
 });

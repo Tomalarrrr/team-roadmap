@@ -21,15 +21,15 @@ import {
   getFinishedColors,
   getNextTurn,
   scoreBotMove,
-} from '../ludo2GameLogic';
+} from '../ludo3GameLogic';
 import {
   PLAYER_COLORS,
   TOTAL_TOKENS,
   TOKENS_PER_PLAYER,
   FINAL_SIZE,
   getColorTokenIndices,
-  type Ludo2Color,
-} from '../ludo2Board';
+  type Ludo3Color,
+} from '../ludo3Board';
 import type { TokenPosition } from '../ludoFirebase';
 
 /** mulberry32 — seeded so a failure is reproducible. */
@@ -45,7 +45,7 @@ function rng(seed: number) {
 
 interface Outcome {
   turns: number;
-  winner: Ludo2Color | null;
+  winner: Ludo3Color | null;
   captures: number;
   /** Turns where a player had counters out on the track and still could not move. */
   stuckWithPiecesOut: number;
@@ -57,12 +57,12 @@ interface Outcome {
 function playGame(seed: number, turnCap = 4000): Outcome {
   const rand = rng(seed);
   let tokens: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
-  let turn: Ludo2Color = PLAYER_COLORS[Math.floor(rand() * 3)];
+  let turn: Ludo3Color = PLAYER_COLORS[Math.floor(rand() * 3)];
   let sixes = 0;
   let captures = 0;
   let stuckWithPiecesOut = 0;
   let deadlocked = 0;
-  let winner: Ludo2Color | null = null;
+  let winner: Ludo3Color | null = null;
   let turns = 0;
 
   while (turns < turnCap && !winner) {
@@ -114,7 +114,7 @@ function playGame(seed: number, turnCap = 4000): Outcome {
   return { turns, winner, captures, stuckWithPiecesOut, deadlocked, tokens };
 }
 
-describe('ludo2 run home: full-game simulation', () => {
+describe('ludo3 run home: full-game simulation', () => {
   const GAMES = 200;
   const results: Outcome[] = [];
   for (let seed = 1; seed <= GAMES; seed++) results.push(playGame(seed));

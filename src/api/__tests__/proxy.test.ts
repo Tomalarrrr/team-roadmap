@@ -42,10 +42,10 @@ describe('proxy path/root validation', () => {
     expect(fetchMock).toHaveBeenCalledWith(`${DB}/ludo/ABCD.json`, expect.anything());
   });
 
-  it('allows the ludo2 subtree', async () => {
-    const r = await handler(makeReq('ludo2/ABCD'));
+  it('allows the ludo3 subtree', async () => {
+    const r = await handler(makeReq('ludo3/ABCD'));
     expect(r.status).toBe(200);
-    expect(fetchMock).toHaveBeenCalledWith(`${DB}/ludo2/ABCD.json`, expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith(`${DB}/ludo3/ABCD.json`, expect.anything());
   });
 
   it('blocks other subtrees (presence, connectFour) with 403 and no upstream call', async () => {

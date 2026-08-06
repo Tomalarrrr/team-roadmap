@@ -1,7 +1,7 @@
 // Ludo4 (four-player, circular board) — shared types, constants and helpers.
 //
-// Ludo4 is Ludo2's four-seat sibling: the same classic rules on a 56-cell ring
-// (4 arms × 14 cells, the same arm length as Ludo2's and the classic board's).
+// Ludo4 is Ludo3's four-seat sibling: the same classic rules on a 56-cell ring
+// (4 arms × 14 cells, the same arm length as Ludo3's and the classic board's).
 // Each color starts at start = 1 + 14·k, enters its final column at start − 1
 // (mod 56), and safe zones sit on every start cell and start + 6. Token
 // serialization reuses serializeTokens/deserializeTokens from ludoFirebase
@@ -12,7 +12,7 @@
 // reach on an exact roll. There is no pile at the centre to overflow into, so a
 // counter that cannot land keeps waiting out on the track — where it can still
 // be sent back to the yard. That exposure is the point of the rule (see
-// ludo2GameLogic for the simulation that retired the walk-in alternative).
+// ludo3GameLogic for the simulation that retired the walk-in alternative).
 
 import type { TokenPosition, TurnPhase, LudoPlayer } from './ludoFirebase';
 import { deserializeTokens } from './ludoFirebase';
@@ -97,7 +97,7 @@ export const ENTRY_CELLS: Record<Ludo4Color, number> = {
 /**
  * Havens: every start cell, and the cell six on from each start.
  *
- * The same reasoning as Ludo2's, which holds here unchanged because the arms
+ * The same reasoning as Ludo3's, which holds here unchanged because the arms
  * are the same fourteen cells long: the start cells have to be safe or
  * deploying is suicide, which makes a counter parked on its own start the
  * strongest square in the game — it covers the six cells ahead of it, which are

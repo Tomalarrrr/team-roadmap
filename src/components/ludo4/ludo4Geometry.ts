@@ -1,6 +1,6 @@
 // Ludo4 circular-board geometry.
 //
-// The same idea as Ludo2's ring, one seat wider: 56 track cells (4 players ×
+// The same idea as Ludo3's ring, one seat wider: 56 track cells (4 players ×
 // 14) laid out as the ring they are, so nothing in ludo4GameLogic changes.
 //
 //   track  t = 1..56   one full turn of the ring, one step = 360/56
@@ -14,7 +14,7 @@
 // polar: degrees, and radius in % of the square container, with 0° pointing
 // down the screen so the plate can turn a player's own colour to face them.
 //
-// Unlike Ludo2 the board is drawn flat — no bore, no bridges, no moulding —
+// Like Ludo3 the board is drawn flat — no bore, no bridges, no moulding —
 // so this module carries only positions and sizes, not lighting.
 
 import type { TokenPosition } from '../../ludoFirebase';
@@ -39,7 +39,7 @@ export const R_RING = 39.2;
  * pitch — the track is the board's main subject, and tile weight is a large
  * part of what says so. */
 export const CELL_PCT = 3.95;
-/** A piece — sized against a cell in the same ratio as Ludo2's counters, so a
+/** A piece — sized against a cell in the same ratio as Ludo3's counters, so a
  * counter covers its cell without burying the cell's own border. */
 export const TOKEN_PCT = 3.25;
 
@@ -59,7 +59,8 @@ const SPOKE_STEP = 4.4;
  * the die, the status line and the turn ring. It is sized for that content:
  * with four arms and the local player's spun to the bottom, the opposite arm
  * owns the space above the hub, so the status cannot live out there the way
- * Ludo2's does. Everything the player reads mid-turn lives at the centre. */
+ * a three-seat board's would. Everything the player reads mid-turn lives at the
+ * centre. */
 export const HUB = { x: 50, y: 50, r: 13.4 };
 
 /** The yard: one bay per counter, in a shallow arc on the apron *outside* the
@@ -67,8 +68,26 @@ export const HUB = { x: 50, y: 50, r: 13.4 };
  * drawn across the track buries that colour's entry and start cells, which are
  * the two cells its owner most needs to see. */
 const R_BASE = 45.9;
-/** A bay is a track cell's twin, so a piece looks the same size everywhere. */
-export const BASE_BAY_PCT = CELL_PCT;
+/** A bay, drawn a little wider than a track cell.
+ *
+ * A piece is the same size everywhere — what changes is what it stands in. A
+ * track cell is a square, so a round counter has the corners to breathe into
+ * and the flats read as clearance. A bay is a *ring*, concentric with the
+ * counter all the way round, so the only clearance it has is the difference in
+ * radius — and at a cell's width that came to half a device pixel, which the
+ * renderer then rounded to one pixel on one side and none on the other. The
+ * counters were dead centre; the sockets just looked like they were not.
+ *
+ * Sized so the white between counter and ring survives rounding at any board
+ * size: BASE_BAY_PCT − 2·BASE_RING_PCT − TOKEN_PCT is a clear 0.26 of the
+ * board, a couple of pixels at a normal popup. */
+export const BASE_BAY_PCT = CELL_PCT + 0.35;
+
+/** The socket ring's own thickness, in board %. Kept in step with the
+ * `box-shadow` inset on `.baseBay` in Ludo4Game.module.css — the test suite
+ * reads the stylesheet and checks the two agree, because the clearance above is
+ * only correct if they do. */
+export const BASE_RING_PCT = 0.26;
 /** Degrees between neighbouring bays: one bay plus a hair, at R_BASE. */
 const BASE_SPOT_STEP = 5.8;
 /** Half the yard's angular span, sockets included. */

@@ -1,13 +1,13 @@
 /* eslint-disable react-refresh/only-export-components */
-// Local dev preview harness for the Ludo4 board (scratch, not shipped).
-// Mirrors the shipped playing layout in Ludo4Game.tsx exactly — same classes in
+// Local dev preview harness for the Ludo3 board (scratch, not shipped).
+// Mirrors the shipped playing layout in Ludo3Game.tsx exactly — same classes in
 // the same order — so the visuals can be inspected without a live game.
-// Open /ludo4-preview.html under `npm run dev`.
+// Open /ludo3-preview.html under `npm run dev`.
 //
 // Query params:
-//   me=red|green|yellow|blue  which seat is the local player (drives the spin)
-//   players=2|3|4             active seat count
-//   active=0|1|2|3            which seat's turn it is (rim tick + card accent)
+//   me=red|green|blue         which seat is the local player (drives the spin)
+//   players=2|3               active seat count
+//   active=0|1|2              which seat's turn it is (rim tick + card accent)
 //   status=turn|hint|long     what the centre line says
 //   time=0..30                seconds left, drives the ring clock around the die
 //   names=long|short          name length, for truncation checks
@@ -16,30 +16,30 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
-import { Ludo4Board } from './components/ludo4/Ludo4Board';
-import styles from './components/ludo4/Ludo4Game.module.css';
+import { Ludo3Board } from './components/ludo3/Ludo3Board';
+import styles from './components/ludo3/Ludo3Game.module.css';
 import {
   PLAYER_COLORS,
   TOKENS_PER_PLAYER,
   FINAL_SIZE,
   MAX_PLAYER_SCORE,
-  type Ludo4Color,
-} from './ludo4Board';
-import { ARM_ANGLE } from './components/ludo4/ludo4Geometry';
+  type Ludo3Color,
+} from './ludo3Board';
+import { ARM_ANGLE } from './components/ludo3/ludo3Geometry';
 import type { TokenPosition } from './ludoFirebase';
 
 const q = new URLSearchParams(location.search);
-const me = (q.get('me') ?? 'red') as Ludo4Color;
-const playerCount = Number(q.get('players') ?? 4);
-const activeIdx = Number(q.get('active') ?? 3);
+const me = (q.get('me') ?? 'red') as Ludo3Color;
+const playerCount = Number(q.get('players') ?? 3);
+const activeIdx = Number(q.get('active') ?? 2);
 const status = q.get('status') ?? 'hint';
 const timeLeft = Number(q.get('time') ?? 22);
 const longNames = q.get('names') !== 'short';
-const winner = (q.get('winner') as Ludo4Color | null) ?? null;
+const winner = (q.get('winner') as Ludo3Color | null) ?? null;
 
 const TURN_SECONDS = 30;
-// Kept in step with Ludo4Game's ring clock.
-const TIMER_RING_R = 12.2;
+// Kept in step with Ludo3Game's ring clock.
+const TIMER_RING_R = 11.2;
 const TIMER_RING_C = 2 * Math.PI * TIMER_RING_R;
 
 // Built off TOKENS_PER_PLAYER rather than written out, so the harness keeps
@@ -48,7 +48,6 @@ const LAYOUT: TokenPosition[][] = [
   ['base', 'base', 'track-1', 'track-10', 'track-5'],
   ['base', 'track-15', 'track-24', 'final-3', 'track-19'],
   ['base', 'base', 'track-38', `final-${FINAL_SIZE}` as TokenPosition, 'track-33'],
-  ['base', 'track-43', 'track-50', 'final-1', 'track-47'],
 ];
 const tokens: TokenPosition[] = PLAYER_COLORS.flatMap((_, ci) =>
   Array.from({ length: TOKENS_PER_PLAYER }, (_, i) => LAYOUT[ci][i] ?? 'base')
@@ -62,34 +61,32 @@ const validMoves = new Map<number, TokenPosition>([
   [3, 'final-2'],
 ]);
 
-const COLOR_HEX: Record<Ludo4Color, string> = {
-  red: '#ea4330', green: '#34a853', yellow: '#fbbc05', blue: '#4285f4',
+const COLOR_HEX: Record<Ludo3Color, string> = {
+  red: '#ea4330', green: '#34a853', blue: '#4285f4',
 };
-const COLOR_RGB: Record<Ludo4Color, string> = {
-  red: '234, 67, 48', green: '52, 168, 83', yellow: '251, 188, 5', blue: '66, 133, 244',
+const COLOR_RGB: Record<Ludo3Color, string> = {
+  red: '234, 67, 48', green: '52, 168, 83', blue: '66, 133, 244',
 };
-const NAMES_LONG: Record<Ludo4Color, string> = {
-  red: 'Bartholomew Vandenberg', green: 'Bot Green', yellow: 'Bot Yellow', blue: 'Bot Blue',
+const NAMES_LONG: Record<Ludo3Color, string> = {
+  red: 'Bartholomew Vandenberg', green: 'Bot Green', blue: 'Bot Blue',
 };
-const NAMES_SHORT: Record<Ludo4Color, string> = {
-  red: 'Tom', green: 'Ana', yellow: 'Jo', blue: 'Kim',
+const NAMES_SHORT: Record<Ludo3Color, string> = {
+  red: 'Tom', green: 'Ana', blue: 'Kim',
 };
-const SCORE: Record<Ludo4Color, number> = { red: 12, green: 55, yellow: 57, blue: 31 };
-const ROLLS: Record<Ludo4Color, number[]> = {
+const SCORE: Record<Ludo3Color, number> = { red: 12, green: 55, blue: 57 };
+const ROLLS: Record<Ludo3Color, number[]> = {
   red: [0, 0, 1, 0, 0, 0],
   green: [0, 0, 0, 0, 0, 0],
-  yellow: [0, 0, 12, 0, 3, 0],
-  blue: [2, 1, 0, 4, 0, 1],
+  blue: [0, 0, 12, 0, 3, 0],
 };
-const CAPS: Record<Ludo4Color, number> = { red: 1, green: 0, yellow: 2, blue: 0 };
+const CAPS: Record<Ludo3Color, number> = { red: 1, green: 0, blue: 2 };
 
 // Same rule as the shipped component's seatCorner().
-function seatCorner(color: Ludo4Color) {
+function seatCorner(color: Ludo3Color) {
   const bearing = (ARM_ANGLE[color] - ARM_ANGLE[me] + 360) % 360;
   return bearing === 0 ? styles.cornerBl
-    : bearing === 90 ? styles.cornerTl
-    : bearing === 180 ? styles.cornerTr
-    : styles.cornerBr;
+    : bearing === 120 ? styles.cornerTl
+    : styles.cornerTr;
 }
 
 const STATUS_TEXT: Record<string, string> = {
@@ -112,7 +109,7 @@ function Preview() {
     >
       <div className={styles.titleBar}>
         <span className={styles.titleText}>
-          Ludo 4<span className={styles.titleCode}>LN84</span>
+          Ludo 3<span className={styles.titleCode}>LN84</span>
         </span>
         <span className={styles.titleButtons}>
           <button className={styles.closeBtn} aria-label="close">
@@ -125,7 +122,7 @@ function Preview() {
       <div className={styles.gameArea}>
         <div className={styles.playingLayout}>
           <div className={styles.boardWrapper}>
-            <Ludo4Board
+            <Ludo3Board
               tokens={tokens}
               playerCount={playerCount}
               myColor={me}

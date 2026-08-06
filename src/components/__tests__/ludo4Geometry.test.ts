@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   CELL_PCT,
   TOKEN_PCT,
   STEP_DEG,
   R_RING,
   BASE_BAY_PCT,
+  BASE_RING_PCT,
   BASE_CENTRE,
   BASE_ARC_DEG,
   TRACK_XY,
@@ -153,6 +156,29 @@ describe('ludo4 circular board geometry', () => {
     }
   });
 
+  /* A counter standing in a bay is a circle inside a ring, concentric all the
+     way round — so unlike a square track cell the bay has no corners to hide a
+     tight fit in. When the white between the two came to half a device pixel it
+     rounded to one pixel on one side and none on the other, and every socket
+     looked as though its counter had been dropped in askew. It had not: the
+     clearance just has to be big enough to survive rounding. */
+  it('leaves a counter real white on every side of its socket', () => {
+    const clearance = (BASE_BAY_PCT - 2 * BASE_RING_PCT - TOKEN_PCT) / 2;
+    expect(clearance).toBeGreaterThan(0.12);
+  });
+
+  it('draws the socket ring at the width the bay is sized around', () => {
+    // The ring lives in CSS and the bay that has to clear it lives here; the
+    // two only agree by being checked.
+    const css = readFileSync(
+      resolve(process.cwd(), 'src/components/ludo4/Ludo4Game.module.css'),
+      'utf-8'
+    );
+    const inset = /\.baseBay\s*\{[^}]*box-shadow:\s*inset 0 0 0 ([\d.]+)cqw/.exec(css);
+    expect(inset).not.toBeNull();
+    expect(Number(inset![1])).toBeCloseTo(BASE_RING_PCT, 6);
+  });
+
   it('keeps yards, and the pieces in them, from touching each other', () => {
     const spots = PLAYER_COLORS.flatMap(c => BASE_XY[c]);
     for (let i = 0; i < spots.length; i++) {
@@ -233,7 +259,7 @@ describe('ludo4 circular board geometry', () => {
 
   it('spins every seat onto an axis, with the local player at the bottom', () => {
     // The plate turns by −ARM_ANGLE[me], so your own arm always lands at
-    // bearing 0 (pointing down at you, as Ludo2 seats you) and the rest at 90°
+    // bearing 0 (pointing down at you, the way you sit at a table) and the rest at 90°
     // steps. There is deliberately no clear wedge above the hub — the status
     // line and clock live inside the hub, which is sized for them (see HUB).
     for (const my of PLAYER_COLORS) {
@@ -333,7 +359,7 @@ describe('getTokenOffset', () => {
   });
 
   it('does not nudge run-home counters of different colours apart', () => {
-    // Regression inherited from Ludo2: matching on the string alone treated
+    // Regression: matching on the string alone treated
     // each colour's third run-home cell as one shared cell and shoved a counter
     // off-centre in each of them while all were in fact standing alone.
     const tokens = empty();

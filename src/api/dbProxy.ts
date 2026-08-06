@@ -1,5 +1,5 @@
 // Game-agnostic Firebase-over-proxy transport, extracted from ludoApi.ts so
-// Ludo and Ludo2 share one copy of the subtle parts. Why a proxy at all:
+// The Ludo games share one copy of the subtle parts. Why a proxy at all:
 // corporate VPNs (Imprivata) block Firebase's WebSocket, so realtime games talk
 // to /api/db/* over plain HTTPS instead of the SDK.
 //

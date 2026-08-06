@@ -47,7 +47,7 @@ import type { TokenPosition } from '../ludoFirebase';
 //
 // Cell numbers are derived from START_POSITIONS/ENTRY_CELLS rather than written
 // in — where the entry sits relative to the start is a live design decision
-// (see the Ludo2 suite this is forked from).
+// (see the Ludo3 suite this is forked from).
 
 const BASE_TOKENS: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
 

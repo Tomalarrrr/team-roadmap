@@ -6,7 +6,7 @@ import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './SearchFilter.module.css';
 
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
-const Ludo2Game = lazy(() => import('./ludo2/Ludo2Game').then(m => ({ default: m.Ludo2Game })));
+const Ludo3Game = lazy(() => import('./ludo3/Ludo3Game').then(m => ({ default: m.Ludo3Game })));
 const Ludo4Game = lazy(() => import('./ludo4/Ludo4Game').then(m => ({ default: m.Ludo4Game })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 import { CyclesiteEmbed } from './CyclesiteEmbed';
@@ -70,10 +70,10 @@ export const SearchFilter = memo(function SearchFilter({
   // secret search term below, which is gated on the vault being unlocked — so a
   // locked viewer or read-only embed can never reach them.
   //
-  // The one exception is a Ludo 2 invite link, handled further down, and it sits
+  // The one exception is a Ludo invite link, handled further down, and it sits
   // behind the same unlock: a URL still cannot carry anyone around the lock.
   const [showLudo, setShowLudo] = useState(false);
-  const [showLudo2, setShowLudo2] = useState(false);
+  const [showLudo3, setShowLudo3] = useState(false);
   const [showLudo4, setShowLudo4] = useState(false);
   const [showCyclesite, setShowCyclesite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -109,15 +109,15 @@ export const SearchFilter = memo(function SearchFilter({
 
   // Easter eggs: typing a magic word opens a hidden feature (only when the
   // site is unlocked). Matched after a short settle-debounce rather than
-  // per-keystroke because "ludo" is a strict prefix of "ludo2" — an eager
+  // per-keystroke because "ludo" is a strict prefix of "ludo3" — an eager
   // exact match would open Ludo v1 on the fourth keystroke and eat the input
-  // before the "2" could ever land.
+  // before the "3" could ever land.
   useEffect(() => {
     if (isLocked) return;
     const magic = search.trim().toLowerCase();
     let open: (() => void) | null = null;
     if (magic === 'ludo') open = () => setShowLudo(true);
-    else if (magic === 'ludo2') open = () => setShowLudo2(true);
+    else if (magic === 'ludo3') open = () => setShowLudo3(true);
     else if (magic === 'ludo4') open = () => setShowLudo4(true);
     else if (magic === 'cyclesite') open = () => setShowCyclesite(true);
     if (!open) return;
@@ -129,13 +129,13 @@ export const SearchFilter = memo(function SearchFilter({
     return () => clearTimeout(timer);
   }, [search, isLocked]);
 
-  // Ludo 2 invite links. The waiting room offers a "Copy Link" button that
-  // writes ?ludo2=CODE, but nothing ever read the parameter at this level — so
+  // Ludo 3 invite links. The waiting room offers a "Copy Link" button that
+  // writes ?ludo3=CODE, but nothing ever read the parameter at this level — so
   // the popup had to already be open for the link to do anything, which meant
   // the recipient needed the secret word anyway and the link was inert.
   //
   // Gated on the unlock exactly like the magic word above: a locked viewer
-  // following one of these gets the roadmap and nothing else. Ludo2Game reads
+  // following one of these gets the roadmap and nothing else. Ludo3Game reads
   // the code itself and strips it from the URL once it has joined.
   //
   // Derived rather than an effect that opens the popup: `isLocked` starts true
@@ -143,15 +143,15 @@ export const SearchFilter = memo(function SearchFilter({
   // and reading the URL into state on a later render is a cascading render for
   // something that is a pure function of the URL and the lock.
   const inviteCode = useMemo(() => {
-    const code = new URLSearchParams(window.location.search).get('ludo2');
+    const code = new URLSearchParams(window.location.search).get('ludo3');
     // Codes are four characters from a 32-char alphabet that includes digits
     // (see generateGameCode) — a letters-only test would drop most of them.
     return code && /^[a-z0-9]{4}$/i.test(code) ? code : null;
   }, []);
   const [inviteDismissed, setInviteDismissed] = useState(false);
-  const ludo2Open = showLudo2 || (!isLocked && inviteCode !== null && !inviteDismissed);
-  const closeLudo2 = useCallback(() => {
-    setShowLudo2(false);
+  const ludo3Open = showLudo3 || (!isLocked && inviteCode !== null && !inviteDismissed);
+  const closeLudo3 = useCallback(() => {
+    setShowLudo3(false);
     setInviteDismissed(true);
   }, []);
 
@@ -342,10 +342,10 @@ export const SearchFilter = memo(function SearchFilter({
         </GameErrorBoundary>,
         document.body
       )}
-      {ludo2Open && createPortal(
-        <GameErrorBoundary gameName="Ludo 2" onClose={closeLudo2}>
+      {ludo3Open && createPortal(
+        <GameErrorBoundary gameName="Ludo 3" onClose={closeLudo3}>
           <Suspense fallback={null}>
-            <Ludo2Game onClose={closeLudo2} isSearchOpen={isOpen} />
+            <Ludo3Game onClose={closeLudo3} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
         document.body

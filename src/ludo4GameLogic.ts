@@ -1,16 +1,16 @@
 // Pure game logic for Ludo4 (four-player, 56-cell circular track).
 //
-// Forked from ludo2GameLogic and re-pointed at the four-seat board constants:
+// Forked from ludo3GameLogic and re-pointed at the four-seat board constants:
 // classic rules, no power-ups, no doubled rolls (a bonus roll is a plain 6).
 // Deterministic, side-effect-free, independently testable.
 //
-// One rule of its own, inherited from Ludo2: the run home has FINAL_SIZE cells
+// One rule of its own, shared with Ludo3: the run home has FINAL_SIZE cells
 // and each player has exactly that many counters, so finishing means standing
 // one counter in every cell of it. A counter may pass over cells that are
 // already taken but has to land on an empty one, exactly — otherwise that
 // counter simply cannot move, and sits out on the track waiting to be sent home
 // by an opponent. Being stuck in the open is the whole tension of the endgame,
-// not a fault in it (see ludo2GameLogic for the simulation numbers).
+// not a fault in it (see ludo3FinishSim for the simulation numbers).
 
 import type { TokenPosition } from './ludoFirebase';
 import {
@@ -157,8 +157,8 @@ export function helpfulRolls(tokens: TokenPosition[], color: Ludo4Color): number
  *
  * Naming the face they need is the difference between a rule that feels sharp
  * and one that feels broken. "No moves" invites the reading that the dice are
- * ignoring you — which is exactly what Ludo2's players reported the last time
- * this rule shipped without it.
+ * ignoring you — which is exactly what players reported the last time this
+ * rule shipped without it.
  */
 export function describeNoMove(tokens: TokenPosition[], color: Ludo4Color): string {
   const faces = helpfulRolls(tokens, color);
@@ -320,8 +320,8 @@ export function scoreBotMove(
 
   // Taking a cell in the run home is valuable — safe from everything, and one of
   // the five a player needs. The `finalNum` term prefers the deep cells: a
-  // deterministic tie-break, not a measured edge (see ludo2GameLogic's note on
-  // the 2400-game measurement).
+  // deterministic tie-break, not a measured edge: deep-first, shallow-first and
+  // no preference at all all score a fair share over 2400 measured games.
   if (targetPos.startsWith('final-')) {
     const finalNum = parseInt(targetPos.split('-')[1]);
     score += 100 + finalNum * 20;

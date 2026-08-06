@@ -1,13 +1,13 @@
-// Presentational circular board for Ludo4. All positioning comes from
-// ludo4Geometry; this component draws the flat disc, the 56-cell ring, the
-// four run-home spokes, the yard sockets and the pieces. Movement is driven by
+// Presentational circular board for Ludo3. All positioning comes from
+// ludo3Geometry; this component draws the flat disc, the 42-cell ring, the
+// three run-home spokes, the yard sockets and the pieces. Movement is driven by
 // the parent via animPos/animParity overrides (the same imperative stepper as
-// Ludo v1 and Ludo3).
+// Ludo v1 and Ludo4).
 //
-// Deliberately 2D, as Ludo3 is: the layout is the ring, the look is Ludo v1's —
-// flat white cells with
-// hairline borders, solid-colour start cells and corridors, glossy counters
-// that glow when they can move. No lighting model, no perspective. The life is
+// Deliberately 2D, exactly as Ludo4 is: the layout is the ring and the look is
+// Ludo v1's — flat white cells with hairline borders, solid-colour start cells
+// and corridors, glossy counters that glow when they can move. No lighting
+// model, no perspective. The life is
 // in the moments instead: a rim tick that sweeps to whoever's turn it is, a
 // path preview under a hovered counter, a ripple where a counter lands, and a
 // cascade up the winner's corridor.
@@ -25,8 +25,8 @@ import {
   PLAYER_COLORS,
   getTokenColor,
   describePosition,
-  type Ludo4Color,
-} from '../../ludo4Board';
+  type Ludo3Color,
+} from '../../ludo3Board';
 import {
   ARM_ANGLE,
   CELL_PCT,
@@ -42,20 +42,21 @@ import {
   computeMovePath,
   getTokenCoords,
   getTokenOffset,
-} from './ludo4Geometry';
-import { pickNearestToken } from './ludo4HitTest';
-import styles from './Ludo4Game.module.css';
+} from './ludo3Geometry';
+import { pickNearestToken } from './ludo3HitTest';
+import styles from './Ludo3Game.module.css';
 
 // --- Palette ---------------------------------------------------------------
-// Ludo v1's four seats, verbatim, so the two boards read as the same family.
-const COLOR_HEX: Record<Ludo4Color, string> = {
-  red: '#ea4330', green: '#34a853', yellow: '#fbbc05', blue: '#4285f4',
+// Three of Ludo v1's four seats, verbatim, so every Ludo board reads as the
+// same family. Yellow is the one left out: on a white cell it is the weakest of
+// the four, and with a seat to spare there is no reason to use it.
+const COLOR_HEX: Record<Ludo3Color, string> = {
+  red: '#ea4330', green: '#34a853', blue: '#4285f4',
 };
 
-const TOKEN_STYLE: Record<Ludo4Color, string> = {
+const TOKEN_STYLE: Record<Ludo3Color, string> = {
   red: styles.tokenRed,
   green: styles.tokenGreen,
-  yellow: styles.tokenYellow,
   blue: styles.tokenBlue,
 };
 
@@ -65,24 +66,24 @@ const STAR_PATH =
 
 /** The rim tick: a short arc at the board's edge, drawn at bearing 0 (the
  * bottom) and rotated to the active seat's arm. Points are polar for bearing
- * ±5° at r 48.5 — outside the yard arc (bays end at ~47.9) but inside the
+ * ±5° at r 48.8 — outside the yard arc (bays end at ~48.1) but inside the
  * rim's swell there (~49.5), so the tick rides the last sliver of apron
  * without grazing either the sockets or the sculpted edge. */
-const RIM_TICK_PATH = 'M 54.23 98.31 A 48.5 48.5 0 0 1 45.77 98.31';
+const RIM_TICK_PATH = 'M 54.25 98.61 A 48.8 48.8 0 0 1 45.75 98.61';
 
 const TRACK_INDICES = Array.from({ length: TRACK_SIZE }, (_, i) => i + 1);
 const TOKEN_INDICES = Array.from({ length: TOTAL_TOKENS }, (_, i) => i);
 const FINAL_CELLS = Array.from({ length: FINAL_SIZE }, (_, i) => i + 1);
 
-const START_CELL_COLOR: Record<number, Ludo4Color> = {};
-const ENTRY_CELL_COLOR: Record<number, Ludo4Color> = {};
+const START_CELL_COLOR: Record<number, Ludo3Color> = {};
+const ENTRY_CELL_COLOR: Record<number, Ludo3Color> = {};
 for (const c of PLAYER_COLORS) {
   START_CELL_COLOR[START_POSITIONS[c]] = c;
   ENTRY_CELL_COLOR[ENTRY_CELLS[c]] = c;
 }
 
-const SEAT_LABEL: Record<Ludo4Color, string> = {
-  red: 'Red', green: 'Green', yellow: 'Yellow', blue: 'Blue',
+const SEAT_LABEL: Record<Ludo3Color, string> = {
+  red: 'Red', green: 'Green', blue: 'Blue',
 };
 
 /** What a cell is, for anyone who hovers it. Only the cells that carry a rule
@@ -112,17 +113,17 @@ function box(x: number, y: number, w: number, h = w, rot = 0) {
 export interface Ripple {
   id: number;
   coords: [number, number];
-  color: Ludo4Color;
+  color: Ludo3Color;
 }
 
-interface Ludo4BoardProps {
+interface Ludo3BoardProps {
   tokens: TokenPosition[];
   playerCount: number;
-  myColor: Ludo4Color | null;
+  myColor: Ludo3Color | null;
   /** Whose turn it is — drives the rim tick. Null hides it (e.g. game over). */
-  activeColor: Ludo4Color | null;
+  activeColor: Ludo3Color | null;
   /** The winner, once there is one — runs the cascade up their corridor. */
-  winner: Ludo4Color | null;
+  winner: Ludo3Color | null;
   validMoves: Map<number, TokenPosition>;
   lastMovedToken: number | null;
   animPos: Map<number, [number, number]>;
@@ -131,7 +132,7 @@ interface Ludo4BoardProps {
   onTokenClick: (tokenIndex: number) => void;
 }
 
-export function Ludo4Board({
+export function Ludo3Board({
   tokens,
   playerCount,
   myColor,
@@ -143,14 +144,14 @@ export function Ludo4Board({
   animParity,
   ripples,
   onTokenClick,
-}: Ludo4BoardProps) {
+}: Ludo3BoardProps) {
   const activeColors = PLAYER_COLORS.slice(0, playerCount);
 
   // Turn the board face so the local player's arm points straight down — your
-  // yard and corridor sit centre-bottom, the way you would sit at the table. The layout
-  // is four-fold symmetric about the centre, so ±90° turns map it exactly onto
-  // itself — only the colours move. (The status line this leaves nowhere to go
-  // above the hub lives *in* the hub instead — see Ludo4Game.)
+  // yard and corridor sit centre-bottom, the way you would sit at the table.
+  // The layout is three-fold symmetric about the centre, so ±120° turns map it
+  // exactly onto itself — only the colours move. (The status line this leaves
+  // nowhere to go above the hub lives *in* the hub instead — see Ludo3Game.)
   const spin = -(myColor ? ARM_ANGLE[myColor] : 0);
   // Anything that is read rather than pointed — the pieces, the safe stars —
   // has to be turned back, or a spun board hands the player a set of counters
@@ -171,7 +172,7 @@ export function Ludo4Board({
    * 3600° is the same picture as one of 0°. Held in state and adjusted during
    * render on the seat actually changing (the same shape as any other
    * derived-from-props state), so a re-render never advances it. */
-  const [tick, setTick] = useState<{ seat: Ludo4Color | null; angle: number }>(() => ({
+  const [tick, setTick] = useState<{ seat: Ludo3Color | null; angle: number }>(() => ({
     seat: activeColor,
     angle: activeColor ? ARM_ANGLE[activeColor] : 0,
   }));
@@ -200,7 +201,7 @@ export function Ludo4Board({
   const hoverColor = hoverToken !== null ? COLOR_HEX[getTokenColor(hoverToken)] : undefined;
 
   /* Presses land on the board, not on the counters: the board asks which
-     playable counter is *closest* (see ludo4HitTest), which is what lets the
+     playable counter is *closest* (see ludo3HitTest), which is what lets the
      catchment be opened past the size of the piece without neighbours stealing
      each other's presses. Counters keep their keyboard handling; this is the
      pointer half only. */
@@ -233,9 +234,9 @@ export function Ludo4Board({
         // cancelled press, not a move somewhere else.
         onPointerLeave={() => { pressRef.current = null; }}
       >
-        {/* The disc: one flat plate whose silhouette dips in on the diagonals
+        {/* The disc: one flat plate whose silhouette dips in between the arms
             and swells out around each yard — the shape itself houses the
-            counters. Four-fold symmetric, so it never has to turn with the
+            counters. Three-fold symmetric, so it never has to turn with the
             plate; a hairline traces the sculpted edge. */}
         <svg className={styles.disc} viewBox="0 0 100 100" aria-hidden="true">
           <path d={RIM_OUTLINE_PATH} />
@@ -249,8 +250,8 @@ export function Ludo4Board({
           className={styles.boardPlate}
           style={{ transform: `rotate(${spin}deg)`, transformOrigin: '50% 50%' }}
         >
-          {/* Territory: each seat's quarter of the apron washed in its own
-              colour, a few percent strong — v1's four colour blocks, bent
+          {/* Territory: each seat's third of the apron washed in its own
+              colour, a few percent strong — v1's colour blocks, bent
               around the ring. Inside the plate so the wash turns with the
               seats. Masked to the apron: a wash across the whole quadrant
               would tint the corridors and the open middle, which are already

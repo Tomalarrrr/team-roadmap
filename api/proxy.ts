@@ -26,11 +26,11 @@ declare const process: { env: Record<string, string | undefined> };
 const ALLOWED_METHODS = new Set(['GET', 'PUT', 'PATCH', 'POST', 'DELETE']);
 const PATH_REGEX = /^[a-zA-Z0-9_\-/]*$/;
 // Subtrees this proxy is allowed to touch. Roadmap is the core data; `ludo`,
-// `ludo2` and `ludo4` are the hidden games, routed through here so they work
+// `ludo3` and `ludo4` are the hidden games, routed through here so they work
 // behind corporate VPNs that block Firebase's WebSocket. Everything else
 // (presence, connectFour, DB root) still goes via the Firebase SDK and must not
 // be reachable through the proxy.
-const ALLOWED_ROOTS = ['roadmap', 'ludo', 'ludo2', 'ludo4'];
+const ALLOWED_ROOTS = ['roadmap', 'ludo', 'ludo3', 'ludo4'];
 
 export default async function handler(request: Request): Promise<Response> {
   const databaseUrl =

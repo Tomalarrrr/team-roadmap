@@ -1,32 +1,33 @@
 // Which counter a press on the board means.
 //
-// Its own module rather than part of Ludo2Board because it is not a component
+// Its own module rather than part of Ludo3Board because it is not a component
 // and not board geometry either — it works in screen pixels, off what the
-// browser actually laid out.
+// browser actually laid out. Ludo4's hit test is the same design; this module
+// carries the derivation.
 
 /**
  * How far from a counter's centre a press still counts, as a multiple of the
  * counter's own width.
  *
- * A counter is TOKEN_PCT (4.1%) of the board and the ring puts its cells 360/42°
- * apart — 5.86% of the board between neighbouring centres. So a target drawn as
- * a *box* cannot be made bigger than about 1.4× the counter without two of them
- * overlapping and the wrong one taking the press: on a 600px board that is a
- * 34px target, under every touch-target guideline there is, and players could
- * not reliably press their own pieces.
+ * A counter is TOKEN_PCT (3.55%) of the board and the ring puts its cells
+ * 360/42° apart — 5.86% of the board between neighbouring centres. So a target
+ * drawn as a *box* cannot be made much bigger than the counter without two of
+ * them overlapping and the wrong one taking the press: on a 600px board that is
+ * a target in the low thirties of pixels, under every touch-target guideline
+ * there is, and players could not reliably press their own pieces.
  *
  * Nearest-centre lifts that ceiling. Overlap stops being a problem when the
  * counter whose centre is closest wins, so the catchment can be opened past the
  * piece and the boundary between two neighbours lands exactly where it should —
  * halfway between them.
  *
- * 0.85 of a counter's width as a radius makes the target 1.7× the piece across —
- * a little over 40px where it used to be 29 — while still not reaching a
- * neighbouring cell's centre, so a press well away from any playable piece still
- * does nothing. Moves cannot be taken back; a catchment that grabbed from across
- * the board would be a worse bug than the one it fixes.
+ * 0.85 of a counter's width as a radius makes the target 1.7× the piece across
+ * while still not reaching a neighbouring cell's centre, so a press well away
+ * from any playable piece still does nothing. Moves cannot be taken back; a
+ * catchment that grabbed from across the board would be a worse bug than the
+ * one it fixes.
  *
- * Kept in step with the `.tokenClickable::before` halo in Ludo2Game.module.css,
+ * Kept in step with the `.tokenClickable::before` halo in Ludo3Game.module.css,
  * which is only there so the cursor turns to a hand over the area that actually
  * answers to it.
  */
