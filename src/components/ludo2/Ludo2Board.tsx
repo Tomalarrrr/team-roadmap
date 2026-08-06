@@ -370,7 +370,7 @@ export function Ludo2Board({
                     inactive ? styles.cellInactive : '',
                     isTarget ? styles.cellTarget : '',
                   ].filter(Boolean).join(' ')}
-                  title={`${SEAT_LABEL[color]}'s run home — walk in, any depth; an overshoot stops on the last cell`}
+                  title={`${SEAT_LABEL[color]}'s run home — land on an empty cell exactly, or wait out on the track`}
                   style={{
                     ...box(spec.x, spec.y, SPOKE_CELL, SPOKE_CELL, spec.rot),
                     ...keyLight(spec.rot + spin),

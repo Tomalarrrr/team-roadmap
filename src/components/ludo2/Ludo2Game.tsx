@@ -48,6 +48,7 @@ import {
 import {
   getValidMoves,
   getDistinctMoves,
+  describeNoMove,
   applyMove,
   checkPlayerFinished,
   getFinishedColors,
@@ -705,6 +706,34 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     };
   }, []);
 
+  /**
+   * Believe our own committed write about whose turn it is now.
+   *
+   * The die is offered on `isMyTurn && turnPhase === 'roll'`, both read from
+   * state that only moves when a poll comes back. So for the second or so after
+   * a write that ends our turn, the client still believed it was ours and still
+   * in the roll phase — and handed the player a second roll they had not earned.
+   *
+   * It showed up hardest at the very start of a game, because with everything
+   * still in the yard every roll but a 6 ends the turn with no move, which is
+   * exactly the path that leaves the die live. The extra roll could not commit
+   * (makeMove checks whose turn it is against the stored state) so nothing was
+   * corrupted — but the dice tumbled, a face landed, and the turn appeared to be
+   * taken twice.
+   */
+  const applyTurnLocally = useCallback((nextColor: Ludo2Color, nextSixes: number) => {
+    currentTurnRef.current = nextColor;
+    setCurrentTurn(nextColor);
+    consecutiveSixesRef.current = nextSixes;
+    setConsecutiveSixes(nextSixes);
+    turnPhaseRef.current = 'roll';
+    setTurnPhase('roll');
+    diceValueRef.current = null;
+    setDiceValue(null);
+    // The clock belongs to the new turn, not to the one that just ended.
+    turnLocalStartRef.current = Date.now();
+  }, []);
+
   // --- Move execution (optimistic, mirrors v1 without power-ups) ---
   const executeMove = useCallback((tokenIndex: number, newPosition: TokenPosition, roll: number) => {
     const gc = gameCodeRef.current;
@@ -791,9 +820,21 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     };
 
     makeMove(gc, curColor, update)
-      .then(committed => { if (!committed) rollbackOptimistic(); })
+      .then(committed => {
+        if (!committed) return rollbackOptimistic();
+        // Hand the turn on locally too, or the die stays live until the next
+        // poll and the player gets a roll that is not theirs.
+        applyTurnLocally(update.currentTurn, nextSixes);
+        // Same reasoning for the win: the die is offered on `!winner`, so the
+        // player who has just finished could otherwise roll once more while
+        // waiting to be told they had won.
+        if (gameWinner) {
+          winnerRef.current = gameWinner;
+          setWinner(gameWinner);
+        }
+      })
       .catch(rollbackOptimistic);
-  }, [showHint, runTokenAnimations]);
+  }, [showHint, runTokenAnimations, applyTurnLocally]);
   const executeMoveRef = useRef(executeMove);
   executeMoveRef.current = executeMove;
 
@@ -825,9 +866,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
     }
 
     // Pity timer: after a few failed attempts to deploy with everything stuck
-    // at base, force a 6 (recorded stats use the true die face, not this)
+    // at base, force a 6. Under the exact-landing rule a yard you cannot leave
+    // is the one genuinely hopeless place to be, so this matters more than it
+    // did — but it stays a nudge, not a guarantee, hence the randomised
+    // threshold.
     let roll = rolls[0];
-    const originalFace = rolls[0];
     const indices = getColorTokenIndices(activeColor);
     const hasTokenAtHome = indices.some(i => tokensRef.current[i] === 'base');
     // Nothing on the track to move: everything is either still in the yard or
@@ -870,7 +913,14 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
       setDiceValue(roll);
       setLastRoll(roll);
 
-      const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), originalFace);
+      // The face that was played, not the one the generator first produced.
+      // Recording the raw face was meant to keep the pity timer out of sight; it
+      // instead made the one table in the game that claims to be a record of it
+      // disagree with the board — six pips showing, a counter coming out, and
+      // the tally crediting a 3. A player counting their own sixes is not
+      // debugging the dice, they are reading the game, and this is the number
+      // they watched happen.
+      const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), roll);
       rollStatsRef.current = updatedRollStats;
 
       const currentTokens = tokensRef.current;
@@ -908,10 +958,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         } else {
           nextColor = findNextActivePlayer(curColor, curPlayerCount, finishedColors);
           nextSixes = 0;
-          // Counters walk into the run home, so anything off the yard always
-          // has somewhere to go: a turn with no move at all can only be a yard
-          // waiting on a 6.
-          showHint('Need a 6 to come out');
+          // Name the face they are actually waiting for. Under the exact
+          // landing rule "no moves" covers several different situations and
+          // only one of them is a yard wanting a 6 — told the wrong one, a
+          // player reads the dice as broken rather than the rule as tight.
+          showHint(describeNoMove(currentTokens, curColor));
         }
         const update: Ludo2MoveUpdate = {
           tokens: serializeTokens(currentTokens),
@@ -929,8 +980,11 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         // on, twelve conflicts in a row) used to leave this stuck true, and a
         // client with it stuck true can neither roll nor move for the rest of
         // the game.
-        await makeMove(gc, curColor, update).catch(() => false);
+        const passed = await makeMove(gc, curColor, update).catch(() => false);
         moveInFlightRef.current = false;
+        // This is the path that gave away a free second roll: with everything in
+        // the yard, every face but a 6 lands here.
+        if (passed) applyTurnLocally(nextColor, nextSixes);
         return;
       }
 
@@ -970,7 +1024,7 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
         diceValueRef.current = roll;
       }
     }, rollAnimMs);
-  }, [showHint]);
+  }, [showHint, applyTurnLocally]);
   const handleRollDiceRef = useRef(handleRollDice);
   handleRollDiceRef.current = handleRollDice;
 
@@ -1474,11 +1528,14 @@ export function Ludo2Game({ onClose, isSearchOpen }: Ludo2GameProps) {
               <li>Land on an opponent to send that counter back to its yard.</li>
               <li>Start spaces and starred spaces are safe. Nothing is captured there.</li>
               <li>
-                Your run home is the five cells on your own spoke. Counters walk in — no
-                exact roll needed, and any number of them may share a cell. A roll that
-                would carry one past the end simply stops it on the <em>last</em> cell.
+                Your run home has five cells and you have five counters — one for each.
+                A counter must land on an empty cell <em>exactly</em>. It may pass over a
+                taken one, but a roll that overshoots the end is no move at all.
               </li>
-              <li>Get all five counters into the run home to win. One still out on the track can always be sent back to your yard.</li>
+              <li>
+                So a counter that cannot land waits out on the track, where it can still
+                be sent back to your yard. Fill all five cells to win.
+              </li>
             </ul>
             <div className={styles.helpKeys}>
               Space or Enter rolls. Tab to a raised counter and press Enter to move it.

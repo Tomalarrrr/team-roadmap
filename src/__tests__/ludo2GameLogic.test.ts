@@ -4,6 +4,8 @@ import {
   getValidMoves,
   distinctMoves,
   getDistinctMoves,
+  helpfulRolls,
+  describeNoMove,
   applyMove,
   checkPlayerFinished,
   getFinishedColors,
@@ -23,6 +25,7 @@ import {
   getPlayerScore,
   getStandings,
   describePosition,
+  getOccupiedFinals,
   deserializeLudo2Tokens,
   initRollStats,
   deserializeRollStats,
@@ -39,7 +42,7 @@ import type { TokenPosition } from '../ludoFirebase';
 // for its run home on the cell before its own start.
 // Safe zones: 1, 7, 15, 21, 29, 35
 // Token indices: red 0-4, green 5-9, yellow 10-14
-// Run home: five cells per colour, shared freely, walked into.
+// Run home: five cells per colour, one counter each, landed on exactly.
 //
 // Cell numbers are derived from START_POSITIONS/ENTRY_CELLS rather than written
 // in. Where the entry sits relative to the start is a live design decision — it
@@ -54,8 +57,9 @@ function tokensWith(overrides: Record<number, TokenPosition>): TokenPosition[] {
   return t;
 }
 
+/** calculateNewPosition against an otherwise-empty board. */
 function calc(from: TokenPosition, steps: number, color: 'red' | 'green' | 'yellow') {
-  return calculateNewPosition(from, steps, color);
+  return calculateNewPosition(from, steps, color, BASE_TOKENS);
 }
 
 type Seat = 'red' | 'green' | 'yellow';
@@ -144,6 +148,12 @@ describe('board constants', () => {
     expect(padded.every(p => p === 'base')).toBe(true);
   });
 
+  it('reads a colour’s occupied run-home cells, ignoring other colours', () => {
+    const t = tokensWith({ 0: 'final-2', 3: 'final-5', 5: 'final-1' });
+    expect(getOccupiedFinals(t, 'red')).toEqual(new Set([2, 5]));
+    expect(getOccupiedFinals(t, 'green')).toEqual(new Set([1]));
+    expect(getOccupiedFinals(t, 'yellow')).toEqual(new Set());
+  });
 });
 
 describe('calculateNewPosition', () => {
@@ -159,8 +169,8 @@ describe('calculateNewPosition', () => {
     expect(calc('final-3', 2, 'yellow')).toBe('final-5');
   });
 
-  it('stops on the last cell rather than overshooting it', () => {
-    expect(calc('final-4', 2, 'green')).toBe(`final-${FINAL_SIZE}`);
+  it('rejects overshoot past the last cell', () => {
+    expect(calc('final-4', 2, 'green')).toBeNull();
   });
 
   it('enters the run home from the entry cell', () => {
@@ -171,8 +181,8 @@ describe('calculateNewPosition', () => {
     expect(calc(atEntry('red'), FINAL_SIZE, 'red')).toBe(`final-${FINAL_SIZE}`);
   });
 
-  it('walks in on a roll that would carry past the run home', () => {
-    expect(calc(atEntry('red'), FINAL_SIZE + 1, 'red')).toBe(`final-${FINAL_SIZE}`);
+  it('rejects a roll that would overshoot the run home entirely', () => {
+    expect(calc(atEntry('red'), FINAL_SIZE + 1, 'red')).toBeNull();
   });
 
   it('enters green’s run home from green’s entry', () => {
@@ -212,29 +222,31 @@ describe('calculateNewPosition', () => {
     expect(calc(from, 3, 'yellow')).toBe(`track-${landing}`);
   });
 
-  // --- Walking into the run home ---
-  //
-  // These replace an exact-landing rule that shipped briefly and deadlocked:
-  // five counters needing five distinct cells left the tail of a game with no
-  // legal move on most turns. The point of each test below is that a counter
-  // off the yard is never stranded.
+  // --- The exact-landing rule ---
 
-  it('caps an overshoot at the last cell rather than refusing it', () => {
-    expect(calc('final-4', 6, 'red')).toBe(`final-${FINAL_SIZE}`);
-    expect(calc(atEntry('red'), 6, 'red')).toBe(`final-${FINAL_SIZE}`);
+  it('refuses a cell of the run home that is already taken', () => {
+    const entry = atEntry('red');
+    const t = tokensWith({ 0: 'final-3', 1: entry });
+    expect(calculateNewPosition(entry, 3, 'red', t)).toBeNull();
+    expect(calculateNewPosition(entry, 2, 'red', t)).toBe('final-2');
   });
 
-  it('lets counters of the same colour share a run-home cell', () => {
-    const t = tokensWith({ 0: 'final-3', 1: atEntry('red') });
-    expect(calculateNewPosition(t[1], 3, 'red')).toBe('final-3');
+  it('refuses a taken cell when shuffling up the run home', () => {
+    const t = tokensWith({ 0: 'final-2', 1: 'final-4' });
+    expect(calculateNewPosition('final-2', 2, 'red', t)).toBeNull();
+    expect(calculateNewPosition('final-2', 1, 'red', t)).toBe('final-3');
   });
 
-  it('always has somewhere to go from anywhere in the run home', () => {
-    for (let cell = 1; cell < FINAL_SIZE; cell++) {
-      for (let roll = 1; roll <= 6; roll++) {
-        expect(calc(`final-${cell}`, roll, 'red')).not.toBeNull();
-      }
-    }
+  it('passes over taken cells to land on a free one beyond them', () => {
+    const t = tokensWith({ 0: 'final-1', 1: 'final-2', 2: 'final-3' });
+    expect(calculateNewPosition('final-1', 3, 'red', t)).toBe('final-4');
+  });
+
+  it('is blocked only by its own colour', () => {
+    // Red holds its own final-2; green's final-2 is a different cell entirely.
+    const greenEntry = atEntry('green');
+    const t = tokensWith({ 0: 'final-2', 5: greenEntry });
+    expect(calculateNewPosition(greenEntry, 2, 'green', t)).toBe('final-2');
   });
 });
 
@@ -265,15 +277,15 @@ describe('getValidMoves', () => {
     expect(getValidMoves(t, 'green', 3)).toEqual([]);
   });
 
-  it('lets the last counter in even when its cell is already occupied', () => {
-    // Red's last counter waits on its entry cell and a 3 takes it to final-3,
-    // where one of its own is already standing. Under the exact-landing rule
-    // this was no move at all, and the player sat there rolling.
+  it('leaves a player stuck when the only space its roll reaches is taken', () => {
+    // Red's last counter waits on its entry cell; a 3 would land on final-3,
+    // which one of its own is standing in. No move — and it stays out on the
+    // track where it can be sent back to the yard.
     const t = tokensWith({
       0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'base',
     });
-    expect(getValidMoves(t, 'red', 3)).toContainEqual({ tokenIndex: 3, newPosition: 'final-3' });
-    expect(getValidMoves(t, 'red', 2)).toContainEqual({ tokenIndex: 3, newPosition: 'final-2' });
+    expect(getValidMoves(t, 'red', 3)).toEqual([]);
+    expect(getValidMoves(t, 'red', 2)).toEqual([{ tokenIndex: 3, newPosition: 'final-2' }]);
   });
 
   it('only returns moves for the given color', () => {
@@ -346,76 +358,74 @@ describe('distinctMoves / getDistinctMoves', () => {
   });
 });
 
-describe('a turn is never stuck with counters on the board', () => {
-  // The regression that took the live game down: with the exact-landing rule a
-  // player could hold counters on the ring and still have no legal move on any
-  // roll, turn after turn. It looked like the dice had stopped working.
+// Under the exact-landing rule "no moves" is not one situation, so the player
+// is told which face would actually help rather than a single canned line. That
+// distinction is the whole reason the rule reads as tight rather than broken.
+describe('helpfulRolls / describeNoMove', () => {
+  it('asks for a 6 when the whole yard is still full', () => {
+    expect(helpfulRolls(BASE_TOKENS, 'red')).toEqual([6]);
+    expect(describeNoMove(BASE_TOKENS, 'red')).toBe('Need a 6 to come out');
+  });
 
-  it('offers a move on every roll while anything is off the yard', () => {
-    const boards: TokenPosition[][] = [
-      tokensWith({ 0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'base' }),
-      tokensWith({ 0: 'final-1', 4: atEntry('red') }),
-      tokensWith({ 0: 'final-2', 1: 'final-3', 2: 'final-4', 3: 'final-5', 4: 'track-3' }),
-      tokensWith({ 0: 'track-3' }),
-    ];
-    for (const t of boards) {
-      for (let roll = 1; roll <= 6; roll++) {
-        expect(getValidMoves(t, 'red', roll).length).toBeGreaterThan(0);
+  it('names only the faces that actually do something', () => {
+    // Red holds run-home cells 1, 3, 4 and 5 and waits on its entry, so cell 2
+    // is the only gap. A 2 walks the waiting counter in; a 1 shuffles the one on
+    // cell 1 up into it. Nothing else moves, and a 6 is no use with an empty yard.
+    const t = tokensWith({
+      0: 'final-3', 1: 'final-4', 2: 'final-5', 3: atEntry('red'), 4: 'final-1',
+    });
+    expect(getValidMoves(t, 'red', 3)).toEqual([]);
+    expect(helpfulRolls(t, 'red')).toEqual([1, 2]);
+    expect(describeNoMove(t, 'red')).toBe('Need 1 or 2');
+  });
+
+  it('lists several faces in order when more than one helps', () => {
+    const t = tokensWith({
+      0: 'final-4', 1: 'final-5', 2: atEntry('red'), 3: 'base', 4: 'base',
+    });
+    const faces = helpfulRolls(t, 'red');
+    expect(faces).toEqual([1, 2, 3, 6]);
+    expect(describeNoMove(t, 'red')).toBe('Need 1, 2, 3 or 6');
+  });
+
+  it('never runs out of helpful faces once anything is off the yard', () => {
+    // The anti-deadlock guarantee, and the answer to the objection that got this
+    // rule reverted. A counter short of its turning can always walk on down the
+    // ring; one standing *on* the turning has at most four of its own counters
+    // ahead of it, so at least one cell of the five is free and the roll that
+    // reaches it is legal. A player is therefore never permanently stuck — only
+    // ever stuck on *this* roll, which is the tension the rule is for.
+    for (let stuck = 0; stuck < FINAL_SIZE; stuck++) {
+      for (let back = 0; back <= 8; back++) {
+        const t = [...BASE_TOKENS];
+        // `stuck` counters parked in the deepest cells, the rest out on the ring.
+        for (let f = 0; f < stuck; f++) t[f] = `final-${FINAL_SIZE - f}` as TokenPosition;
+        for (let i = stuck; i < TOKENS_PER_PLAYER; i++) t[i] = beforeEntry('red', back);
+        expect(helpfulRolls(t, 'red').length).toBeGreaterThan(0);
       }
     }
   });
 
-  it('only runs dry when every counter is in the yard or already home', () => {
-    // Four home on the last cell and one still in the yard: nothing to move
-    // without a 6, which is ordinary Ludo rather than a deadlock.
-    const t = tokensWith({
-      0: 'final-5', 1: 'final-5', 2: 'final-5', 3: 'final-5', 4: 'base',
-    });
-    for (let roll = 1; roll <= 5; roll++) {
-      expect(getValidMoves(t, 'red', roll)).toEqual([]);
-    }
-    expect(getValidMoves(t, 'red', 6)).toHaveLength(1);
-  });
-
-  it('does not offer a counter on the last cell a move to where it stands', () => {
-    const t = tokensWith({ 0: 'final-5', 1: 'track-3' });
-    const moves = getValidMoves(t, 'red', 4);
-    expect(moves.every(m => m.tokenIndex !== 0)).toBe(true);
+  it('reads each colour independently', () => {
+    const t = tokensWith({ 0: 'track-3' });
+    expect(helpfulRolls(t, 'red')).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(helpfulRolls(t, 'green')).toEqual([6]);
   });
 });
 
 describe('MAX_PLAYER_SCORE', () => {
-  it('is exactly what every counter on the last cell scores', () => {
-    // Counters share cells now, so this — not one per cell — is the ceiling.
+  it('is exactly what a filled run home scores', () => {
     const t = [...BASE_TOKENS];
-    for (let i = 0; i < TOKENS_PER_PLAYER; i++) t[i] = `final-${FINAL_SIZE}` as TokenPosition;
+    for (let f = 1; f <= FINAL_SIZE; f++) t[f - 1] = `final-${f}` as TokenPosition;
     expect(getPlayerScore(t, 'red')).toBe(MAX_PLAYER_SCORE);
     expect(checkPlayerFinished(t, 'red')).toBe(true);
   });
 
-  it('is not exceeded by a whole run home stacked on the deepest cell', () => {
-    // The regression this exists for: the ceiling was the triangular sum
-    // 1+2+…+FINAL_SIZE, which was right while a cell held one counter. Once
-    // they could share, a stacked run home scored *past* the maximum and the
-    // seat's progress meter was handed a width above 100%.
-    for (let f = 1; f <= FINAL_SIZE; f++) {
-      const t = [...BASE_TOKENS];
-      for (let i = 0; i < TOKENS_PER_PLAYER; i++) t[i] = `final-${f}` as TokenPosition;
-      expect(getPlayerScore(t, 'red')).toBeLessThanOrEqual(MAX_PLAYER_SCORE);
-    }
-  });
-
   it('is never exceeded from any reachable position', () => {
-    // Every counter on the same cell is the worst case, so sweep the whole
-    // board that way rather than one counter at a time.
-    const everywhere: TokenPosition[] = [
-      ...Array.from({ length: TRACK_SIZE }, (_, i) => `track-${i + 1}` as TokenPosition),
-      ...Array.from({ length: FINAL_SIZE }, (_, i) => `final-${i + 1}` as TokenPosition),
-    ];
-    for (const pos of everywhere) {
-      const t = [...BASE_TOKENS];
-      for (let i = 0; i < TOKENS_PER_PLAYER; i++) t[i] = pos;
-      expect(getPlayerScore(t, 'red')).toBeLessThanOrEqual(MAX_PLAYER_SCORE);
+    // Sweep every single-counter placement; none may score above the ceiling.
+    for (let t = 1; t <= TRACK_SIZE; t++) {
+      expect(getPlayerScore(tokensWith({ 0: `track-${t}` }), 'red'))
+        .toBeLessThanOrEqual(MAX_PLAYER_SCORE);
     }
   });
 });
