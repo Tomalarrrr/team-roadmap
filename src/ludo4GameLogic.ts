@@ -4,11 +4,13 @@
 // classic rules, no power-ups, no doubled rolls (a bonus roll is a plain 6).
 // Deterministic, side-effect-free, independently testable.
 //
-// The run home has FINAL_SIZE cells and each player has exactly that many
-// counters, so finishing means getting all of them into it. Counters walk in
-// rather than having to land exactly: any number of them may share a cell, and
-// a roll that would carry one past the end stops it on the last cell. (The
-// exact-landing rule deadlocked Ludo2's endgame; this board never had it.)
+// One rule of its own, inherited from Ludo2: the run home has FINAL_SIZE cells
+// and each player has exactly that many counters, so finishing means standing
+// one counter in every cell of it. A counter may pass over cells that are
+// already taken but has to land on an empty one, exactly — otherwise that
+// counter simply cannot move, and sits out on the track waiting to be sent home
+// by an opponent. Being stuck in the open is the whole tension of the endgame,
+// not a fault in it (see ludo2GameLogic for the simulation numbers).
 
 import type { TokenPosition } from './ludoFirebase';
 import {
@@ -21,27 +23,27 @@ import {
   PLAYER_COLORS,
   getTokenColor,
   getColorTokenIndices,
+  getOccupiedFinals,
   getPlayerScore,
   type Ludo4Color,
 } from './ludo4Board';
 
 /**
  * Calculate where a token lands after moving `steps` spaces.
- *
- * Returns null only for a counter still in the yard, which needs a 6 to come
- * out and is handled by getValidMoves. Anything already on the board has a
- * move: within the run home the roll is capped at the last cell rather than
- * refused, so a counter can never be stranded by being unable to land.
+ * Returns null if the move is invalid: overshooting the end of the run home, or
+ * landing on a cell of it that one of this colour's own counters already holds.
  */
 export function calculateNewPosition(
   current: TokenPosition,
   steps: number,
-  color: Ludo4Color
+  color: Ludo4Color,
+  tokens: TokenPosition[]
 ): TokenPosition | null {
   if (current === 'base') return null;
 
-  const intoFinal = (cell: number): TokenPosition =>
-    `final-${Math.min(cell, FINAL_SIZE)}`;
+  const occupied = getOccupiedFinals(tokens, color);
+  const intoFinal = (cell: number): TokenPosition | null =>
+    cell > FINAL_SIZE || occupied.has(cell) ? null : `final-${cell}`;
 
   if (current.startsWith('final-')) {
     const currentFinal = parseInt(current.split('-')[1]);
@@ -89,12 +91,8 @@ export function getValidMoves(
       continue;
     }
 
-    const newPos = calculateNewPosition(current, diceValue, color);
+    const newPos = calculateNewPosition(current, diceValue, color, tokens);
     if (newPos === null) continue;
-    // Capping at the last cell means a counter standing on it "moves" to where
-    // it already is. That is not a move, and offering it would let a player
-    // burn a turn on nothing.
-    if (newPos === current) continue;
 
     moves.push({ tokenIndex: idx, newPosition: newPos });
   }
@@ -135,6 +133,49 @@ export function getDistinctMoves(
   diceValue: number
 ): { tokenIndex: number; newPosition: TokenPosition }[] {
   return distinctMoves(tokens, getValidMoves(tokens, color, diceValue));
+}
+
+/**
+ * The die faces that would give this colour something to do.
+ *
+ * Under the exact-landing rule "no moves" stops being one situation. It can be a
+ * yard waiting on a 6, a counter at the mouth of the run home that needs a 4 and
+ * nothing else, or a board where genuinely nothing helps and only an opponent's
+ * capture will free it. Those want different things said to the player, and the
+ * only honest way to tell them apart is to ask the rules — so ask all six.
+ */
+export function helpfulRolls(tokens: TokenPosition[], color: Ludo4Color): number[] {
+  const faces: number[] = [];
+  for (let face = 1; face <= 6; face++) {
+    if (getValidMoves(tokens, color, face).length > 0) faces.push(face);
+  }
+  return faces;
+}
+
+/**
+ * What to tell a player whose roll did nothing.
+ *
+ * Naming the face they need is the difference between a rule that feels sharp
+ * and one that feels broken. "No moves" invites the reading that the dice are
+ * ignoring you — which is exactly what Ludo2's players reported the last time
+ * this rule shipped without it.
+ */
+export function describeNoMove(tokens: TokenPosition[], color: Ludo4Color): string {
+  const faces = helpfulRolls(tokens, color);
+  if (faces.length === 0) {
+    // Defensive. No reachable position has all six faces dead: a counter short
+    // of its turning can always walk on down the ring, and one standing on the
+    // turning has at most four of its own ahead of it, so a cell is always free
+    // and the roll that reaches it is legal. Asserted over every seat on every
+    // turn of the simulated games in ludo4FinishSim.
+    return 'Nothing can move — an opponent has to send one of yours back';
+  }
+  const allInYard = getColorTokenIndices(color).every(i => tokens[i] === 'base');
+  if (faces.length === 1 && faces[0] === 6 && allInYard) return 'Need a 6 to come out';
+  const list = faces.length === 1
+    ? `a ${faces[0]}`
+    : `${faces.slice(0, -1).join(', ')} or ${faces[faces.length - 1]}`;
+  return `Need ${list}`;
 }
 
 /**
@@ -277,20 +318,15 @@ export function scoreBotMove(
   // Deploy from base: valuable but decreasing as more tokens are already in play.
   if (curPos === 'base') score += 90 - tokensInPlay * 20;
 
+  // Taking a cell in the run home is valuable — safe from everything, and one of
+  // the five a player needs. The `finalNum` term prefers the deep cells: a
+  // deterministic tie-break, not a measured edge (see ludo2GameLogic's note on
+  // the 2400-game measurement).
   if (targetPos.startsWith('final-')) {
     const finalNum = parseInt(targetPos.split('-')[1]);
-    if (curPos.startsWith('final-')) {
-      // Shuffling deeper *inside* the run home. Depth is worth nothing under
-      // the walk-in rule — winning is having all five counters in, at any
-      // depth, and a counter already in is already safe from everything — so
-      // this ranks below every move that achieves something (see Ludo2's note
-      // on the bot talking itself out of its own win).
-      score += 4 + finalNum;
-    } else {
-      // Arriving. This is the move that wins games: one of the five, safe from
-      // capture for good, and a bonus turn on top. Depth only breaks ties.
-      score += 150 + finalNum;
-    }
+    score += 100 + finalNum * 20;
+    // Arriving in the run home grants a bonus turn — worth ~35 points
+    if (!curPos.startsWith('final-')) score += 35;
   }
 
   if (targetPos.startsWith('track-')) {

@@ -9,8 +9,8 @@
  * How far from a counter's centre a press still counts, as a multiple of the
  * counter's own width.
  *
- * A counter is TOKEN_PCT (3.1%) of the board and the ring puts its cells 360/56°
- * apart — 4.40% of the board between neighbouring centres. A target drawn as a
+ * A counter is TOKEN_PCT (3.25%) of the board and the ring puts its cells
+ * 360/56° apart — 4.40% of the board between neighbouring centres. A target drawn as a
  * *box* therefore cannot grow much past the counter before two of them overlap
  * and the wrong one takes the press. Nearest-centre lifts that ceiling: overlap
  * stops being a problem when the counter whose centre is closest wins, so the

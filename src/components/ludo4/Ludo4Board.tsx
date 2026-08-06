@@ -7,9 +7,12 @@
 // Deliberately 2D: Ludo2's board is a moulded, tilted, key-lit object; this one
 // takes its layout from Ludo2 and its look from Ludo v1 — flat white cells with
 // hairline borders, solid-colour start cells and corridors, glossy counters
-// that glow when they can move. No lighting model, no perspective.
+// that glow when they can move. No lighting model, no perspective. The life is
+// in the moments instead: a rim tick that sweeps to whoever's turn it is, a
+// path preview under a hovered counter, a ripple where a counter lands, and a
+// cascade up the winner's corridor.
 
-import { useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { TokenPosition } from '../../ludoFirebase';
 import {
   TRACK_SIZE,
@@ -26,15 +29,17 @@ import {
 } from '../../ludo4Board';
 import {
   ARM_ANGLE,
-  SEAT_OFFSET_DEG,
   CELL_PCT,
   TOKEN_PCT,
   SPOKE_CELL,
   BASE_BAY_PCT,
   BASE_SPEC,
   HUB,
+  RIM_OUTLINE_PATH,
+  RIM_CLIP_PATH,
   trackCellSpec,
   finalCellSpec,
+  computeMovePath,
   getTokenCoords,
   getTokenOffset,
 } from './ludo4Geometry';
@@ -57,6 +62,13 @@ const TOKEN_STYLE: Record<Ludo4Color, string> = {
 /** Five-point star, outer r10 / inner r4.2 on a 24×24 box. */
 const STAR_PATH =
   'M12 2L14.47 8.6L21.51 8.91L15.99 13.3L17.88 20.09L12 16.2L6.12 20.09L8.01 13.3L2.49 8.91L9.53 8.6Z';
+
+/** The rim tick: a short arc at the board's edge, drawn at bearing 0 (the
+ * bottom) and rotated to the active seat's arm. Points are polar for bearing
+ * ±5° at r 48.5 — outside the yard arc (bays end at ~47.9) but inside the
+ * rim's swell there (~49.5), so the tick rides the last sliver of apron
+ * without grazing either the sockets or the sculpted edge. */
+const RIM_TICK_PATH = 'M 54.23 98.31 A 48.5 48.5 0 0 1 45.77 98.31';
 
 const TRACK_INDICES = Array.from({ length: TRACK_SIZE }, (_, i) => i + 1);
 const TOKEN_INDICES = Array.from({ length: TOTAL_TOKENS }, (_, i) => i);
@@ -96,8 +108,9 @@ function box(x: number, y: number, w: number, h = w, rot = 0) {
   };
 }
 
-export interface CapturedGhost {
-  index: number;
+/** A landing ripple, spawned by the parent when a counter arrives on a cell. */
+export interface Ripple {
+  id: number;
   coords: [number, number];
   color: Ludo4Color;
 }
@@ -106,11 +119,15 @@ interface Ludo4BoardProps {
   tokens: TokenPosition[];
   playerCount: number;
   myColor: Ludo4Color | null;
+  /** Whose turn it is — drives the rim tick. Null hides it (e.g. game over). */
+  activeColor: Ludo4Color | null;
+  /** The winner, once there is one — runs the cascade up their corridor. */
+  winner: Ludo4Color | null;
   validMoves: Map<number, TokenPosition>;
   lastMovedToken: number | null;
   animPos: Map<number, [number, number]>;
   animParity: Map<number, number>;
-  capturedGhosts: CapturedGhost[];
+  ripples: Ripple[];
   onTokenClick: (tokenIndex: number) => void;
 }
 
@@ -118,21 +135,23 @@ export function Ludo4Board({
   tokens,
   playerCount,
   myColor,
+  activeColor,
+  winner,
   validMoves,
   lastMovedToken,
   animPos,
   animParity,
-  capturedGhosts,
+  ripples,
   onTokenClick,
 }: Ludo4BoardProps) {
   const activeColors = PLAYER_COLORS.slice(0, playerCount);
 
-  // Turn the board face so the local player's yard is nearest them. The layout
+  // Turn the board face so the local player's arm points straight down — your
+  // yard and corridor sit centre-bottom, exactly as Ludo2 seats you. The layout
   // is four-fold symmetric about the centre, so ±90° turns map it exactly onto
-  // itself — only the colours move. SEAT_OFFSET_DEG then parks the arms on the
-  // diagonals: your yard by the bottom-left corner, and the vertical axis
-  // (status line above the hub, die in it) clear of every arm.
-  const spin = SEAT_OFFSET_DEG - (myColor ? ARM_ANGLE[myColor] : 0);
+  // itself — only the colours move. (The status line this leaves nowhere to go
+  // above the hub lives *in* the hub instead — see Ludo4Game.)
+  const spin = -(myColor ? ARM_ANGLE[myColor] : 0);
   // Anything that is read rather than pointed — the pieces, the safe stars —
   // has to be turned back, or a spun board hands the player a set of counters
   // lying on their sides.
@@ -141,6 +160,17 @@ export function Ludo4Board({
   // Where the offered moves land. "Which of my counters can move" is only half
   // the question — the other half is where it would end up.
   const moveTargets = new Set<TokenPosition>(validMoves.values());
+
+  // Path preview: while a playable counter is hovered, the cells it would walk
+  // are dotted in its colour. The destination cell already carries the target
+  // ring, so the dots stop one short of it.
+  const [hoverToken, setHoverToken] = useState<number | null>(null);
+  const hoverTarget = hoverToken !== null ? validMoves.get(hoverToken) : undefined;
+  const hoverPath: [number, number][] =
+    hoverToken !== null && hoverTarget !== undefined && !animPos.has(hoverToken)
+      ? computeMovePath(tokens[hoverToken], hoverTarget, getTokenColor(hoverToken)).slice(0, -1)
+      : [];
+  const hoverColor = hoverToken !== null ? COLOR_HEX[getTokenColor(hoverToken)] : undefined;
 
   /* Presses land on the board, not on the counters: the board asks which
      playable counter is *closest* (see ludo4HitTest), which is what lets the
@@ -176,13 +206,47 @@ export function Ludo4Board({
         // cancelled press, not a move somewhere else.
         onPointerLeave={() => { pressRef.current = null; }}
       >
-        {/* The disc: one flat circle. Everything else is drawn on it. */}
-        <div className={styles.disc} />
+        {/* The disc: one flat plate whose silhouette dips in on the diagonals
+            and swells out around each yard — the shape itself houses the
+            counters. Four-fold symmetric, so it never has to turn with the
+            plate; a hairline traces the sculpted edge. */}
+        <svg className={styles.disc} viewBox="0 0 100 100" aria-hidden="true">
+          <path d={RIM_OUTLINE_PATH} />
+        </svg>
+
+        {/* The ground the track sits in. A full annulus, so it never needs to
+            turn with the plate. See TRACK_BAND for the radii the mask encodes. */}
+        <div className={styles.trackBand} aria-hidden="true" />
 
         <div
           className={styles.boardPlate}
           style={{ transform: `rotate(${spin}deg)`, transformOrigin: '50% 50%' }}
         >
+          {/* Territory: each seat's quarter of the apron washed in its own
+              colour, a few percent strong — v1's four colour blocks, bent
+              around the ring. Inside the plate so the wash turns with the
+              seats. Masked to the apron: a wash across the whole quadrant
+              would tint the corridors and the open middle, which are already
+              doing their own talking. */}
+          <div
+            className={styles.apronWash}
+            style={{ clipPath: RIM_CLIP_PATH }}
+            aria-hidden="true"
+          />
+
+          {/* Whose turn it is, said on the board itself: a short arc at the rim
+              of the active seat's arm, sweeping round when the turn passes. */}
+          {activeColor && activeColors.includes(activeColor) && (
+            <svg
+              className={styles.rimTick}
+              viewBox="0 0 100 100"
+              style={{ transform: `rotate(${ARM_ANGLE[activeColor]}deg)` }}
+              aria-hidden="true"
+            >
+              <path d={RIM_TICK_PATH} stroke={COLOR_HEX[activeColor]} />
+            </svg>
+          )}
+
           {/* Track tiles */}
           {TRACK_INDICES.map(t => {
             const spec = trackCellSpec(t);
@@ -236,8 +300,9 @@ export function Ludo4Board({
 
           {/* The run home: five cells of solid seat colour stepping inward —
               the classic board's corridor, turned to stand on its arm. One cell
-              per counter is no longer required (counters may share), but five
-              cells keeps the corridor the depth the rules talk about. */}
+              per counter, landed on exactly: every one of them has to end up
+              with a counter standing in it. When somebody wins, their corridor
+              lights up cell by cell from the entry to the centre. */}
           {PLAYER_COLORS.map(color =>
             FINAL_CELLS.map(f => {
               const spec = finalCellSpec(color, f);
@@ -245,6 +310,7 @@ export function Ludo4Board({
               // A run-home cell is only ever a target for its own owner, and
               // `final-n` carries no colour — so the spoke has to match too.
               const isTarget = color === myColor && moveTargets.has(`final-${f}`);
+              const isWinning = color === winner;
               return (
                 <div
                   key={`final-${color}-${f}`}
@@ -252,12 +318,16 @@ export function Ludo4Board({
                     styles.spokeCell,
                     inactive ? styles.cellInactive : '',
                     isTarget ? styles.cellTarget : '',
+                    isWinning ? styles.spokeCellWin : '',
                   ].filter(Boolean).join(' ')}
-                  title={`${SEAT_LABEL[color]}'s run home — walk in, any depth; an overshoot stops on the last cell`}
+                  title={`${SEAT_LABEL[color]}'s run home — land on an empty cell exactly, or wait out on the track`}
                   style={{
                     ...box(spec.x, spec.y, SPOKE_CELL, SPOKE_CELL, spec.rot),
                     backgroundColor: COLOR_HEX[color],
                     ...(isTarget ? { ['--target' as string]: '#ffffff' } : {}),
+                    // Entry first, centre last: the cascade walks the way a
+                    // counter does.
+                    ...(isWinning ? { animationDelay: `${(f - 1) * 140}ms` } : {}),
                   } as CSSProperties}
                 >
                   {f === 1 && (
@@ -276,7 +346,8 @@ export function Ludo4Board({
             })
           )}
 
-          {/* The hub: a flat ring where the die rests. */}
+          {/* The hub: a flat ring holding the die, the status line and the
+              turn ring (all rendered by the parent, screen-anchored). */}
           <div className={styles.homeDisc} style={box(50, 50, HUB.r * 2)} />
 
           {/* Yards — five round sockets on the apron, clear of the track,
@@ -295,17 +366,32 @@ export function Ludo4Board({
             ));
           })}
 
-          {/* Capture ghosts */}
-          {capturedGhosts.map(ghost => (
+          {/* Hover path preview: the cells the hovered counter would walk. */}
+          {hoverPath.map((p, k) => (
             <div
-              key={`ghost-${ghost.index}-${ghost.coords[0]}`}
-              className={styles.tokenSlot}
-              style={{ ...box(ghost.coords[0], ghost.coords[1], TOKEN_PCT), transform: upright }}
-            >
-              <div
-                className={`${styles.token} ${TOKEN_STYLE[ghost.color]} ${styles.tokenCaptured}`}
-              />
-            </div>
+              key={`dot-${k}`}
+              className={styles.pathDot}
+              style={{
+                ...box(p[0], p[1], 1.15),
+                background: hoverColor,
+                animationDelay: `${k * 18}ms`,
+              }}
+              aria-hidden="true"
+            />
+          ))}
+
+          {/* Landing ripples — one soft expanding ring where a counter just
+              arrived, in the mover's colour. */}
+          {ripples.map(r => (
+            <div
+              key={`ripple-${r.id}`}
+              className={styles.ripple}
+              style={{
+                ...box(r.coords[0], r.coords[1], CELL_PCT * 2.4),
+                ['--ripple' as string]: COLOR_HEX[r.color],
+              } as CSSProperties}
+              aria-hidden="true"
+            />
           ))}
 
           {/* Pieces. The slot carries the position and the counter-spin; the
@@ -342,6 +428,8 @@ export function Ludo4Board({
                   // pick the *nearest* counter instead of whichever box the
                   // pointer happened to be inside. See pickNearestToken.
                   // Keyboard players tab to a playable piece and press Enter.
+                  onPointerEnter={clickable ? () => setHoverToken(i) : undefined}
+                  onPointerLeave={clickable ? () => setHoverToken(h => (h === i ? null : h)) : undefined}
                   onKeyDown={clickable ? (e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                       e.preventDefault();

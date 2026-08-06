@@ -7,6 +7,7 @@ import styles from './SearchFilter.module.css';
 
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
 const Ludo2Game = lazy(() => import('./ludo2/Ludo2Game').then(m => ({ default: m.Ludo2Game })));
+const Ludo4Game = lazy(() => import('./ludo4/Ludo4Game').then(m => ({ default: m.Ludo4Game })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 import { CyclesiteEmbed } from './CyclesiteEmbed';
 
@@ -73,6 +74,7 @@ export const SearchFilter = memo(function SearchFilter({
   // behind the same unlock: a URL still cannot carry anyone around the lock.
   const [showLudo, setShowLudo] = useState(false);
   const [showLudo2, setShowLudo2] = useState(false);
+  const [showLudo4, setShowLudo4] = useState(false);
   const [showCyclesite, setShowCyclesite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -116,6 +118,7 @@ export const SearchFilter = memo(function SearchFilter({
     let open: (() => void) | null = null;
     if (magic === 'ludo') open = () => setShowLudo(true);
     else if (magic === 'ludo2') open = () => setShowLudo2(true);
+    else if (magic === 'ludo4') open = () => setShowLudo4(true);
     else if (magic === 'cyclesite') open = () => setShowCyclesite(true);
     if (!open) return;
     const timer = setTimeout(() => {
@@ -150,6 +153,19 @@ export const SearchFilter = memo(function SearchFilter({
   const closeLudo2 = useCallback(() => {
     setShowLudo2(false);
     setInviteDismissed(true);
+  }, []);
+
+  // Ludo 4 invite links: the same contract on ?ludo4=CODE. Ludo4Game reads the
+  // code itself and strips it from the URL once it has joined.
+  const invite4Code = useMemo(() => {
+    const code = new URLSearchParams(window.location.search).get('ludo4');
+    return code && /^[a-z0-9]{4}$/i.test(code) ? code : null;
+  }, []);
+  const [invite4Dismissed, setInvite4Dismissed] = useState(false);
+  const ludo4Open = showLudo4 || (!isLocked && invite4Code !== null && !invite4Dismissed);
+  const closeLudo4 = useCallback(() => {
+    setShowLudo4(false);
+    setInvite4Dismissed(true);
   }, []);
 
   // Compute search results as derived state (no effect needed)
@@ -330,6 +346,14 @@ export const SearchFilter = memo(function SearchFilter({
         <GameErrorBoundary gameName="Ludo 2" onClose={closeLudo2}>
           <Suspense fallback={null}>
             <Ludo2Game onClose={closeLudo2} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
+        document.body
+      )}
+      {ludo4Open && createPortal(
+        <GameErrorBoundary gameName="Ludo 4" onClose={closeLudo4}>
+          <Suspense fallback={null}>
+            <Ludo4Game onClose={closeLudo4} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
         document.body

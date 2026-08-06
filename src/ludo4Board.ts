@@ -7,11 +7,12 @@
 // serialization reuses serializeTokens/deserializeTokens from ludoFirebase
 // (length-agnostic).
 //
-// The run home is five cells deep and a player has five counters. Counters walk
-// in rather than having to land exactly: any number may share a cell, and a
-// roll that would carry one past the end stops it on the last cell. A player is
-// finished once all five are somewhere in the run home. (The exact-landing rule
-// deadlocked Ludo2's endgame — see ludo2GameLogic — so this board never had it.)
+// The run home is five cells and a player has five counters, one per cell: a
+// counter is home only once it stands in a cell of its own, which it can only
+// reach on an exact roll. There is no pile at the centre to overflow into, so a
+// counter that cannot land keeps waiting out on the track — where it can still
+// be sent back to the yard. That exposure is the point of the rule (see
+// ludo2GameLogic for the simulation that retired the walk-in alternative).
 
 import type { TokenPosition, TurnPhase, LudoPlayer } from './ludoFirebase';
 import { deserializeTokens } from './ludoFirebase';
@@ -68,8 +69,8 @@ export interface Ludo4MoveUpdate {
 // --- Board constants ---
 
 export const TRACK_SIZE = 56;
-/** Cells in a run home, and counters per player. Counters may share a cell —
- * a player is finished once all of theirs are somewhere in the run home. */
+/** Cells in a run home — and, deliberately, counters per player: every cell
+ * has to end up with a counter standing in it for that player to be finished. */
 export const FINAL_SIZE = 5;
 export const TOKENS_PER_PLAYER = FINAL_SIZE;
 export const TOTAL_TOKENS = TOKENS_PER_PLAYER * 4;
@@ -136,6 +137,17 @@ export function getTokenColor(index: number): Ludo4Color {
   return 'blue';
 }
 
+/** Which cells of `color`'s run home already have a counter standing in them.
+ * A counter may pass over an occupied cell but never stop on one. */
+export function getOccupiedFinals(tokens: TokenPosition[], color: Ludo4Color): Set<number> {
+  const occupied = new Set<number>();
+  for (const i of getColorTokenIndices(color)) {
+    const pos = tokens[i];
+    if (pos && pos.startsWith('final-')) occupied.add(parseInt(pos.split('-')[1]));
+  }
+  return occupied;
+}
+
 /** Deserialize a stored token string to exactly TOTAL_TOKENS entries. Rooms
  * written by an older client are shorter; pad rather than hand the board a
  * sparse array it will read past the end of. */
@@ -146,15 +158,16 @@ export function deserializeLudo4Tokens(str: string): TokenPosition[] {
 }
 
 /**
- * The highest score getPlayerScore can return: every counter on the last cell
- * of the run home.
+ * The highest score getPlayerScore can return: every counter standing in a cell
+ * of the run home, one per cell.
  *
- * FINAL_SIZE apiece, not 1+2+…+FINAL_SIZE — counters walk in and may share a
- * cell, so all of them can pile onto the deepest one (see Ludo2's note; the
- * walk-in rule was inherited, so the true ceiling was too). A winner need not
- * read 100%: finishing only means every counter is *in* the run home.
+ * Not TOKENS_PER_PLAYER × (TRACK_SIZE + FINAL_SIZE) — only one counter can hold
+ * the deepest cell, so the run-home half of the sum is 1+2+…+FINAL_SIZE rather
+ * than FINAL_SIZE apiece. A meter scaled to that looser bound stops short of
+ * full even for the player who has just won.
  */
-export const MAX_PLAYER_SCORE = TOKENS_PER_PLAYER * (TRACK_SIZE + FINAL_SIZE);
+export const MAX_PLAYER_SCORE =
+  TOKENS_PER_PLAYER * TRACK_SIZE + (FINAL_SIZE * (FINAL_SIZE + 1)) / 2;
 
 /**
  * A position in the words the board uses. 'track-17' is a storage detail; what

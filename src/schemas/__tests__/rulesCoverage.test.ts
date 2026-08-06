@@ -84,18 +84,16 @@ describe('Firebase security rules cover every schema field', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The same guard for Ludo2. There is no Zod schema for the game state — it is a
-// TypeScript interface — so the field list is read straight out of the source
-// rather than restated here, which is the only version that cannot drift. The
-// `lastRoll` field is exactly the bug this catches: added to the interface and
-// written on every roll, but absent from the rules, so `$other: false` denied
-// every write in the game.
+// The same guard for the Ludo games. There is no Zod schema for the game state
+// — it is a TypeScript interface — so the field list is read straight out of
+// the source rather than restated here, which is the only version that cannot
+// drift. The `lastRoll` field is exactly the bug this catches: added to the
+// interface and written on every roll, but absent from the rules, so
+// `$other: false` denied every write in the game.
 // ---------------------------------------------------------------------------
 
-const ludo2Source = readFileSync(
-  resolve(process.cwd(), 'src/ludo2Board.ts'),
-  'utf-8',
-);
+const ludoSource = (file: string) =>
+  readFileSync(resolve(process.cwd(), file), 'utf-8');
 
 /** Field names declared in `interface <name> { ... }`, comments stripped. */
 function interfaceFields(source: string, name: string): string[] {
@@ -123,17 +121,19 @@ function interfaceFields(source: string, name: string): string[] {
   return fields;
 }
 
-describe('Firebase security rules cover every Ludo2 state field', () => {
-  const gameNode = ((rules.rules.ludo2 as RuleNode).$gameCode) as RuleNode;
+const LUDO_CASES = [
+  { game: 'ludo2', source: 'src/ludo2Board.ts', interfaces: ['Ludo2GameState', 'Ludo2MoveUpdate'] },
+  { game: 'ludo4', source: 'src/ludo4Board.ts', interfaces: ['Ludo4GameState', 'Ludo4MoveUpdate'] },
+];
 
-  it.each(['Ludo2GameState', 'Ludo2MoveUpdate'])(
-    '%s: every field is permitted by the rules',
-    (name) => {
-      const allowed = new Set(allowedFields(gameNode));
-      const missing = interfaceFields(ludo2Source, name).filter((k) => !allowed.has(k));
-      expect(missing).toEqual([]);
-    },
-  );
+describe.each(LUDO_CASES)('Firebase security rules cover every $game state field', ({ game, source, interfaces }) => {
+  const gameNode = ((rules.rules[game] as RuleNode).$gameCode) as RuleNode;
+
+  it.each(interfaces)('%s: every field is permitted by the rules', (name) => {
+    const allowed = new Set(allowedFields(gameNode));
+    const missing = interfaceFields(ludoSource(source), name).filter((k) => !allowed.has(k));
+    expect(missing).toEqual([]);
+  });
 
   it('has the strict "$other" guard (so extra fields are caught)', () => {
     expect((gameNode.$other as RuleNode)?.['.validate']).toBe(false);
@@ -141,5 +141,11 @@ describe('Firebase security rules cover every Ludo2 state field', () => {
 
   it('the "lastRoll" field specifically is allowed (regression: every write 401d)', () => {
     expect(allowedFields(gameNode)).toContain('lastRoll');
+  });
+
+  // The seat a room's creator took. Seats are handed out at random, so without
+  // this stored the host cannot be identified — and an unlisted field is denied.
+  it('the "host" field is allowed (random seat assignment depends on it)', () => {
+    expect(allowedFields(gameNode)).toContain('host');
   });
 });

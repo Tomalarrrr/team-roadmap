@@ -35,35 +35,32 @@ export const STEP_DEG = 360 / TRACK_SIZE;
 /** Radius of the track ring, to tile centres. */
 export const R_RING = 39.2;
 
-/** Track tile. Arc spacing at R_RING is 2πR/56 ≈ 4.40, so 3.75 leaves a gap
- * in the same proportion as Ludo2's 5.0-in-5.86. */
-export const CELL_PCT = 3.75;
+/** Track tile. Arc spacing at R_RING is 2πR/56 ≈ 4.40; 3.95 fills most of the
+ * pitch — the track is the board's main subject, and tile weight is a large
+ * part of what says so. */
+export const CELL_PCT = 3.95;
 /** A piece — sized against a cell in the same ratio as Ludo2's counters, so a
  * counter covers its cell without burying the cell's own border. */
-export const TOKEN_PCT = 3.1;
+export const TOKEN_PCT = 3.25;
+
+/** The band the track sits in: a flat toned annulus hugging the ring of cells.
+ * The tiles are the whitest thing on the board and the band is what makes them
+ * so. Cell half-width plus a little air each side. */
+export const TRACK_BAND = { inner: 36.5, outer: 41.9 };
 
 /** The run home is drawn in the same square cells as the ring: five of them
  * stepping inward on the colour's bearing, solid seat colour like the classic
  * board's corridors. Five squares plus the hub have to fit inside the ring. */
 export const SPOKE_CELL = CELL_PCT;
 const R_SPOKE_OUT = 33.5;
-const SPOKE_STEP = 4.7;
+const SPOKE_STEP = 4.4;
 
-/** The hub the four runs home point at. No counter ever stands here — it is
- * where the die rests. */
-export const HUB = { x: 50, y: 50, r: 10.4 };
-
-/**
- * The extra turn given to the plate so the arms sit on the diagonals.
- *
- * With three arms, spinning your own to the bottom leaves the space above the
- * hub clear for the status line. With four, the opposite arm then points
- * straight up through it. Offsetting the whole plate 45° parks the arms on the
- * corners instead — your yard sits by the bottom-left corner, and both the
- * vertical axis (status, die) and the four corner seat cards line up with an
- * arm each.
- */
-export const SEAT_OFFSET_DEG = 45;
+/** The hub the four runs home point at. No counter ever stands here — it holds
+ * the die, the status line and the turn ring. It is sized for that content:
+ * with four arms and the local player's spun to the bottom, the opposite arm
+ * owns the space above the hub, so the status cannot live out there the way
+ * Ludo2's does. Everything the player reads mid-turn lives at the centre. */
+export const HUB = { x: 50, y: 50, r: 13.4 };
 
 /** The yard: one bay per counter, in a shallow arc on the apron *outside* the
  * track, centred on the colour's own bearing. Off the ring entirely — a yard
@@ -80,6 +77,41 @@ export const BASE_ARC_DEG = ((TOKENS_PER_PLAYER - 1) / 2) * BASE_SPOT_STEP;
 export const ARM_ANGLE: Record<Ludo4Color, number> = {
   red: 0, green: 90, yellow: 180, blue: 270,
 };
+
+// --- The rim ----------------------------------------------------------------
+// The board's silhouette is not a circle: the rim dips in on the diagonals and
+// swells back out around each yard, so the shape itself houses the counters.
+// One smooth four-lobed curve, r(θ) = mid + amp·cos(4θ) — its period is 90°,
+// so it is invariant under the plate's quarter-turns and never needs to spin.
+
+/** Rim radius between arms (the dip) and over each yard (the swell). */
+export const RIM_DIP = 45.4;
+export const RIM_BULGE = 49.6;
+
+/** Rim radius at a board bearing, in % of the container. */
+export function rimRadiusAt(bearingDeg: number): number {
+  const mid = (RIM_DIP + RIM_BULGE) / 2;
+  const amp = (RIM_BULGE - RIM_DIP) / 2;
+  return mid + amp * Math.cos((4 * bearingDeg * Math.PI) / 180);
+}
+
+/** The rim as points, dense enough (2.5° steps) that the polyline reads as a
+ * continuous curve at any board size. */
+const RIM_POINTS: [number, number][] = Array.from({ length: 144 }, (_, i) => {
+  const b = (i * 360) / 144;
+  const r = rimRadiusAt(b);
+  const a = (b * Math.PI) / 180;
+  return [50 - r * Math.sin(a), 50 + r * Math.cos(a)];
+});
+
+/** SVG path for the rim, in the board's 0–100 viewBox. */
+export const RIM_OUTLINE_PATH =
+  `M ${RIM_POINTS.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join(' L ')} Z`;
+
+/** The same outline as a CSS clip-path, for layers (the apron wash) that have
+ * to stop at the rim rather than run on to the old circle. */
+export const RIM_CLIP_PATH =
+  `polygon(${RIM_POINTS.map(([x, y]) => `${x.toFixed(2)}% ${y.toFixed(2)}%`).join(', ')})`;
 
 export interface CellSpec {
   x: number;
@@ -190,12 +222,13 @@ export function getTokenCoords(pos: TokenPosition, tokenIndex: number): [number,
 /** Jitter co-located pieces into quadrants so stacks stay readable, with the
  * fifth slot in the middle — four quadrants and modulo would draw two of a full
  * yard's five on top of each other, the one thing the jitter exists to prevent.
+ * A run-home cell only ever holds one counter (exact landing), so this only
+ * fires out on the track.
  *
  * Sharing a *position* is not the same as sharing a *cell*. Track cells are one
  * ring every colour walks, so `track-17` is one place; a run home belongs to its
- * colour, so `final-3` is four different places and only counters of the same
- * colour are actually stacked. Matching on the string alone would nudge
- * counters off-centre in run-home cells they are not sharing. */
+ * colour, so `final-3` is four different places. Matching on the string alone
+ * would nudge counters off-centre in run-home cells they are not sharing. */
 export function getTokenOffset(tokens: TokenPosition[], tokenIndex: number): [number, number] {
   const pos = tokens[tokenIndex];
   if (pos === 'base') return [0, 0];
