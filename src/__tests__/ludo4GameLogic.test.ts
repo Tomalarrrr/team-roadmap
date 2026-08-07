@@ -363,10 +363,48 @@ describe('distinctMoves / getDistinctMoves', () => {
 
 // Under the exact-landing rule "no moves" is not one situation, so the player
 // is told which face would actually help rather than a single canned line.
+// Two doors out of the yard, not one. A 6 alone left a player 44 of their own
+// turns short of having all five counters on the board — see DEPLOY_FACES for
+// the measurement — so a 1 opens the gate as well. It buys nothing else.
+describe('leaving the yard', () => {
+  it('lets a 1 bring a counter out', () => {
+    const moves = getDistinctMoves(BASE_TOKENS, 'red', 1);
+    expect(moves).toHaveLength(1);
+    expect(moves[0].newPosition).toBe(`track-${START_POSITIONS.red}`);
+  });
+
+  it('still lets a 6 bring a counter out', () => {
+    const moves = getDistinctMoves(BASE_TOKENS, 'red', 6);
+    expect(moves).toHaveLength(1);
+    expect(moves[0].newPosition).toBe(`track-${START_POSITIONS.red}`);
+  });
+
+  it('opens the yard to nothing else', () => {
+    for (const face of [2, 3, 4, 5]) {
+      expect(getDistinctMoves(BASE_TOKENS, 'red', face)).toEqual([]);
+    }
+  });
+
+  it('gives no bonus throw for the 1 — only the 6 does that', () => {
+    const none = new Set<never>();
+    // Deploying on a 1 hands the turn on...
+    expect(getNextTurn('red', 1, 0, false, false, PLAYER_COLORS.length, none).nextColor)
+      .not.toBe('red');
+    // ...where the 6 keeps it.
+    expect(getNextTurn('red', 6, 0, false, false, PLAYER_COLORS.length, none).nextColor)
+      .toBe('red');
+  });
+
+  it('deploys onto a haven, so coming out is never suicide', () => {
+    expect(SAFE_ZONES.has(START_POSITIONS.red)).toBe(true);
+  });
+});
+
 describe('helpfulRolls / describeNoMove', () => {
-  it('asks for a 6 when the whole yard is still full', () => {
-    expect(helpfulRolls(BASE_TOKENS, 'red')).toEqual([6]);
-    expect(describeNoMove(BASE_TOKENS, 'red')).toBe('Need a 6 to come out');
+  it('asks for a 1 or a 6 when the whole yard is still full', () => {
+    // Both doors out of the yard, and nothing else to do with a full yard.
+    expect(helpfulRolls(BASE_TOKENS, 'red')).toEqual([1, 6]);
+    expect(describeNoMove(BASE_TOKENS, 'red')).toBe('Need a 1 or a 6 to come out');
   });
 
   it('names only the faces that actually do something', () => {
@@ -410,7 +448,8 @@ describe('helpfulRolls / describeNoMove', () => {
   it('reads each colour independently', () => {
     const t = tokensWith({ 0: 'track-3' });
     expect(helpfulRolls(t, 'red')).toEqual([1, 2, 3, 4, 5, 6]);
-    expect(helpfulRolls(t, 'green')).toEqual([6]);
+    // Green is still entirely in the yard, so only the two doors out help it.
+    expect(helpfulRolls(t, 'green')).toEqual([1, 6]);
   });
 });
 

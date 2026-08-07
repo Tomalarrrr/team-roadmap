@@ -19,7 +19,7 @@ import {
   leaveGame,
   type Ludo4GameState,
 } from '../ludo4Api';
-import { deserializeRollStats } from '../../ludo4Board';
+import { deserializeRollStats, PLAYER_COLORS } from '../../ludo4Board';
 
 type FakeRes = {
   ok: boolean;
@@ -141,7 +141,7 @@ describe('makeMove', () => {
 });
 
 describe('addBot / removeBot', () => {
-  it('adds a bot to an empty slot before the game starts', async () => {
+  it('seats a bot in the next free chair, closing any gap', async () => {
     fetchMock
       .mockResolvedValueOnce(
         res(baseState({ players: { red: { sessionId: 's-red', name: 'Red' } }, startedAt: null }), { etag: 'e1' })
@@ -150,9 +150,16 @@ describe('addBot / removeBot', () => {
 
     await addBot('GAME', 'blue', 's-red');
 
+    // Asked for blue, seated in green: the turn rotation runs over the first
+    // `playerCount` colours, so a gap is a chair nobody can play from. Packing
+    // it out here rather than at the off is what stops a player's colour
+    // changing under them when the board appears — and a bot re-keys to the
+    // seat it lands in, name and id together.
     const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
-    expect(putBody.players.blue.sessionId).toBe('bot-blue');
-    expect(putBody.players.blue.name).toBe('Bot Blue');
+    expect(putBody.players.blue).toBeUndefined();
+    expect(putBody.players.green.sessionId).toBe('bot-green');
+    expect(putBody.players.green.name).toBe('Bot Green');
+    expect(putBody.players.red.sessionId).toBe('s-red');
   });
 
   it('does not write if the slot is already taken', async () => {
@@ -211,6 +218,107 @@ describe('addBot / removeBot', () => {
     fetchMock.mockResolvedValueOnce(res(baseState({ startedAt: null }), { etag: 'e2' }));
     await removeBot('GAME', 'green', 's-red'); // green is a human here
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The lobby promises a colour; the game has to keep it.
+//
+// The turn rotation is a cycle over the first `playerCount` colours, so an
+// empty chair in the middle is a seat nobody can play from. That gap used to be
+// closed when the game started, which meant a player could sit in the lobby as
+// Blue and find themselves Green the moment the board appeared, with nothing on
+// screen to explain it. Every seat is now packed as it changes, so the gap
+// never exists and the pack-down at the off has nothing to do.
+describe('seating never leaves a gap', () => {
+  it('packs the room when a player in the middle leaves', async () => {
+    const waiting = baseState({
+      players: {
+        red: { sessionId: 's-red', name: 'Red' },
+        green: { sessionId: 's-mid', name: 'Mid' },
+        blue: { sessionId: 's-high', name: 'High' },
+      },
+      startedAt: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(res(waiting, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await leaveGame('GAME', 's-mid');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(putBody.players.red.sessionId).toBe('s-red');
+    // The player above the hole slid down into it *now*, in the lobby, where
+    // everyone can see it happen — not silently at kick-off.
+    expect(putBody.players.green.sessionId).toBe('s-high');
+    expect(putBody.players.blue).toBeUndefined();
+  });
+
+  it('keeps the host with the person, not the colour, across a re-seat', async () => {
+    const waiting = baseState({
+      players: {
+        red: { sessionId: 's-red', name: 'Red' },
+        green: { sessionId: 's-mid', name: 'Mid' },
+        blue: { sessionId: 's-host', name: 'Host' },
+      },
+      host: 'blue',
+      startedAt: null,
+    });
+    fetchMock
+      .mockResolvedValueOnce(res(waiting, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await leaveGame('GAME', 's-mid');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    // The host moved down a chair; the host field has to move with them, or the
+    // room hands its controls to whoever slid into the colour they left.
+    expect(putBody.players[putBody.host].sessionId).toBe('s-host');
+  });
+
+  it('starts a full table without moving anybody', async () => {
+    // Every arm taken. The seats are rotations of one another, so there is
+    // nothing to draw for — and a colour that changes as the board appears is
+    // the thing players read as a bug.
+    const players: Record<string, { sessionId: string; name: string }> = {};
+    PLAYER_COLORS.forEach((c, i) => { players[c] = { sessionId: `s-${i}`, name: `P${i}` }; });
+    const waiting = baseState({ players, host: 'red', startedAt: null } as never);
+    fetchMock
+      .mockResolvedValueOnce(res(waiting, { etag: 'e1' }))
+      .mockResolvedValueOnce(res(null, { status: 200 }));
+
+    await startGame('GAME', 's-0');
+
+    const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+    PLAYER_COLORS.forEach((c, i) => {
+      expect(putBody.players[c].sessionId).toBe(`s-${i}`);
+    });
+    expect(putBody.playerCount).toBe(PLAYER_COLORS.length);
+  });
+
+  it('draws for the seats when short-handed, where they are not even', async () => {
+    // Two of three (or four) arms: one seat really is better, so which player
+    // gets it is a coin flip rather than a fixture. Run the draw enough times
+    // that a fixed assignment could not survive.
+    const seen = new Set<string>();
+    for (let i = 0; i < 60; i++) {
+      fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const waiting = baseState({
+        players: {
+          red: { sessionId: 's-a', name: 'A' },
+          green: { sessionId: 's-b', name: 'B' },
+        },
+        host: 'red',
+        startedAt: null,
+      });
+      fetchMock
+        .mockResolvedValueOnce(res(waiting, { etag: 'e1' }))
+        .mockResolvedValueOnce(res(null, { status: 200 }));
+      await startGame('GAME', 's-a');
+      const putBody = JSON.parse(fetchMock.mock.calls[1][1].body);
+      seen.add(putBody.players.red.sessionId);
+    }
+    expect(seen).toEqual(new Set(['s-a', 's-b']));
   });
 });
 

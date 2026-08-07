@@ -51,11 +51,43 @@ function randomInt(n: number): number {
   return arr[0] % n;
 }
 
-/** Seats are dealt at random rather than in board order, so creating a game
- * doesn't hand you red every time. The starting player is drawn separately in
- * startGame, so neither the colour nor the first move follows join order. */
-function randomColor(): Ludo3Color {
-  return PLAYER_COLORS[randomInt(PLAYER_COLORS.length)];
+/**
+ * Pack the seated players onto the first colours, keeping their order.
+ *
+ * The turn rotation is a cycle over `PLAYER_COLORS.slice(0, playerCount)`, so a
+ * gap in the middle is a seat nobody can play. That used to be closed at the
+ * off, which meant the lobby could show you as blue and the game could start
+ * you as green — you watched your own colour change as the board appeared, and
+ * nothing on screen explained it. So close it *whenever the room changes*
+ * instead: every seat is packed the moment it is taken or given up, the lobby
+ * therefore always shows the colour you will actually play, and the pack-down
+ * at the off has nothing left to do.
+ *
+ * The cost is that the creator is always red rather than drawn at random. That
+ * is the smaller loss: which colour you get is a novelty, and having it change
+ * under you is a bug. The draw that matters — who moves first — is still made
+ * at random in startGame.
+ *
+ * A bot carries its seat in both its name and its id, so it is re-keyed rather
+ * than carried across; otherwise the green chair spends the game labelled
+ * "Bot Blue" beside a green dot.
+ */
+function packSeats(players: Ludo3GameState['players']): Ludo3GameState['players'] {
+  const seated = PLAYER_COLORS.filter((c) => !!players[c]);
+  const packed: Ludo3GameState['players'] = {};
+  seated.forEach((from, i) => {
+    const to = PLAYER_COLORS[i];
+    const player = players[from] as LudoPlayer;
+    packed[to] = player.sessionId.startsWith('bot-')
+      ? { sessionId: `bot-${to}`, name: BOT_NAMES[to] }
+      : player;
+  });
+  return packed;
+}
+
+/** Which colour a session is sitting on, after a re-seat. */
+function seatOf(players: Ludo3GameState['players'], sessionId: string): Ludo3Color | undefined {
+  return PLAYER_COLORS.find((c) => players[c]?.sessionId === sessionId);
 }
 
 export async function createGame(
@@ -64,7 +96,8 @@ export async function createGame(
 ): Promise<{ code: string; color: Ludo3Color }> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = generateGameCode();
-    const color = randomColor();
+    // The first seat, not a random one — see packSeats.
+    const color = PLAYER_COLORS[0];
 
     const initialState: Ludo3GameState = {
       players: { [color]: { sessionId, name: userName } },
@@ -132,7 +165,10 @@ export async function addBot(code: string, color: Ludo3Color, sessionId: string)
     if (current.players[color]) return undefined;
     return {
       ...current,
-      players: { ...current.players, [color]: { sessionId: `bot-${color}`, name: BOT_NAMES[color] } },
+      players: packSeats({
+        ...current.players,
+        [color]: { sessionId: `bot-${color}`, name: BOT_NAMES[color] },
+      }),
     };
   });
 }
@@ -146,7 +182,9 @@ export async function removeBot(code: string, color: Ludo3Color, sessionId: stri
     if (!player || !player.sessionId.startsWith('bot-')) return undefined;
     const newPlayers = { ...current.players };
     delete newPlayers[color];
-    return { ...current, players: newPlayers };
+    const packed = packSeats(newPlayers);
+    // The host may have slid down with everyone else; follow them by session.
+    return { ...current, players: packed, host: seatOf(packed, sessionId) ?? current.host };
   });
 }
 
@@ -173,11 +211,19 @@ export async function leaveGame(code: string, sessionId: string): Promise<void> 
     const seat = PLAYER_COLORS.find((c) => current.players[c]?.sessionId === sessionId);
     if (!seat) return undefined; // Not at this table
 
-    const players = { ...current.players };
+    // Read before anything moves: after a re-seat the host's *colour* may belong
+    // to somebody else, so the host has to be followed by session.
+    const hostSession = current.players[current.host ?? 'red']?.sessionId;
+
+    let players = { ...current.players };
     if (current.startedAt) {
       players[seat] = { sessionId: `bot-${seat}`, name: BOT_NAMES[seat] };
     } else {
       delete players[seat];
+      // Pack the gap out immediately rather than at the off. Left until then,
+      // everyone below the empty chair changes colour the moment the board
+      // appears — which is exactly the surprise packSeats exists to prevent.
+      players = packSeats(players);
     }
 
     const humansLeft = PLAYER_COLORS.filter(
@@ -188,8 +234,8 @@ export async function leaveGame(code: string, sessionId: string): Promise<void> 
       return { ...current, players };
     }
 
-    const hostSeat = current.host ?? 'red';
-    const nextHost = humansLeft.includes(hostSeat) ? hostSeat : humansLeft[0];
+    const hostSeatNow = hostSession ? seatOf(players, hostSession) : undefined;
+    const nextHost = hostSeatNow && humansLeft.includes(hostSeatNow) ? hostSeatNow : humansLeft[0];
 
     return {
       ...current,
@@ -238,27 +284,36 @@ export async function startGame(code: string, sessionId: string): Promise<void> 
     const seated = PLAYER_COLORS.filter((c) => !!current.players[c]);
     if (seated.length < 2) return undefined;
 
-    /* Dealt onto the first colours at random, not in board order.
+    /* Seats are only re-drawn when they have to be.
      *
-     * The seats are not interchangeable when fewer people play than the board
-     * has arms: on a ring, the player whose start cell sits a third of a lap
-     * *behind* the other's passes the other's guns early in its lap, when its
-     * counters have little to lose, while the other passes them late, with a
-     * counter that has most of a lap invested in it. Measured over 20,000
-     * two-handed games, the seat 14 cells behind wins 51.5% against 48.5%
-     * (chi2 17.9, df 1) — and the mirror pairing gives the mirror result, so it
-     * is the *gap* that decides it, not the colour. Three arms cannot be split
-     * evenly between two players, so the board cannot be rid of it.
+     * With every arm taken, the seats are interchangeable: rotate the board and
+     * one seat becomes another, which is why a full table measures 33.11 / 33.52 / 33.37 over 30,000 games.
+     * Shuffling those does nothing for fairness and takes something real away —
+     * the player watched the colour they had been given in the lobby change as
+     * the board appeared, with nothing on screen to explain it. So a full table
+     * keeps its seats exactly as the lobby showed them.
      *
-     * What it can be rid of is that edge going to the same *person* every time.
-     * Slid down in board order it did: the creator draws a colour at random and
-     * the joiner takes the first free one, so the joiner landed on the favoured
-     * seat two games in three. Shuffling makes it the coin flip it should have
-     * been. (Turn order is drawn separately, below.) */
+     * Short-handed is a different board. On a ring, the player whose start cell
+     * sits a third of a lap *behind* the other's passes the other's guns early
+     * in its lap, when its counters have little to lose, while the other passes
+     * them late, with a counter that has most of a lap invested in it. Measured
+     * over 20,000 two-handed games, the seat 14 cells behind wins 52.6% against
+     * 47.4% (chi2 55.6, df 1). That edge cannot be removed by seating — every
+     * pair of arms on a three-fold board is a rotation of every other, and on
+     * the four-seat board the fair pairing (opposite arms) is not a prefix of
+     * the colours the turn rotation runs over. What it can be is a coin flip
+     * rather than a fixture, so a short-handed table draws for it. The waiting
+     * room says so before anyone presses Start.
+     *
+     * Either way nobody is moved to close a gap: seats are packed as they are
+     * taken (see packSeats), so by here there is never a hole to close. */
+    const shortHanded = seated.length < PLAYER_COLORS.length;
     const order = [...seated];
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = randomInt(i + 1);
-      [order[i], order[j]] = [order[j], order[i]];
+    if (shortHanded) {
+      for (let i = order.length - 1; i > 0; i--) {
+        const j = randomInt(i + 1);
+        [order[i], order[j]] = [order[j], order[i]];
+      }
     }
 
     const playerCount = seated.length;
@@ -326,9 +381,10 @@ export async function joinGame(
       joinError = 'Game is full';
       return undefined;
     }
+    // Packed on the way in, so the seat shown in the lobby is the seat played.
     return {
       ...current,
-      players: { ...current.players, [foundColor]: { sessionId, name: userName } },
+      players: packSeats({ ...current.players, [foundColor]: { sessionId, name: userName } }),
     };
   });
 

@@ -172,11 +172,15 @@ function Preview() {
                       <span key={`h${n}`} className={styles.rollHead}>{n}</span>
                     ))}
                     <span className={styles.rollHead}>C</span>
+                    <span className={styles.rollHead}>n</span>
                     {ROLLS[color].map((v, k) => (
                       <span key={k} className={`${styles.rollVal} ${v ? '' : styles.statNil}`}>{v || '·'}</span>
                     ))}
                     <span className={`${styles.rollVal} ${CAPS[color] ? '' : styles.statNil}`}>
                       {CAPS[color] || '·'}
+                    </span>
+                    <span className={`${styles.rollVal} ${styles.rollTotal}`}>
+                      {ROLLS[color].reduce((a, b) => a + b, 0)}
                     </span>
                   </div>
                 </div>

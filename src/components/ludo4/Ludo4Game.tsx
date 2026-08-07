@@ -1513,8 +1513,8 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
           <div className={styles.helpCard}>
             <div className={styles.helpTitle}>How to play</div>
             <ul className={styles.helpList}>
-              <li>Roll a 6 to bring a counter out of your yard.</li>
-              <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes.</li>
+              <li>Roll a 6 <em>or a 1</em> to bring a counter out of your yard.</li>
+              <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes. A 1 gets you out; it does not buy a second throw.</li>
               <li>Land on an opponent to send that counter back to its yard.</li>
               <li>Start spaces and starred spaces are safe. Nothing is captured there.</li>
               <li>
@@ -1647,16 +1647,29 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                 );
               })}
             </div>
+            {/* Short-handed, the seats are not interchangeable and the game
+                draws for them at kick-off (see startGame). Said here, before
+                anyone commits, because a colour changing as the board appears
+                with no warning reads as a bug — which is exactly what it was
+                taken for. A full table keeps the colours shown above. */}
             {(() => {
               const filledCount = PLAYER_COLORS.filter(c => !!playerNames[c]).length;
               const canStart = myColor === hostColor && filledCount >= 2;
               return (
+                <>
+                {filledCount >= 2 && filledCount < PLAYER_COLORS.length && (
+                  <div className={styles.shareHint}>
+                    Short-handed, so seats are drawn when the game starts — the
+                    arms are not quite even with an empty one.
+                  </div>
+                )}
                 <button className={styles.createBtn} onClick={handleStartGame} disabled={!canStart || isLoading}>
                   {isLoading ? 'Starting…'
                     : filledCount < 2 ? 'Need 2+ players'
                     : myColor !== hostColor ? 'Waiting for host…'
                     : 'Start Game'}
                 </button>
+                </>
               );
             })()}
             <button className={styles.linkBtn} onClick={handleBackToLobby}>Back</button>
@@ -1690,6 +1703,7 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
               {PLAYER_COLORS.slice(0, activePlayerCount).map(color => {
                 const score = getPlayerScore(tokens, color);
                 const stats = rollStats[colorIndex(color)];
+                const throwCount = stats.rolls.reduce((a, b) => a + b, 0);
                 return (
                   <div
                     key={color}
@@ -1730,12 +1744,20 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                     <div
                       className={styles.rollGrid}
                       role="img"
-                      aria-label={`Rolls — ${stats.rolls.map((n, i) => `${i + 1}: ${n}`).join(', ')}; captures ${stats.captures}`}
+                      aria-label={`${throwCount} throws — ${stats.rolls.map((n, i) => `${i + 1}: ${n}`).join(', ')}; captures ${stats.captures}`}
                     >
                       {[1, 2, 3, 4, 5, 6].map(n => (
                         <span key={`h${n}`} className={styles.rollHead} aria-hidden="true">{n}</span>
                       ))}
                       <span className={styles.rollHead} title="Captures" aria-hidden="true">C</span>
+                      {/* The denominator. Without it the six counts are read
+                          against each other as though every seat had thrown the
+                          same number of times — and they never have, because a
+                          6 buys another roll, so the seat with the most 6s has
+                          the most throws to show them in. Two players reading
+                          "10 sixes" against "3 sixes" were looking at 49 throws
+                          against 37. */}
+                      <span className={styles.rollHead} title="Throws" aria-hidden="true">n</span>
                       {/* A middot, not a blank: an empty cell reads as a broken
                           grid, where a placeholder reads as "none yet" and keeps
                           the columns visibly lined up under their face. */}
@@ -1753,6 +1775,12 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                         aria-hidden="true"
                       >
                         {stats.captures || '·'}
+                      </span>
+                      <span
+                        className={`${styles.rollVal} ${styles.rollTotal} ${throwCount ? '' : styles.statNil}`}
+                        aria-hidden="true"
+                      >
+                        {throwCount || '·'}
                       </span>
                     </div>
                   </div>

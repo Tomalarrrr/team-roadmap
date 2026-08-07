@@ -974,7 +974,8 @@
    the row under it, so the numbers never need reading twice to place them. */
 .rollGrid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr) 1.3fr;
+  /* six faces, captures, then the throw count that all seven are out of */
+  grid-template-columns: repeat(6, 1fr) 1.15fr 1.35fr;
   font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
@@ -986,6 +987,13 @@
 .rollHead { color: var(--text-muted); }
 
 .rollVal { color: var(--text-secondary); }
+
+/* The denominator reads as scale, not as a seventh face: same size, quieter,
+   and set off by a hairline so the eye stops before it. */
+.rollTotal {
+  color: var(--text-muted);
+  border-left: 1px solid var(--border-light);
+}
 
 .seatCardActive .rollVal { color: var(--text-primary); }
 
