@@ -564,26 +564,6 @@
   mask: radial-gradient(closest-side, transparent 0 83.8%, #000 83.8%);
 }
 
-/* Whose turn it is, on the board itself: a short arc at the rim of the active
-   seat's arm. One element rotated to the seat rather than four toggled, so the
-   turn passing reads as the tick sweeping round the rim to the next player. */
-.rimTick {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  transition: transform 700ms cubic-bezier(0.65, 0, 0.35, 1);
-}
-
-/* Slim and half-strength on purpose: it marks whose turn it is, every turn,
-   all game — at full weight it stopped reading as a marker and started
-   reading as a stripe painted on the rim. */
-.rimTick path {
-  fill: none;
-  stroke-width: 0.35;
-  stroke-linecap: round;
-  opacity: 0.55;
-}
-
 /* Hover path preview: the cells a lit counter would walk, dotted in its own
    colour. Dots fade in one after another (delay set inline), so the path draws
    itself toward the destination rather than appearing as a block. */
@@ -1212,7 +1192,6 @@
   .popup,
   .playingLayout,
   .boardPlate,
-  .rimTick,
   .pathDot,
   .ripple,
   .spokeCellWin,

@@ -8,9 +8,8 @@
 // flat white cells with
 // hairline borders, solid-colour start cells and corridors, glossy counters
 // that glow when they can move. No lighting model, no perspective. The life is
-// in the moments instead: a rim tick that sweeps to whoever's turn it is, a
-// path preview under a hovered counter, a ripple where a counter lands, and a
-// cascade up the winner's corridor.
+// in the moments instead: a path preview under a hovered counter, a ripple
+// where a counter lands, and a cascade up the winner's corridor.
 
 import { useState, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import type { TokenPosition } from '../../ludoFirebase';
@@ -63,13 +62,6 @@ const TOKEN_STYLE: Record<Ludo4Color, string> = {
 const STAR_PATH =
   'M12 2L14.47 8.6L21.51 8.91L15.99 13.3L17.88 20.09L12 16.2L6.12 20.09L8.01 13.3L2.49 8.91L9.53 8.6Z';
 
-/** The rim tick: a short arc at the board's edge, drawn at bearing 0 (the
- * bottom) and rotated to the active seat's arm. Points are polar for bearing
- * ±5° at r 48.5 — outside the yard arc (bays end at ~47.9) but inside the
- * rim's swell there (~49.5), so the tick rides the last sliver of apron
- * without grazing either the sockets or the sculpted edge. */
-const RIM_TICK_PATH = 'M 54.23 98.31 A 48.5 48.5 0 0 1 45.77 98.31';
-
 const TRACK_INDICES = Array.from({ length: TRACK_SIZE }, (_, i) => i + 1);
 const TOKEN_INDICES = Array.from({ length: TOTAL_TOKENS }, (_, i) => i);
 const FINAL_CELLS = Array.from({ length: FINAL_SIZE }, (_, i) => i + 1);
@@ -119,7 +111,7 @@ interface Ludo4BoardProps {
   tokens: TokenPosition[];
   playerCount: number;
   myColor: Ludo4Color | null;
-  /** Whose turn it is — drives the rim tick. Null hides it (e.g. game over). */
+  /** Whose turn it is — colours the move-target rings. Null while game over. */
   activeColor: Ludo4Color | null;
   /** The winner, once there is one — runs the cascade up their corridor. */
   winner: Ludo4Color | null;
@@ -156,33 +148,6 @@ export function Ludo4Board({
   // has to be turned back, or a spun board hands the player a set of counters
   // lying on their sides.
   const upright = `rotate(${-spin}deg)`;
-
-  /* The rim tick sweeps to the seat whose turn it is — and only ever forwards.
-   *
-   * Rotations are interpolated as numbers, so handing the turn from the last
-   * arm back to the first (240° → 0°, or 270° → 0° on the four-seat board) ran
-   * the tick all the way back round the board against the direction of play. It
-   * is the one element on the board whose whole job is to say "the turn has
-   * moved on", so it going backwards said the opposite.
-   *
-   * Kept as a running total instead: each handover adds the *forward* distance
-   * to the seat taking over, so 240 → 0 is a step of 120 to 360, not a sweep of
-   * −240. The number grows without bound, which costs nothing — a rotation of
-   * 3600° is the same picture as one of 0°. Held in state and adjusted during
-   * render on the seat actually changing (the same shape as any other
-   * derived-from-props state), so a re-render never advances it. */
-  const [tick, setTick] = useState<{ seat: Ludo4Color | null; angle: number }>(() => ({
-    seat: activeColor,
-    angle: activeColor ? ARM_ANGLE[activeColor] : 0,
-  }));
-  if (activeColor && activeColor !== tick.seat) {
-    setTick(prev => ({
-      seat: activeColor,
-      angle: prev.seat === null
-        ? ARM_ANGLE[activeColor]
-        : prev.angle + ((ARM_ANGLE[activeColor] - ARM_ANGLE[prev.seat] + 360) % 360),
-    }));
-  }
 
   // Where the offered moves land. "Which of my counters can move" is only half
   // the question — the other half is where it would end up.
@@ -260,19 +225,6 @@ export function Ludo4Board({
             style={{ clipPath: RIM_CLIP_PATH }}
             aria-hidden="true"
           />
-
-          {/* Whose turn it is, said on the board itself: a short arc at the rim
-              of the active seat's arm, sweeping round when the turn passes. */}
-          {activeColor && activeColors.includes(activeColor) && (
-            <svg
-              className={styles.rimTick}
-              viewBox="0 0 100 100"
-              style={{ transform: `rotate(${tick.angle}deg)` }}
-              aria-hidden="true"
-            >
-              <path d={RIM_TICK_PATH} stroke={COLOR_HEX[activeColor]} />
-            </svg>
-          )}
 
           {/* Track tiles. The turn for home is marked once, on the run-home
               cell it leads into — the track cell in front of it used to carry a

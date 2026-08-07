@@ -65,6 +65,8 @@ import {
   findNextActivePlayer,
   getNextTurn,
   scoreBotMove,
+  noCountersOnTrack,
+  YARD_THROWS,
 } from '../../ludo3GameLogic';
 import { computeMovePath, getTokenCoords, ARM_ANGLE, TRACK_XY } from './ludo3Geometry';
 import { Ludo3Board, type Ripple } from './Ludo3Board';
@@ -886,7 +888,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
   executeMoveRef.current = executeMove;
 
   // --- Roll dice ---
-  const handleRollDice = useCallback(async () => {
+  // `attempt` is which throw of the turn this is (see the yard rule below).
+  // Normalized rather than trusted: an event object arriving here from an
+  // onClick must count as throw one, not as “not < 3”.
+  const handleRollDice = useCallback(async (attempt?: number) => {
+    const throwNo = typeof attempt === 'number' ? attempt : 1;
     const gc = gameCodeRef.current;
     const mc = myColorRef.current;
     if (!gc || !mc) return;
@@ -959,6 +965,21 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       const playable = getValidMoves(currentTokens, curColor, roll);
 
       if (moves.length === 0) {
+        // The classic yard rule: with nothing of yours out on the ring, a
+        // failed throw is not the end of the turn — you get YARD_THROWS
+        // throws at the 6. Retries stay local: nothing is written until the
+        // turn resolves, so the other seats simply see the deploy or the pass
+        // that ends it. Every attempt goes through recordRoll above, so the
+        // extra throws are on the seat card's tally (n counts them), not a
+        // kindness hidden inside the die.
+        if (roll !== 6 && throwNo < YARD_THROWS && noCountersOnTrack(currentTokens, curColor)) {
+          moveInFlightRef.current = false;
+          showHint(`No 6 — throw ${throwNo + 1} of ${YARD_THROWS}`);
+          rollTimeoutRef.current = setTimeout(() => {
+            handleRollDiceRef.current(throwNo + 1);
+          }, 700);
+          return;
+        }
         let nextColor: Ludo3Color;
         let nextSixes: number;
         if (roll === 6 && curSixes < 2) {
@@ -976,7 +997,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
           // landing rule "no moves" covers several different situations and
           // only one of them is a yard wanting a 6 — told the wrong one, a
           // player reads the dice as broken rather than the rule as tight.
-          showHint(describeNoMove(currentTokens, curColor));
+          showHint(
+            noCountersOnTrack(currentTokens, curColor) && throwNo >= YARD_THROWS
+              ? 'No 6 in three throws — turn passes'
+              : describeNoMove(currentTokens, curColor)
+          );
         }
         const update: Ludo3MoveUpdate = {
           tokens: serializeTokens(currentTokens),
@@ -1515,8 +1540,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
           <div className={styles.helpCard}>
             <div className={styles.helpTitle}>How to play</div>
             <ul className={styles.helpList}>
-              <li>Roll a 6 <em>or a 1</em> to bring a counter out of your yard.</li>
-              <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes. A 1 gets you out; it does not buy a second throw.</li>
+              <li>
+                Roll a 6 to bring a counter out of your yard. While none of
+                your counters are out on the ring, you get three throws at it.
+              </li>
+              <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes.</li>
               <li>Land on an opponent to send that counter back to its yard.</li>
               <li>Start spaces and starred spaces are safe. Nothing is captured there.</li>
               <li>
@@ -1838,7 +1866,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
                   isRolling ? styles.diceRolling : '',
                   diceCanRoll ? styles.diceActive : '',
                 ].filter(Boolean).join(' ')}
-                onClick={handleRollDice}
+                onClick={() => handleRollDice()}
                 disabled={!diceCanRoll}
                 aria-label="Roll dice"
                 title={diceCanRoll ? 'Roll — or press Space' : undefined}

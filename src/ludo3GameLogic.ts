@@ -29,27 +29,36 @@ import {
 } from './ludo3Board';
 
 /**
- * The faces that bring a counter out of the yard.
+ * Only a 6 brings a counter out of the yard.
  *
- * A 6 alone was too tight a gate. Five counters each start in the yard and each
- * one costs a 6 to get out, so a player spent 44 of their own turns — 40% of a
- * game — before their last counter reached the board, and one turn in eight did
- * nothing at all. Measured over 3000 simulated games; 8% of players never got
- * all five out before somebody won.
+ * This was briefly widened to "a 1 or a 6" (commit 9b564a0): letting a 1
+ * deploy halves the 44 own-turns a player spends emptying the yard and cuts
+ * do-nothing turns from 12.8% to 5.1%, measured over 3000 simulated games. The
+ * table rejected it the same afternoon — watching a counter walk out on a 1
+ * reads as the game miscounting, not as a rule.
  *
- * Letting a 1 out as well (a standard Ludo variant) halves that to 22 turns,
- * cuts the do-nothing turns from 12.8% to 5.1%, and every player gets their
- * full five onto the board. Game length barely moves: 313 turns to 321.
- *
- * The alternative was the pity timer Ludo v1 and Ludo 2 use — quietly turning a
- * stuck player's roll into a 6. It measures about as well but it lies to the
- * player about the die, and the seat cards here show the tally. A second door
- * out of the yard is a rule; a substituted face is a fib.
- *
- * Only the 6 still buys another roll (see getNextTurn) — the 1 is a way out,
- * not a bonus.
+ * The slog the variant existed to fix is handled the way the classic board
+ * handles it instead: a player with no counter out on the ring gets
+ * YARD_THROWS throws at the 6, not one. The flow lives in the game shell's
+ * roll handler, because it spans rolls; the eligibility test is
+ * noCountersOnTrack below. The 6 stays the only door; the drought goes:
+ * expected own-turns to first deploy falls from 6.0 to 2.4, and the chance of
+ * still being shut in after six of them from 33.5 percent to 3.7.
  */
-export const DEPLOY_FACES = new Set([1, 6]);
+export const DEPLOY_FACES = new Set([6]);
+
+/** Throws a turn gets at the 6 while noCountersOnTrack — the classic rule. */
+export const YARD_THROWS = 3;
+
+/**
+ * True when none of this colour's counters stand out on the ring — every one
+ * is still in the yard or already standing in the run home. The classic
+ * board's condition for the three throws: counters at home are out of play,
+ * and a player in this position can do nothing whatever without a 6.
+ */
+export function noCountersOnTrack(tokens: TokenPosition[], color: Ludo3Color): boolean {
+  return getColorTokenIndices(color).every(i => !tokens[i].startsWith('track-'));
+}
 
 /**
  * Calculate where a token lands after moving `steps` spaces.
@@ -194,7 +203,7 @@ export function describeNoMove(tokens: TokenPosition[], color: Ludo3Color): stri
     return 'Nothing can move — an opponent has to send one of yours back';
   }
   const allInYard = getColorTokenIndices(color).every(i => tokens[i] === 'base');
-  if (allInYard && faces.every(f => DEPLOY_FACES.has(f))) return 'Need a 1 or a 6 to come out';
+  if (faces.length === 1 && faces[0] === 6 && allInYard) return 'Need a 6 to come out';
   const list = faces.length === 1
     ? `a ${faces[0]}`
     : `${faces.slice(0, -1).join(', ')} or ${faces[faces.length - 1]}`;
