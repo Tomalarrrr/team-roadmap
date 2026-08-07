@@ -13,6 +13,7 @@ import {
   type Ludo4GameState,
   type Ludo4MoveUpdate,
 } from '../ludo4Board';
+import { YARD_MISS_LIMIT } from '../ludo4GameLogic';
 import { generateGameCode } from '../utils/gameUtils';
 import {
   getServerTimestamp,
@@ -116,6 +117,7 @@ export async function createGame(
       turnStartedAt: getServerTimestamp() as unknown as number,
       playerCount: 4,
       rollStats: initRollStats(),
+      yardMisses: PLAYER_COLORS.map(() => 0).join(','),
     };
 
     const result = await proxyTransaction<Ludo4GameState>(`ludo4/${code}`, (current) => {
@@ -477,6 +479,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       paused: false,
       pausedAt: null,
       rollStats: initRollStats(),
+      yardMisses: PLAYER_COLORS.map(() => 0).join(','),
       singlePlayer: hasBots,
     };
   });
@@ -495,4 +498,30 @@ export async function resetGame(code: string, playerCount: number): Promise<void
  */
 export async function requestDiceRoll(): Promise<{ rolls: number[]; serverGenerated: boolean }> {
   return { rolls: [1 + randomInt(6)], serverGenerated: false };
+}
+
+/**
+ * The shut-in throw — the warm die the rules card describes.
+ *
+ * Stone fair before the first miss, then one twenty-fourth warmer per miss:
+ * P(6) = (4 + misses) / 24 — 1/6, then 5/24, 6/24, 7/24, 8/24 — never past
+ * double fair odds. Once YARD_MISS_LIMIT misses are served the wait is over
+ * and the throw is simply a given 6. The other five faces always share the
+ * remainder evenly: the draw is over 120 equally likely states (lcm of 24 and
+ * 5), rejection-sampled exact like everything else in this file, so warming
+ * the 6 never quietly biases the low faces against each other.
+ *
+ * Only ever thrown while allInYard — one counter out of the yard and it is
+ * requestDiceRoll, no exceptions. Stated in full on the rules card, which is
+ * what separates a rule from a thumb on the die; the fairness suite pins this
+ * curve to numbers exactly as it pins the fair die's.
+ */
+export async function requestYardRoll(
+  misses: number
+): Promise<{ rolls: number[]; serverGenerated: boolean }> {
+  if (misses >= YARD_MISS_LIMIT) return { rolls: [6], serverGenerated: false };
+  const sixStates = (4 + Math.max(0, misses)) * 5; // of 120
+  const r = randomInt(120);
+  const face = r < sixStates ? 6 : 1 + ((r - sixStates) % 5);
+  return { rolls: [face], serverGenerated: false };
 }

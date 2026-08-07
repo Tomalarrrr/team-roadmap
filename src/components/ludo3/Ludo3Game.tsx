@@ -28,6 +28,7 @@ import {
   startGame,
   leaveGame,
   requestDiceRoll,
+  requestYardRoll,
   getServerTimestamp,
   type Ludo3GameState,
   type Ludo3MoveUpdate,
@@ -52,6 +53,8 @@ import {
   serializeRollStats,
   recordRoll,
   recordCapture,
+  parseYardMisses,
+  serializeYardMisses,
   type RollStats,
   type Ludo3Color,
 } from '../../ludo3Board';
@@ -65,8 +68,8 @@ import {
   findNextActivePlayer,
   getNextTurn,
   scoreBotMove,
-  noCountersOnTrack,
-  YARD_THROWS,
+  allInYard,
+  YARD_MISS_LIMIT,
 } from '../../ludo3GameLogic';
 import { computeMovePath, getTokenCoords, ARM_ANGLE, TRACK_XY } from './ludo3Geometry';
 import { Ludo3Board, type Ripple } from './Ludo3Board';
@@ -254,6 +257,8 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
   activePlayerCountRef.current = activePlayerCount;
   const [rollStats, setRollStats] = useState<RollStats>(() => deserializeRollStats(initRollStats()));
   const rollStatsRef = useRef(rollStats);
+  // The warm die's memory, mirrored from synced state (see requestYardRoll).
+  const yardMissesRef = useRef<string>('');
 
   // --- Turn/interaction state ---
   const [validMoves, setValidMoves] = useState<Map<number, TokenPosition>>(new Map());
@@ -589,6 +594,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
         setRollStats(parsed);
         rollStatsRef.current = parsed;
       }
+      yardMissesRef.current = state.yardMisses ?? '';
 
       if (state.currentTurn !== currentTurnRef.current) {
         isRollingRef.current = false;
@@ -828,6 +834,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       rollStatsRef.current = moveRollStats;
     }
 
+    // Any executed move writes the mover's shut-in count cold: a deploy is
+    // the 6 arriving, and every other move means a counter is out, where the
+    // warm die never applies.
+    const coldMisses = parseYardMisses(yardMissesRef.current);
+    coldMisses[colorIndex(curColor)] = 0;
     const update: Ludo3MoveUpdate = {
       tokens: serializeTokens(newTokens),
       currentTurn: gameWinner ? curColor : nextColor,
@@ -843,6 +854,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       finishOrder: updatedFinishOrder.join(','),
       turnStartedAt: getServerTimestamp(),
       rollStats: serializeRollStats(moveRollStats),
+      yardMisses: serializeYardMisses(coldMisses),
     };
 
     // Optimistic local apply so the token animates immediately
@@ -888,11 +900,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
   executeMoveRef.current = executeMove;
 
   // --- Roll dice ---
-  // `attempt` is which throw of the turn this is (see the yard rule below).
-  // Normalized rather than trusted: an event object arriving here from an
-  // onClick must count as throw one, not as “not < 3”.
-  const handleRollDice = useCallback(async (attempt?: number) => {
-    const throwNo = typeof attempt === 'number' ? attempt : 1;
+  const handleRollDice = useCallback(async () => {
     const gc = gameCodeRef.current;
     const mc = myColorRef.current;
     if (!gc || !mc) return;
@@ -909,7 +917,16 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
     setIsRolling(true);
     const rollAnimMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : 800;
 
-    const { rolls } = await requestDiceRoll();
+    // Shut in — all five still at home — the throw comes from the warm die:
+    // stone fair before the first miss, a twenty-fourth warmer for each miss
+    // since (never past double), and once YARD_MISS_LIMIT misses are served
+    // the throw is a given 6, so nobody waits past six of their own turns.
+    // One counter out of the yard and this is the plain fair die, always.
+    const shutIn = allInYard(tokensRef.current, activeColor);
+    const missesBefore = parseYardMisses(yardMissesRef.current)[colorIndex(activeColor)];
+    const { rolls } = shutIn
+      ? await requestYardRoll(missesBefore)
+      : await requestDiceRoll();
 
     if (currentTurnRef.current !== activeColor || turnPhaseRef.current !== 'roll' || winnerRef.current) {
       moveInFlightRef.current = false;
@@ -940,6 +957,9 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
 
       setDiceValue(roll);
       setLastRoll(roll);
+      if (shutIn && missesBefore >= YARD_MISS_LIMIT) {
+        showHint('Five misses served — this 6 is given');
+      }
 
       const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), roll);
       rollStatsRef.current = updatedRollStats;
@@ -965,21 +985,6 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       const playable = getValidMoves(currentTokens, curColor, roll);
 
       if (moves.length === 0) {
-        // The classic yard rule: with nothing of yours out on the ring, a
-        // failed throw is not the end of the turn — you get YARD_THROWS
-        // throws at the 6. Retries stay local: nothing is written until the
-        // turn resolves, so the other seats simply see the deploy or the pass
-        // that ends it. Every attempt goes through recordRoll above, so the
-        // extra throws are on the seat card's tally (n counts them), not a
-        // kindness hidden inside the die.
-        if (roll !== 6 && throwNo < YARD_THROWS && noCountersOnTrack(currentTokens, curColor)) {
-          moveInFlightRef.current = false;
-          showHint(`No 6 — throw ${throwNo + 1} of ${YARD_THROWS}`);
-          rollTimeoutRef.current = setTimeout(() => {
-            handleRollDiceRef.current(throwNo + 1);
-          }, 700);
-          return;
-        }
         let nextColor: Ludo3Color;
         let nextSixes: number;
         if (roll === 6 && curSixes < 2) {
@@ -997,12 +1002,13 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
           // landing rule "no moves" covers several different situations and
           // only one of them is a yard wanting a 6 — told the wrong one, a
           // player reads the dice as broken rather than the rule as tight.
-          showHint(
-            noCountersOnTrack(currentTokens, curColor) && throwNo >= YARD_THROWS
-              ? 'No 6 in three throws — turn passes'
-              : describeNoMove(currentTokens, curColor)
-          );
+          showHint(describeNoMove(currentTokens, curColor));
         }
+        // A shut-in miss is counted the moment the turn resolves; any other
+        // no-move turn writes the seat cold, so a player captured back to a
+        // full yard later never inherits a stale count.
+        const misses = parseYardMisses(yardMissesRef.current);
+        misses[colorIndex(curColor)] = shutIn ? missesBefore + 1 : 0;
         const update: Ludo3MoveUpdate = {
           tokens: serializeTokens(currentTokens),
           currentTurn: nextColor,
@@ -1014,6 +1020,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
           turnStartedAt: getServerTimestamp(),
           rollStats: serializeRollStats(updatedRollStats),
           lastRoll: roll,
+          yardMisses: serializeYardMisses(misses),
         };
         // Cleared whether or not it landed: a write that aborts must not leave
         // this client unable to roll or move for the rest of the game.
@@ -1541,8 +1548,10 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
             <div className={styles.helpTitle}>How to play</div>
             <ul className={styles.helpList}>
               <li>
-                Roll a 6 to bring a counter out of your yard. While none of
-                your counters are out on the ring, you get three throws at it.
+                Roll a 6 to bring a counter out of your yard. While all five
+                are still at home, the die warms to you: each missed 6 makes
+                the next a little likelier — never more than double — and
+                after five misses the sixth throw is a 6, given.
               </li>
               <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes.</li>
               <li>Land on an opponent to send that counter back to its yard.</li>
@@ -1556,7 +1565,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
                 So a counter that cannot land waits out on the track, where it can still
                 be sent back to your yard. Fill all five cells to win.
               </li>
-              <li>The die is fair: every face is equally likely, every throw.</li>
+              <li>
+                The die is fair: once a counter of yours is out, every face is
+                equally likely, every throw. The warm start above is the one
+                exception, and the face shown is always the face played.
+              </li>
             </ul>
             <div className={styles.helpKeys}>
               Space or Enter rolls. Tab to a raised counter and press Enter to move it.

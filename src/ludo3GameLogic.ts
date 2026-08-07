@@ -37,27 +37,34 @@ import {
  * table rejected it the same afternoon — watching a counter walk out on a 1
  * reads as the game miscounting, not as a rule.
  *
- * The slog the variant existed to fix is handled the way the classic board
- * handles it instead: a player with no counter out on the ring gets
- * YARD_THROWS throws at the 6, not one. The flow lives in the game shell's
- * roll handler, because it spans rolls; the eligibility test is
- * noCountersOnTrack below. The 6 stays the only door; the drought goes:
- * expected own-turns to first deploy falls from 6.0 to 2.4, and the chance of
- * still being shut in after six of them from 33.5 percent to 3.7.
+ * What answers the drought instead, tuned at the table across one afternoon
+ * (1-or-6: too loud; three visible throws: too busy): the warm start. While
+ * EVERY counter of a colour is still at home (allInYard), its single throw
+ * warms gently with each missed 6 — stone fair on the first, then one
+ * twenty-fourth per miss, never past double — and once YARD_MISS_LIMIT misses
+ * have been served the next throw is a given 6, so nobody waits past six of
+ * their own turns. One counter out of the yard and every throw is the plain
+ * fair die again. The curve lives with the die (requestYardRoll in the api
+ * layer); the miss count is synced state (yardMisses), so the promise holds
+ * across refreshes and for bot turns thrown by other clients; and the whole
+ * thing is stated on the rules card — a stated rule, not a thumb on the die.
  */
 export const DEPLOY_FACES = new Set([6]);
 
-/** Throws a turn gets at the 6 while noCountersOnTrack — the classic rule. */
-export const YARD_THROWS = 3;
+/** Shut-in misses after which the next throw is a given 6 — the card's
+ * "after five misses the sixth throw is a 6". */
+export const YARD_MISS_LIMIT = 5;
 
 /**
- * True when none of this colour's counters stand out on the ring — every one
- * is still in the yard or already standing in the run home. The classic
- * board's condition for the three throws: counters at home are out of play,
- * and a player in this position can do nothing whatever without a 6.
+ * True while every one of this colour's counters is still at home in the
+ * yard — the warm die's only theatre. Deliberately strict: a counter out on
+ * the ring OR standing in the run home means every throw is stone fair. The
+ * table's ruling was "only when all are at home", and the strictness is also
+ * what keeps the warmth honest — it can never touch a seat that has anything
+ * at all it could otherwise do.
  */
-export function noCountersOnTrack(tokens: TokenPosition[], color: Ludo3Color): boolean {
-  return getColorTokenIndices(color).every(i => !tokens[i].startsWith('track-'));
+export function allInYard(tokens: TokenPosition[], color: Ludo3Color): boolean {
+  return getColorTokenIndices(color).every(i => tokens[i] === 'base');
 }
 
 /**

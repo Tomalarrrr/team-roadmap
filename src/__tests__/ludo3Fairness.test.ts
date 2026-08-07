@@ -1,9 +1,12 @@
 /// <reference types="node" />
 // Fairness, measured — because Ludo3 promises it.
 //
-// The help card tells players "the die is fair: every face is equally likely,
-// every throw", and unlike v1 there is no pity timer quietly swapping
-// faces for 6s. Those are product claims about probability, and probability
+// The help card makes two promises about the die. Out on the board it is
+// exactly fair — no pity timer quietly swapping faces for 6s the way v1's
+// does. And while a seat is shut in (all five counters at home) it warms by a
+// stated curve — P(6) = (4 + misses) / 24, never past double — with the throw
+// after YARD_MISS_LIMIT misses a given 6. A stated curve is only honest while
+// it is the curve actually thrown, so both promises get pinned here. Those are product claims about probability, and probability
 // claims rot silently: nothing else in the suite would fail if someone
 // reintroduced `Math.random() * 6 | 0 % ...` bias, biased the seat deal, or
 // wrote a scoring rule that favours one colour's side of the ring. So this file
@@ -12,7 +15,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { requestDiceRoll } from '../api/ludo3Api';
+import { requestDiceRoll, requestYardRoll } from '../api/ludo3Api';
+import { YARD_MISS_LIMIT } from '../ludo3GameLogic';
 import {
   TRACK_SIZE,
   TOTAL_TOKENS,
@@ -114,6 +118,53 @@ function playGame(seed: number): Ludo3Color | null {
   return null;
 }
 
+// --- The warm start ----------------------------------------------------------
+
+describe('the warm start is exactly what the card says', () => {
+  it('is stone fair before the first miss', async () => {
+    const n = 60000;
+    let sixes = 0;
+    for (let i = 0; i < n; i++) if ((await requestYardRoll(0)).rolls[0] === 6) sixes++;
+    // 1/6 ± 7σ — a fresh shut-in seat gets no warmth at all.
+    expect(sixes / n).toBeGreaterThan(0.156);
+    expect(sixes / n).toBeLessThan(0.178);
+  });
+
+  it('never warms past double fair odds', async () => {
+    const n = 60000;
+    let sixes = 0;
+    for (let i = 0; i < n; i++) {
+      if ((await requestYardRoll(YARD_MISS_LIMIT - 1)).rolls[0] === 6) sixes++;
+    }
+    // The warmest throw before the given 6 is (4 + 4)/24 = exactly 1/3, ± 6σ.
+    expect(sixes / n).toBeGreaterThan(0.322);
+    expect(sixes / n).toBeLessThan(0.345);
+  });
+
+  it('keeps the five other faces even while warm', async () => {
+    // Warmth may only feed the 6. If the remainder is shared unevenly the low
+    // faces pick up a bias nobody stated — at the warmest step each of 1..5
+    // should carry (1 − 1/3)/5 ≈ 13.3% of all throws.
+    const n = 60000;
+    const counts = [0, 0, 0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      const f = (await requestYardRoll(YARD_MISS_LIMIT - 1)).rolls[0];
+      if (f !== 6) counts[f - 1]++;
+    }
+    for (const c of counts) {
+      expect(c / n).toBeGreaterThan(0.120);
+      expect(c / n).toBeLessThan(0.147);
+    }
+  });
+
+  it('serves the given 6 once the misses are spent', async () => {
+    for (let i = 0; i < 50; i++) {
+      expect((await requestYardRoll(YARD_MISS_LIMIT)).rolls[0]).toBe(6);
+      expect((await requestYardRoll(YARD_MISS_LIMIT + 3)).rolls[0]).toBe(6);
+    }
+  });
+});
+
 describe('no seat is structurally favoured', () => {
   it('three identical bots win a fair share each over 400 games', () => {
     // The board is three-fold symmetric and the starting seat is drawn at
@@ -201,8 +252,11 @@ describe('the fair-die promise is kept in the client', () => {
     expect(game).not.toMatch(/homeStuckRolls|pityThreshold|originalFace/);
   });
 
-  it('still tells the player the die is fair', () => {
+  it('tells the player the whole truth about the die', () => {
     expect(game).toContain('The die is fair');
+    // The warm start may exist only for as long as the card discloses it.
+    expect(game).toContain('the die warms to you');
+    expect(game).toContain('given');
   });
 });
 

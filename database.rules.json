@@ -228,6 +228,9 @@
         "rollStats": {
           ".validate": "newData.isString() && newData.val().length <= 200"
         },
+        "yardMisses": {
+          ".validate": "newData.isString() && newData.val().length <= 24"
+        },
         "$other": { ".validate": false }
       }
     },
@@ -278,6 +281,9 @@
         },
         "rollStats": {
           ".validate": "newData.isString() && newData.val().length <= 200"
+        },
+        "yardMisses": {
+          ".validate": "newData.isString() && newData.val().length <= 24"
         },
         "$other": { ".validate": false }
       }

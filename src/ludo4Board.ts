@@ -50,6 +50,10 @@ export interface Ludo4GameState {
   pausedAt?: number;
   singlePlayer?: boolean;
   rollStats?: string; // "r1,..,r6,captures|g...|y...|b..." (4 groups)
+  /** Consecutive shut-in throws without a 6, one count per seat ("0,0,0").
+   * The warm die's memory (see requestYardRoll). Missing reads as cold, so
+   * legacy rooms and old clients simply play on fair. */
+  yardMisses?: string;
 }
 
 export interface Ludo4MoveUpdate {
@@ -64,6 +68,8 @@ export interface Ludo4MoveUpdate {
   finishOrder: string;
   turnStartedAt: number | object; // accepts serverTimestamp() sentinel
   rollStats?: string;
+  /** Omit to preserve the stored counts — only turn-resolving writes carry it. */
+  yardMisses?: string;
 }
 
 // --- Board constants ---
@@ -289,4 +295,23 @@ export function mergeRollStats(a: string, b: string): string {
     captures: Math.max(s.captures, sb[i].captures),
   }));
   return serializeRollStats(merged);
+}
+
+// --- Shut-in misses (the warm die's memory) ----------------------------------
+
+/** Parse "a,b,c" per-seat miss counts. Anything absent or malformed reads as
+ * zero, so a legacy room or a garbled write starts a seat cold, never warm. */
+export function parseYardMisses(str: string | undefined | null): number[] {
+  const out = PLAYER_COLORS.map(() => 0);
+  if (!str) return out;
+  const parts = str.split(',');
+  for (let i = 0; i < out.length && i < parts.length; i++) {
+    const n = parseInt(parts[i], 10);
+    if (Number.isFinite(n) && n > 0) out[i] = n;
+  }
+  return out;
+}
+
+export function serializeYardMisses(misses: number[]): string {
+  return PLAYER_COLORS.map((_, i) => misses[i] ?? 0).join(',');
 }

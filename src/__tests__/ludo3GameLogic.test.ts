@@ -12,8 +12,8 @@ import {
   findNextActivePlayer,
   getNextTurn,
   scoreBotMove,
-  noCountersOnTrack,
-  YARD_THROWS,
+  allInYard,
+  YARD_MISS_LIMIT,
 } from '../ludo3GameLogic';
 import {
   SAFE_ZONES,
@@ -35,6 +35,8 @@ import {
   recordCapture,
   serializeRollStats,
   mergeRollStats,
+  parseYardMisses,
+  serializeYardMisses,
   INITIAL_TOKENS,
 } from '../ludo3Board';
 import { deserializeTokens, serializeTokens } from '../ludoFirebase';
@@ -368,9 +370,10 @@ describe('distinctMoves / getDistinctMoves', () => {
 // the dead turns — but the table threw it out the same afternoon: a counter
 // walking out on a 1 reads as the game miscounting. This block pins their
 // decision so no future cleanup quietly reopens the second door. The drought
-// that decision leaves is handled the classic way instead — three throws at
-// the 6 while nothing of yours stands on the ring — and the eligibility test
-// for that lives in the logic layer, guarded below.
+// the ruling leaves is answered by the warm start instead — a stated curve on
+// the shut-in throw and a given 6 after YARD_MISS_LIMIT misses, applied only
+// while every counter is still at home. Eligibility is guarded here; the
+// curve itself is pinned to numbers in the fairness suite.
 describe('leaving the yard', () => {
   it('a 6 brings a counter out, onto the start haven', () => {
     const moves = getDistinctMoves(BASE_TOKENS, 'red', 6);
@@ -385,15 +388,22 @@ describe('leaving the yard', () => {
     }
   });
 
-  it('grants the extra throws only while nothing stands on the ring', () => {
-    expect(YARD_THROWS).toBe(3);
-    expect(noCountersOnTrack(BASE_TOKENS, 'red')).toBe(true);
-    // Counters standing in the run home are out of play, not on the ring.
-    expect(noCountersOnTrack(tokensWith({ 0: 'final-2' }), 'red')).toBe(true);
-    // One counter out on the track and the ordinary single throw applies.
-    expect(noCountersOnTrack(tokensWith({ 0: 'track-9' }), 'red')).toBe(false);
+  it('warms the die only while every counter is still at home', () => {
+    expect(YARD_MISS_LIMIT).toBe(5);
+    expect(allInYard(BASE_TOKENS, 'red')).toBe(true);
+    // One counter anywhere out of the yard — on the ring or standing in the
+    // run home — and every throw is the plain fair die.
+    expect(allInYard(tokensWith({ 0: 'track-9' }), 'red')).toBe(false);
+    expect(allInYard(tokensWith({ 0: 'final-2' }), 'red')).toBe(false);
     // Another colour's counters never count for red.
-    expect(noCountersOnTrack(tokensWith({ 5: 'track-9' }), 'red')).toBe(true);
+    expect(allInYard(tokensWith({ 5: 'track-9' }), 'red')).toBe(true);
+  });
+
+  it('round-trips the shut-in tally, reading legacy rooms as cold', () => {
+    expect(parseYardMisses(undefined)).toEqual([0, 0, 0]);
+    expect(parseYardMisses('')).toEqual([0, 0, 0]);
+    expect(parseYardMisses('junk')).toEqual([0, 0, 0]);
+    expect(serializeYardMisses(parseYardMisses('2,0,5'))).toBe('2,0,5');
   });
 });
 

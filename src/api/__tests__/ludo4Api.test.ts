@@ -614,6 +614,8 @@ describe('createGame', () => {
     expect(body.tokens).toHaveLength(60);
     expect(body.playerCount).toBe(4);
     expect(body.rollStats.split('|')).toHaveLength(4);
+    // Every seat starts cold — the warm die never inherits a count.
+    expect(body.yardMisses).toBe('0,0,0,0');
     expect(firstPut?.[1].headers['if-match']).toBe('null_etag');
     expect(firstPut?.[0]).toContain('/api/db/ludo4/');
   });
