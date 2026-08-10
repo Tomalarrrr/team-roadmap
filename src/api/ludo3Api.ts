@@ -505,13 +505,13 @@ export async function requestDiceRoll(): Promise<{ rolls: number[]; serverGenera
 /**
  * The shut-in throw — the warm die the rules card describes.
  *
- * Stone fair before the first miss, then one twenty-fourth warmer per miss:
- * P(6) = (4 + misses) / 24 — 1/6, then 5/24, 6/24, 7/24, 8/24 — never past
- * double fair odds. Once YARD_MISS_LIMIT misses are served the wait is over
- * and the throw is simply a given 6. The other five faces always share the
- * remainder evenly: the draw is over 120 equally likely states (lcm of 24 and
- * 5), rejection-sampled exact like everything else in this file, so warming
- * the 6 never quietly biases the low faces against each other.
+ * Warm from the very first throw and warmer with each miss:
+ * P(6) = (2 + misses) / 8 — 1/4, then 3/8, then 1/2. Once YARD_MISS_LIMIT
+ * misses are served the wait is over and the throw is simply a given 6. The
+ * other five faces always share the remainder evenly: the draw is over 40
+ * equally likely states (lcm of 8 and 5), rejection-sampled exact like
+ * everything else in this file, so warming the 6 never quietly biases the low
+ * faces against each other.
  *
  * Only ever thrown while allInYard — one counter out of the yard and it is
  * requestDiceRoll, no exceptions. Stated in full on the rules card, which is
@@ -522,8 +522,8 @@ export async function requestYardRoll(
   misses: number
 ): Promise<{ rolls: number[]; serverGenerated: boolean }> {
   if (misses >= YARD_MISS_LIMIT) return { rolls: [6], serverGenerated: false };
-  const sixStates = (4 + Math.max(0, misses)) * 5; // of 120
-  const r = randomInt(120);
+  const sixStates = (2 + Math.max(0, misses)) * 5; // of 40
+  const r = randomInt(40);
   const face = r < sixStates ? 6 : 1 + ((r - sixStates) % 5);
   return { rolls: [face], serverGenerated: false };
 }

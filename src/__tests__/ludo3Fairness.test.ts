@@ -4,8 +4,8 @@
 // The help card makes two promises about the die. Out on the board it is
 // exactly fair — no pity timer quietly swapping faces for 6s the way v1's
 // does. And while a seat is shut in (all five counters at home) it warms by a
-// stated curve — P(6) = (4 + misses) / 24, never past double — with the throw
-// after YARD_MISS_LIMIT misses a given 6. A stated curve is only honest while
+// stated curve — P(6) = (2 + misses) / 8, warm from the very first throw —
+// with the throw after YARD_MISS_LIMIT misses a given 6. A stated curve is only honest while
 // it is the curve actually thrown, so both promises get pinned here. Those are product claims about probability, and probability
 // claims rot silently: nothing else in the suite would fail if someone
 // reintroduced `Math.random() * 6 | 0 % ...` bias, biased the seat deal, or
@@ -121,30 +121,31 @@ function playGame(seed: number): Ludo3Color | null {
 // --- The warm start ----------------------------------------------------------
 
 describe('the warm start is exactly what the card says', () => {
-  it('is stone fair before the first miss', async () => {
+  it('is already warm on the very first throw', async () => {
     const n = 60000;
     let sixes = 0;
     for (let i = 0; i < n; i++) if ((await requestYardRoll(0)).rolls[0] === 6) sixes++;
-    // 1/6 ± 7σ — a fresh shut-in seat gets no warmth at all.
-    expect(sixes / n).toBeGreaterThan(0.156);
-    expect(sixes / n).toBeLessThan(0.178);
+    // (2 + 0)/8 = exactly 1/4 ± 7σ. The gentler curve this replaced opened at
+    // a stone-fair 1/6 and was too flat to be felt (see ludo3GameLogic).
+    expect(sixes / n).toBeGreaterThan(0.237);
+    expect(sixes / n).toBeLessThan(0.263);
   });
 
-  it('never warms past double fair odds', async () => {
+  it('warms to a coin on the last throw before the given 6', async () => {
     const n = 60000;
     let sixes = 0;
     for (let i = 0; i < n; i++) {
       if ((await requestYardRoll(YARD_MISS_LIMIT - 1)).rolls[0] === 6) sixes++;
     }
-    // The warmest throw before the given 6 is (4 + 4)/24 = exactly 1/3, ± 6σ.
-    expect(sixes / n).toBeGreaterThan(0.322);
-    expect(sixes / n).toBeLessThan(0.345);
+    // The warmest throw before the given 6 is (2 + 2)/8 = exactly 1/2, ± 6σ.
+    expect(sixes / n).toBeGreaterThan(0.487);
+    expect(sixes / n).toBeLessThan(0.513);
   });
 
   it('keeps the five other faces even while warm', async () => {
     // Warmth may only feed the 6. If the remainder is shared unevenly the low
     // faces pick up a bias nobody stated — at the warmest step each of 1..5
-    // should carry (1 − 1/3)/5 ≈ 13.3% of all throws.
+    // should carry (1 − 1/2)/5 = 10% of all throws.
     const n = 60000;
     const counts = [0, 0, 0, 0, 0];
     for (let i = 0; i < n; i++) {
@@ -152,8 +153,8 @@ describe('the warm start is exactly what the card says', () => {
       if (f !== 6) counts[f - 1]++;
     }
     for (const c of counts) {
-      expect(c / n).toBeGreaterThan(0.120);
-      expect(c / n).toBeLessThan(0.147);
+      expect(c / n).toBeGreaterThan(0.092);
+      expect(c / n).toBeLessThan(0.108);
     }
   });
 

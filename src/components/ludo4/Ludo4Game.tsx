@@ -916,9 +916,9 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
     const rollAnimMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : 800;
 
     // Shut in — all five still at home — the throw comes from the warm die:
-    // stone fair before the first miss, a twenty-fourth warmer for each miss
-    // since (never past double), and once YARD_MISS_LIMIT misses are served
-    // the throw is a given 6, so nobody waits past six of their own turns.
+    // a quarter on the first throw, warmer for each miss since (three eighths,
+    // then a half), and once YARD_MISS_LIMIT misses are served the throw is a
+    // given 6, so nobody waits past four of their own turns.
     // One counter out of the yard and this is the plain fair die, always.
     const shutIn = allInYard(tokensRef.current, activeColor);
     const missesBefore = parseYardMisses(yardMissesRef.current)[colorIndex(activeColor)];
@@ -956,7 +956,7 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
       setDiceValue(roll);
       setLastRoll(roll);
       if (shutIn && missesBefore >= YARD_MISS_LIMIT) {
-        showHint('Five misses served — this 6 is given');
+        showHint('Three misses served — this 6 is given');
       }
 
       const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), roll);
@@ -1547,9 +1547,9 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
             <ul className={styles.helpList}>
               <li>
                 Roll a 6 to bring a counter out of your yard. While all five
-                are still at home, the die warms to you: each missed 6 makes
-                the next a little likelier — never more than double — and
-                after five misses the sixth throw is a 6, given.
+                are still at home, the die warms to you: your first throw
+                already leans to the 6, each missed 6 makes the next likelier
+                still, and after three misses the fourth throw is a 6, given.
               </li>
               <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes.</li>
               <li>Land on an opponent to send that counter back to its yard.</li>

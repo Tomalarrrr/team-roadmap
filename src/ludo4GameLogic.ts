@@ -39,21 +39,33 @@ import {
  *
  * What answers the drought instead, tuned at the table across one afternoon
  * (1-or-6: too loud; three visible throws: too busy): the warm start. While
- * EVERY counter of a colour is still at home (allInYard), its single throw
- * warms gently with each missed 6 — stone fair on the first, then one
- * twenty-fourth per miss, never past double — and once YARD_MISS_LIMIT misses
- * have been served the next throw is a given 6, so nobody waits past six of
- * their own turns. One counter out of the yard and every throw is the plain
- * fair die again. The curve lives with the die (requestYardRoll in the api
- * layer); the miss count is synced state (yardMisses), so the promise holds
- * across refreshes and for bot turns thrown by other clients; and the whole
- * thing is stated on the rules card — a stated rule, not a thumb on the die.
+ * EVERY counter of a colour is still at home (allInYard), its single throw is
+ * warm from the off and warmer with each missed 6 — a quarter, then three
+ * eighths, then a half — and once YARD_MISS_LIMIT misses have been served the
+ * next throw is a given 6, so nobody waits past four of their own turns.
+ *
+ * The first cut of this started stone fair and warmed by a twenty-fourth per
+ * miss, with the given 6 on the sixth throw. Too gentle to be felt: a shut-in
+ * seat still spent 3.6 of its own turns in the yard on average and 23% of them
+ * rode all the way to the guarantee — two dozen throws of watching at a
+ * four-seat table. Players read that as "wait for the sixth", which is exactly
+ * the drought the warmth was meant to answer, so the given 6 had become the
+ * rule and the curve under it was decoration. This one averages 2.5 turns and
+ * puts the work in the throws people actually sit through. The price is that
+ * the first throw is no longer a fair die, and the card says so in as many
+ * words.
+ *
+ * One counter out of the yard and every throw is the plain fair die again. The
+ * curve lives with the die (requestYardRoll in the api layer); the miss count
+ * is synced state (yardMisses), so the promise holds across refreshes and for
+ * bot turns thrown by other clients; and the whole thing is stated on the
+ * rules card — a stated rule, not a thumb on the die.
  */
 export const DEPLOY_FACES = new Set([6]);
 
 /** Shut-in misses after which the next throw is a given 6 — the card's
- * "after five misses the sixth throw is a 6". */
-export const YARD_MISS_LIMIT = 5;
+ * "after three misses the fourth throw is a 6". */
+export const YARD_MISS_LIMIT = 3;
 
 /**
  * True while every one of this colour's counters is still at home in the

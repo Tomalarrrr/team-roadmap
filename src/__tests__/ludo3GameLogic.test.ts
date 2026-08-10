@@ -389,7 +389,7 @@ describe('leaving the yard', () => {
   });
 
   it('warms the die only while every counter is still at home', () => {
-    expect(YARD_MISS_LIMIT).toBe(5);
+    expect(YARD_MISS_LIMIT).toBe(3);
     expect(allInYard(BASE_TOKENS, 'red')).toBe(true);
     // One counter anywhere out of the yard — on the ring or standing in the
     // run home — and every throw is the plain fair die.
