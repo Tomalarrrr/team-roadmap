@@ -13,6 +13,8 @@ import {
   getNextTurn,
   scoreBotMove,
   allInYard,
+  hasYardCounter,
+  isWarmThrow,
   YARD_MISS_LIMIT,
 } from '../ludo3GameLogic';
 import {
@@ -388,15 +390,43 @@ describe('leaving the yard', () => {
     }
   });
 
-  it('warms the die only while every counter is still at home', () => {
+  it('knows when the whole colour is still at home', () => {
     expect(YARD_MISS_LIMIT).toBe(3);
     expect(allInYard(BASE_TOKENS, 'red')).toBe(true);
-    // One counter anywhere out of the yard — on the ring or standing in the
-    // run home — and every throw is the plain fair die.
     expect(allInYard(tokensWith({ 0: 'track-9' }), 'red')).toBe(false);
     expect(allInYard(tokensWith({ 0: 'final-2' }), 'red')).toBe(false);
     // Another colour's counters never count for red.
     expect(allInYard(tokensWith({ 5: 'track-9' }), 'red')).toBe(true);
+  });
+
+  it('counts a yard counter only for the colour that owns it', () => {
+    expect(hasYardCounter(BASE_TOKENS, 'red')).toBe(true);
+    expect(hasYardCounter(tokensWith({ 0: 'track-9' }), 'red')).toBe(true);
+    const redAllOut = tokensWith({ 0: 'track-9', 1: 'track-10', 2: 'track-11', 3: 'final-1', 4: 'final-2' });
+    expect(hasYardCounter(redAllOut, 'red')).toBe(false);
+    // Green's five are still at home; that is green's business, not red's.
+    expect(hasYardCounter(redAllOut, 'green')).toBe(true);
+  });
+
+  it('warms the die on the opening throw and after a wasted one, never otherwise', () => {
+    // The opening: whole colour at home, nothing thrown yet.
+    expect(isWarmThrow(BASE_TOKENS, 'red', 0)).toBe(true);
+
+    // Four at home but a counter out and a board to play on — this is the case
+    // the old all-at-home rule left throwing a stone-cold die for the remaining
+    // four deploys, and the reason seats sat through runs of fifteen dead turns.
+    const oneOut = tokensWith({ 0: 'track-9' });
+    expect(isWarmThrow(oneOut, 'red', 0)).toBe(false);
+    // ...until a throw of theirs is actually wasted.
+    expect(isWarmThrow(oneOut, 'red', 1)).toBe(true);
+    expect(isWarmThrow(oneOut, 'red', YARD_MISS_LIMIT)).toBe(true);
+
+    // Nothing left in the yard: there is no 6 to wait for, so no warmth however
+    // many dead turns a jammed run home has cost. A stale count cannot leak
+    // warmth to a player the yard die was never meant to help.
+    const noneAtHome = tokensWith({ 0: 'track-9', 1: 'track-10', 2: 'track-11', 3: 'final-1', 4: 'final-2' });
+    expect(isWarmThrow(noneAtHome, 'red', 0)).toBe(false);
+    expect(isWarmThrow(noneAtHome, 'red', 9)).toBe(false);
   });
 
   it('round-trips the shut-in tally, reading legacy rooms as cold', () => {

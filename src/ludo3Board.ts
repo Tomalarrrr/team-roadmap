@@ -49,9 +49,9 @@ export interface Ludo3GameState {
   pausedAt?: number;
   singlePlayer?: boolean;
   rollStats?: string; // "r1,..,r6,captures|g...|b..." (3 groups)
-  /** Consecutive shut-in throws without a 6, one count per seat ("0,0,0").
-   * The warm die's memory (see requestYardRoll). Missing reads as cold, so
-   * legacy rooms and old clients simply play on fair. */
+  /** Consecutive dead throws taken with a counter still in the yard, one count
+   * per seat ("0,0,0"). The warm die's memory (see requestYardRoll). Missing
+   * reads as cold, so legacy rooms and old clients simply play on fair. */
   yardMisses?: string;
 }
 
@@ -244,10 +244,21 @@ export function getPlayerScore(tokens: TokenPosition[], color: Ludo3Color): numb
 
 // --- Roll stats (3 color groups: red|green|blue) ---
 
-export type RollStats = { rolls: number[]; captures: number }[];
+/**
+ * A seat's tally: how each face fell, captures made, and how many of those
+ * throws came off the warm die rather than the fair one.
+ *
+ * `warm` exists because the other seven numbers are read as a fairness record
+ * and, on their own, they lie by omission. A seat that spent turns shut out of
+ * its own yard throws a die that leans to the 6 (see requestYardRoll), so the
+ * player who had the *worst* luck shows the *most* 6s — which is exactly the
+ * reading that gets the die called crooked. Counting the warm throws puts the
+ * explanation on the card beside the number it explains.
+ */
+export type RollStats = { rolls: number[]; captures: number; warm: number }[];
 
 function emptyRollStats(): RollStats {
-  return PLAYER_COLORS.map(() => ({ rolls: [0, 0, 0, 0, 0, 0], captures: 0 }));
+  return PLAYER_COLORS.map(() => ({ rolls: [0, 0, 0, 0, 0, 0], captures: 0, warm: 0 }));
 }
 
 export function initRollStats(): string {
@@ -255,7 +266,7 @@ export function initRollStats(): string {
 }
 
 export function serializeRollStats(stats: RollStats): string {
-  return stats.map(s => [...s.rolls, s.captures].join(',')).join('|');
+  return stats.map(s => [...s.rolls, s.captures, s.warm].join(',')).join('|');
 }
 
 export function deserializeRollStats(str: string): RollStats {
@@ -267,20 +278,31 @@ export function deserializeRollStats(str: string): RollStats {
       const nums = parts[i].split(',').map(Number);
       for (let j = 0; j < 6; j++) result[i].rolls[j] = nums[j] || 0;
       result[i].captures = nums[6] || 0;
+      // Absent in rooms written before the warm throw was counted — reads as
+      // zero, which is the truthful answer for a tally that never tracked it.
+      result[i].warm = nums[7] || 0;
     }
   }
   return result;
 }
 
-export function recordRoll(stats: RollStats, colorIdx: number, diceValue: number): RollStats {
-  const result = stats.map(s => ({ rolls: [...s.rolls], captures: s.captures }));
+/** Record one throw. `warm` marks it as coming off the shut-out die rather
+ * than the fair one — see RollStats. */
+export function recordRoll(
+  stats: RollStats,
+  colorIdx: number,
+  diceValue: number,
+  warm = false
+): RollStats {
+  const result = stats.map(s => ({ rolls: [...s.rolls], captures: s.captures, warm: s.warm }));
   const idx = Math.max(0, Math.min(diceValue, 6) - 1);
   result[colorIdx].rolls[idx]++;
+  if (warm) result[colorIdx].warm++;
   return result;
 }
 
 export function recordCapture(stats: RollStats, colorIdx: number): RollStats {
-  const result = stats.map(s => ({ rolls: [...s.rolls], captures: s.captures }));
+  const result = stats.map(s => ({ rolls: [...s.rolls], captures: s.captures, warm: s.warm }));
   result[colorIdx].captures++;
   return result;
 }
@@ -295,11 +317,12 @@ export function mergeRollStats(a: string, b: string): string {
   const merged = sa.map((s, i) => ({
     rolls: s.rolls.map((r, j) => Math.max(r, sb[i].rolls[j])),
     captures: Math.max(s.captures, sb[i].captures),
+    warm: Math.max(s.warm, sb[i].warm),
   }));
   return serializeRollStats(merged);
 }
 
-// --- Shut-in misses (the warm die's memory) ----------------------------------
+// --- Shut-out misses (the warm die's memory) ---------------------------------
 
 /** Parse "a,b,c" per-seat miss counts. Anything absent or malformed reads as
  * zero, so a legacy room or a garbled write starts a seat cold, never warm. */

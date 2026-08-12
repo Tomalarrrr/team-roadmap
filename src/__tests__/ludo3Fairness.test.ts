@@ -35,6 +35,8 @@ import {
   getFinishedColors,
   getNextTurn,
   scoreBotMove,
+  isWarmThrow,
+  hasYardCounter,
 } from '../ludo3GameLogic';
 import type { TokenPosition } from '../ludoFirebase';
 
@@ -166,6 +168,103 @@ describe('the warm start is exactly what the card says', () => {
   });
 });
 
+/**
+ * A full game under the *real* die, warm throws and all.
+ *
+ * playGame above answers "is a seat favoured", so it throws a plain fair die
+ * and ignores the yard rule. This one exists to answer the other question the
+ * card makes a promise about — how long a player can be left with counters at
+ * home and nothing to do — so it has to reproduce the warm die exactly:
+ * the same warm condition (isWarmThrow), the same miss accounting as
+ * Ludo3Game's no-move path, and the same curve as requestYardRoll.
+ *
+ * Returns, per seat, the longest run of that seat's OWN consecutive turns
+ * spent with a counter in the yard and no legal move.
+ */
+function worstYardWait(seed: number): Record<Ludo3Color, number> {
+  const rand = rng(seed);
+  let tokens: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
+  let turn: Ludo3Color = PLAYER_COLORS[Math.floor(rand() * 3)];
+  let sixes = 0;
+  const misses: Record<Ludo3Color, number> = { red: 0, green: 0, blue: 0 };
+  const run: Record<Ludo3Color, number> = { red: 0, green: 0, blue: 0 };
+  const worst: Record<Ludo3Color, number> = { red: 0, green: 0, blue: 0 };
+
+  for (let t = 0; t < 20000; t++) {
+    const before = misses[turn];
+    const warm = isWarmThrow(tokens, turn, before);
+    let roll: number;
+    if (warm && before >= YARD_MISS_LIMIT) {
+      roll = 6; // the given 6
+    } else if (warm) {
+      // P(6) = (2 + misses) / 8, the other five faces sharing the remainder.
+      const sixStates = (2 + before) * 5;
+      const r = Math.floor(rand() * 40);
+      roll = r < sixStates ? 6 : 1 + ((r - sixStates) % 5);
+    } else {
+      roll = 1 + Math.floor(rand() * 6);
+    }
+
+    const moves = getValidMoves(tokens, turn, roll);
+    if (moves.length === 0) {
+      const waiting = hasYardCounter(tokens, turn);
+      misses[turn] = waiting ? before + 1 : 0;
+      if (waiting) {
+        run[turn]++;
+        if (run[turn] > worst[turn]) worst[turn] = run[turn];
+      }
+      const next = getNextTurn(turn, roll, sixes, false, false, 3, getFinishedColors(tokens, 3));
+      turn = next.nextColor;
+      sixes = next.nextSixes;
+      continue;
+    }
+
+    run[turn] = 0;
+    misses[turn] = 0;
+    let best = moves[0];
+    let bestScore = -Infinity;
+    for (const m of moves) {
+      const s = scoreBotMove(m.tokenIndex, m.newPosition, tokens, turn, 3);
+      if (s > bestScore) { bestScore = s; best = m; }
+    }
+    const applied = applyMove(tokens, best.tokenIndex, best.newPosition);
+    tokens = applied.newTokens;
+    if (checkPlayerFinished(tokens, turn)) break;
+    const next = getNextTurn(
+      turn, roll, sixes, applied.captured, applied.reachedHome, 3, getFinishedColors(tokens, 3)
+    );
+    turn = next.nextColor;
+    sixes = next.nextSixes;
+  }
+  return worst;
+}
+
+describe('nobody is left watching their own yard', () => {
+  it('caps the wait at three dead turns, in real games', () => {
+    // The card promises the fourth throw is a given 6. That promise is only
+    // worth anything if it is reachable, and the rule it replaced made it
+    // almost unreachable: warmth applied only while all five counters were at
+    // home, so the four deploys after the first were made against a stone-cold
+    // die. Measured over 3000 games under that rule, a seat's worst run of its
+    // own dead turns with a counter still at home hit 15 at the 95th
+    // percentile and 45 at worst, and 31% of seats sat through six or more.
+    //
+    // Under the rule as it now stands the guarantee binds: a fourth consecutive
+    // dead turn is not reachable at all, because the third miss makes the next
+    // throw a given 6 and a 6 always deploys. This is the assertion that would
+    // fail if the warm condition were ever narrowed back to the board state
+    // instead of the wasted turn.
+    let worstSeen = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const worst = worstYardWait(seed);
+      for (const color of PLAYER_COLORS) {
+        worstSeen = Math.max(worstSeen, worst[color]);
+      }
+    }
+    expect(worstSeen).toBeLessThanOrEqual(YARD_MISS_LIMIT);
+  }, 30_000);
+});
+
 describe('no seat is structurally favoured', () => {
   it('three identical bots win a fair share each over 400 games', () => {
     // The board is three-fold symmetric and the starting seat is drawn at
@@ -255,9 +354,22 @@ describe('the fair-die promise is kept in the client', () => {
 
   it('tells the player the whole truth about the die', () => {
     expect(game).toContain('The die is fair');
-    // The warm start may exist only for as long as the card discloses it.
+    // The warm throw may exist only for as long as the card discloses it, and
+    // the card has to name the condition it actually fires on — "while all five
+    // are at home" described a rule the game no longer plays.
     expect(game).toContain('the die warms to you');
+    expect(game).toContain('leaves you nothing to do');
     expect(game).toContain('given');
+  });
+
+  it('shows the warm throws it took, beside the faces they produced', () => {
+    // The six face columns are read as a fairness record, and a warm throw
+    // leans to the 6 — so a seat that was shut out a lot shows a tall 6 column
+    // for a reason that has nothing to do with the die being crooked. The `w`
+    // column is what makes that readable rather than suspicious; without it the
+    // tally is an honest number presented misleadingly.
+    expect(game).toContain('Warm throws (shut out of your yard)');
+    expect(game).toContain('stats.warm');
   });
 });
 
@@ -282,7 +394,7 @@ describe('firebase rules accept every field the client writes', () => {
     'players', 'host', 'tokens', 'currentTurn', 'turnPhase', 'diceValue',
     'lastRoll', 'consecutiveSixes', 'winner', 'finishOrder', 'createdAt',
     'startedAt', 'turnStartedAt', 'playerCount', 'paused', 'pausedAt',
-    'singlePlayer', 'rollStats',
+    'singlePlayer', 'rollStats', 'yardMisses',
   ];
 
   it.each(written)('allows %s', (field) => {

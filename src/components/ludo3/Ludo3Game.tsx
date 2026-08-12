@@ -10,10 +10,13 @@
 // concurrent writers).
 //
 // One deliberate difference from v1: there is NO pity timer. That board quietly
-// swaps a stuck player's roll for a 6 after a few failed deploys, which makes 6
-// the most common face over a game. Here the die is exactly uniform (see
-// requestDiceRoll in ludo3Api) and the face rolled is always the face played,
-// so the tallies on the seat cards are honest.
+// swaps a stuck player's roll for a 6 after a few failed deploys, and says
+// nothing about it. Here the face rolled is always the face played; the die is
+// exactly uniform on any turn a player could have played (requestDiceRoll), and
+// the one exception — the warm die a player earns by sitting through a turn
+// that did nothing while counters wait in their yard — is stated on the rules
+// card and counted in its own column on the seat card, so the tallies stay
+// honest about which throws were which.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -68,7 +71,8 @@ import {
   findNextActivePlayer,
   getNextTurn,
   scoreBotMove,
-  allInYard,
+  isWarmThrow,
+  hasYardCounter,
   YARD_MISS_LIMIT,
 } from '../../ludo3GameLogic';
 import { computeMovePath, getTokenCoords, ARM_ANGLE, TRACK_XY } from './ludo3Geometry';
@@ -834,9 +838,9 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       rollStatsRef.current = moveRollStats;
     }
 
-    // Any executed move writes the mover's shut-in count cold: a deploy is
-    // the 6 arriving, and every other move means a counter is out, where the
-    // warm die never applies.
+    // Any executed move writes the mover's miss count cold. The count exists to
+    // measure a run of turns that did nothing, and this turn did something —
+    // whether that was the 6 arriving or a counter walking on down the ring.
     const coldMisses = parseYardMisses(yardMissesRef.current);
     coldMisses[colorIndex(curColor)] = 0;
     const update: Ludo3MoveUpdate = {
@@ -917,14 +921,15 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
     setIsRolling(true);
     const rollAnimMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : 800;
 
-    // Shut in — all five still at home — the throw comes from the warm die:
-    // a quarter on the first throw, warmer for each miss since (three eighths,
-    // then a half), and once YARD_MISS_LIMIT misses are served the throw is a
-    // given 6, so nobody waits past four of their own turns.
-    // One counter out of the yard and this is the plain fair die, always.
-    const shutIn = allInYard(tokensRef.current, activeColor);
+    // Shut out — a counter still waiting in the yard, and either the opening
+    // (nothing thrown yet, whole colour at home) or a throw of this player's
+    // already wasted. Then the die is warm: a quarter, warmer for each miss
+    // since (three eighths, then a half), and once YARD_MISS_LIMIT misses are
+    // served the throw is a given 6, so nobody waits past four of their own
+    // turns. Any turn this player can actually play is the plain fair die.
     const missesBefore = parseYardMisses(yardMissesRef.current)[colorIndex(activeColor)];
-    const { rolls } = shutIn
+    const warmThrow = isWarmThrow(tokensRef.current, activeColor, missesBefore);
+    const { rolls } = warmThrow
       ? await requestYardRoll(missesBefore)
       : await requestDiceRoll();
 
@@ -957,11 +962,13 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
 
       setDiceValue(roll);
       setLastRoll(roll);
-      if (shutIn && missesBefore >= YARD_MISS_LIMIT) {
-        showHint('Three misses served — this 6 is given');
+      if (warmThrow && missesBefore >= YARD_MISS_LIMIT) {
+        showHint('Three dead throws served — this 6 is given');
       }
 
-      const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), roll);
+      const updatedRollStats = recordRoll(
+        rollStatsRef.current, colorIndex(activeColor), roll, warmThrow
+      );
       rollStatsRef.current = updatedRollStats;
 
       const currentTokens = tokensRef.current;
@@ -1004,11 +1011,15 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
           // player reads the dice as broken rather than the rule as tight.
           showHint(describeNoMove(currentTokens, curColor));
         }
-        // A shut-in miss is counted the moment the turn resolves; any other
-        // no-move turn writes the seat cold, so a player captured back to a
-        // full yard later never inherits a stale count.
+        // The miss, counted the moment the turn resolves: this throw did
+        // nothing and a counter is still waiting in the yard, which is the
+        // whole of what the player just sat through. A dead turn with an empty
+        // yard is a different complaint — a counter that cannot land — and the
+        // yard die is not the answer to it, so that writes the seat cold.
         const misses = parseYardMisses(yardMissesRef.current);
-        misses[colorIndex(curColor)] = shutIn ? missesBefore + 1 : 0;
+        misses[colorIndex(curColor)] = hasYardCounter(currentTokens, curColor)
+          ? missesBefore + 1
+          : 0;
         const update: Ludo3MoveUpdate = {
           tokens: serializeTokens(currentTokens),
           currentTurn: nextColor,
@@ -1548,10 +1559,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
             <div className={styles.helpTitle}>How to play</div>
             <ul className={styles.helpList}>
               <li>
-                Roll a 6 to bring a counter out of your yard. While all five
-                are still at home, the die warms to you: your first throw
-                already leans to the 6, each missed 6 makes the next likelier
-                still, and after three misses the fourth throw is a 6, given.
+                Roll a 6 to bring a counter out of your yard. Whenever a throw
+                leaves you nothing to do and a counter is still waiting at home,
+                the die warms to you: the next throw leans to the 6, each
+                further dead throw makes it likelier still, and after three the
+                next throw is a 6, given. Your opening throw is warm already.
               </li>
               <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes.</li>
               <li>Land on an opponent to send that counter back to its yard.</li>
@@ -1566,9 +1578,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
                 be sent back to your yard. Fill all five cells to win.
               </li>
               <li>
-                The die is fair: once a counter of yours is out, every face is
-                equally likely, every throw. The warm start above is the one
-                exception, and the face shown is always the face played.
+                The die is fair: on any turn you can actually play, every face
+                is equally likely, and the face shown is always the face played.
+                The warm throw above is the one exception — your seat's tally
+                counts them under <strong>w</strong>, so a big 6 column can
+                always be checked against how many of those throws were warm.
               </li>
             </ul>
             <div className={styles.helpKeys}>
@@ -1782,17 +1796,24 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
 
                     {/* This seat's own roll tally. Per-card rather than one
                         shared table, so each player's luck sits next to their
-                        score — and with a fair die (see ludo3Api), over a long
-                        game the seven columns really do converge. */}
+                        score — and on the fair die (see ludo3Api), over a long
+                        game the six face columns really do converge. */}
                     <div
                       className={styles.rollGrid}
                       role="img"
-                      aria-label={`${throwCount} throws — ${stats.rolls.map((n, i) => `${i + 1}: ${n}`).join(', ')}; captures ${stats.captures}`}
+                      aria-label={`${throwCount} throws — ${stats.rolls.map((n, i) => `${i + 1}: ${n}`).join(', ')}; captures ${stats.captures}; warm throws ${stats.warm}`}
                     >
                       {[1, 2, 3, 4, 5, 6].map(n => (
                         <span key={`h${n}`} className={styles.rollHead} aria-hidden="true">{n}</span>
                       ))}
                       <span className={styles.rollHead} title="Captures" aria-hidden="true">C</span>
+                      {/* Warm throws. Without it the 6 column is read as a
+                          fairness record it is not: a seat shut out of its own
+                          yard throws a die that leans to the 6, so the player
+                          who suffered the most dead turns shows the most 6s and
+                          the die gets called crooked for helping them. This is
+                          how many of the throws beside it were warm ones. */}
+                      <span className={styles.rollHead} title="Warm throws (shut out of your yard)" aria-hidden="true">w</span>
                       {/* The denominator. Without it the six counts are read
                           against each other as though every seat had thrown the
                           same number of times — and they never have, because a
@@ -1818,6 +1839,12 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
                         aria-hidden="true"
                       >
                         {stats.captures || '·'}
+                      </span>
+                      <span
+                        className={`${styles.rollVal} ${stats.warm ? '' : styles.statNil}`}
+                        aria-hidden="true"
+                      >
+                        {stats.warm || '·'}
                       </span>
                       <span
                         className={`${styles.rollVal} ${styles.rollTotal} ${throwCount ? '' : styles.statNil}`}

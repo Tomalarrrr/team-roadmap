@@ -503,7 +503,7 @@ export async function requestDiceRoll(): Promise<{ rolls: number[]; serverGenera
 }
 
 /**
- * The shut-in throw — the warm die the rules card describes.
+ * The shut-out throw — the warm die the rules card describes.
  *
  * Warm from the very first throw and warmer with each miss:
  * P(6) = (2 + misses) / 8 — 1/4, then 3/8, then 1/2. Once YARD_MISS_LIMIT
@@ -513,10 +513,13 @@ export async function requestDiceRoll(): Promise<{ rolls: number[]; serverGenera
  * everything else in this file, so warming the 6 never quietly biases the low
  * faces against each other.
  *
- * Only ever thrown while allInYard — one counter out of the yard and it is
+ * Only ever thrown while isWarmThrow holds — a counter still waiting in the
+ * yard, and either the opening or a throw of this player's already wasted (see
+ * ludo3GameLogic). Any turn a player could actually have played is
  * requestDiceRoll, no exceptions. Stated in full on the rules card, which is
- * what separates a rule from a thumb on the die; the fairness suite pins this
- * curve to numbers exactly as it pins the fair die's.
+ * what separates a rule from a thumb on the die; counted on the seat card, so
+ * the tally beside it cannot be mistaken for a fair-die record; and the
+ * fairness suite pins this curve to numbers exactly as it pins the fair die's.
  */
 export async function requestYardRoll(
   misses: number

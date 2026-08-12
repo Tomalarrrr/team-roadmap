@@ -953,9 +953,13 @@
    the row under it, so the numbers never need reading twice to place them. */
 .rollGrid {
   display: grid;
-  /* six faces, captures, then the throw count that all seven are out of */
-  grid-template-columns: repeat(6, 1fr) 1.15fr 1.35fr;
-  font-size: var(--text-xs);
+  /* six faces, captures, warm throws, then the throw count they are all out of */
+  grid-template-columns: repeat(6, 1fr) 1.15fr 1.15fr 1.35fr;
+  /* Nine columns in a card that is 122px wide at its narrowest, so the type has
+     to come down with the stage or two-digit counts sit shoulder to shoulder.
+     Tracks the same --stage the card's own width is measured against, and never
+     grows past the scale everything else in the card is set in. */
+  font-size: clamp(9px, calc(var(--stage) * 0.0165), var(--text-xs));
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
   text-align: center;
