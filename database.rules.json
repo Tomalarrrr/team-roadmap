@@ -234,6 +234,9 @@
         "packDraws": {
           ".validate": "newData.isString() && newData.val().length <= 200"
         },
+        "packThrows": {
+          ".validate": "newData.isString() && newData.val().length <= 40"
+        },
         "$other": { ".validate": false }
       }
     },
@@ -290,6 +293,9 @@
         },
         "packDraws": {
           ".validate": "newData.isString() && newData.val().length <= 200"
+        },
+        "packThrows": {
+          ".validate": "newData.isString() && newData.val().length <= 40"
         },
         "$other": { ".validate": false }
       }

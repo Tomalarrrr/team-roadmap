@@ -9,9 +9,9 @@ import {
   PLAYER_COLORS,
   initRollStats,
   mergeRollStats,
-  initPackDraws,
-  mergePackDraws,
-  drawFromPack,
+  initPackThrows,
+  mergePackThrows,
+  packFace,
   type Ludo3Color,
   type Ludo3GameState,
   type Ludo3MoveUpdate,
@@ -120,7 +120,7 @@ export async function createGame(
       playerCount: 3,
       rollStats: initRollStats(),
       yardMisses: PLAYER_COLORS.map(() => 0).join(','),
-      packDraws: initPackDraws(),
+      packThrows: initPackThrows(),
     };
 
     const result = await proxyTransaction<Ludo3GameState>(`ludo3/${code}`, (current) => {
@@ -436,9 +436,9 @@ export async function makeMove(
       ...(updates.rollStats && current.rollStats
         ? { rollStats: mergeRollStats(current.rollStats, updates.rollStats) }
         : {}),
-      // The pack's draws get the same treatment for the same races.
-      ...(updates.packDraws && current.packDraws
-        ? { packDraws: mergePackDraws(current.packDraws, updates.packDraws) }
+      // The pack's throw counts get the same treatment for the same races.
+      ...(updates.packThrows && current.packThrows
+        ? { packThrows: mergePackThrows(current.packThrows, updates.packThrows) }
         : {}),
     };
   });
@@ -490,35 +490,38 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       pausedAt: null,
       rollStats: initRollStats(),
       yardMisses: PLAYER_COLORS.map(() => 0).join(','),
-      packDraws: initPackDraws(),
+      packThrows: initPackThrows(),
       singlePlayer: hasBots,
     };
   });
 }
 
 /**
- * Client-side dice roll (the server-side roll endpoint is blocked behind the
- * VPNs this proxy exists to support — acceptable for a hidden, casual game).
+ * One throw off the seat's pack — a pure function of the room, the seat and
+ * how many pack throws that seat has already taken.
  *
- * A draw from the seat's own pack of eighteen — three of every face, drawn
- * without replacement, refilled when the last is taken (see the pack section
- * of ludo3Board). This replaced the plain i.i.d. die after a table sat
- * through a night of one seat starved of 6s while another swam in them: a
- * fair die is fair only in the long run, and a games night is the short run.
- * The pack moves the fairness from expectation to guarantee — every completed
- * pack holds exactly three of each face — and it is a stated rule on the
- * card, which is what separates it from a pity timer. Unlike Ludo v1 there is
- * still nothing downstream quietly swapping faces for 6s: the face this
- * returns is the face that is played, and the tally each seat card shows is
- * the truth about the pack.
+ * There is no randomness here at all, and that is deliberate: the shuffle,
+ * the cut and the wild throws are all derived from the room's seed (see the
+ * pack section of ludo3Board). Every client therefore computes the same face for
+ * the same throw, which is what makes it safe for two of them to throw the
+ * same bot's die at once — the duplicate is the same number, and the merge of
+ * two equal counts is a no-op. Under the crypto die this replaced, the two
+ * clients rolled two different faces and both were kept, quietly costing that
+ * seat two cards for one turn.
  *
- * The draw among remaining dice is exact: crypto randomness through the same
- * rejection sampling the seat deal uses, never `Math.random()`.
+ * The randomness that matters is still there, it has just moved: `randomInt`
+ * above shuffles nothing here but still deals the seats and draws who goes
+ * first, and the pack's own order is a shuffle nobody at the table can see.
+ * What the players are promised — three of every face per pack, a cut they
+ * cannot count, one throw in seven wild — is in the pack module, stated on the
+ * card, and pinned in the fairness suite.
  */
 export async function requestPackRoll(
-  drawn: number[]
+  seed: number,
+  seatIdx: number,
+  throwIndex: number
 ): Promise<{ rolls: number[]; serverGenerated: boolean }> {
-  return { rolls: [drawFromPack(drawn, randomInt)], serverGenerated: false };
+  return { rolls: [packFace(seed, seatIdx, throwIndex)], serverGenerated: false };
 }
 
 /**

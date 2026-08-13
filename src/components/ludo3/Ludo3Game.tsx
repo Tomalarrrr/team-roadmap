@@ -59,9 +59,10 @@ import {
   recordCapture,
   parseYardMisses,
   serializeYardMisses,
-  initPackDraws,
-  parsePackDraws,
-  recordPackDraw,
+  initPackThrows,
+  parsePackThrows,
+  serializePackThrows,
+  packSeed,
   type RollStats,
   type Ludo3Color,
 } from '../../ludo3Board';
@@ -267,12 +268,15 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
   const rollStatsRef = useRef(rollStats);
   // The warm die's memory, mirrored from synced state (see requestYardRoll).
   const yardMissesRef = useRef<string>('');
-  // Each seat's cumulative pack draws (see the pack section of ludo3Board).
-  // Optimistic like rollStatsRef — bumped locally the moment a throw is
-  // recorded, resynced from the server by the subscription — because a client
-  // resolving consecutive turns (bot games) outruns the ~1.2s poll, and a
-  // stale pack would re-offer dice already drawn.
-  const packDrawsRef = useRef<string>(initPackDraws());
+  // Each seat's pack throw count (see the pack section of ludo3Board). Optimistic
+  // like rollStatsRef — bumped locally the moment a throw is recorded,
+  // resynced from the server by the subscription — because a client resolving
+  // consecutive turns (bot games) outruns the ~1.2s poll, and a stale count
+  // would deal the same card twice.
+  const packThrowsRef = useRef<string>(initPackThrows());
+  // The room's seed: game code and creation time, mixed. Every client derives
+  // the same one, so every client deals the same pack.
+  const packSeedRef = useRef<number>(0);
 
   // --- Turn/interaction state ---
   const [validMoves, setValidMoves] = useState<Map<number, TokenPosition>>(new Map());
@@ -610,9 +614,10 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       }
       yardMissesRef.current = state.yardMisses ?? '';
       // Guarded like rollStats, not like yardMisses: in a legacy room the
-      // field never arrives, and the local optimistic draws must survive the
+      // field never arrives, and the local optimistic count must survive the
       // poll until this client's own writes have taught the room the field.
-      if (state.packDraws) packDrawsRef.current = state.packDraws;
+      if (state.packThrows) packThrowsRef.current = state.packThrows;
+      if (state.createdAt) packSeedRef.current = packSeed(gameCode, state.createdAt);
 
       if (state.currentTurn !== currentTurnRef.current) {
         isRollingRef.current = false;
@@ -873,7 +878,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       turnStartedAt: getServerTimestamp(),
       rollStats: serializeRollStats(moveRollStats),
       yardMisses: serializeYardMisses(coldMisses),
-      packDraws: packDrawsRef.current,
+      packThrows: packThrowsRef.current,
     };
 
     // Optimistic local apply so the token animates immediately
@@ -947,7 +952,11 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
     const warmThrow = isWarmThrow(tokensRef.current, activeColor, missesBefore);
     const { rolls } = warmThrow
       ? await requestYardRoll(missesBefore)
-      : await requestPackRoll(parsePackDraws(packDrawsRef.current)[colorIndex(activeColor)]);
+      : await requestPackRoll(
+          packSeedRef.current,
+          colorIndex(activeColor),
+          parsePackThrows(packThrowsRef.current)[colorIndex(activeColor)]
+        );
 
     if (currentTurnRef.current !== activeColor || turnPhaseRef.current !== 'roll' || winnerRef.current) {
       moveInFlightRef.current = false;
@@ -986,11 +995,13 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
         rollStatsRef.current, colorIndex(activeColor), roll, warmThrow
       );
       rollStatsRef.current = updatedRollStats;
-      // The pack draw commits exactly where the tally does, so the two can
-      // never disagree about how many throws happened — and a throw the
-      // guards above discarded burns no die. Warm yard throws never draw.
+      // The pack advances exactly where the tally does, so the two can never
+      // disagree about how many throws happened — and a throw the guards above
+      // discarded costs no card. Warm yard throws never touch the pack.
       if (!warmThrow) {
-        packDrawsRef.current = recordPackDraw(packDrawsRef.current, colorIndex(activeColor), roll);
+        const counts = parsePackThrows(packThrowsRef.current);
+        counts[colorIndex(activeColor)]++;
+        packThrowsRef.current = serializePackThrows(counts);
       }
 
       const currentTokens = tokensRef.current;
@@ -1054,7 +1065,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
           rollStats: serializeRollStats(updatedRollStats),
           lastRoll: roll,
           yardMisses: serializeYardMisses(misses),
-          packDraws: packDrawsRef.current,
+          packThrows: packThrowsRef.current,
         };
         // Cleared whether or not it landed: a write that aborts must not leave
         // this client unable to roll or move for the rest of the game.
@@ -1088,7 +1099,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
         turnStartedAt: getServerTimestamp(),
         rollStats: serializeRollStats(updatedRollStats),
         lastRoll: roll,
-        packDraws: packDrawsRef.current,
+        packThrows: packThrowsRef.current,
       };
       const committed = await makeMove(gc, curColor, update).catch(() => false);
       moveInFlightRef.current = false;
@@ -1212,7 +1223,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
             // No throw here — republishing the mirror is a no-op under the
             // max-merge, and it flushes any draw a cancelled auto-move left
             // stranded in the ref (same reasoning as rollStats).
-            packDraws: packDrawsRef.current,
+            packThrows: packThrowsRef.current,
           };
           // Released either way — an aborted write must not leave this client
           // unable to act for the rest of the game.
@@ -1281,7 +1292,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
               finishOrder: finishOrderRef.current.join(','),
               turnStartedAt: getServerTimestamp(),
               rollStats: serializeRollStats(rollStatsRef.current),
-              packDraws: packDrawsRef.current,
+              packThrows: packThrowsRef.current,
             })
               .catch(() => false)
               .then(() => { moveInFlightRef.current = false; });
@@ -1319,7 +1330,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
     const stats = deserializeRollStats(initRollStats());
     setRollStats(stats);
     rollStatsRef.current = stats;
-    packDrawsRef.current = initPackDraws();
+    packThrowsRef.current = initPackThrows();
   }, []);
 
   const handleCreateGame = useCallback(async () => {
@@ -1608,13 +1619,15 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
                 be sent back to your yard. Fill all five cells to win.
               </li>
               <li>
-                The die is a pack of eighteen: three of every face, drawn
-                without replacement from your own pack and refilled when the
-                last is taken — every eighteen throws hold exactly three 6s,
-                so nobody's night runs cold, and the face shown is always the
-                face played. The warm throw above is the one exception — your
-                seat's tally counts them under <strong>w</strong>, so a big 6
-                column can always be checked against how many were warm.
+                Your die is a pack: three of every face, shuffled and dealt
+                in order, so nobody's night runs cold. The pack is
+                <em>cut</em> — it reshuffles at a point you can't see, so it
+                can't be counted — and one throw in seven is wild, off a fresh
+                die, so a face you've run out of is unlikely rather than
+                impossible. The face shown is always the face played. The warm
+                throw above is the one exception — your seat's tally counts
+                them under <strong>w</strong>, so a big 6 column can always be
+                checked against how many were warm.
               </li>
             </ul>
             <div className={styles.helpKeys}>

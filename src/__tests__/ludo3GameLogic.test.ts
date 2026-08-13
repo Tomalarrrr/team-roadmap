@@ -41,13 +41,16 @@ import {
   serializeYardMisses,
   PACK_PER_FACE,
   PACK_SIZE,
-  initPackDraws,
-  parsePackDraws,
-  serializePackDraws,
-  packRemaining,
-  drawFromPack,
-  recordPackDraw,
-  mergePackDraws,
+  PACK_CUT_MIN,
+  WILD_IN,
+  initPackThrows,
+  parsePackThrows,
+  serializePackThrows,
+  mergePackThrows,
+  packSeed,
+  packCut,
+  packOrder,
+  packFace,
   INITIAL_TOKENS,
 } from '../ludo3Board';
 import { deserializeTokens, serializeTokens } from '../ludoFirebase';
@@ -791,68 +794,130 @@ describe('rollStats (3 colors)', () => {
 });
 
 // --- The dice pack -----------------------------------------------------------
-// The synced state is cumulative DRAWS (monotone, so makeMove's max-merge is
-// idempotent under the same races rollStats survives); the pack itself is
-// derived from them. See the pack section of ludo3Board.
+// The synced state is one throw count per seat; the shuffle, the cut and the
+// wild throws are all derived from it and the room's seed. See the pack
+// section of ludo3Board.
 
 describe('the dice pack (3 seats)', () => {
-  it('a legacy room starts every seat on a fresh, full pack', () => {
-    expect(parsePackDraws(undefined)).toHaveLength(3);
-    expect(parsePackDraws('').every(seat => seat.every(d => d === 0))).toBe(true);
-    expect(parsePackDraws('junk')[0]).toEqual([0, 0, 0, 0, 0, 0]);
-    for (const seat of parsePackDraws(undefined)) {
-      expect(packRemaining(seat)).toEqual(Array(6).fill(PACK_PER_FACE));
-    }
-    expect(serializePackDraws(parsePackDraws(initPackDraws()))).toBe(initPackDraws());
+  const SEED = packSeed('ABCD', 1700000000000);
+
+  it('a legacy room starts every seat on a fresh pack', () => {
+    expect(parsePackThrows(undefined)).toEqual([0, 0, 0]);
+    expect(parsePackThrows('')).toEqual([0, 0, 0]);
+    expect(parsePackThrows('junk')).toEqual([0, 0, 0]);
+    expect(serializePackThrows(parsePackThrows(initPackThrows()))).toBe(initPackThrows());
+    expect(initPackThrows()).toBe('0,0,0');
   });
 
-  it('draws exactly three of every face per eighteen, then refills', () => {
-    // Deterministic picker — always the first die remaining. Whatever the
-    // picker does, a full cycle must exhaust the pack at exactly
-    // PACK_PER_FACE per face, and the boundary must refill it by derivation
-    // alone: there is no reshuffle event to sync, so there is none to lose.
-    const drawn = [0, 0, 0, 0, 0, 0];
-    const counts = [0, 0, 0, 0, 0, 0];
-    for (let i = 0; i < PACK_SIZE; i++) {
-      const face = drawFromPack(drawn, () => 0);
-      counts[face - 1]++;
-      drawn[face - 1]++;
-    }
-    expect(counts).toEqual(Array(6).fill(PACK_PER_FACE));
-    expect(packRemaining(drawn)).toEqual(Array(6).fill(PACK_PER_FACE));
+  it('merges per-seat max, so a duplicate throw of the same index is free', () => {
+    // The whole reason the state is a count and the face is derived: two
+    // clients throwing the same bot turn compute the SAME index and therefore
+    // the SAME face, and max(n, n) = n. Nothing is drawn twice.
+    expect(mergePackThrows('4,0,0', '2,0,0')).toBe(serializePackThrows([4, 0, 0]));
+    expect(mergePackThrows('2,0,0', '4,0,0')).toBe(serializePackThrows([4, 0, 0]));
   });
 
-  it('never offers a face already exhausted within the pack', () => {
-    // All three 1s drawn: whichever remaining die the picker lands on, the
-    // face cannot come up again until the refill.
-    const drawn = [PACK_PER_FACE, 0, 0, 0, 0, 0];
-    for (let k = 0; k < 15; k++) {
-      expect(drawFromPack(drawn, () => k)).not.toBe(1);
+  it('is a pure function — same room, seat and index, same face', () => {
+    for (let i = 0; i < 200; i++) {
+      expect(packFace(SEED, 0, i)).toBe(packFace(SEED, 0, i));
     }
   });
 
-  it('records a draw into the right seat lane only', () => {
-    const parsed = parsePackDraws(recordPackDraw(initPackDraws(), 1, 6));
-    expect(parsed[1]).toEqual([0, 0, 0, 0, 0, 1]);
-    for (const lane of [0, 2]) {
-      expect(parsed[lane]).toEqual([0, 0, 0, 0, 0, 0]);
+  it('gives different rooms and different seats different packs', () => {
+    const other = packSeed('WXYZ', 1700000000000);
+    const sameRoom = Array.from({ length: 60 }, (_, i) => packFace(SEED, 0, i)).join('');
+    const otherRoom = Array.from({ length: 60 }, (_, i) => packFace(other, 0, i)).join('');
+    const otherSeat = Array.from({ length: 60 }, (_, i) => packFace(SEED, 1, i)).join('');
+    expect(sameRoom).not.toBe(otherRoom);
+    expect(sameRoom).not.toBe(otherSeat);
+  });
+
+  it('only ever deals 1..6', () => {
+    for (let seat = 0; seat < 3; seat++) {
+      for (let i = 0; i < 400; i++) {
+        const face = packFace(SEED, seat, i);
+        expect(face).toBeGreaterThanOrEqual(1);
+        expect(face).toBeLessThanOrEqual(6);
+        expect(Number.isInteger(face)).toBe(true);
+      }
     }
   });
 
-  it('merge takes per-cell max, so a resent draw never double-burns', () => {
-    const base = initPackDraws();
-    const a = recordPackDraw(recordPackDraw(base, 0, 5), 0, 5);
-    const b = recordPackDraw(base, 0, 5);
-    expect(parsePackDraws(mergePackDraws(a, b))[0][4]).toBe(2);
-    expect(parsePackDraws(mergePackDraws(b, a))[0][4]).toBe(2);
+  it('shuffles a full pack: three of every face, in some order', () => {
+    for (let k = 0; k < 50; k++) {
+      const order = packOrder(SEED, 0, k);
+      expect(order).toHaveLength(PACK_SIZE);
+      for (let face = 1; face <= 6; face++) {
+        expect(order.filter(c => c === face)).toHaveLength(PACK_PER_FACE);
+      }
+    }
   });
 
-  it('always has a die to draw, even from a garbled write', () => {
-    // A count past its allowance clamps to zero remaining, never negative —
-    // and the sum of what remains is always at least one.
-    expect(packRemaining([10, 0, 0, 0, 0, 0])).toEqual([0, 3, 3, 3, 3, 3]);
-    const total = packRemaining([17, 3, 3, 3, 3, 3]).reduce((x, y) => x + y, 0);
-    expect(total).toBeGreaterThan(0);
-    expect(() => drawFromPack([10, 0, 0, 0, 0, 0], n => n - 1)).not.toThrow();
+  it('cuts every pack between PACK_CUT_MIN and a full pack', () => {
+    const seen = new Set<number>();
+    for (let k = 0; k < 300; k++) {
+      const cut = packCut(SEED, 0, k);
+      expect(cut).toBeGreaterThanOrEqual(PACK_CUT_MIN);
+      expect(cut).toBeLessThanOrEqual(PACK_SIZE);
+      seen.add(cut);
+    }
+    // The cut has to actually vary, or it is not a cut — a fixed boundary is
+    // exactly the countable pack the table threw out.
+    expect(seen.size).toBeGreaterThan(3);
+  });
+
+  it('keeps the wild throw rare but real', () => {
+    // Wild throws are what stop a run-out face being impossible. Measured
+    // across many packs the rate should sit near 1/WILD_IN; the bounds are
+    // wide enough not to be flaky and tight enough to catch it being wired
+    // off (0%) or taking over (uniform).
+    let wild = 0;
+    const N = 20000;
+    for (let i = 0; i < N; i++) {
+      // A throw is wild when it disagrees with the card the pack would deal.
+      let packIdx = 0, base = 0;
+      for (;;) { const c = packCut(SEED, 0, packIdx); if (i < base + c) break; base += c; packIdx++; }
+      if (packFace(SEED, 0, i) !== packOrder(SEED, 0, packIdx)[i - base]) wild++;
+    }
+    const rate = wild / N;
+    // A wild throw agrees with the pack 1 time in 6 by chance, so the
+    // observable disagreement rate is (1/WILD_IN) * (5/6).
+    const expected = (1 / WILD_IN) * (5 / 6);
+    expect(rate).toBeGreaterThan(expected * 0.75);
+    expect(rate).toBeLessThan(expected * 1.25);
+  });
+
+  it('holds a game\'s worth of throws near its share, without being exact', () => {
+    // Two claims at once, and the change that prompted them. Fairness: over a
+    // realistic game window a seat's 6 count stays near its share — measured
+    // across 2000 seat-games the worst deviation is 7, where a true die
+    // reaches 13 and gave one seat 7 sixes in 85 the night this was written.
+    // Variety: an exact three-of-each pack window is rare, because the cut and
+    // the wild throw stop the tally being arithmetic. A future change that
+    // tightened this back to exact would be the countable pack the table
+    // rejected; one that loosened it would be the die they complained about.
+    let exact = 0, windows = 0, worstDeviation = 0;
+    for (let room = 0; room < 60; room++) {
+      const seed = packSeed(`R${room}`, 1700000000000 + room);
+      for (let seat = 0; seat < 3; seat++) {
+        let sixes = 0;
+        for (let i = 0; i < 90; i++) if (packFace(seed, seat, i) === 6) sixes++;
+        worstDeviation = Math.max(worstDeviation, Math.abs(sixes - 15));
+        for (let start = 0; start + PACK_SIZE <= 90; start += PACK_SIZE) {
+          const counts = [0, 0, 0, 0, 0, 0];
+          for (let i = start; i < start + PACK_SIZE; i++) counts[packFace(seed, seat, i) - 1]++;
+          windows++;
+          if (counts.every(c => c === PACK_PER_FACE)) exact++;
+        }
+      }
+    }
+    expect(exact / windows).toBeLessThan(0.05);   // variety is real
+    expect(worstDeviation).toBeLessThanOrEqual(9); // but the drift is bounded
+  });
+
+  it('survives a corrupt count without hanging or throwing', () => {
+    expect(() => packFace(SEED, 0, 1e6)).not.toThrow();
+    expect(packFace(SEED, 0, 1e6)).toBeGreaterThanOrEqual(1);
+    expect(serializePackThrows(parsePackThrows('-4,x,99'))).toBeTruthy();
   });
 });

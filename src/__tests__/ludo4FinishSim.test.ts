@@ -24,7 +24,8 @@ import {
   TOKENS_PER_PLAYER,
   FINAL_SIZE,
   getColorTokenIndices,
-  drawFromPack,
+  packSeed,
+  packFace,
   type Ludo4Color,
 } from '../ludo4Board';
 import type { TokenPosition } from '../ludoFirebase';
@@ -53,14 +54,14 @@ interface Outcome {
 
 function playGame(seed: number, turnCap = 6000): Outcome {
   const rand = rng(seed);
-  // Per-seat packs through the shipped drawFromPack — the sim rolls the same
-  // die the table does, seeded so a failure is reproducible.
-  const packs = new Map<typeof PLAYER_COLORS[number], number[]>(PLAYER_COLORS.map(c => [c, [0, 0, 0, 0, 0, 0]]));
+  // The shipped pack, dealt per seat — the sim rolls the same die the table
+  // does, with a per-seed room so a failure is reproducible.
+  const roomSeed = packSeed(`S${seed}`, 1700000000000 + seed);
+  const counts = new Map<typeof PLAYER_COLORS[number], number>(PLAYER_COLORS.map(c => [c, 0]));
   const draw = (c: Ludo4Color) => {
-    const drawn = packs.get(c)!;
-    const face = drawFromPack(drawn, n => Math.floor(rand() * n));
-    drawn[face - 1]++;
-    return face;
+    const i = counts.get(c)!;
+    counts.set(c, i + 1);
+    return packFace(roomSeed, PLAYER_COLORS.indexOf(c), i);
   };
   let tokens: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
   let turn: Ludo4Color = PLAYER_COLORS[Math.floor(rand() * 4)];

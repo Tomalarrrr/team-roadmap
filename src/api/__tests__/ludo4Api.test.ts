@@ -19,7 +19,7 @@ import {
   leaveGame,
   type Ludo4GameState,
 } from '../ludo4Api';
-import { deserializeRollStats, parsePackDraws, PLAYER_COLORS } from '../../ludo4Board';
+import { deserializeRollStats, parsePackThrows, PLAYER_COLORS } from '../../ludo4Board';
 
 type FakeRes = {
   ok: boolean;
@@ -139,20 +139,20 @@ describe('makeMove', () => {
     expect(merged[3].rolls[5]).toBe(4); // blue sixes: max(2,4)
   });
 
-  it('merges packDraws per-cell max so a stale writer cannot refill the pack', async () => {
-    // 4 colour lanes of cumulative draws, "d1..d6"
-    const packs = (redSixes: number, blueSixes: number) =>
-      `0,0,0,0,0,${redSixes}|0,0,0,0,0,0|0,0,0,0,0,0|0,0,0,0,0,${blueSixes}`;
+  it('merges packThrows per-seat max, so a duplicate throw costs nothing', async () => {
+    // Two clients driving the same bot turn compute the same throw index and
+    // therefore the same face, so the merge of their counts is a no-op — and a
+    // stale writer can never wind a seat's pack backwards.
     fetchMock
-      .mockResolvedValueOnce(res(baseState({ packDraws: packs(2, 1) }), { etag: 'e1' }))
+      .mockResolvedValueOnce(res(baseState({ packThrows: '7,0,0,0' }), { etag: 'e1' }))
       .mockResolvedValueOnce(res(null, { status: 200 }));
 
-    const ok = await makeMove('GAME', 'red', { ...moveUpdates, packDraws: packs(1, 3) });
+    const ok = await makeMove('GAME', 'red', { ...moveUpdates, packThrows: '5,0,0,0' });
 
     expect(ok).toBe(true);
-    const merged = parsePackDraws(JSON.parse(fetchMock.mock.calls[1][1].body).packDraws);
-    expect(merged[0][5]).toBe(2); // red 6s drawn: max(2,1)
-    expect(merged[3][5]).toBe(3); // blue 6s drawn: max(1,3)
+    const merged = parsePackThrows(JSON.parse(fetchMock.mock.calls[1][1].body).packThrows);
+    expect(merged[0]).toBe(7);
+    expect(merged[3]).toBe(0);
   });
 });
 
@@ -632,8 +632,8 @@ describe('createGame', () => {
     expect(body.rollStats.split('|')).toHaveLength(4);
     // Every seat starts cold — the warm die never inherits a count.
     expect(body.yardMisses).toBe('0,0,0,0');
-    // And every seat starts on a fresh, full pack: zero draws in every lane.
-    expect(body.packDraws).toBe('0,0,0,0,0,0|0,0,0,0,0,0|0,0,0,0,0,0|0,0,0,0,0,0');
+    // And every seat starts on a fresh pack: zero throws taken.
+    expect(body.packThrows).toBe('0,0,0,0');
     expect(firstPut?.[1].headers['if-match']).toBe('null_etag');
     expect(firstPut?.[0]).toContain('/api/db/ludo4/');
   });

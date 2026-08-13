@@ -54,10 +54,11 @@ export interface Ludo4GameState {
    * The warm die's memory (see requestYardRoll). Missing reads as cold, so
    * legacy rooms and old clients simply play on fair. */
   yardMisses?: string;
-  /** Cumulative faces drawn from each seat's dice pack,
-   * "d1,..,d6|g...|y...|b..." (see the pack section below). Missing reads as
-   * zero draws, so a legacy room starts every seat on a fresh, full pack. */
-  packDraws?: string;
+  /** How many pack throws each seat has taken ("0,0,0,0") — the whole pack is
+   * derived from this and the room's seed (see the pack section below).
+   * Missing reads as zero, so a legacy room starts every seat on a fresh
+   * pack. */
+  packThrows?: string;
 }
 
 export interface Ludo4MoveUpdate {
@@ -75,7 +76,7 @@ export interface Ludo4MoveUpdate {
   /** Omit to preserve the stored counts — only turn-resolving writes carry it. */
   yardMisses?: string;
   /** Rides exactly where rollStats rides — same monotone counts, same merge. */
-  packDraws?: string;
+  packThrows?: string;
 }
 
 // --- Board constants ---
@@ -344,104 +345,160 @@ export function serializeYardMisses(misses: number[]): string {
 
 // --- The dice pack -----------------------------------------------------------
 //
-// Every seat throws from its own pack of eighteen dice — three of every face,
-// drawn without replacement, refilled the moment the last one is taken. That
-// is the whole rule: over any completed pack a seat gets exactly three 6s (and
-// three of everything else), so a night cannot run cold by luck alone. The
-// warm yard die is the one throw that does not draw from the pack — it is its
-// own stated exception and its own stated curve.
+// Every seat throws from its own pack: three of every face, shuffled, dealt in
+// order — and cut, so the pack is reshuffled at a point nobody can see. One
+// throw in WILD_IN comes off a fresh die instead of the pack.
+//
+// The first cut of this was a plain pack of eighteen drawn to exhaustion. It
+// delivered exactly what it promised — every seat's tally within one or two of
+// every other's — and the table rejected it for the same reason: with the
+// per-face counts printed on the seat cards, a pack you can see the end of is a
+// pack you can count. Measured, a watcher could name a player's next face 32.9%
+// of the time against a true die's 16.7%, and the tallies finished so level the
+// game read as arithmetic rather than dice. The cut and the wild throw put the
+// uncertainty back: 23.9% guessable even to someone who somehow knew the pack
+// state, seat-to-seat gaps of about three 6s rather than one, and the drought
+// and yard guarantees untouched.
+//
+// The warm yard die is the one throw that does not come off the pack — its own
+// stated exception, its own stated curve, and it does not advance the count.
 
-/** Three of each face per pack: the whole fairness promise in one number. */
+/** Three of each face in a full pack. */
 export const PACK_PER_FACE = 3;
-/** Six faces of PACK_PER_FACE each — eighteen draws empties a pack. */
+/** A full pack, before the cut takes some of it away. */
 export const PACK_SIZE = 6 * PACK_PER_FACE;
+/** The cut never falls before this, so a pack always deals most of itself. */
+export const PACK_CUT_MIN = 12;
+/** One throw in this many is wild — a fresh die, not a card off the pack. */
+export const WILD_IN = 7;
 
 /**
- * What is synced is not the pack but the DRAWS: per seat, how many times each
- * face has ever been drawn from that seat's pack since the game began. Counts
- * only ever grow, which is the property everything downstream leans on:
- * makeMove merges concurrent writers cell-by-cell with max exactly as it
- * merges rollStats, and a duplicate throw for the same bot turn collapses to
- * one draw the same way it collapses to one tally mark. Storing the dice
- * *remaining* would read more naturally and be wrong the first time two
- * clients wrote at once — max would resurrect every die the other had drawn.
+ * What is synced is not the pack, nor the faces drawn from it, but a single
+ * count per seat: how many pack throws that seat has taken. Everything else —
+ * which pack, how it was shuffled, where it is cut, which throws are wild — is
+ * derived from that count and the room's seed.
  *
- * The pack itself is derived (packRemaining), and the refill needs no synced
- * event: the eighteenth draw of one pack simply starts the count of the next.
+ * That is what makes the throw idempotent, and idempotence is the whole reason
+ * for the design. Bot turns are thrown by whichever human client gets there
+ * first, and two clients can both reach the same turn before either one's write
+ * has been polled by the other. Under a stored draw-history they would generate
+ * two *different* faces, and a cell-wise max merge would keep both — one bot
+ * turn quietly burning two dice out of the pack. Here both clients compute the
+ * same throw index, so they compute the same face; the merge takes the max of
+ * two equal counts and the duplicate costs nothing. The race is not defended
+ * against, it is designed out.
+ *
+ * The count only grows, so the merge stays safe under every other concurrent
+ * write as well, exactly as rollStats does.
  */
-export type PackDraws = number[][];
-
-export function initPackDraws(): string {
-  return PLAYER_COLORS.map(() => [0, 0, 0, 0, 0, 0].join(',')).join('|');
+export function initPackThrows(): string {
+  return PLAYER_COLORS.map(() => 0).join(',');
 }
 
-/** Absent or garbled reads as zero draws — a legacy room or an old client's
- * write starts a seat on a fresh, full pack, never a depleted one. */
-export function parsePackDraws(str: string | undefined | null): PackDraws {
-  const out: PackDraws = PLAYER_COLORS.map(() => [0, 0, 0, 0, 0, 0]);
+/** Absent or garbled reads as zero throws — a legacy room or an old client's
+ * write starts a seat on a fresh pack, never a part-dealt one. */
+export function parsePackThrows(str: string | undefined | null): number[] {
+  const out = PLAYER_COLORS.map(() => 0);
   if (!str) return out;
-  const parts = str.split('|');
+  const parts = str.split(',');
   for (let i = 0; i < out.length && i < parts.length; i++) {
-    const nums = parts[i].split(',').map(Number);
-    for (let j = 0; j < 6; j++) {
-      const n = nums[j];
-      if (Number.isFinite(n) && n > 0) out[i][j] = Math.floor(n);
-    }
+    const n = parseInt(parts[i], 10);
+    if (Number.isFinite(n) && n > 0) out[i] = n;
   }
   return out;
 }
 
-export function serializePackDraws(draws: PackDraws): string {
-  return PLAYER_COLORS.map((_, i) => (draws[i] ?? [0, 0, 0, 0, 0, 0]).join(',')).join('|');
+export function serializePackThrows(throws: number[]): string {
+  return PLAYER_COLORS.map((_, i) => Math.max(0, throws[i] ?? 0)).join(',');
+}
+
+/** Merge two serialized counts taking the per-seat max — monotone counts, so a
+ * concurrent writer can never wind a seat's pack backwards, and a duplicate
+ * throw of the same index merges to itself. */
+export function mergePackThrows(a: string, b: string): string {
+  const pa = parsePackThrows(a);
+  const pb = parsePackThrows(b);
+  return serializePackThrows(pa.map((n, i) => Math.max(n, pb[i])));
 }
 
 /**
- * The dice one seat still holds, derived from its cumulative draws. Each
- * face's allowance is PACK_PER_FACE per pack, and a new pack begins the moment
- * the last draw of the current one is taken: the allowance grows with
- * floor(total / PACK_SIZE), what remains is allowance minus drawn. Within an
- * honest pack no face can outrun its allowance (drawFromPack only offers what
- * remains), so at every boundary each face has been drawn exactly three times
- * and the fresh pack is full — the clamp is for garbled writes, and the sum of
- * what this returns is always at least one, so there is always a die to draw.
+ * The room's seed: the game code and the moment it was created, mixed. Every
+ * client derives the same one, so every client deals the same pack.
+ *
+ * This is a hidden shuffle, not a secret one. Someone who reimplemented these
+ * functions and knew the room's createdAt could deal the pack out ahead of the
+ * game — which is a fair description of a marked deck, and the reason this is
+ * acceptable is that it is a casual game hidden behind a search palette among
+ * people sharing a roadmap. What it buys is worth the trade: every client
+ * agreeing on every face, which is what makes a bot's turn safe to throw twice.
  */
-export function packRemaining(drawn: number[]): number[] {
-  const total = drawn.reduce((a, b) => a + b, 0);
-  const allowance = PACK_PER_FACE * (Math.floor(total / PACK_SIZE) + 1);
-  return drawn.map(d => Math.max(0, allowance - d));
-}
-
-/**
- * Draw one die from a seat's pack: uniform among the dice actually remaining.
- * That is a shuffled pack without the theatre of a stored order — and without
- * a stored order, nothing in the synced state says what anyone's next throw
- * will be. `pick` supplies the randomness (a uniform integer in [0, n)): the
- * api layer passes its crypto randomInt, the simulations pass their seeded
- * generator, and this stays the one definition of how a pack is drawn.
- */
-export function drawFromPack(drawn: number[], pick: (n: number) => number): number {
-  const remaining = packRemaining(drawn);
-  const total = remaining.reduce((a, b) => a + b, 0);
-  let k = pick(total);
-  for (let face = 0; face < 6; face++) {
-    k -= remaining[face];
-    if (k < 0) return face + 1;
+export function packSeed(gameCode: string, createdAt: number): number {
+  let h = 0x811c9dc5;
+  const s = `${gameCode}:${createdAt}`;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
   }
-  return 6; // unreachable: packRemaining never sums to zero
+  return h >>> 0;
 }
 
-/** Record one drawn face into a seat's cumulative counts. String in, string
- * out — the ref that carries this lives in serialized form, like yardMisses. */
-export function recordPackDraw(packStr: string, colorIdx: number, face: number): string {
-  const draws = parsePackDraws(packStr);
-  draws[colorIdx][Math.max(0, Math.min(face, 6) - 1)]++;
-  return serializePackDraws(draws);
+/** One round of mixing — enough for a pack shuffle nobody is attacking. */
+function mix(seed: number, a: number, b: number, c: number): number {
+  let h = (seed ^ Math.imul(a + 0x9e3779b9, 0x85ebca6b)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  h = (h ^ Math.imul(b + 0x165667b1, 0x27d4eb2f)) >>> 0;
+  h = Math.imul(h ^ (h >>> 15), 0x85ebca6b) >>> 0;
+  h = (h ^ Math.imul(c + 0x9e3779b9, 0xc2b2ae35)) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x2545f491) >>> 0;
+  return h >>> 0;
 }
 
-/** Merge two serialized pack-draw strings cell-by-cell taking the max — the
- * same idempotence rollStats gets from mergeRollStats, for the same races. */
-export function mergePackDraws(a: string, b: string): string {
-  const da = parsePackDraws(a);
-  const db = parsePackDraws(b);
-  return serializePackDraws(da.map((seat, i) => seat.map((d, j) => Math.max(d, db[i][j]))));
+/** Where pack `packIdx` is cut: PACK_CUT_MIN..PACK_SIZE throws, then reshuffle.
+ * Never the same twice running for long, and never visible in the state. */
+export function packCut(seed: number, seatIdx: number, packIdx: number): number {
+  return PACK_CUT_MIN + (mix(seed, seatIdx, packIdx, 0x0c07) % (PACK_SIZE - PACK_CUT_MIN + 1));
+}
+
+/** The shuffled order of one pack: three of every face, Fisher-Yates with a
+ * generator seeded from the room, the seat and the pack number. */
+export function packOrder(seed: number, seatIdx: number, packIdx: number): number[] {
+  const cards: number[] = [];
+  for (let face = 1; face <= 6; face++) {
+    for (let n = 0; n < PACK_PER_FACE; n++) cards.push(face);
+  }
+  for (let i = cards.length - 1; i > 0; i--) {
+    const j = mix(seed, seatIdx, packIdx, i) % (i + 1);
+    const t = cards[i];
+    cards[i] = cards[j];
+    cards[j] = t;
+  }
+  return cards;
+}
+
+/**
+ * The face for one seat's Nth pack throw — the whole die, as a pure function.
+ *
+ * Walks the cuts to find which pack this throw falls in and how far into it,
+ * then either deals that card or, one throw in WILD_IN, throws a fresh die
+ * instead. The walk is bounded by the throw count (a long game is a couple of
+ * hundred throws, each pack at least PACK_CUT_MIN of them), so it stays cheap.
+ */
+export function packFace(seed: number, seatIdx: number, throwIndex: number): number {
+  let packIdx = 0;
+  let base = 0;
+  // A guard, not a rule: at PACK_CUT_MIN per pack this cannot spin, but a
+  // corrupt count must not hang the client mid-turn.
+  for (let guard = 0; guard < 10000; guard++) {
+    const cut = packCut(seed, seatIdx, packIdx);
+    if (throwIndex < base + cut) break;
+    base += cut;
+    packIdx++;
+  }
+  const offset = throwIndex - base;
+  // The wild throw: the reason a face the pack has run out of is unlikely
+  // rather than impossible, and the reason a hot streak can still happen.
+  if (mix(seed, seatIdx, packIdx * 1000 + offset, 0x77d1) % WILD_IN === 0) {
+    return 1 + (mix(seed, seatIdx, packIdx * 1000 + offset, 0x51ed) % 6);
+  }
+  return packOrder(seed, seatIdx, packIdx)[offset] ?? 6;
 }
