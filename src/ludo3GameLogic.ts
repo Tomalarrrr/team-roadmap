@@ -69,13 +69,13 @@ import {
  * seats still win 32.9 / 33.0 / 34.0, so none of this bought one seat an edge.
  *
  * Warmth has to be earned by a wasted turn: a seat with four counters at home
- * and a board it can still play on throws the plain fair die, every time. The
- * curve lives with the die (requestYardRoll in the api layer); the miss count
- * is synced state (yardMisses), so the promise holds across refreshes and for
- * bot turns thrown by other clients; the throws it applied to are counted on
- * the seat card (RollStats.warm) so the tally cannot be read as a fair-die
- * record when it isn't; and the whole thing is stated on the rules card — a
- * stated rule, not a thumb on the die.
+ * and a board it can still play on draws from its own pack (requestPackRoll),
+ * every time. The curve lives with the die (requestYardRoll in the api
+ * layer); the miss count is synced state (yardMisses), so the promise holds
+ * across refreshes and for bot turns thrown by other clients; the throws it
+ * applied to are counted on the seat card (RollStats.warm) so the tally
+ * cannot be read as a pack record when it isn't; and the whole thing is
+ * stated on the rules card — a stated rule, not a thumb on the die.
  */
 export const DEPLOY_FACES = new Set([6]);
 
@@ -102,12 +102,12 @@ export function hasYardCounter(tokens: TokenPosition[], color: Ludo3Color): bool
 }
 
 /**
- * Whether this throw comes off the warm die rather than the fair one.
+ * Whether this throw comes off the warm die rather than the seat's pack.
  *
  * Two ways in, and both require a counter still waiting in the yard: the
  * opening, where nothing has been thrown yet and the whole colour is at home,
  * and any point after a throw of this player's has already been wasted. Every
- * other throw in the game is the plain fair die.
+ * other throw in the game draws from the seat's own pack (requestPackRoll).
  */
 export function isWarmThrow(
   tokens: TokenPosition[],

@@ -39,6 +39,15 @@ import {
   mergeRollStats,
   parseYardMisses,
   serializeYardMisses,
+  PACK_PER_FACE,
+  PACK_SIZE,
+  initPackDraws,
+  parsePackDraws,
+  serializePackDraws,
+  packRemaining,
+  drawFromPack,
+  recordPackDraw,
+  mergePackDraws,
   INITIAL_TOKENS,
 } from '../ludo3Board';
 import { deserializeTokens, serializeTokens } from '../ludoFirebase';
@@ -778,5 +787,72 @@ describe('rollStats (3 colors)', () => {
   it('tolerates empty and short input', () => {
     expect(deserializeRollStats('')).toHaveLength(3);
     expect(deserializeRollStats('1,0,0,0,0,0,2')).toHaveLength(3);
+  });
+});
+
+// --- The dice pack -----------------------------------------------------------
+// The synced state is cumulative DRAWS (monotone, so makeMove's max-merge is
+// idempotent under the same races rollStats survives); the pack itself is
+// derived from them. See the pack section of ludo3Board.
+
+describe('the dice pack (3 seats)', () => {
+  it('a legacy room starts every seat on a fresh, full pack', () => {
+    expect(parsePackDraws(undefined)).toHaveLength(3);
+    expect(parsePackDraws('').every(seat => seat.every(d => d === 0))).toBe(true);
+    expect(parsePackDraws('junk')[0]).toEqual([0, 0, 0, 0, 0, 0]);
+    for (const seat of parsePackDraws(undefined)) {
+      expect(packRemaining(seat)).toEqual(Array(6).fill(PACK_PER_FACE));
+    }
+    expect(serializePackDraws(parsePackDraws(initPackDraws()))).toBe(initPackDraws());
+  });
+
+  it('draws exactly three of every face per eighteen, then refills', () => {
+    // Deterministic picker — always the first die remaining. Whatever the
+    // picker does, a full cycle must exhaust the pack at exactly
+    // PACK_PER_FACE per face, and the boundary must refill it by derivation
+    // alone: there is no reshuffle event to sync, so there is none to lose.
+    const drawn = [0, 0, 0, 0, 0, 0];
+    const counts = [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < PACK_SIZE; i++) {
+      const face = drawFromPack(drawn, () => 0);
+      counts[face - 1]++;
+      drawn[face - 1]++;
+    }
+    expect(counts).toEqual(Array(6).fill(PACK_PER_FACE));
+    expect(packRemaining(drawn)).toEqual(Array(6).fill(PACK_PER_FACE));
+  });
+
+  it('never offers a face already exhausted within the pack', () => {
+    // All three 1s drawn: whichever remaining die the picker lands on, the
+    // face cannot come up again until the refill.
+    const drawn = [PACK_PER_FACE, 0, 0, 0, 0, 0];
+    for (let k = 0; k < 15; k++) {
+      expect(drawFromPack(drawn, () => k)).not.toBe(1);
+    }
+  });
+
+  it('records a draw into the right seat lane only', () => {
+    const parsed = parsePackDraws(recordPackDraw(initPackDraws(), 1, 6));
+    expect(parsed[1]).toEqual([0, 0, 0, 0, 0, 1]);
+    for (const lane of [0, 2]) {
+      expect(parsed[lane]).toEqual([0, 0, 0, 0, 0, 0]);
+    }
+  });
+
+  it('merge takes per-cell max, so a resent draw never double-burns', () => {
+    const base = initPackDraws();
+    const a = recordPackDraw(recordPackDraw(base, 0, 5), 0, 5);
+    const b = recordPackDraw(base, 0, 5);
+    expect(parsePackDraws(mergePackDraws(a, b))[0][4]).toBe(2);
+    expect(parsePackDraws(mergePackDraws(b, a))[0][4]).toBe(2);
+  });
+
+  it('always has a die to draw, even from a garbled write', () => {
+    // A count past its allowance clamps to zero remaining, never negative —
+    // and the sum of what remains is always at least one.
+    expect(packRemaining([10, 0, 0, 0, 0, 0])).toEqual([0, 3, 3, 3, 3, 3]);
+    const total = packRemaining([17, 3, 3, 3, 3, 3]).reduce((x, y) => x + y, 0);
+    expect(total).toBeGreaterThan(0);
+    expect(() => drawFromPack([10, 0, 0, 0, 0, 0], n => n - 1)).not.toThrow();
   });
 });

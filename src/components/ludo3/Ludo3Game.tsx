@@ -11,12 +11,13 @@
 //
 // One deliberate difference from v1: there is NO pity timer. That board quietly
 // swaps a stuck player's roll for a 6 after a few failed deploys, and says
-// nothing about it. Here the face rolled is always the face played; the die is
-// exactly uniform on any turn a player could have played (requestDiceRoll), and
-// the one exception — the warm die a player earns by sitting through a turn
-// that did nothing while counters wait in their yard — is stated on the rules
-// card and counted in its own column on the seat card, so the tallies stay
-// honest about which throws were which.
+// nothing about it. Here the face rolled is always the face played; on any
+// turn a player could have played, the throw is drawn from that seat's own
+// pack of eighteen — three of every face, drawn without replacement
+// (requestPackRoll) — and the one exception, the warm die a player earns by
+// sitting through a turn that did nothing while counters wait in their yard,
+// is stated on the rules card and counted in its own column on the seat card,
+// so the tallies stay honest about which throws were which.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -30,7 +31,7 @@ import {
   removeBot,
   startGame,
   leaveGame,
-  requestDiceRoll,
+  requestPackRoll,
   requestYardRoll,
   getServerTimestamp,
   type Ludo3GameState,
@@ -58,6 +59,9 @@ import {
   recordCapture,
   parseYardMisses,
   serializeYardMisses,
+  initPackDraws,
+  parsePackDraws,
+  recordPackDraw,
   type RollStats,
   type Ludo3Color,
 } from '../../ludo3Board';
@@ -263,6 +267,12 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
   const rollStatsRef = useRef(rollStats);
   // The warm die's memory, mirrored from synced state (see requestYardRoll).
   const yardMissesRef = useRef<string>('');
+  // Each seat's cumulative pack draws (see the pack section of ludo3Board).
+  // Optimistic like rollStatsRef — bumped locally the moment a throw is
+  // recorded, resynced from the server by the subscription — because a client
+  // resolving consecutive turns (bot games) outruns the ~1.2s poll, and a
+  // stale pack would re-offer dice already drawn.
+  const packDrawsRef = useRef<string>(initPackDraws());
 
   // --- Turn/interaction state ---
   const [validMoves, setValidMoves] = useState<Map<number, TokenPosition>>(new Map());
@@ -599,6 +609,10 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
         rollStatsRef.current = parsed;
       }
       yardMissesRef.current = state.yardMisses ?? '';
+      // Guarded like rollStats, not like yardMisses: in a legacy room the
+      // field never arrives, and the local optimistic draws must survive the
+      // poll until this client's own writes have taught the room the field.
+      if (state.packDraws) packDrawsRef.current = state.packDraws;
 
       if (state.currentTurn !== currentTurnRef.current) {
         isRollingRef.current = false;
@@ -859,6 +873,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       turnStartedAt: getServerTimestamp(),
       rollStats: serializeRollStats(moveRollStats),
       yardMisses: serializeYardMisses(coldMisses),
+      packDraws: packDrawsRef.current,
     };
 
     // Optimistic local apply so the token animates immediately
@@ -926,12 +941,13 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
     // already wasted. Then the die is warm: a quarter, warmer for each miss
     // since (three eighths, then a half), and once YARD_MISS_LIMIT misses are
     // served the throw is a given 6, so nobody waits past four of their own
-    // turns. Any turn this player can actually play is the plain fair die.
+    // turns. Any turn this player can actually play draws from the seat's own
+    // pack instead.
     const missesBefore = parseYardMisses(yardMissesRef.current)[colorIndex(activeColor)];
     const warmThrow = isWarmThrow(tokensRef.current, activeColor, missesBefore);
     const { rolls } = warmThrow
       ? await requestYardRoll(missesBefore)
-      : await requestDiceRoll();
+      : await requestPackRoll(parsePackDraws(packDrawsRef.current)[colorIndex(activeColor)]);
 
     if (currentTurnRef.current !== activeColor || turnPhaseRef.current !== 'roll' || winnerRef.current) {
       moveInFlightRef.current = false;
@@ -941,8 +957,8 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
     }
 
     // The face rolled is the face played — no pity timer, no substitutions.
-    // The die is exactly uniform (see requestDiceRoll) and the tallies on the
-    // seat cards stay an honest record of it.
+    // The die is a draw from the seat's own pack (see requestPackRoll) and
+    // the tallies on the seat cards stay an honest record of it.
     const roll = rolls[0];
 
     rollTimeoutRef.current = setTimeout(async () => {
@@ -970,6 +986,12 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
         rollStatsRef.current, colorIndex(activeColor), roll, warmThrow
       );
       rollStatsRef.current = updatedRollStats;
+      // The pack draw commits exactly where the tally does, so the two can
+      // never disagree about how many throws happened — and a throw the
+      // guards above discarded burns no die. Warm yard throws never draw.
+      if (!warmThrow) {
+        packDrawsRef.current = recordPackDraw(packDrawsRef.current, colorIndex(activeColor), roll);
+      }
 
       const currentTokens = tokensRef.current;
       const curColor = activeColor;
@@ -1032,6 +1054,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
           rollStats: serializeRollStats(updatedRollStats),
           lastRoll: roll,
           yardMisses: serializeYardMisses(misses),
+          packDraws: packDrawsRef.current,
         };
         // Cleared whether or not it landed: a write that aborts must not leave
         // this client unable to roll or move for the rest of the game.
@@ -1065,6 +1088,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
         turnStartedAt: getServerTimestamp(),
         rollStats: serializeRollStats(updatedRollStats),
         lastRoll: roll,
+        packDraws: packDrawsRef.current,
       };
       const committed = await makeMove(gc, curColor, update).catch(() => false);
       moveInFlightRef.current = false;
@@ -1185,6 +1209,10 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
             finishOrder: finishOrderRef.current.join(','),
             turnStartedAt: getServerTimestamp(),
             rollStats: serializeRollStats(rollStatsRef.current),
+            // No throw here — republishing the mirror is a no-op under the
+            // max-merge, and it flushes any draw a cancelled auto-move left
+            // stranded in the ref (same reasoning as rollStats).
+            packDraws: packDrawsRef.current,
           };
           // Released either way — an aborted write must not leave this client
           // unable to act for the rest of the game.
@@ -1253,6 +1281,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
               finishOrder: finishOrderRef.current.join(','),
               turnStartedAt: getServerTimestamp(),
               rollStats: serializeRollStats(rollStatsRef.current),
+              packDraws: packDrawsRef.current,
             })
               .catch(() => false)
               .then(() => { moveInFlightRef.current = false; });
@@ -1290,6 +1319,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
     const stats = deserializeRollStats(initRollStats());
     setRollStats(stats);
     rollStatsRef.current = stats;
+    packDrawsRef.current = initPackDraws();
   }, []);
 
   const handleCreateGame = useCallback(async () => {
@@ -1578,11 +1608,13 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
                 be sent back to your yard. Fill all five cells to win.
               </li>
               <li>
-                The die is fair: on any turn you can actually play, every face
-                is equally likely, and the face shown is always the face played.
-                The warm throw above is the one exception — your seat's tally
-                counts them under <strong>w</strong>, so a big 6 column can
-                always be checked against how many of those throws were warm.
+                The die is a pack of eighteen: three of every face, drawn
+                without replacement from your own pack and refilled when the
+                last is taken — every eighteen throws hold exactly three 6s,
+                so nobody's night runs cold, and the face shown is always the
+                face played. The warm throw above is the one exception — your
+                seat's tally counts them under <strong>w</strong>, so a big 6
+                column can always be checked against how many were warm.
               </li>
             </ul>
             <div className={styles.helpKeys}>
@@ -1796,8 +1828,9 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
 
                     {/* This seat's own roll tally. Per-card rather than one
                         shared table, so each player's luck sits next to their
-                        score — and on the fair die (see ludo3Api), over a long
-                        game the six face columns really do converge. */}
+                        score — and drawing from a pack (see ludo3Api), the six
+                        face columns converge by design: every completed pack
+                        of eighteen holds exactly three of each. */}
                     <div
                       className={styles.rollGrid}
                       role="img"

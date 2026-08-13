@@ -38,11 +38,12 @@ import {
  * reads as the game miscounting, not as a rule.
  *
  * What answers the drought instead, tuned at the table across one afternoon
- * (1-or-6: too loud; three visible throws: too busy): the warm start. While
- * EVERY counter of a colour is still at home (allInYard), its single throw is
- * warm from the off and warmer with each missed 6 — a quarter, then three
- * eighths, then a half — and once YARD_MISS_LIMIT misses have been served the
- * next throw is a given 6, so nobody waits past four of their own turns.
+ * (1-or-6: too loud; three visible throws: too busy): the warm die. A throw
+ * that leaves a player nothing to do while counters wait in their yard is a
+ * MISS, and each miss warms the next throw toward the 6 — a quarter, then
+ * three eighths, then a half — until YARD_MISS_LIMIT misses have been served
+ * and the next throw is a given 6, so nobody sits stuck past four of their
+ * own turns.
  *
  * The first cut of this started stone fair and warmed by a twenty-fourth per
  * miss, with the given 6 on the sixth throw. Too gentle to be felt: a shut-in
@@ -50,33 +51,69 @@ import {
  * rode all the way to the guarantee — two dozen throws of watching at a
  * four-seat table. Players read that as "wait for the sixth", which is exactly
  * the drought the warmth was meant to answer, so the given 6 had become the
- * rule and the curve under it was decoration. This one averages 2.5 turns and
- * puts the work in the throws people actually sit through. The price is that
- * the first throw is no longer a fair die, and the card says so in as many
- * words.
+ * rule and the curve under it was decoration.
  *
- * One counter out of the yard and every throw is the plain fair die again. The
- * curve lives with the die (requestYardRoll in the api layer); the miss count
- * is synced state (yardMisses), so the promise holds across refreshes and for
- * bot turns thrown by other clients; and the whole thing is stated on the
- * rules card — a stated rule, not a thumb on the die.
+ * The second cut warmed only while EVERY counter was still at home
+ * (allInYard). That reads as the tighter, more honest rule and is in fact the
+ * crueller one, because it covers almost nothing: after the opening deploy a
+ * seat is never all-at-home again unless an opponent sends its whole colour
+ * back, so a seat stranded late — one counter stuck out on the ring, the rest
+ * waiting behind a 6 that never came — had no protection at all. Ludo3
+ * measured the same rule at a worst run of 15 stuck turns at the 95th
+ * percentile and 45 at worst, and the table lived it here the night one seat
+ * threw 7 sixes in 85. So the miss is defined by what the player actually
+ * experiences — a turn that did nothing while the yard still holds a counter
+ * (isWarmThrow, ported from ludo3) — rather than by how full the yard happens
+ * to be. Same curve, same guarantee, now reachable exactly when it is needed.
+ *
+ * Warmth has to be earned by a wasted turn: a seat with counters at home and
+ * a board it can still play on draws from its own pack (requestPackRoll),
+ * every time. The curve lives with the die (requestYardRoll in the api
+ * layer); the miss count is synced state (yardMisses), so the promise holds
+ * across refreshes and for bot turns thrown by other clients; the throws it
+ * applied to are counted on the seat card (RollStats.warm) so the tally
+ * cannot be read as a pack record when it isn't; and the whole thing is
+ * stated on the rules card — a stated rule, not a thumb on the die.
  */
 export const DEPLOY_FACES = new Set([6]);
 
-/** Shut-in misses after which the next throw is a given 6 — the card's
- * "after three misses the fourth throw is a 6". */
+/** Misses after which the next throw is a given 6 — the card's "after three
+ * dead throws the fourth is a 6". */
 export const YARD_MISS_LIMIT = 3;
 
 /**
- * True while every one of this colour's counters is still at home in the
- * yard — the warm die's only theatre. Deliberately strict: a counter out on
- * the ring OR standing in the run home means every throw is stone fair. The
- * table's ruling was "only when all are at home", and the strictness is also
- * what keeps the warmth honest — it can never touch a seat that has anything
- * at all it could otherwise do.
+ * True while every one of this colour's counters is still at home in the yard.
+ *
+ * The opening position, and the one state that is warm before it has cost the
+ * player anything: a seat that has not yet thrown has no miss to its name, and
+ * making it spend a turn to earn the first sliver of warmth just moves the
+ * drought to the top of the game.
  */
 export function allInYard(tokens: TokenPosition[], color: Ludo4Color): boolean {
   return getColorTokenIndices(color).every(i => tokens[i] === 'base');
+}
+
+/** Whether this colour still has a counter waiting in its yard — the thing a
+ * 6 would answer, and so the precondition for a throw counting as a miss. */
+export function hasYardCounter(tokens: TokenPosition[], color: Ludo4Color): boolean {
+  return getColorTokenIndices(color).some(i => tokens[i] === 'base');
+}
+
+/**
+ * Whether this throw comes off the warm die rather than the seat's pack.
+ *
+ * Two ways in, and both require a counter still waiting in the yard: the
+ * opening, where nothing has been thrown yet and the whole colour is at home,
+ * and any point after a throw of this player's has already been wasted. Every
+ * other throw in the game draws from the seat's own pack (requestPackRoll).
+ */
+export function isWarmThrow(
+  tokens: TokenPosition[],
+  color: Ludo4Color,
+  misses: number
+): boolean {
+  if (!hasYardCounter(tokens, color)) return false;
+  return misses > 0 || allInYard(tokens, color);
 }
 
 /**

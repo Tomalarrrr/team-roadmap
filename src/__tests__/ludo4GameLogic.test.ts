@@ -13,6 +13,8 @@ import {
   getNextTurn,
   scoreBotMove,
   allInYard,
+  hasYardCounter,
+  isWarmThrow,
   YARD_MISS_LIMIT,
 } from '../ludo4GameLogic';
 import {
@@ -38,6 +40,15 @@ import {
   mergeRollStats,
   parseYardMisses,
   serializeYardMisses,
+  PACK_PER_FACE,
+  PACK_SIZE,
+  initPackDraws,
+  parsePackDraws,
+  serializePackDraws,
+  packRemaining,
+  drawFromPack,
+  recordPackDraw,
+  mergePackDraws,
   INITIAL_TOKENS,
 } from '../ludo4Board';
 import { deserializeTokens, serializeTokens } from '../ludoFirebase';
@@ -372,10 +383,11 @@ describe('distinctMoves / getDistinctMoves', () => {
 // the dead turns — but the table threw it out the same afternoon: a counter
 // walking out on a 1 reads as the game miscounting. This block pins their
 // decision so no future cleanup quietly reopens the second door. The drought
-// the ruling leaves is answered by the warm start instead — a stated curve on
-// the shut-in throw and a given 6 after YARD_MISS_LIMIT misses, applied only
-// while every counter is still at home. Eligibility is guarded here; the
-// curve itself is pinned to numbers in the fairness suite.
+// the ruling leaves is answered by the warm die instead — a stated curve on
+// any throw taken after a wasted turn with a counter still in the yard, and a
+// given 6 after YARD_MISS_LIMIT misses (isWarmThrow, ported from ludo3).
+// Eligibility is guarded here; the curve itself is pinned to numbers in the
+// fairness suite.
 describe('leaving the yard', () => {
   it('a 6 brings a counter out, onto the start haven', () => {
     const moves = getDistinctMoves(BASE_TOKENS, 'red', 6);
@@ -390,15 +402,44 @@ describe('leaving the yard', () => {
     }
   });
 
-  it('warms the die only while every counter is still at home', () => {
+  it('knows when the whole colour is still at home', () => {
     expect(YARD_MISS_LIMIT).toBe(3);
     expect(allInYard(BASE_TOKENS, 'red')).toBe(true);
-    // One counter anywhere out of the yard — on the ring or standing in the
-    // run home — and every throw is the plain fair die.
     expect(allInYard(tokensWith({ 0: 'track-9' }), 'red')).toBe(false);
     expect(allInYard(tokensWith({ 0: 'final-2' }), 'red')).toBe(false);
     // Another colour's counters never count for red.
     expect(allInYard(tokensWith({ 5: 'track-9' }), 'red')).toBe(true);
+  });
+
+  it('counts a yard counter only for the colour that owns it', () => {
+    expect(hasYardCounter(BASE_TOKENS, 'red')).toBe(true);
+    expect(hasYardCounter(tokensWith({ 0: 'track-9' }), 'red')).toBe(true);
+    const redAllOut = tokensWith({ 0: 'track-9', 1: 'track-10', 2: 'track-11', 3: 'final-1', 4: 'final-2' });
+    expect(hasYardCounter(redAllOut, 'red')).toBe(false);
+    // Green's five are still at home; that is green's business, not red's.
+    expect(hasYardCounter(redAllOut, 'green')).toBe(true);
+  });
+
+  it('warms the die on the opening throw and after a wasted one, never otherwise', () => {
+    // The opening: whole colour at home, nothing thrown yet.
+    expect(isWarmThrow(BASE_TOKENS, 'red', 0)).toBe(true);
+
+    // Four at home but a counter out and a board to play on — this is the case
+    // the old all-at-home rule left throwing a stone-cold die for the remaining
+    // four deploys, and the reason a seat could sit stuck for six-plus turns
+    // the night the table called the die crooked.
+    const oneOut = tokensWith({ 0: 'track-9' });
+    expect(isWarmThrow(oneOut, 'red', 0)).toBe(false);
+    // ...until a throw of theirs is actually wasted.
+    expect(isWarmThrow(oneOut, 'red', 1)).toBe(true);
+    expect(isWarmThrow(oneOut, 'red', YARD_MISS_LIMIT)).toBe(true);
+
+    // Nothing left in the yard: there is no 6 to wait for, so no warmth however
+    // many dead turns a jammed run home has cost. A stale count cannot leak
+    // warmth to a player the yard die was never meant to help.
+    const noneAtHome = tokensWith({ 0: 'track-9', 1: 'track-10', 2: 'track-11', 3: 'final-1', 4: 'final-2' });
+    expect(isWarmThrow(noneAtHome, 'red', 0)).toBe(false);
+    expect(isWarmThrow(noneAtHome, 'red', 9)).toBe(false);
   });
 
   it('round-trips the shut-in tally, reading legacy rooms as cold', () => {
@@ -735,6 +776,17 @@ describe('rollStats (4 colors)', () => {
     expect(rt[3].captures).toBe(1);
   });
 
+  it('counts warm throws beside the faces they produced, round-tripping', () => {
+    let stats = deserializeRollStats(initRollStats());
+    stats = recordRoll(stats, 2, 6, true);
+    stats = recordRoll(stats, 2, 6);
+    const rt = deserializeRollStats(serializeRollStats(stats));
+    expect(rt[2].rolls[5]).toBe(2);
+    expect(rt[2].warm).toBe(1);
+    // A room written before the warm count existed reads as zero warm throws.
+    expect(deserializeRollStats('1,0,0,0,0,0,2')[0].warm).toBe(0);
+  });
+
   it('merge takes per-cell max', () => {
     let a = deserializeRollStats(initRollStats());
     a = recordRoll(a, 0, 1);
@@ -752,5 +804,72 @@ describe('rollStats (4 colors)', () => {
   it('tolerates empty and short input', () => {
     expect(deserializeRollStats('')).toHaveLength(4);
     expect(deserializeRollStats('1,0,0,0,0,0,2')).toHaveLength(4);
+  });
+});
+
+// --- The dice pack -----------------------------------------------------------
+// The synced state is cumulative DRAWS (monotone, so makeMove's max-merge is
+// idempotent under the same races rollStats survives); the pack itself is
+// derived from them. See the pack section of ludo4Board.
+
+describe('the dice pack (4 seats)', () => {
+  it('a legacy room starts every seat on a fresh, full pack', () => {
+    expect(parsePackDraws(undefined)).toHaveLength(4);
+    expect(parsePackDraws('').every(seat => seat.every(d => d === 0))).toBe(true);
+    expect(parsePackDraws('junk')[0]).toEqual([0, 0, 0, 0, 0, 0]);
+    for (const seat of parsePackDraws(undefined)) {
+      expect(packRemaining(seat)).toEqual(Array(6).fill(PACK_PER_FACE));
+    }
+    expect(serializePackDraws(parsePackDraws(initPackDraws()))).toBe(initPackDraws());
+  });
+
+  it('draws exactly three of every face per eighteen, then refills', () => {
+    // Deterministic picker — always the first die remaining. Whatever the
+    // picker does, a full cycle must exhaust the pack at exactly
+    // PACK_PER_FACE per face, and the boundary must refill it by derivation
+    // alone: there is no reshuffle event to sync, so there is none to lose.
+    const drawn = [0, 0, 0, 0, 0, 0];
+    const counts = [0, 0, 0, 0, 0, 0];
+    for (let i = 0; i < PACK_SIZE; i++) {
+      const face = drawFromPack(drawn, () => 0);
+      counts[face - 1]++;
+      drawn[face - 1]++;
+    }
+    expect(counts).toEqual(Array(6).fill(PACK_PER_FACE));
+    expect(packRemaining(drawn)).toEqual(Array(6).fill(PACK_PER_FACE));
+  });
+
+  it('never offers a face already exhausted within the pack', () => {
+    // All three 1s drawn: whichever remaining die the picker lands on, the
+    // face cannot come up again until the refill.
+    const drawn = [PACK_PER_FACE, 0, 0, 0, 0, 0];
+    for (let k = 0; k < 15; k++) {
+      expect(drawFromPack(drawn, () => k)).not.toBe(1);
+    }
+  });
+
+  it('records a draw into the right seat lane only', () => {
+    const parsed = parsePackDraws(recordPackDraw(initPackDraws(), 2, 6));
+    expect(parsed[2]).toEqual([0, 0, 0, 0, 0, 1]);
+    for (const lane of [0, 1, 3]) {
+      expect(parsed[lane]).toEqual([0, 0, 0, 0, 0, 0]);
+    }
+  });
+
+  it('merge takes per-cell max, so a resent draw never double-burns', () => {
+    const base = initPackDraws();
+    const a = recordPackDraw(recordPackDraw(base, 0, 5), 0, 5);
+    const b = recordPackDraw(base, 0, 5);
+    expect(parsePackDraws(mergePackDraws(a, b))[0][4]).toBe(2);
+    expect(parsePackDraws(mergePackDraws(b, a))[0][4]).toBe(2);
+  });
+
+  it('always has a die to draw, even from a garbled write', () => {
+    // A count past its allowance clamps to zero remaining, never negative —
+    // and the sum of what remains is always at least one.
+    expect(packRemaining([10, 0, 0, 0, 0, 0])).toEqual([0, 3, 3, 3, 3, 3]);
+    const total = packRemaining([17, 3, 3, 3, 3, 3]).reduce((x, y) => x + y, 0);
+    expect(total).toBeGreaterThan(0);
+    expect(() => drawFromPack([10, 0, 0, 0, 0, 0], n => n - 1)).not.toThrow();
   });
 });

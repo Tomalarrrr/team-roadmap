@@ -9,9 +9,11 @@
 //
 // One deliberate difference from v1: there is NO pity timer. That board quietly
 // swaps a stuck player's roll for a 6 after a few failed deploys, which makes 6
-// the most common face over a game. Here the die is
-// exactly uniform (see requestDiceRoll in ludo4Api) and the face rolled is
-// always the face played, so the tallies on the seat cards are honest.
+// the most common face over a game. Here every seat throws from its own pack
+// of eighteen — three of every face, drawn without replacement (see
+// requestPackRoll in ludo4Api) — and the face rolled is always the face
+// played, so the tallies on the seat cards are honest: they even out because
+// the pack does, not because anything swapped a face.
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -25,7 +27,7 @@ import {
   removeBot,
   startGame,
   leaveGame,
-  requestDiceRoll,
+  requestPackRoll,
   requestYardRoll,
   getServerTimestamp,
   type Ludo4GameState,
@@ -53,6 +55,9 @@ import {
   recordCapture,
   parseYardMisses,
   serializeYardMisses,
+  initPackDraws,
+  parsePackDraws,
+  recordPackDraw,
   type RollStats,
   type Ludo4Color,
 } from '../../ludo4Board';
@@ -66,7 +71,8 @@ import {
   findNextActivePlayer,
   getNextTurn,
   scoreBotMove,
-  allInYard,
+  isWarmThrow,
+  hasYardCounter,
   YARD_MISS_LIMIT,
 } from '../../ludo4GameLogic';
 import { computeMovePath, getTokenCoords, ARM_ANGLE, TRACK_XY } from './ludo4Geometry';
@@ -257,6 +263,12 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
   const rollStatsRef = useRef(rollStats);
   // The warm die's memory, mirrored from synced state (see requestYardRoll).
   const yardMissesRef = useRef<string>('');
+  // Each seat's cumulative pack draws (see the pack section of ludo4Board).
+  // Optimistic like rollStatsRef — bumped locally the moment a throw is
+  // recorded, resynced from the server by the subscription — because a client
+  // resolving consecutive turns (bot games) outruns the ~1.2s poll, and a
+  // stale pack would re-offer dice already drawn.
+  const packDrawsRef = useRef<string>(initPackDraws());
 
   // --- Turn/interaction state ---
   const [validMoves, setValidMoves] = useState<Map<number, TokenPosition>>(new Map());
@@ -593,6 +605,10 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
         rollStatsRef.current = parsed;
       }
       yardMissesRef.current = state.yardMisses ?? '';
+      // Guarded like rollStats, not like yardMisses: in a legacy room the
+      // field never arrives, and the local optimistic draws must survive the
+      // poll until this client's own writes have taught the room the field.
+      if (state.packDraws) packDrawsRef.current = state.packDraws;
 
       if (state.currentTurn !== currentTurnRef.current) {
         isRollingRef.current = false;
@@ -853,6 +869,7 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
       turnStartedAt: getServerTimestamp(),
       rollStats: serializeRollStats(moveRollStats),
       yardMisses: serializeYardMisses(coldMisses),
+      packDraws: packDrawsRef.current,
     };
 
     // Optimistic local apply so the token animates immediately
@@ -915,16 +932,18 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
     setIsRolling(true);
     const rollAnimMs = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 100 : 800;
 
-    // Shut in — all five still at home — the throw comes from the warm die:
-    // a quarter on the first throw, warmer for each miss since (three eighths,
-    // then a half), and once YARD_MISS_LIMIT misses are served the throw is a
-    // given 6, so nobody waits past four of their own turns.
-    // One counter out of the yard and this is the plain fair die, always.
-    const shutIn = allInYard(tokensRef.current, activeColor);
+    // Shut out — a counter still waiting in the yard, and either the opening
+    // (nothing thrown yet, whole colour at home) or a throw of this player's
+    // already wasted. Then the die is warm: a quarter, warmer for each miss
+    // since (three eighths, then a half), and once YARD_MISS_LIMIT misses are
+    // served the throw is a given 6, so nobody sits stuck past four of their
+    // own turns. Any turn this player can actually play draws from the seat's
+    // own pack instead.
     const missesBefore = parseYardMisses(yardMissesRef.current)[colorIndex(activeColor)];
-    const { rolls } = shutIn
+    const warmThrow = isWarmThrow(tokensRef.current, activeColor, missesBefore);
+    const { rolls } = warmThrow
       ? await requestYardRoll(missesBefore)
-      : await requestDiceRoll();
+      : await requestPackRoll(parsePackDraws(packDrawsRef.current)[colorIndex(activeColor)]);
 
     if (currentTurnRef.current !== activeColor || turnPhaseRef.current !== 'roll' || winnerRef.current) {
       moveInFlightRef.current = false;
@@ -934,8 +953,8 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
     }
 
     // The face rolled is the face played — no pity timer, no substitutions.
-    // The die is exactly uniform (see requestDiceRoll) and the tallies on the
-    // seat cards stay an honest record of it.
+    // The die is a draw from the seat's own pack (see requestPackRoll) and
+    // the tallies on the seat cards stay an honest record of it.
     const roll = rolls[0];
 
     rollTimeoutRef.current = setTimeout(async () => {
@@ -955,12 +974,20 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
 
       setDiceValue(roll);
       setLastRoll(roll);
-      if (shutIn && missesBefore >= YARD_MISS_LIMIT) {
-        showHint('Three misses served — this 6 is given');
+      if (warmThrow && missesBefore >= YARD_MISS_LIMIT) {
+        showHint('Three dead throws served — this 6 is given');
       }
 
-      const updatedRollStats = recordRoll(rollStatsRef.current, colorIndex(activeColor), roll);
+      const updatedRollStats = recordRoll(
+        rollStatsRef.current, colorIndex(activeColor), roll, warmThrow
+      );
       rollStatsRef.current = updatedRollStats;
+      // The pack draw commits exactly where the tally does, so the two can
+      // never disagree about how many throws happened — and a throw the
+      // guards above discarded burns no die. Warm yard throws never draw.
+      if (!warmThrow) {
+        packDrawsRef.current = recordPackDraw(packDrawsRef.current, colorIndex(activeColor), roll);
+      }
 
       const currentTokens = tokensRef.current;
       const curColor = activeColor;
@@ -1002,11 +1029,15 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
           // player reads the dice as broken rather than the rule as tight.
           showHint(describeNoMove(currentTokens, curColor));
         }
-        // A shut-in miss is counted the moment the turn resolves; any other
-        // no-move turn writes the seat cold, so a player captured back to a
-        // full yard later never inherits a stale count.
+        // The miss, counted the moment the turn resolves: this throw did
+        // nothing and a counter is still waiting in the yard, which is the
+        // whole of what the player just sat through. A dead turn with an empty
+        // yard is a different complaint — a counter that cannot land — and the
+        // yard die is not the answer to it, so that writes the seat cold.
         const misses = parseYardMisses(yardMissesRef.current);
-        misses[colorIndex(curColor)] = shutIn ? missesBefore + 1 : 0;
+        misses[colorIndex(curColor)] = hasYardCounter(currentTokens, curColor)
+          ? missesBefore + 1
+          : 0;
         const update: Ludo4MoveUpdate = {
           tokens: serializeTokens(currentTokens),
           currentTurn: nextColor,
@@ -1019,6 +1050,7 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
           rollStats: serializeRollStats(updatedRollStats),
           lastRoll: roll,
           yardMisses: serializeYardMisses(misses),
+          packDraws: packDrawsRef.current,
         };
         // Cleared whether or not it landed: a write that aborts must not leave
         // this client unable to roll or move for the rest of the game.
@@ -1052,6 +1084,7 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
         turnStartedAt: getServerTimestamp(),
         rollStats: serializeRollStats(updatedRollStats),
         lastRoll: roll,
+        packDraws: packDrawsRef.current,
       };
       const committed = await makeMove(gc, curColor, update).catch(() => false);
       moveInFlightRef.current = false;
@@ -1172,6 +1205,10 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
             finishOrder: finishOrderRef.current.join(','),
             turnStartedAt: getServerTimestamp(),
             rollStats: serializeRollStats(rollStatsRef.current),
+            // No throw here — republishing the mirror is a no-op under the
+            // max-merge, and it flushes any draw a cancelled auto-move left
+            // stranded in the ref (same reasoning as rollStats).
+            packDraws: packDrawsRef.current,
           };
           // Released either way — an aborted write must not leave this client
           // unable to act for the rest of the game.
@@ -1240,6 +1277,7 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
               finishOrder: finishOrderRef.current.join(','),
               turnStartedAt: getServerTimestamp(),
               rollStats: serializeRollStats(rollStatsRef.current),
+              packDraws: packDrawsRef.current,
             })
               .catch(() => false)
               .then(() => { moveInFlightRef.current = false; });
@@ -1277,6 +1315,7 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
     const stats = deserializeRollStats(initRollStats());
     setRollStats(stats);
     rollStatsRef.current = stats;
+    packDrawsRef.current = initPackDraws();
   }, []);
 
   const handleCreateGame = useCallback(async () => {
@@ -1546,10 +1585,11 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
             <div className={styles.helpTitle}>How to play</div>
             <ul className={styles.helpList}>
               <li>
-                Roll a 6 to bring a counter out of your yard. While all five
-                are still at home, the die warms to you: your first throw
-                already leans to the 6, each missed 6 makes the next likelier
-                still, and after three misses the fourth throw is a 6, given.
+                Roll a 6 to bring a counter out of your yard. Whenever a throw
+                leaves you nothing to do and a counter is still waiting at home,
+                the die warms to you: the next throw leans to the 6, each
+                further dead throw makes it likelier still, and after three the
+                next throw is a 6, given. Your opening throw is warm already.
               </li>
               <li>A 6, a capture, or reaching home earns another roll — but three 6s in a row and the turn passes.</li>
               <li>Land on an opponent to send that counter back to its yard.</li>
@@ -1564,9 +1604,13 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                 be sent back to your yard. Fill all five cells to win.
               </li>
               <li>
-                The die is fair: once a counter of yours is out, every face is
-                equally likely, every throw. The warm start above is the one
-                exception, and the face shown is always the face played.
+                The die is a pack of eighteen: three of every face, drawn
+                without replacement from your own pack and refilled when the
+                last is taken — every eighteen throws hold exactly three 6s,
+                so nobody's night runs cold, and the face shown is always the
+                face played. The warm throw above is the one exception — your
+                seat's tally counts them under <strong>w</strong>, so a big 6
+                column can always be checked against how many were warm.
               </li>
             </ul>
             <div className={styles.helpKeys}>
@@ -1780,17 +1824,25 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
 
                     {/* This seat's own roll tally. Per-card rather than one
                         shared table, so each player's luck sits next to their
-                        score — and with a fair die (see ludo4Api), over a long
-                        game the seven columns really do converge. */}
+                        score — and drawing from a pack (see ludo4Api), the six
+                        face columns converge by design: every completed pack
+                        of eighteen holds exactly three of each. */}
                     <div
                       className={styles.rollGrid}
                       role="img"
-                      aria-label={`${throwCount} throws — ${stats.rolls.map((n, i) => `${i + 1}: ${n}`).join(', ')}; captures ${stats.captures}`}
+                      aria-label={`${throwCount} throws — ${stats.rolls.map((n, i) => `${i + 1}: ${n}`).join(', ')}; captures ${stats.captures}; warm throws ${stats.warm}`}
                     >
                       {[1, 2, 3, 4, 5, 6].map(n => (
                         <span key={`h${n}`} className={styles.rollHead} aria-hidden="true">{n}</span>
                       ))}
                       <span className={styles.rollHead} title="Captures" aria-hidden="true">C</span>
+                      {/* Warm throws. Without it the 6 column is read as a
+                          fairness record it is not: a seat shut out of its own
+                          yard throws a die that leans to the 6, so the player
+                          who suffered the most dead turns shows the most 6s and
+                          the die gets called crooked for helping them. This is
+                          how many of the throws beside it were warm ones. */}
+                      <span className={styles.rollHead} title="Warm throws (shut out of your yard)" aria-hidden="true">w</span>
                       {/* The denominator. Without it the six counts are read
                           against each other as though every seat had thrown the
                           same number of times — and they never have, because a
@@ -1816,6 +1868,12 @@ export function Ludo4Game({ onClose, isSearchOpen }: Ludo4GameProps) {
                         aria-hidden="true"
                       >
                         {stats.captures || '·'}
+                      </span>
+                      <span
+                        className={`${styles.rollVal} ${stats.warm ? '' : styles.statNil}`}
+                        aria-hidden="true"
+                      >
+                        {stats.warm || '·'}
                       </span>
                       <span
                         className={`${styles.rollVal} ${styles.rollTotal} ${throwCount ? '' : styles.statNil}`}

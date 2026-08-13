@@ -24,6 +24,7 @@ import {
   TOKENS_PER_PLAYER,
   FINAL_SIZE,
   getColorTokenIndices,
+  drawFromPack,
   type Ludo4Color,
 } from '../ludo4Board';
 import type { TokenPosition } from '../ludoFirebase';
@@ -52,6 +53,15 @@ interface Outcome {
 
 function playGame(seed: number, turnCap = 6000): Outcome {
   const rand = rng(seed);
+  // Per-seat packs through the shipped drawFromPack — the sim rolls the same
+  // die the table does, seeded so a failure is reproducible.
+  const packs = new Map<typeof PLAYER_COLORS[number], number[]>(PLAYER_COLORS.map(c => [c, [0, 0, 0, 0, 0, 0]]));
+  const draw = (c: Ludo4Color) => {
+    const drawn = packs.get(c)!;
+    const face = drawFromPack(drawn, n => Math.floor(rand() * n));
+    drawn[face - 1]++;
+    return face;
+  };
   let tokens: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
   let turn: Ludo4Color = PLAYER_COLORS[Math.floor(rand() * 4)];
   let sixes = 0;
@@ -72,7 +82,7 @@ function playGame(seed: number, turnCap = 6000): Outcome {
       if (idx.every(i => tokens[i] === 'base')) continue;
       if (helpfulRolls(tokens, c).length === 0) deadlocked++;
     }
-    const roll = 1 + Math.floor(rand() * 6);
+    const roll = draw(turn);
     const moves = getValidMoves(tokens, turn, roll);
     const finished = getFinishedColors(tokens, 4);
 

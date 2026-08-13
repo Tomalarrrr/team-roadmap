@@ -231,6 +231,9 @@
         "yardMisses": {
           ".validate": "newData.isString() && newData.val().length <= 24"
         },
+        "packDraws": {
+          ".validate": "newData.isString() && newData.val().length <= 200"
+        },
         "$other": { ".validate": false }
       }
     },
@@ -284,6 +287,9 @@
         },
         "yardMisses": {
           ".validate": "newData.isString() && newData.val().length <= 24"
+        },
+        "packDraws": {
+          ".validate": "newData.isString() && newData.val().length <= 200"
         },
         "$other": { ".validate": false }
       }

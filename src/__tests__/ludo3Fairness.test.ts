@@ -1,21 +1,24 @@
 /// <reference types="node" />
 // Fairness, measured — because Ludo3 promises it.
 //
-// The help card makes two promises about the die. Out on the board it is
-// exactly fair — no pity timer quietly swapping faces for 6s the way v1's
-// does. And while a seat is shut in (all five counters at home) it warms by a
-// stated curve — P(6) = (2 + misses) / 8, warm from the very first throw —
-// with the throw after YARD_MISS_LIMIT misses a given 6. A stated curve is only honest while
-// it is the curve actually thrown, so both promises get pinned here. Those are product claims about probability, and probability
+// The help card makes two promises about the die. Out on the board it is a
+// pack of eighteen per seat — three of every face, drawn without replacement,
+// refilled when the last is taken — no pity timer quietly swapping faces for
+// 6s the way v1's does, and no night run cold: the fairness is per pack, not
+// per expectation. And on a throw taken after a wasted turn with a counter
+// still in the yard it warms by a stated curve — P(6) = (2 + misses) / 8 —
+// with the throw after YARD_MISS_LIMIT misses a given 6. A stated rule is
+// only honest while it is the rule actually thrown, so both promises get
+// pinned here. Those are product claims about probability, and probability
 // claims rot silently: nothing else in the suite would fail if someone
-// reintroduced `Math.random() * 6 | 0 % ...` bias, biased the seat deal, or
-// wrote a scoring rule that favours one colour's side of the ring. So this file
-// pins each claim to a number.
+// reintroduced `Math.random() * 6 | 0 % ...` bias, put the i.i.d. die back,
+// biased the seat deal, or wrote a scoring rule that favours one colour's
+// side of the ring. So this file pins each claim to a number.
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { requestDiceRoll, requestYardRoll } from '../api/ludo3Api';
+import { requestPackRoll, requestYardRoll } from '../api/ludo3Api';
 import { YARD_MISS_LIMIT } from '../ludo3GameLogic';
 import {
   TRACK_SIZE,
@@ -24,6 +27,9 @@ import {
   PLAYER_COLORS,
   START_POSITIONS,
   MAX_PLAYER_SCORE,
+  PACK_PER_FACE,
+  PACK_SIZE,
+  drawFromPack,
   getColorTokenIndices,
   getPlayerScore,
   type Ludo3Color,
@@ -42,26 +48,48 @@ import type { TokenPosition } from '../ludoFirebase';
 
 // --- The die ----------------------------------------------------------------
 
-describe('the die is uniform', () => {
-  it('never leaves 1..6', async () => {
+describe('the die is a pack of eighteen', () => {
+  it('never leaves 1..6, from any pack state', async () => {
+    const drawn = [0, 0, 0, 0, 0, 0];
     for (let i = 0; i < 1000; i++) {
-      const { rolls } = await requestDiceRoll();
+      const { rolls } = await requestPackRoll(drawn);
       expect(rolls[0]).toBeGreaterThanOrEqual(1);
       expect(rolls[0]).toBeLessThanOrEqual(6);
       expect(Number.isInteger(rolls[0])).toBe(true);
+      drawn[rolls[0] - 1]++;
     }
   });
 
-  it('passes a chi-square test over sixty thousand throws', async () => {
-    // The faces should be uniform to within sampling noise. Chi-square with
-    // five degrees of freedom: the critical value at p = 1e-4 is 25.7, so a
-    // bound of 30 fails a genuinely biased die (the old `byte % 6` bias alone
-    // costs ~34 at this sample size) while a fair one trips it about once per
-    // hundred thousand runs.
+  it('every completed pack holds exactly three of each face', async () => {
+    // The whole promise on the card, asserted literally: draw a seat's pack
+    // dry a hundred times over and every cycle of eighteen comes out
+    // 3/3/3/3/3/3. An i.i.d. die put back here fails within the first few
+    // packs.
+    const drawn = [0, 0, 0, 0, 0, 0];
+    for (let pack = 0; pack < 100; pack++) {
+      const counts = [0, 0, 0, 0, 0, 0];
+      for (let i = 0; i < PACK_SIZE; i++) {
+        const { rolls } = await requestPackRoll(drawn);
+        counts[rolls[0] - 1]++;
+        drawn[rolls[0] - 1]++;
+      }
+      expect(counts).toEqual(Array(6).fill(PACK_PER_FACE));
+    }
+  });
+
+  it('opens every fresh pack uniformly — the crypto-bias check', async () => {
+    // The first draw from a full pack is uniform over the six faces, so the
+    // chi-square test the i.i.d. die used to carry lives on here, pointed at
+    // the one draw the pack takes with no memory. Five degrees of freedom:
+    // the critical value at p = 1e-4 is 25.7, so a bound of 30 fails a
+    // genuinely biased picker (the old `byte % 6` bias alone costs ~34 at
+    // this sample size) while a fair one trips it about once per hundred
+    // thousand runs.
     const N = 60_000;
     const counts = [0, 0, 0, 0, 0, 0];
+    const fresh = [0, 0, 0, 0, 0, 0];
     for (let i = 0; i < N; i++) {
-      const { rolls } = await requestDiceRoll();
+      const { rolls } = await requestPackRoll(fresh);
       counts[rolls[0] - 1]++;
     }
     const expected = N / 6;
@@ -70,6 +98,26 @@ describe('the die is uniform', () => {
     // Generous wall-clock allowance: 60k crypto draws are fast alone but this
     // file shares workers with the whole suite, and a timeout here would read
     // as a fairness failure.
+  }, 30_000);
+
+  it('caps a 6 drought at thirty throws, by construction', async () => {
+    // The worst a pack can do: the three 6s drawn at the very top of one pack
+    // and the very bottom of the next leave at most 15 + 15 dice between 6s.
+    // The i.i.d. die this replaced had no cap at all — a 30-throw drought
+    // came round about once in two hundred throws, which over a games night
+    // is somebody's whole evening.
+    const drawn = [0, 0, 0, 0, 0, 0];
+    let sinceSix = 0;
+    for (let i = 0; i < 20_000; i++) {
+      const { rolls } = await requestPackRoll(drawn);
+      drawn[rolls[0] - 1]++;
+      if (rolls[0] === 6) {
+        sinceSix = 0;
+      } else {
+        sinceSix++;
+        expect(sinceSix).toBeLessThanOrEqual(2 * (PACK_SIZE - PACK_PER_FACE));
+      }
+    }
   }, 30_000);
 });
 
@@ -86,15 +134,29 @@ function rng(seed: number) {
   };
 }
 
+/** Per-seat packs for a simulation, drawn through the shipped drawFromPack so
+ * the sim rolls the same die the table does — seeded, so a failure is
+ * reproducible. */
+function makePackDraw(rand: () => number): (c: Ludo3Color) => number {
+  const packs = new Map<typeof PLAYER_COLORS[number], number[]>(PLAYER_COLORS.map(c => [c, [0, 0, 0, 0, 0, 0]]));
+  return (c: Ludo3Color) => {
+    const drawn = packs.get(c)!;
+    const face = drawFromPack(drawn, n => Math.floor(rand() * n));
+    drawn[face - 1]++;
+    return face;
+  };
+}
+
 /** Three identical bots play a full game; returns the winner. Same harness as
  * ludo3FinishSim, kept lean — this file only cares who wins. */
 function playGame(seed: number): Ludo3Color | null {
   const rand = rng(seed);
+  const draw = makePackDraw(rand);
   let tokens: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
   let turn: Ludo3Color = PLAYER_COLORS[Math.floor(rand() * 3)];
   let sixes = 0;
   for (let turns = 0; turns < 6000; turns++) {
-    const roll = 1 + Math.floor(rand() * 6);
+    const roll = draw(turn);
     const moves = getValidMoves(tokens, turn, roll);
     if (moves.length === 0) {
       const next = getNextTurn(turn, roll, sixes, false, false, 3, getFinishedColors(tokens, 3));
@@ -183,6 +245,7 @@ describe('the warm start is exactly what the card says', () => {
  */
 function worstYardWait(seed: number): Record<Ludo3Color, number> {
   const rand = rng(seed);
+  const draw = makePackDraw(rand);
   let tokens: TokenPosition[] = Array(TOTAL_TOKENS).fill('base');
   let turn: Ludo3Color = PLAYER_COLORS[Math.floor(rand() * 3)];
   let sixes = 0;
@@ -202,7 +265,9 @@ function worstYardWait(seed: number): Record<Ludo3Color, number> {
       const r = Math.floor(rand() * 40);
       roll = r < sixStates ? 6 : 1 + ((r - sixStates) % 5);
     } else {
-      roll = 1 + Math.floor(rand() * 6);
+      // The cold branch is the shipped pack die; warm throws never draw from
+      // the pack, exactly as in the client.
+      roll = draw(turn);
     }
 
     const moves = getValidMoves(tokens, turn, roll);
@@ -353,7 +418,8 @@ describe('the fair-die promise is kept in the client', () => {
   });
 
   it('tells the player the whole truth about the die', () => {
-    expect(game).toContain('The die is fair');
+    expect(game).toContain('The die is a pack of eighteen');
+    expect(game).toContain('three of every face');
     // The warm throw may exist only for as long as the card discloses it, and
     // the card has to name the condition it actually fires on — "while all five
     // are at home" described a rule the game no longer plays.
@@ -394,7 +460,7 @@ describe('firebase rules accept every field the client writes', () => {
     'players', 'host', 'tokens', 'currentTurn', 'turnPhase', 'diceValue',
     'lastRoll', 'consecutiveSixes', 'winner', 'finishOrder', 'createdAt',
     'startedAt', 'turnStartedAt', 'playerCount', 'paused', 'pausedAt',
-    'singlePlayer', 'rollStats', 'yardMisses',
+    'singlePlayer', 'rollStats', 'yardMisses', 'packDraws',
   ];
 
   it.each(written)('allows %s', (field) => {

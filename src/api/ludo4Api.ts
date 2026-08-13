@@ -9,6 +9,9 @@ import {
   PLAYER_COLORS,
   initRollStats,
   mergeRollStats,
+  initPackDraws,
+  mergePackDraws,
+  drawFromPack,
   type Ludo4Color,
   type Ludo4GameState,
   type Ludo4MoveUpdate,
@@ -40,9 +43,9 @@ const BOT_NAMES: Record<Ludo4Color, string> = {
  *
  * Not `arr[0] % n`: a byte covers 0..255, which no n that doesn't divide 256
  * splits evenly — for a die, 0..3 would come up 43 times against 42 for 4 and
- * 5, a bias of about 0.8% toward the low faces. This function also *is* the
- * die (see requestDiceRoll), so it is the one place fairness actually lives.
- * Reject the short tail and the remainder is exact.
+ * 5, a bias of about 0.8% toward the low faces. This function also draws the
+ * die from the pack (see requestPackRoll), so it is the one place the
+ * randomness actually lives. Reject the short tail and the remainder is exact.
  */
 function randomInt(n: number): number {
   const limit = 256 - (256 % n);
@@ -118,6 +121,7 @@ export async function createGame(
       playerCount: 4,
       rollStats: initRollStats(),
       yardMisses: PLAYER_COLORS.map(() => 0).join(','),
+      packDraws: initPackDraws(),
     };
 
     const result = await proxyTransaction<Ludo4GameState>(`ludo4/${code}`, (current) => {
@@ -430,6 +434,10 @@ export async function makeMove(
       ...(updates.rollStats && current.rollStats
         ? { rollStats: mergeRollStats(current.rollStats, updates.rollStats) }
         : {}),
+      // The pack's draws get the same treatment for the same races.
+      ...(updates.packDraws && current.packDraws
+        ? { packDraws: mergePackDraws(current.packDraws, updates.packDraws) }
+        : {}),
     };
   });
   return result.committed;
@@ -480,6 +488,7 @@ export async function resetGame(code: string, playerCount: number): Promise<void
       pausedAt: null,
       rollStats: initRollStats(),
       yardMisses: PLAYER_COLORS.map(() => 0).join(','),
+      packDraws: initPackDraws(),
       singlePlayer: hasBots,
     };
   });
@@ -489,15 +498,25 @@ export async function resetGame(code: string, playerCount: number): Promise<void
  * Client-side dice roll (the server-side roll endpoint is blocked behind the
  * VPNs this proxy exists to support — acceptable for a hidden, casual game).
  *
- * Exactly uniform over the six faces: crypto randomness through the same
- * rejection sampling the seat deal uses, not `Math.random() * 6`. And unlike
- * Ludo v1 there is no pity timer anywhere downstream quietly swapping
- * faces for 6s — the face this returns is the face that is played, so every
- * face is equally likely on every throw and the tally each seat card shows is
- * the truth about the die, not about the die plus a kindness.
+ * A draw from the seat's own pack of eighteen — three of every face, drawn
+ * without replacement, refilled when the last is taken (see the pack section
+ * of ludo4Board). This replaced the plain i.i.d. die after a table sat
+ * through a night of one seat throwing 7 sixes in 85 while another threw 20
+ * in 95: a fair die is fair only in the long run, and a games night is the
+ * short run. The pack moves the fairness from expectation to guarantee —
+ * every completed pack holds exactly three of each face — and it is a stated
+ * rule on the card, which is what separates it from a pity timer. Unlike Ludo
+ * v1 there is still nothing downstream quietly swapping faces for 6s: the
+ * face this returns is the face that is played, and the tally each seat card
+ * shows is the truth about the pack.
+ *
+ * The draw among remaining dice is exact: crypto randomness through the same
+ * rejection sampling the seat deal uses, never `Math.random()`.
  */
-export async function requestDiceRoll(): Promise<{ rolls: number[]; serverGenerated: boolean }> {
-  return { rolls: [1 + randomInt(6)], serverGenerated: false };
+export async function requestPackRoll(
+  drawn: number[]
+): Promise<{ rolls: number[]; serverGenerated: boolean }> {
+  return { rolls: [drawFromPack(drawn, randomInt)], serverGenerated: false };
 }
 
 /**
@@ -511,10 +530,14 @@ export async function requestDiceRoll(): Promise<{ rolls: number[]; serverGenera
  * everything else in this file, so warming the 6 never quietly biases the low
  * faces against each other.
  *
- * Only ever thrown while allInYard — one counter out of the yard and it is
- * requestDiceRoll, no exceptions. Stated in full on the rules card, which is
- * what separates a rule from a thumb on the die; the fairness suite pins this
- * curve to numbers exactly as it pins the fair die's.
+ * Only ever thrown while isWarmThrow holds — a counter still waiting in the
+ * yard, and either the opening or a throw of this player's already wasted (see
+ * ludo4GameLogic). Any turn a player could actually have played is
+ * requestPackRoll, no exceptions, and a warm throw never draws from the pack.
+ * Stated in full on the rules card, which is what separates a rule from a
+ * thumb on the die; counted on the seat card, so the tally beside it cannot
+ * be mistaken for a pack record; and the fairness suite pins this curve to
+ * numbers exactly as it pins the pack's.
  */
 export async function requestYardRoll(
   misses: number

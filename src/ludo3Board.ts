@@ -48,11 +48,15 @@ export interface Ludo3GameState {
   paused?: boolean;
   pausedAt?: number;
   singlePlayer?: boolean;
-  rollStats?: string; // "r1,..,r6,captures|g...|b..." (3 groups)
+  rollStats?: string; // "r1,..,r6,captures,warm|g...|b..." (3 groups)
   /** Consecutive dead throws taken with a counter still in the yard, one count
    * per seat ("0,0,0"). The warm die's memory (see requestYardRoll). Missing
    * reads as cold, so legacy rooms and old clients simply play on fair. */
   yardMisses?: string;
+  /** Cumulative faces drawn from each seat's dice pack,
+   * "d1,..,d6|g...|b..." (see the pack section below). Missing reads as zero
+   * draws, so a legacy room starts every seat on a fresh, full pack. */
+  packDraws?: string;
 }
 
 export interface Ludo3MoveUpdate {
@@ -69,6 +73,8 @@ export interface Ludo3MoveUpdate {
   rollStats?: string;
   /** Omit to preserve the stored counts — only turn-resolving writes carry it. */
   yardMisses?: string;
+  /** Rides exactly where rollStats rides — same monotone counts, same merge. */
+  packDraws?: string;
 }
 
 // --- Board constants ---
@@ -339,4 +345,108 @@ export function parseYardMisses(str: string | undefined | null): number[] {
 
 export function serializeYardMisses(misses: number[]): string {
   return PLAYER_COLORS.map((_, i) => misses[i] ?? 0).join(',');
+}
+
+// --- The dice pack -----------------------------------------------------------
+//
+// Every seat throws from its own pack of eighteen dice — three of every face,
+// drawn without replacement, refilled the moment the last one is taken. That
+// is the whole rule: over any completed pack a seat gets exactly three 6s (and
+// three of everything else), so a night cannot run cold by luck alone. The
+// warm yard die is the one throw that does not draw from the pack — it is its
+// own stated exception and its own stated curve.
+
+/** Three of each face per pack: the whole fairness promise in one number. */
+export const PACK_PER_FACE = 3;
+/** Six faces of PACK_PER_FACE each — eighteen draws empties a pack. */
+export const PACK_SIZE = 6 * PACK_PER_FACE;
+
+/**
+ * What is synced is not the pack but the DRAWS: per seat, how many times each
+ * face has ever been drawn from that seat's pack since the game began. Counts
+ * only ever grow, which is the property everything downstream leans on:
+ * makeMove merges concurrent writers cell-by-cell with max exactly as it
+ * merges rollStats, and a duplicate throw for the same bot turn collapses to
+ * one draw the same way it collapses to one tally mark. Storing the dice
+ * *remaining* would read more naturally and be wrong the first time two
+ * clients wrote at once — max would resurrect every die the other had drawn.
+ *
+ * The pack itself is derived (packRemaining), and the refill needs no synced
+ * event: the eighteenth draw of one pack simply starts the count of the next.
+ */
+export type PackDraws = number[][];
+
+export function initPackDraws(): string {
+  return PLAYER_COLORS.map(() => [0, 0, 0, 0, 0, 0].join(',')).join('|');
+}
+
+/** Absent or garbled reads as zero draws — a legacy room or an old client's
+ * write starts a seat on a fresh, full pack, never a depleted one. */
+export function parsePackDraws(str: string | undefined | null): PackDraws {
+  const out: PackDraws = PLAYER_COLORS.map(() => [0, 0, 0, 0, 0, 0]);
+  if (!str) return out;
+  const parts = str.split('|');
+  for (let i = 0; i < out.length && i < parts.length; i++) {
+    const nums = parts[i].split(',').map(Number);
+    for (let j = 0; j < 6; j++) {
+      const n = nums[j];
+      if (Number.isFinite(n) && n > 0) out[i][j] = Math.floor(n);
+    }
+  }
+  return out;
+}
+
+export function serializePackDraws(draws: PackDraws): string {
+  return PLAYER_COLORS.map((_, i) => (draws[i] ?? [0, 0, 0, 0, 0, 0]).join(',')).join('|');
+}
+
+/**
+ * The dice one seat still holds, derived from its cumulative draws. Each
+ * face's allowance is PACK_PER_FACE per pack, and a new pack begins the moment
+ * the last draw of the current one is taken: the allowance grows with
+ * floor(total / PACK_SIZE), what remains is allowance minus drawn. Within an
+ * honest pack no face can outrun its allowance (drawFromPack only offers what
+ * remains), so at every boundary each face has been drawn exactly three times
+ * and the fresh pack is full — the clamp is for garbled writes, and the sum of
+ * what this returns is always at least one, so there is always a die to draw.
+ */
+export function packRemaining(drawn: number[]): number[] {
+  const total = drawn.reduce((a, b) => a + b, 0);
+  const allowance = PACK_PER_FACE * (Math.floor(total / PACK_SIZE) + 1);
+  return drawn.map(d => Math.max(0, allowance - d));
+}
+
+/**
+ * Draw one die from a seat's pack: uniform among the dice actually remaining.
+ * That is a shuffled pack without the theatre of a stored order — and without
+ * a stored order, nothing in the synced state says what anyone's next throw
+ * will be. `pick` supplies the randomness (a uniform integer in [0, n)): the
+ * api layer passes its crypto randomInt, the simulations pass their seeded
+ * generator, and this stays the one definition of how a pack is drawn.
+ */
+export function drawFromPack(drawn: number[], pick: (n: number) => number): number {
+  const remaining = packRemaining(drawn);
+  const total = remaining.reduce((a, b) => a + b, 0);
+  let k = pick(total);
+  for (let face = 0; face < 6; face++) {
+    k -= remaining[face];
+    if (k < 0) return face + 1;
+  }
+  return 6; // unreachable: packRemaining never sums to zero
+}
+
+/** Record one drawn face into a seat's cumulative counts. String in, string
+ * out — the ref that carries this lives in serialized form, like yardMisses. */
+export function recordPackDraw(packStr: string, colorIdx: number, face: number): string {
+  const draws = parsePackDraws(packStr);
+  draws[colorIdx][Math.max(0, Math.min(face, 6) - 1)]++;
+  return serializePackDraws(draws);
+}
+
+/** Merge two serialized pack-draw strings cell-by-cell taking the max — the
+ * same idempotence rollStats gets from mergeRollStats, for the same races. */
+export function mergePackDraws(a: string, b: string): string {
+  const da = parsePackDraws(a);
+  const db = parsePackDraws(b);
+  return serializePackDraws(da.map((seat, i) => seat.map((d, j) => Math.max(d, db[i][j]))));
 }
