@@ -9,7 +9,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
+import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker, BoardSettings } from '../types';
 import { normalizeStatusColor } from './statusColors';
 
 /**
@@ -33,6 +33,7 @@ export interface FirebaseRoadmapData {
   dependencies: Record<string, Dependency> | Dependency[];
   leaveBlocks: Record<string, LeaveBlock> | LeaveBlock[];
   periodMarkers: Record<string, PeriodMarker> | PeriodMarker[];
+  settings?: BoardSettings;
 }
 
 // ---------- Generic converters ----------
@@ -163,7 +164,12 @@ export function firebaseSnapshotToRoadmapData(data: unknown): RoadmapData {
     raw.periodMarkers as Record<string, PeriodMarker> | PeriodMarker[] | undefined
   );
 
-  return { projects, teamMembers, dependencies, leaveBlocks, periodMarkers };
+  // Settings are a plain record, not a collection. Left off entirely when the
+  // board has none, so the defaults apply.
+  return {
+    projects, teamMembers, dependencies, leaveBlocks, periodMarkers,
+    ...(raw.settings && typeof raw.settings === 'object' && { settings: raw.settings })
+  };
 }
 
 /**
@@ -188,6 +194,8 @@ export function roadmapDataToFirebaseFormat(data: RoadmapData): FirebaseRoadmapD
     teamMembers: arrayToKeyedObject(orderedMembers),
     dependencies: arrayToKeyedObject(data.dependencies || []),
     leaveBlocks: arrayToKeyedObject(data.leaveBlocks || []),
-    periodMarkers: arrayToKeyedObject(data.periodMarkers || [])
+    periodMarkers: arrayToKeyedObject(data.periodMarkers || []),
+    // A full save replaces the whole node, so the rules have to go with it.
+    ...(data.settings && { settings: data.settings })
   };
 }

@@ -3,6 +3,13 @@ import { createPortal } from 'react-dom';
 import type { LeaveType, LeaveCoverage } from '../types';
 import styles from './LeaveContextMenu.module.css';
 
+const LEAVE_TYPES: { value: LeaveType; label: string }[] = [
+  { value: 'annual-leave', label: 'Annual leave' },
+  { value: 'training', label: 'Training' },
+  { value: 'conference', label: 'Conference' },
+  { value: 'other', label: 'Other' },
+];
+
 interface LeaveContextMenuProps {
   x: number;
   y: number;
@@ -30,6 +37,7 @@ export function LeaveContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [startDate, setStartDate] = useState(date);
   const [endDate, setEndDate] = useState(date);
+  const [type, setType] = useState<LeaveType>('annual-leave');
 
   // Adjust menu position to stay within viewport via direct DOM mutation.
   // useLayoutEffect runs before paint, preventing position flash.
@@ -75,8 +83,10 @@ export function LeaveContextMenu({
         memberId,
         startDate,
         endDate,
-        type: 'annual-leave',
-        coverage: 'full'
+        type,
+        coverage: 'full',
+        // The board shows a block's label, so anything but plain leave is named.
+        ...(type !== 'annual-leave' && { label: LEAVE_TYPES.find(t => t.value === type)?.label })
       });
       onClose();
     }
@@ -88,9 +98,20 @@ export function LeaveContextMenu({
       className={styles.menu}
       style={{ left: x, top: y }}
     >
-      <div className={styles.menuHeader}>Add Annual Leave</div>
+      <div className={styles.menuHeader}>Add time away</div>
       <div className={styles.formGroup}>
-        <label className={styles.label}>Start Date</label>
+        <label className={styles.label} htmlFor="leave-type">Type</label>
+        <select
+          id="leave-type"
+          className={styles.dateInput}
+          value={type}
+          onChange={(e) => setType(e.target.value as LeaveType)}
+        >
+          {LEAVE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+      </div>
+      <div className={styles.formGroup}>
+        <label className={styles.label}>Start date</label>
         <input
           type="date"
           className={styles.dateInput}
@@ -99,7 +120,7 @@ export function LeaveContextMenu({
         />
       </div>
       <div className={styles.formGroup}>
-        <label className={styles.label}>End Date</label>
+        <label className={styles.label}>End date</label>
         <input
           type="date"
           className={styles.dateInput}
@@ -113,7 +134,7 @@ export function LeaveContextMenu({
         onClick={handleSubmit}
         disabled={!startDate || !endDate || endDate < startDate}
       >
-        Add Leave
+        Add
       </button>
     </div>,
     document.body

@@ -37,6 +37,7 @@ import {
 import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from 'date-fns';
 import {
   CAPACITY,
+  capacityOfMember,
   UNIT_HEIGHT,
   SLOT_PITCH,
   heightForSize,
@@ -46,6 +47,7 @@ import {
 } from '../utils/capacity';
 import { isOnHold } from '../utils/statusColors';
 import { getTimelineBounds } from '../utils/timelineBounds';
+import { leaversLast } from '../utils/teamMembers';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
@@ -129,6 +131,7 @@ interface TimelineProps {
   dayWidth?: number; // Pixels per day (0.5 - 12)
   selectedProjectId?: string | null;
   filteredOwners?: string[]; // When set, only show swimlanes for these owners
+  dimLeavers?: boolean; // Grey back the lanes of people who have left the team
   // When true, a swimlane with nothing left to show collapses to a slim strip
   // instead of reserving the full capacity frame. Set while a filter is active,
   // so a filtered board doesn't become a column of tall empty lanes. Off
@@ -213,6 +216,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   dayWidth: dayWidthProp,
   selectedProjectId,
   filteredOwners,
+  dimLeavers = true,
   slimEmptyLanes = false,
   newDependencyIds,
   isLocked = false,
@@ -252,9 +256,6 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   // Tracks the last selection we actually scrolled to, so Effect B fires once per
   // genuine selection change instead of every time timelineStart/dayWidth churn.
   const prevSelectedProjectIdRef = useRef<string | null>(null);
-
-  // Zoom animation ref for cleanup
-  const zoomTimeoutRef = useRef<number | null>(null);
 
   // Support both old zoomLevel prop and new dayWidth prop
   const dayWidth = dayWidthProp ?? (zoomLevel ? ZOOM_DAY_WIDTHS[zoomLevel] : DEFAULT_DAY_WIDTH);
@@ -297,12 +298,12 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     })
   );
 
-  // Filter team members when owner filter is active
+  // Filter team members when owner filter is active; leavers always sit last.
   const displayedTeamMembers = useMemo(() => {
-    if (!filteredOwners || filteredOwners.length === 0) {
-      return teamMembers;
-    }
-    return teamMembers.filter(m => filteredOwners.includes(m.name));
+    const shown = !filteredOwners || filteredOwners.length === 0
+      ? teamMembers
+      : teamMembers.filter(m => filteredOwners.includes(m.name));
+    return leaversLast(shown);
   }, [teamMembers, filteredOwners]);
 
   // Handler for team member reordering
@@ -465,72 +466,27 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId, timelineStart, dayWidth]);
 
-  // Effect C: Smooth zoom animation when dayWidth changes
-  // Uses direct DOM manipulation for synchronous transform application
+  // Where the next zoom should pivot: the content x (px at the old dayWidth) that
+  // must stay under viewport x `viewportX`. The wheel handler sets it to the
+  // cursor; zooms from the slider or keyboard leave it null and pivot on the
+  // viewport centre.
+  const zoomAnchorRef = useRef<{ contentX: number; viewportX: number } | null>(null);
+
+  // Effect C: keep the zoom pivot still when dayWidth changes. Layout effect so
+  // the corrected scrollLeft lands in the same paint as the resized content.
   useLayoutEffect(() => {
-    if (!scrollRef.current || !lanesRef.current || !headerRef.current || !hasInitialScrolledRef.current) return;
-    if (prevDayWidthRef.current === null || prevDayWidthRef.current === dayWidth) return;
-
-    const lanes = lanesRef.current;
-    const header = headerRef.current;
     const scroll = scrollRef.current;
+    if (!scroll || !hasInitialScrolledRef.current) return;
+    const prev = prevDayWidthRef.current;
+    if (prev === null || prev === dayWidth) return;
 
-    // Calculate the scale ratio (inverse to counteract the DOM size change)
-    const scaleRatio = prevDayWidthRef.current / dayWidth;
+    const viewportX = zoomAnchorRef.current?.viewportX ?? scroll.clientWidth / 2;
+    const contentX = zoomAnchorRef.current?.contentX ?? scroll.scrollLeft + viewportX;
+    scroll.scrollLeft = Math.max(0, contentX * (dayWidth / prev) - viewportX);
 
-    // Calculate what position was at viewport center before zoom
-    const viewportWidth = scroll.clientWidth;
-    const prevScrollLeft = scroll.scrollLeft;
-    const viewportCenterX = prevScrollLeft + viewportWidth / 2;
-
-    // Cancel any existing animation
-    if (zoomTimeoutRef.current !== null) {
-      clearTimeout(zoomTimeoutRef.current);
-      lanes.classList.remove(styles.zooming);
-      header.classList.remove(styles.zooming);
-    }
-
-    // Step 1: Set transform origin to left edge (simpler math)
-    lanes.style.transformOrigin = 'left top';
-    header.style.transformOrigin = 'left top';
-
-    // Step 2: Apply inverse scale immediately via DOM (synchronous!)
-    lanes.style.transform = `scaleX(${scaleRatio})`;
-    header.style.transform = `scaleX(${scaleRatio})`;
-
-    // Step 3: Adjust scroll to keep the same content centered
-    // The position that was at viewportCenterX is now at viewportCenterX * (newDayWidth/oldDayWidth)
-    const newCenterX = viewportCenterX * (dayWidth / prevDayWidthRef.current);
-    scroll.scrollLeft = Math.max(0, newCenterX - viewportWidth / 2);
-
-    // Step 4: In next frame, enable transition and animate to scale(1)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        lanes.classList.add(styles.zooming);
-        header.classList.add(styles.zooming);
-        lanes.style.transform = '';
-        header.style.transform = '';
-
-        // Step 5: After animation completes, clean up
-        zoomTimeoutRef.current = window.setTimeout(() => {
-          lanes.classList.remove(styles.zooming);
-          header.classList.remove(styles.zooming);
-          zoomTimeoutRef.current = null;
-        }, 300); // Match CSS transition duration
-      });
-    });
-
+    zoomAnchorRef.current = null;
     prevDayWidthRef.current = dayWidth;
   }, [dayWidth]);
-
-  // Cleanup zoom timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (zoomTimeoutRef.current !== null) {
-        clearTimeout(zoomTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Keyboard navigation for timeline panning
   const KEYBOARD_SCROLL_AMOUNT = 100;
@@ -546,19 +502,48 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     enabled: true
   });
 
-  // Use native wheel event listener with { passive: false } to allow preventDefault
-  // Handles both horizontal scrolling (header drag) and Ctrl/Cmd + scroll zoom
+  // Native wheel listener ({ passive: false }) so the zoom gesture can
+  // preventDefault. Handles Ctrl/Cmd + wheel zoom and horizontal scroll over the
+  // header.
+  const dayWidthRef = useRef(dayWidth);
+  useEffect(() => {
+    dayWidthRef.current = dayWidth;
+  }, [dayWidth]);
+
   useEffect(() => {
     const scrollEl = scrollRef.current;
     if (!scrollEl) return;
 
+    // A trackpad pinch arrives as dozens of small ctrl+wheel events per second
+    // and a mouse wheel as a few large ones. Both are folded into one factor and
+    // applied once per frame, so a gesture costs one render per frame however
+    // many events it fires.
+    let pendingFactor = 1;
+    let frame: number | null = null;
+
     const handleWheel = (e: WheelEvent) => {
-      // Ctrl/Cmd + scroll to zoom (like Google Maps)
       if ((e.ctrlKey || e.metaKey) && onDayWidthChange) {
         e.preventDefault();
-        const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1; // Scroll down = zoom out, up = zoom in
-        const newDayWidth = Math.min(12, Math.max(0.5, dayWidth * zoomFactor));
-        onDayWidthChange(newDayWidth);
+        const deltaPx = e.deltaMode === WheelEvent.DOM_DELTA_LINE ? e.deltaY * 16 : e.deltaY;
+        // A pinch sends many small deltas and a wheel notch one large one. Scale
+        // with the delta but cap each event, so a notch is one deliberate step
+        // (about 1.2x) instead of a jump.
+        const step = Math.max(-0.18, Math.min(0.18, -deltaPx * 0.01));
+        pendingFactor *= Math.exp(step);
+
+        const rect = scrollEl.getBoundingClientRect();
+        const viewportX = e.clientX - rect.left;
+        if (frame === null) {
+          frame = requestAnimationFrame(() => {
+            frame = null;
+            const current = dayWidthRef.current;
+            const next = Math.min(12, Math.max(0.5, current * pendingFactor));
+            pendingFactor = 1;
+            if (next === current) return;
+            zoomAnchorRef.current = { contentX: scrollEl.scrollLeft + viewportX, viewportX };
+            onDayWidthChange(next);
+          });
+        }
         return;
       }
 
@@ -573,8 +558,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     };
 
     scrollEl.addEventListener('wheel', handleWheel, { passive: false });
-    return () => scrollEl.removeEventListener('wheel', handleWheel);
-  }, [dayWidth, onDayWidthChange]);
+    return () => {
+      scrollEl.removeEventListener('wheel', handleWheel);
+      if (frame !== null) cancelAnimationFrame(frame);
+    };
+  }, [onDayWidthChange]);
 
   // Click-drag panning state
   const [isPanning, setIsPanning] = useState(false);
@@ -601,6 +589,16 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
 
   // Track which project/milestone is hovered for dependency highlighting
   const [hoveredItemId, setHoveredItemId] = useState<{ projectId: string } | null>(null);
+  // Hovering a bar only matters to the dependency lines, so bars with no link
+  // report nothing and a cursor sweep across the board stops re-rendering it.
+  const linkedProjectIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const dep of dependencies) {
+      ids.add(dep.fromProjectId);
+      ids.add(dep.toProjectId);
+    }
+    return ids;
+  }, [dependencies]);
 
   // Leave context menu state
   const [leaveContextMenu, setLeaveContextMenu] = useState<{
@@ -743,7 +741,6 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     const sidebarContentEl = sidebarContentRef.current;
     if (!scrollEl || !sidebarContentEl) return;
 
-    let rafId: number | null = null;
     let lastScrollTop = scrollEl.scrollTop;
 
     // The sidebar is positioned purely via transform, so its own native scrollTop
@@ -765,17 +762,11 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
       if (scrollEl.scrollTop === lastScrollTop) return;
       lastScrollTop = scrollEl.scrollTop;
 
-      // Cancel any pending frame to avoid queuing multiple updates
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
-
-      // Schedule transform update on next frame for perfect sync
-      rafId = requestAnimationFrame(() => {
-        sidebarContentEl.style.transform = `translate3d(0, -${lastScrollTop}px, 0)`;
-        resetSidebarNativeScroll();
-        rafId = null;
-      });
+      // Written here, not in a frame callback: scroll events already arrive
+      // once per frame ahead of paint, so the names move in the same frame as
+      // the lanes.
+      sidebarContentEl.style.transform = `translate3d(0, -${lastScrollTop}px, 0)`;
+      resetSidebarNativeScroll();
     };
 
     // Use passive listener for better scroll performance
@@ -783,9 +774,6 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
 
     return () => {
       scrollEl.removeEventListener('scroll', syncSidebarToMain);
-      if (rafId !== null) {
-        cancelAnimationFrame(rafId);
-      }
     };
   }, [isFullscreen]); // Re-run when fullscreen changes to sync sidebar after it remounts
 
@@ -976,8 +964,8 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes, emptyLaneIds]);
 
   // Over-allocation markers per owner. Capacity is no longer a hard limit — a
-  // member can be pushed past their 4 slots — so wherever their concurrent load
-  // exceeds CAPACITY from today forward we flag the *top-most* pill in that
+  // member can be pushed past their slots — so wherever their concurrent load
+  // exceeds their own capacity from today forward we flag the *top-most* pill in that
   // window: the one that visually tips the stack over its 4-slot frame. That pill
   // shows a single clean "!" warning. The Digital Queue is exempt (it's a holding
   // bay — projects are meant to pile up there), so its lane is never flagged.
@@ -1002,7 +990,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         samplePoints.forEach(date => {
           const active = owned.filter(p => p.startDate <= date && date <= p.endDate);
           const load = active.reduce((sum, p) => sum + slotsFor(p.size ?? DEFAULT_SIZE), 0);
-          if (load > CAPACITY && active.length > 0) {
+          if (load > capacityOfMember(member) && active.length > 0) {
             const top = active.reduce((a, b) =>
               ((stacks?.get(b.id) ?? 0) > (stacks?.get(a.id) ?? 0) ? b : a));
             flagged.add(top.id);
@@ -1146,7 +1134,6 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
         <div ref={sidebarContentRef} className={styles.sidebarContent}>
           {displayedTeamMembers.length === 0 ? (
             <div className={styles.emptyState}>
-              <div className={styles.emptyIcon}>👥</div>
               <p className={styles.emptyTitle}>No team members yet</p>
               <p className={styles.emptyText}>Add team members to start planning your roadmap</p>
             </div>
@@ -1169,6 +1156,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                     isCollapsed={collapsedLanes.has(member.id)}
                     isEmpty={emptyLaneIds.has(member.id)}
                     railMode={sidebarCollapsed}
+                    isDimmed={dimLeavers && member.left === true}
                     onToggleCollapse={onToggleLaneCollapse ? () => onToggleLaneCollapse(member.id) : undefined}
                     onEdit={() => onEditTeamMember(member)}
                     onAddProject={() => onAddProject(member.name)}
@@ -1322,6 +1310,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                     memberName={member.name}
                     top={lanePositions[idx]}
                     height={laneHeights[idx]}
+                    isDimmed={dimLeavers && member.left === true}
                     onContextMenu={(e) => handleLaneContextMenu(e, member.id)}
                     onHoverChange={(isHovered) => onHoveredMemberChange?.(isHovered ? member.name : null)}
                     timelineStart={timelineStart}
@@ -1369,11 +1358,17 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                         onDelete={() => onDeleteProject(project.id)}
                         onEdit={() => onEditProject(project)}
                         onCopy={onCopyProject ? () => onCopyProject(project) : undefined}
-                        onSelect={onSelectProject ? () => onSelectProject(project) : undefined}
+                        onSelect={onSelectProject ? () => {
+                          // A clicked pill is already under the pointer. Mark it as
+                          // scrolled-to so Effect B does not move the board, which
+                          // would put the second click of a double-click somewhere else.
+                          prevSelectedProjectIdRef.current = project.id;
+                          onSelectProject(project);
+                        } : undefined}
                         onEdgeDrag={handleEdgeDrag}
-                        onHoverChange={(hovered) => setHoveredItemId(
-                          hovered ? { projectId: project.id } : null
-                        )}
+                        onHoverChange={linkedProjectIds.has(project.id)
+                          ? (hovered) => setHoveredItemId(hovered ? { projectId: project.id } : null)
+                          : undefined}
                       />
                       );
                     })}

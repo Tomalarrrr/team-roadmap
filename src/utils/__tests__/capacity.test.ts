@@ -8,6 +8,9 @@ import {
   earliestAvailableDate,
   evaluateAssignment,
   supportSegments,
+  nextFreeDate,
+  capacityOfMember,
+  capacityByOwner,
   isCapacityExempt,
   type CapacityItem,
 } from '../capacity';
@@ -287,5 +290,77 @@ describe('supportSegments', () => {
     const segments = supportSegments(items, '2026-01-01', '2026-01-31');
     // 4 (free) | 1 | 4 | 1 | 4  -> the equal-4 gaps are separated by load, not merged
     expect(segments.map(s => s.freeSlots)).toEqual([4, 1, 4, 1, 4]);
+  });
+});
+
+describe('per-person capacity', () => {
+  it('is the full lane unless the member has their own figure', () => {
+    expect(capacityOfMember({})).toBe(CAPACITY);
+    expect(capacityOfMember({ capacity: 2 })).toBe(2);
+  });
+
+  it('looks capacity up by owner name, with the full lane for an unknown owner', () => {
+    const capacityOf = capacityByOwner([{ name: 'Priya', capacity: 2 }, { name: 'Sam' }]);
+    expect(capacityOf('Priya')).toBe(2);
+    expect(capacityOf('Sam')).toBe(CAPACITY);
+    expect(capacityOf('Nobody')).toBe(CAPACITY);
+  });
+
+  it('fits a medium beside a medium at four slots but not at three', () => {
+    const existing = [item('a', '2026-01-01', '2026-01-31', 'medium')];
+    const candidate = item('b', '2026-01-10', '2026-01-20', 'medium');
+    expect(checkFit(existing, candidate).fits).toBe(true);
+    expect(checkFit(existing, candidate, undefined, 3)).toEqual({ fits: false, peakLoad: 4, freeSlots: 1 });
+  });
+
+  it('judges the intended owner and the alternatives each by their own capacity', () => {
+    const byOwner = {
+      Priya: [item('a', '2026-01-01', '2026-01-31', 'medium')],
+      Sam: [item('c', '2026-01-01', '2026-01-31', 'medium')],
+      Lee: [item('d', '2026-01-01', '2026-01-31', 'medium')],
+    };
+    const candidate = item('b', '2026-01-10', '2026-01-20', 'medium');
+    const capacityOf = capacityByOwner([{ name: 'Priya', capacity: 3 }, { name: 'Sam', capacity: 3 }, { name: 'Lee' }]);
+    const verdict = evaluateAssignment(byOwner, candidate, 'Priya', undefined, capacityOf);
+    expect(verdict.fits).toBe(false);
+    expect(verdict.alternativeOwners.map(a => a.owner)).toEqual(['Lee']);
+  });
+
+  it('frees the owner the given number of recovery days after the blocking work', () => {
+    const existing = [item('a', '2026-01-01', '2026-01-31', 'full-time')];
+    const candidate = item('b', '2026-01-10', '2026-01-20', 'small');
+    expect(earliestAvailableDate(existing, candidate, undefined, CAPACITY, 7)).toBe('2026-02-08');
+    expect(earliestAvailableDate(existing, candidate, undefined, CAPACITY, 0)).toBe('2026-02-01');
+  });
+
+  it('reports free slots against the capacity given, going negative when over', () => {
+    const items = [item('a', '2026-01-10', '2026-01-20', 'large')];
+    expect(supportSegments(items, '2026-01-01', '2026-01-31', 2).map(s => s.freeSlots)).toEqual([2, -1, 2]);
+  });
+});
+
+describe('nextFreeDate', () => {
+  const segments = supportSegments([item('a', '2026-01-01', '2026-01-20', 'large')], '2026-01-01', '2026-03-31');
+
+  it('is the start of the window when that much is free already', () => {
+    expect(nextFreeDate(segments, 1, 7)).toBe('2026-01-01');
+  });
+
+  it('adds the recovery days when the room only opens later', () => {
+    expect(nextFreeDate(segments, 2, 7)).toBe('2026-01-28');
+    expect(nextFreeDate(segments, 2, 0)).toBe('2026-01-21');
+  });
+
+  it('skips a gap that closes before recovery is over', () => {
+    const tight = supportSegments(
+      [item('a', '2026-01-01', '2026-01-20', 'full-time'), item('b', '2026-01-24', '2026-02-10', 'full-time')],
+      '2026-01-01',
+      '2026-03-31',
+    );
+    expect(nextFreeDate(tight, 1, 7)).toBe('2026-02-18');
+  });
+
+  it('is null when nothing that size opens in the window', () => {
+    expect(nextFreeDate(segments, 5, 7)).toBeNull();
   });
 });

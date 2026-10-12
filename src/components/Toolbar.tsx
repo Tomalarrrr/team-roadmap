@@ -5,16 +5,19 @@ import { ExportMenu } from './ExportMenu';
 import { ZoomSlider } from './ZoomSlider';
 import { SaveStatus } from './SaveStatus';
 import { PresenceAvatars } from './PresenceAvatars';
-import type { Project, TeamMember, Dependency, FilterState } from '../types';
+import type { Project, TeamMember, RoadmapData, FilterState } from '../types';
 import type { PresenceUser } from '../hooks/usePresence';
+import type { BoardView } from '../utils/boardView';
 import { isMacPlatform } from '../utils/platformUtils';
 import styles from './Toolbar.module.css';
 
 interface ToolbarProps {
   projects: Project[];
   teamMembers: TeamMember[];
-  dependencies: Dependency[];
+  board: RoadmapData;
   filters: FilterState;
+  /** Every tag in use on the board — the Filter menu's tag chips. */
+  tags: string[];
   onFiltersChange: (filters: FilterState) => void;
   onSearchChange: (search: string) => void;
   /** Projects passing the active filters. Drives the filter panel's summary and
@@ -38,6 +41,10 @@ interface ToolbarProps {
   onToggleLock: () => void;
   // Read-only embed (e.g. framed in SharePoint): hides editor-only controls.
   embedMode?: boolean;
+  view: BoardView;
+  onViewChange: (view: BoardView) => void;
+  onOpenCapacity: () => void;
+  onOpenRules: () => void;
   // Presence props
   presenceUsers?: PresenceUser[];
   currentUserId?: string;
@@ -46,8 +53,9 @@ interface ToolbarProps {
 export const Toolbar = memo(function Toolbar({
   projects,
   teamMembers,
-  dependencies,
+  board,
   filters,
+  tags,
   onFiltersChange,
   onSearchChange,
   filteredProjects,
@@ -67,6 +75,10 @@ export const Toolbar = memo(function Toolbar({
   isLocked,
   onToggleLock,
   embedMode = false,
+  view,
+  onViewChange,
+  onOpenCapacity,
+  onOpenRules,
   presenceUsers = [],
   currentUserId = ''
 }: ToolbarProps) {
@@ -84,6 +96,19 @@ export const Toolbar = memo(function Toolbar({
       </div>
 
       <div className={styles.center}>
+        <div className={styles.views} role="group" aria-label="Board layout">
+          {(['people', 'programmes'] as const).map(option => (
+            <button
+              key={option}
+              type="button"
+              className={`${styles.viewBtn} ${view === option ? styles.viewBtnOn : ''}`}
+              aria-pressed={view === option}
+              onClick={() => onViewChange(option)}
+            >
+              {option === 'people' ? 'People' : 'Programmes'}
+            </button>
+          ))}
+        </div>
         <SearchFilter
           projects={projects}
           onSearchChange={onSearchChange}
@@ -93,6 +118,7 @@ export const Toolbar = memo(function Toolbar({
         <FilterMenu
           filters={filters}
           teamMembers={teamMembers}
+          tags={tags}
           onFiltersChange={onFiltersChange}
           filteredCount={filteredProjects.length}
           totalCount={projects.length}
@@ -111,10 +137,13 @@ export const Toolbar = memo(function Toolbar({
           </>
         )}
 
-        {/* View — zoom */}
-        <ZoomSlider value={dayWidth} onChange={onDayWidthChange} />
-
-        <div className={styles.divider} />
+        {/* View — zoom. The programme view always shows a whole year. */}
+        {view === 'people' && (
+          <>
+            <ZoomSlider value={dayWidth} onChange={onDayWidthChange} />
+            <div className={styles.divider} />
+          </>
+        )}
 
         {/* Actions — one consistent icon-button group. Undo/redo and the lock
             toggle are editor-only, so they're dropped in read-only embed mode;
@@ -165,11 +194,29 @@ export const Toolbar = memo(function Toolbar({
             </>
           )}
 
+          <button className={styles.iconBtn} onClick={onOpenCapacity} title="Capacity: who has room, and when" aria-label="Capacity">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 13V8M8 13V3M13 13V6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+          </button>
+
+          {/* The rules change how the whole board reads, so they sit behind the
+              same lock as every other edit. */}
+          {!embedMode && !isLocked && (
+            <button className={styles.iconBtn} onClick={onOpenRules} title="Board rules" aria-label="Board rules">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M2.5 4.5h4M10.5 4.5h3M2.5 11.5h3M9.5 11.5h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                <circle cx="8.5" cy="4.5" r="1.75" stroke="currentColor" strokeWidth="1.5"/>
+                <circle cx="7.5" cy="11.5" r="1.75" stroke="currentColor" strokeWidth="1.5"/>
+              </svg>
+            </button>
+          )}
+
           <ExportMenu
+            boardVisible={view === 'people'}
             projects={filteredProjects}
             allProjects={projects}
-            teamMembers={teamMembers}
-            dependencies={dependencies}
+            board={board}
             embedMode={embedMode}
           />
         </div>

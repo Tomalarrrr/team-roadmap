@@ -3,11 +3,12 @@ import { parseISO, addDays, differenceInDays, format } from 'date-fns';
 /**
  * Capacity model.
  *
- * Each team member has a fixed capacity of CAPACITY "slots". A project consumes
- * slots according to its size. Capacity is a *point-in-time* constraint: at any
- * moment on the timeline, the slots of the projects that overlap there must sum
- * to no more than CAPACITY. A member can hold many projects over a year as long
- * as no single instant exceeds CAPACITY.
+ * A lane is CAPACITY "slots" tall, and that is what a team member has unless
+ * their own `capacity` says fewer (part-time, or a role that is only partly
+ * project work). A project consumes slots according to its size. Capacity is a
+ * *point-in-time* constraint: at any moment on the timeline, the slots of the
+ * projects that overlap there must sum to no more than the member's capacity. A
+ * member can hold many projects over a year as long as no single instant exceeds it.
  *
  * This module is intentionally decoupled from the app's `Project` type — it
  * works on the minimal `CapacityItem` shape so it can't collide with concurrent
@@ -38,8 +39,21 @@ export const SIZE_SLOTS: Record<ProjectSize, number> = {
  */
 export const DEFAULT_SIZE: ProjectSize = 'small';
 
-/** Days of recovery buffer added after a project ends before its slots free up. */
-const RECOVERY_BUFFER_DAYS = 7;
+/** Days of recovery buffer added after a project ends before its slots free up.
+ *  The default; a board can set its own in its rules. */
+export const RECOVERY_BUFFER_DAYS = 7;
+
+/** Slots a member has for project work: their own figure, or the full lane. */
+export function capacityOfMember(member: { capacity?: number }): number {
+  return member.capacity ?? CAPACITY;
+}
+
+/** Look up capacity by owner name. An owner who is not a team member (the
+ *  Digital Queue lane, a name typed before owners were a list) gets the full lane. */
+export function capacityByOwner(teamMembers: { name: string; capacity?: number }[]): (owner: string) => number {
+  const byName = new Map(teamMembers.map(m => [m.name, capacityOfMember(m)]));
+  return owner => byName.get(owner) ?? CAPACITY;
+}
 
 /**
  * Title of the always-on "Digital Queue" workstream. It's ongoing BAU rather
@@ -142,6 +156,33 @@ export function projectAnchorY(
   return laneOffset + stackOffset + heightForSize(size ?? DEFAULT_SIZE) / 2;
 }
 
+/**
+ * Corners of a dependency line whose target starts to the left of where its
+ * source ends. `from` is the source pill's end and `to` the target pill's start,
+ * each at the pill's vertical centre. The line steps out past the source, runs
+ * back through the gap beside the target (half a SLOT_GAP clear of it, on the
+ * side facing the source, or beneath both pills when they share a row) and comes
+ * in at the target's start.
+ */
+export function backwardDependencyCorners(
+  from: { x: number; y: number; height: number },
+  to: { x: number; y: number; height: number },
+  gap: number,
+): Array<{ x: number; y: number }> {
+  const clear = SLOT_GAP / 2;
+  const toHalf = to.height / 2;
+  const sameRow = Math.abs(to.y - from.y) < toHalf + from.height / 2;
+  const runY = sameRow
+    ? Math.max(from.y + from.height / 2, to.y + toHalf) + clear
+    : to.y + (from.y < to.y ? -1 : 1) * (toHalf + clear);
+  return [
+    { x: from.x + gap, y: from.y },
+    { x: from.x + gap, y: runY },
+    { x: to.x - gap, y: runY },
+    { x: to.x - gap, y: to.y },
+  ];
+}
+
 /** Inclusive overlap test for two ISO date ranges. ISO strings sort lexically. */
 function rangesOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
   return aStart <= bEnd && bStart <= aEnd;
@@ -189,7 +230,7 @@ export interface FitResult {
 
 /**
  * Can `candidate` be added to `existing` (the owner's other projects) without
- * any instant in the candidate's range exceeding CAPACITY?
+ * any instant in the candidate's range exceeding `capacity`?
  *
  * `existing` should NOT include the candidate itself (filter by id upstream when
  * checking a move/resize of an already-placed project).
@@ -200,14 +241,19 @@ export interface FitResult {
  * no earlier than `asOf`, which also drops any item that ended before `asOf` out
  * of the overlap.
  */
-export function checkFit(existing: CapacityItem[], candidate: CapacityItem, asOf?: string): FitResult {
+export function checkFit(
+  existing: CapacityItem[],
+  candidate: CapacityItem,
+  asOf?: string,
+  capacity: number = CAPACITY,
+): FitResult {
   const windowStart = asOf && asOf > candidate.startDate ? asOf : candidate.startDate;
   const existingPeak = peakOverlappingLoad(existing, windowStart, candidate.endDate);
   const peakLoad = existingPeak + slotsFor(candidate.size);
   return {
-    fits: peakLoad <= CAPACITY,
+    fits: peakLoad <= capacity,
     peakLoad,
-    freeSlots: CAPACITY - existingPeak,
+    freeSlots: capacity - existingPeak,
   };
 }
 
@@ -227,12 +273,13 @@ export function suggestMembers(
   candidate: CapacityItem,
   excludeOwner: string,
   asOf?: string,
+  capacityOf: (owner: string) => number = () => CAPACITY,
 ): MemberSuggestion[] {
   const suggestions: MemberSuggestion[] = [];
   for (const owner of Object.keys(projectsByOwner)) {
     if (owner === excludeOwner) continue;
     const others = projectsByOwner[owner].filter(p => p.id !== candidate.id);
-    const result = checkFit(others, candidate, asOf);
+    const result = checkFit(others, candidate, asOf, capacityOf(owner));
     if (result.fits) {
       suggestions.push({ owner, freeSlots: result.freeSlots });
     }
@@ -245,7 +292,7 @@ export function suggestMembers(
  * duration) without exceeding capacity.
  *
  * Candidate start dates are the requested start plus, for each blocking project,
- * one week after it ends — the point its slots are considered recovered. Returns
+ * `recoveryDays` after it ends — the point its slots are considered recovered. Returns
  * the earliest candidate start whose shifted window fits, or null if none found
  * within the considered horizon.
  */
@@ -253,6 +300,8 @@ export function earliestAvailableDate(
   existing: CapacityItem[],
   candidate: CapacityItem,
   asOf?: string,
+  capacity: number = CAPACITY,
+  recoveryDays: number = RECOVERY_BUFFER_DAYS,
 ): string | null {
   const others = existing.filter(p => p.id !== candidate.id);
   const spanDays = differenceInDays(parseISO(candidate.endDate), parseISO(candidate.startDate));
@@ -260,14 +309,14 @@ export function earliestAvailableDate(
   // Build sorted, de-duplicated candidate start dates.
   const starts = new Set<string>([candidate.startDate]);
   for (const p of others) {
-    const freedFrom = format(addDays(parseISO(p.endDate), RECOVERY_BUFFER_DAYS + 1), 'yyyy-MM-dd');
+    const freedFrom = format(addDays(parseISO(p.endDate), recoveryDays + 1), 'yyyy-MM-dd');
     if (freedFrom > candidate.startDate) starts.add(freedFrom);
   }
 
   const sortedStarts = [...starts].sort();
   for (const start of sortedStarts) {
     const end = format(addDays(parseISO(start), spanDays), 'yyyy-MM-dd');
-    if (checkFit(others, { ...candidate, startDate: start, endDate: end }, asOf).fits) {
+    if (checkFit(others, { ...candidate, startDate: start, endDate: end }, asOf, capacity).fits) {
       return start;
     }
   }
@@ -292,9 +341,12 @@ export function evaluateAssignment(
   candidate: CapacityItem,
   intendedOwner: string,
   asOf?: string,
+  capacityOf: (owner: string) => number = () => CAPACITY,
+  recoveryDays: number = RECOVERY_BUFFER_DAYS,
 ): CapacityVerdict {
   const ownerProjects = (projectsByOwner[intendedOwner] ?? []).filter(p => p.id !== candidate.id);
-  const result = checkFit(ownerProjects, candidate, asOf);
+  const capacity = capacityOf(intendedOwner);
+  const result = checkFit(ownerProjects, candidate, asOf, capacity);
 
   if (result.fits) {
     return { fits: true, peakLoad: result.peakLoad, alternativeOwners: [], availableFrom: null };
@@ -303,8 +355,8 @@ export function evaluateAssignment(
   return {
     fits: false,
     peakLoad: result.peakLoad,
-    alternativeOwners: suggestMembers(projectsByOwner, candidate, intendedOwner, asOf),
-    availableFrom: earliestAvailableDate(ownerProjects, candidate, asOf),
+    alternativeOwners: suggestMembers(projectsByOwner, candidate, intendedOwner, asOf, capacityOf),
+    availableFrom: earliestAvailableDate(ownerProjects, candidate, asOf, capacity, recoveryDays),
   };
 }
 
@@ -313,25 +365,25 @@ export interface SupportSegment {
   startDate: string;
   /** Inclusive ISO end of the segment. */
   endDate: string;
-  /** Free slots (CAPACITY - load) across this segment. */
+  /** Free slots (capacity - load) across this segment; negative when over. */
   freeSlots: number;
 }
 
 /**
  * Break an owner's timeline into maximal segments of constant load and report
- * the free capacity (CAPACITY - load) in each.
+ * the free capacity (capacity - load) in each.
  *
- * Pure helper retained for capacity analysis and tests; it no longer drives any
- * UI (the "Team Support / Development" filler band was removed). Bounded to
- * [windowStart, windowEnd] so callers can scope it to the visible timeline.
+ * Drives the capacity view's per-person strip. Bounded to
+ * [windowStart, windowEnd] so callers can scope it to the period they show.
  */
 export function supportSegments(
   items: CapacityItem[],
   windowStart: string,
   windowEnd: string,
+  capacity: number = CAPACITY,
 ): SupportSegment[] {
   if (items.length === 0) {
-    return [{ startDate: windowStart, endDate: windowEnd, freeSlots: CAPACITY }];
+    return [{ startDate: windowStart, endDate: windowEnd, freeSlots: capacity }];
   }
 
   // Collect boundary dates: window edges, each start, and the day after each end.
@@ -357,7 +409,7 @@ export function supportSegments(
       (sum, it) => (activeOn(it, segStart) ? sum + slotsFor(it.size) : sum),
       0,
     );
-    const freeSlots = CAPACITY - load;
+    const freeSlots = capacity - load;
 
     // Merge with previous segment if free capacity is unchanged.
     const prev = segments[segments.length - 1];
@@ -369,4 +421,23 @@ export function supportSegments(
   }
 
   return segments;
+}
+
+/**
+ * First date an owner has at least `slots` free, read off their segments.
+ *
+ * Capacity that is free at the start of the window is free now. Capacity that
+ * opens later only counts `recoveryDays` after the work in front of it ends,
+ * the same recovery rule the project form applies, and only if the gap is
+ * still open by then. Null when nothing that size opens in the window.
+ */
+export function nextFreeDate(segments: SupportSegment[], slots: number, recoveryDays: number): string | null {
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    if (segment.freeSlots < slots) continue;
+    if (i === 0) return segment.startDate;
+    const recovered = format(addDays(parseISO(segment.startDate), recoveryDays), 'yyyy-MM-dd');
+    if (recovered <= segment.endDate) return recovered;
+  }
+  return null;
 }

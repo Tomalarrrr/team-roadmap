@@ -7,7 +7,7 @@ import styles from './FilterMenu.module.css';
 
 /**
  * Header filter control: a quiet chip that opens an anchored panel of filter
- * dimensions (EPR / people / size / status). All selections are multi-select
+ * dimensions (EPR / tags / people / size / status). All selections are multi-select
  * and applied instantly; the active count sits on the trigger so the state is
  * visible while the panel is closed. Search lives separately in SearchFilter —
  * this menu owns everything persistent.
@@ -16,6 +16,8 @@ import styles from './FilterMenu.module.css';
 interface FilterMenuProps {
   filters: FilterState;
   teamMembers: TeamMember[];
+  /** Every tag in use on the board. The section is omitted while there are none. */
+  tags: string[];
   onFiltersChange: (filters: FilterState) => void;
   /** Projects passing the current filters / total on the board — the panel's summary line. */
   filteredCount: number;
@@ -48,6 +50,7 @@ function toggled<T>(list: T[], value: T): T[] {
 export const FilterMenu = memo(function FilterMenu({
   filters,
   teamMembers,
+  tags,
   onFiltersChange,
   filteredCount,
   totalCount,
@@ -130,6 +133,24 @@ export const FilterMenu = memo(function FilterMenu({
               ))}
             </div>
           </div>
+
+          {tags.length > 0 && (
+            <div className={styles.section}>
+              <span className={styles.sectionLabel}>Tags</span>
+              <div className={styles.chips}>
+                {tags.map(tag => (
+                  <button
+                    key={tag}
+                    className={`${styles.chip} ${filters.tags.includes(tag) ? styles.chipActive : ''}`}
+                    onClick={() => onFiltersChange({ ...filters, tags: toggled(filters.tags, tag) })}
+                    aria-pressed={filters.tags.includes(tag)}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className={styles.section}>
             <span className={styles.sectionLabel}>Timeframe</span>

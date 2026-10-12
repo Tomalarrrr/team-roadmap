@@ -20,13 +20,15 @@ import { getLastFirebaseActivity } from '../firebase';
 import { projectToFirebase } from '../utils/firebaseConversions';
 import { createWriteCoalescer } from '../utils/writeCoalescer';
 import { changedFields } from '../utils/objectDiff';
-import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
+import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker, BoardSettings } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { format } from 'date-fns';
 import { withRetry } from '../utils/retry';
 import { analytics } from '../utils/analytics';
 import { validateDependency } from '../utils/dependencyUtils';
 import { safeValidateRoadmapData, formatValidationErrors } from '../schemas/roadmap';
 import { classifyScore } from '../utils/scoring';
+import { ownerRenamePaths, memberOrderPaths } from '../utils/teamMembers';
 
 // Wrap saveRoadmap with retry logic
 const saveWithRetry = (data: RoadmapData) =>
@@ -104,7 +106,8 @@ function normalizeData(newData: Partial<RoadmapData>): RoadmapData {
     teamMembers: newData.teamMembers || [],
     dependencies: newData.dependencies || [],
     leaveBlocks: newData.leaveBlocks || [],
-    periodMarkers: newData.periodMarkers || []
+    periodMarkers: newData.periodMarkers || [],
+    ...(newData.settings && { settings: newData.settings })
   };
 }
 
@@ -523,17 +526,32 @@ export function useRoadmap() {
     if (!existingMember) return;
 
     const updatedMember = { ...existingMember, ...updates };
+    const ownerPaths = updates.name !== undefined && updates.name !== existingMember.name
+      ? ownerRenamePaths(currentData.projects, existingMember.name, updates.name)
+      : {};
 
     // Optimistic update
     const newMembers = currentData.teamMembers.map(m => m.id === memberId ? updatedMember : m);
-    dataRef.current = { ...currentData, teamMembers: newMembers };
+    const newProjects = currentData.projects.map(p =>
+      `projects/${p.id}/owner` in ownerPaths ? { ...p, owner: updatedMember.name } : p
+    );
+    dataRef.current = { ...currentData, teamMembers: newMembers, projects: newProjects };
     setData(dataRef.current);
     startSaving();
 
     try {
       // Granular Firebase update - only updates this specific team member by ID
       // Write only the changed fields (field-level merge), not the whole member.
-      await withRetry(() => updateTeamMemberAtPath(memberId, sanitizeForFirebase(updates)), {
+      // A rename takes the member's projects with it in the same request, so
+      // the board is never left with the name changed and the projects not.
+      const fields = sanitizeForFirebase(updates);
+      const write = Object.keys(ownerPaths).length === 0
+        ? () => updateTeamMemberAtPath(memberId, fields)
+        : () => batchUpdate({
+            ...Object.fromEntries(Object.entries(fields).map(([key, value]) => [`teamMembers/${memberId}/${key}`, value])),
+            ...ownerPaths
+          });
+      await withRetry(write, {
         maxRetries: 3,
         baseDelayMs: 500
       });
@@ -595,10 +613,7 @@ export function useRoadmap() {
     newMembers.splice(toIndex, 0, moved);
     // Assign order fields based on new positions for ID-keyed Firebase storage
     const orderedMembers = newMembers.map((m, i) => ({ ...m, order: i }));
-    // Write only the teamMembers subtree (one path per member) so the reorder
-    // doesn't rewrite — and risk clobbering — unrelated collections.
-    const paths: Record<string, unknown> = {};
-    for (const m of orderedMembers) paths[`teamMembers/${m.id}`] = sanitizeForFirebase(m);
+    const paths = memberOrderPaths(newMembers);
     await optimisticSave({ ...currentData, teamMembers: orderedMembers }, () => batchWithRetry(paths));
     analytics.memberReordered();
   }, [optimisticSave]);
@@ -612,7 +627,12 @@ export function useRoadmap() {
     } as Project : {
       ...project,
       id: uuidv4(),
-      milestones: []
+      milestones: [],
+      // A new project's first end date is its baseline, and its status was
+      // chosen today. Both are set here so a copy or a paste gets its own
+      // rather than inheriting the source project's.
+      baselineEndDate: project.endDate,
+      statusSetOn: format(new Date(), 'yyyy-MM-dd')
     };
     await optimisticSave(
       { ...currentData, projects: [...currentData.projects, newProject] },
@@ -971,9 +991,16 @@ export function useRoadmap() {
     const updatedMarker = { ...markers[markerIndex], ...updates };
     const newMarkers = [...markers];
     newMarkers[markerIndex] = updatedMarker;
+    // Field-level paths, so a colleague's edit to another field of the same
+    // marker survives. changedFields turns a cleared field into a null, which
+    // deletes that path.
+    const patch = changedFields(markers[markerIndex], updatedMarker);
+    if (Object.keys(patch).length === 0) return;
+    const paths: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(patch)) paths[`periodMarkers/${markerId}/${key}`] = value;
     await optimisticSave(
       { ...currentData, periodMarkers: newMarkers },
-      () => batchWithRetry({ [`periodMarkers/${markerId}`]: sanitizeForFirebase(updatedMarker) })
+      () => batchWithRetry(paths)
     );
   }, [optimisticSave]);
 
@@ -983,6 +1010,37 @@ export function useRoadmap() {
     await optimisticSave(
       { ...currentData, periodMarkers: newMarkers },
       () => batchWithRetry({ [`periodMarkers/${markerId}`]: null })
+    );
+  }, [optimisticSave]);
+
+  // Board rules. Each field is written to its own path, so two people changing
+  // different rules at once don't overwrite each other.
+  const updateSettings = useCallback(async (updates: BoardSettings) => {
+    const currentData = dataRef.current;
+    const paths: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(updates)) paths[`settings/${key}`] = value;
+    await optimisticSave(
+      { ...currentData, settings: { ...currentData.settings, ...updates } },
+      () => batchWithRetry(paths)
+    );
+  }, [optimisticSave]);
+
+  // Renaming or removing a programme has to carry the projects under it in the
+  // same write, or they would be left pointing at a name that is off the list.
+  // `to` is the new name, or null to remove the programme and unassign its work.
+  const replaceProgramme = useCallback(async (from: string, to: string | null) => {
+    const currentData = dataRef.current;
+    const list = currentData.settings?.programmes ?? [];
+    const programmes = to === null ? list.filter(p => p !== from) : list.map(p => (p === from ? to : p));
+    const paths: Record<string, unknown> = { 'settings/programmes': programmes };
+    const projects = currentData.projects.map(p => {
+      if (p.programme !== from) return p;
+      paths[`projects/${p.id}/programme`] = to;
+      return { ...p, programme: to ?? undefined };
+    });
+    await optimisticSave(
+      { ...currentData, projects, settings: { ...currentData.settings, programmes } },
+      () => batchWithRetry(paths)
     );
   }, [optimisticSave]);
 
@@ -1014,6 +1072,8 @@ export function useRoadmap() {
     deleteLeaveBlock,
     addPeriodMarker,
     updatePeriodMarker,
-    deletePeriodMarker
+    deletePeriodMarker,
+    updateSettings,
+    replaceProgramme
   };
 }

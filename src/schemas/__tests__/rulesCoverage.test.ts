@@ -10,6 +10,7 @@ import {
   dependencySchema,
   leaveBlockSchema,
   periodMarkerSchema,
+  boardSettingsSchema,
 } from '../roadmap';
 
 // ---------------------------------------------------------------------------
@@ -61,6 +62,7 @@ const CASES: { name: string; schema: z.ZodTypeAny; node: RuleNode }[] = [
   { name: 'dependencies', schema: dependencySchema, node: (roadmap.dependencies as RuleNode).$depId as RuleNode },
   { name: 'leaveBlocks', schema: leaveBlockSchema, node: (roadmap.leaveBlocks as RuleNode).$leaveId as RuleNode },
   { name: 'periodMarkers', schema: periodMarkerSchema, node: (roadmap.periodMarkers as RuleNode).$markerId as RuleNode },
+  { name: 'settings', schema: boardSettingsSchema, node: roadmap.settings as RuleNode },
 ];
 
 describe('Firebase security rules cover every schema field', () => {
@@ -153,6 +155,11 @@ describe.each(LUDO_CASES)('Firebase security rules cover every $game state field
 // Snake has two written shapes, the match and a seat's live state, each under
 // its own rules node. A seat state is written several times a second, so a
 // field missing here would refuse every one of those writes.
+const SWARM_CASES = [
+  { name: 'SwarmMatch', node: (r: RuleNode) => r.m as RuleNode },
+  { name: 'SwarmSeatState', node: (r: RuleNode) => (r.s as RuleNode).$seat as RuleNode },
+];
+
 const SNAKE_CASES = [
   { name: 'SnakeMatch', node: (r: RuleNode) => r.m as RuleNode },
   { name: 'SnakeSeatState', node: (r: RuleNode) => (r.s as RuleNode).$seat as RuleNode },
@@ -164,6 +171,23 @@ describe.each(SNAKE_CASES)('Firebase security rules cover every snake $name fiel
   it('every field is permitted by the rules', () => {
     const fields = interfaceFields(ludoSource('src/snakeGameLogic.ts'), name);
     expect(fields.length).toBeGreaterThan(5);
+    const allowed = new Set(allowedFields(ruleNode));
+    expect(fields.filter((k) => !allowed.has(k))).toEqual([]);
+  });
+
+  it('has the strict "$other" guard (so extra fields are caught)', () => {
+    expect((ruleNode.$other as RuleNode)?.['.validate']).toBe(false);
+  });
+});
+
+// Swarm follows Snake's split: the match, and a seat's orders.
+describe.each(SWARM_CASES)('Firebase security rules cover every swarm $name field', ({ name, node }) => {
+  const ruleNode = node((rules.rules.swarm as RuleNode).$code as RuleNode);
+
+  it('every field is permitted by the rules', () => {
+    const fields = interfaceFields(ludoSource('src/swarmGameLogic.ts'), name);
+    // The seat state has five fields, so the control is that all of them were found.
+    expect(fields.length).toBeGreaterThanOrEqual(5);
     const allowed = new Set(allowedFields(ruleNode));
     expect(fields.filter((k) => !allowed.has(k))).toEqual([]);
   });

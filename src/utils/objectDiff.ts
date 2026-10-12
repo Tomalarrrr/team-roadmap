@@ -9,22 +9,43 @@
 /**
  * Build the `updates` payload that reverts an edit back to `before`.
  *
+ * Only the keys the edit actually changed are carried. An undo may run long
+ * after the edit, and by then a colleague can have changed other fields of the
+ * same record; a payload holding the whole pre-edit record would put those back
+ * too. A key the edit wrote with the value it already had is left out for the
+ * same reason: the edit form submits every field, changed or not.
+ *
  * Reverting goes through a MERGING update (`{...existing, ...updates}`), so a
  * key that's simply absent from `updates` keeps its post-edit value. Undoing an
  * edit that *introduced* a field therefore silently leaves that field set — e.g.
  * ticking `epr` on a project created before that field existed, then undoing.
+ * Such a key is carried explicitly, as `undefined`. changedFields then turns
+ * that undefined into a null, which a field-level Firebase PATCH treats as
+ * "delete this path".
  *
- * Every key the edit wrote is carried explicitly here, as `undefined` when the
- * original had none. changedFields then turns that undefined into a null, which
- * a field-level Firebase PATCH treats as "delete this path".
+ * Redo is the same call the other way round: `revertPatch(after, undoPatch)`
+ * names the same keys with the values the edit wrote.
  */
-export function revertPatch<T extends object>(before: T, written: object): T {
-  const patch: Record<string, unknown> = {};
-  Object.assign(patch, before);
-  for (const key of Object.keys(written)) {
-    if (!(key in patch)) patch[key] = undefined;
+export function revertPatch<T extends object>(before: T, written: Partial<T>): Partial<T> {
+  const patch: Partial<T> = {};
+  for (const key of Object.keys(written) as (keyof T)[]) {
+    if (before[key] !== written[key]) patch[key] = before[key];
   }
-  return patch as T;
+  return patch;
+}
+
+/**
+ * The fields of a submitted form that differ in value from the record the form
+ * was opened on. A form hands back every field, each array and object rebuilt,
+ * so comparing by reference would call them all changed and write the lot over
+ * whatever a colleague saved while the form was open.
+ */
+export function valueChanges<T extends object>(opened: T, submitted: Partial<T>): Partial<T> {
+  const changes: Partial<T> = {};
+  for (const key of Object.keys(submitted) as (keyof T)[]) {
+    if (JSON.stringify(opened[key]) !== JSON.stringify(submitted[key])) changes[key] = submitted[key];
+  }
+  return changes;
 }
 
 export function changedFields<T extends object>(before: T | undefined, after: T): Partial<T> {

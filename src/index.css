@@ -301,11 +301,6 @@ input, textarea, select {
               background-color var(--transition-fast);
 }
 
-/* Smooth scrolling for the whole app */
-html {
-  scroll-behavior: smooth;
-}
-
 /* GPU acceleration for common interactive patterns */
 .animate-gpu {
   transform: translateZ(0);
@@ -376,14 +371,9 @@ html {
   color: var(--accent-blue-dark);
 }
 
-/* Reduced motion preference. Delays and smooth scrolling are included: without
-   them a 0.01ms transition still waited out its full delay, and the app's
-   `scroll-behavior: smooth` kept animating every jump to a date. */
+/* Reduced motion preference. Delays are included: without them a 0.01ms transition
+   still waited out its full delay. */
 @media (prefers-reduced-motion: reduce) {
-  html {
-    scroll-behavior: auto;
-  }
-
   *,
   *::before,
   *::after {

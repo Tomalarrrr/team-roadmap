@@ -9,11 +9,12 @@ const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGam
 const Ludo3Game = lazy(() => import('./ludo3/Ludo3Game').then(m => ({ default: m.Ludo3Game })));
 const Ludo4Game = lazy(() => import('./ludo4/Ludo4Game').then(m => ({ default: m.Ludo4Game })));
 const SnakeGame = lazy(() => import('./snake/SnakeGame').then(m => ({ default: m.SnakeGame })));
+const SwarmGame = lazy(() => import('./swarm/SwarmGame').then(m => ({ default: m.SwarmGame })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 import { CyclesiteEmbed } from './CyclesiteEmbed';
 
 /**
- * Quick-find (Cmd+K): search projects by title or owner and jump to one.
+ * Quick-find (Cmd+K): search projects by title, owner or tag and jump to one.
  * Typing also live-filters the board via onSearchChange; the text is cleared
  * whenever the modal closes, so a hidden search can never keep filtering the
  * board with no visible cue. The persistent filter dimensions live in the
@@ -67,16 +68,17 @@ export const SearchFilter = memo(function SearchFilter({
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
-  // Hidden features (Ludo and Snake games, Cyclesite traffic-flow embed). Reached by the
+  // Hidden features (Ludo, Snake and Swarm games, Cyclesite traffic-flow embed). Reached by the
   // secret search term below, which is gated on the vault being unlocked — so a
   // locked viewer or read-only embed can never reach them.
   //
-  // The one exception is a Ludo or Snake invite link, handled further down, and it sits
+  // The one exception is a Ludo, Snake or Swarm invite link, handled further down, and it sits
   // behind the same unlock: a URL still cannot carry anyone around the lock.
   const [showLudo, setShowLudo] = useState(false);
   const [showLudo3, setShowLudo3] = useState(false);
   const [showLudo4, setShowLudo4] = useState(false);
   const [showSnake, setShowSnake] = useState(false);
+  const [showSwarm, setShowSwarm] = useState(false);
   const [showCyclesite, setShowCyclesite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -122,6 +124,7 @@ export const SearchFilter = memo(function SearchFilter({
     else if (magic === 'ludo3') open = () => setShowLudo3(true);
     else if (magic === 'ludo4') open = () => setShowLudo4(true);
     else if (magic === 'snake') open = () => setShowSnake(true);
+    else if (magic === 'swarm') open = () => setShowSwarm(true);
     else if (magic === 'cyclesite') open = () => setShowCyclesite(true);
     if (!open) return;
     const timer = setTimeout(() => {
@@ -183,6 +186,18 @@ export const SearchFilter = memo(function SearchFilter({
     setSnakeInviteDismissed(true);
   }, []);
 
+  // Swarm invite links: the same contract again on ?swarm=CODE.
+  const swarmInviteCode = useMemo(() => {
+    const code = new URLSearchParams(window.location.search).get('swarm');
+    return code && /^[a-z0-9]{4}$/i.test(code) ? code : null;
+  }, []);
+  const [swarmInviteDismissed, setSwarmInviteDismissed] = useState(false);
+  const swarmOpen = showSwarm || (!isLocked && swarmInviteCode !== null && !swarmInviteDismissed);
+  const closeSwarm = useCallback(() => {
+    setShowSwarm(false);
+    setSwarmInviteDismissed(true);
+  }, []);
+
   // Compute search results as derived state (no effect needed)
   const { searchResults, totalResultCount } = useMemo(() => {
     if (!search.trim()) {
@@ -193,7 +208,8 @@ export const SearchFilter = memo(function SearchFilter({
     const results = projects.filter(p => {
       const matchesTitle = p.title.toLowerCase().includes(query);
       const matchesOwner = p.owner.toLowerCase().includes(query);
-      return matchesTitle || matchesOwner;
+      const matchesTag = p.tags?.some(t => t.toLowerCase().includes(query));
+      return matchesTitle || matchesOwner || matchesTag;
     });
 
     return { searchResults: results.slice(0, 8), totalResultCount: results.length };
@@ -377,6 +393,14 @@ export const SearchFilter = memo(function SearchFilter({
         <GameErrorBoundary gameName="Snake" onClose={closeSnake}>
           <Suspense fallback={null}>
             <SnakeGame onClose={closeSnake} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
+        document.body
+      )}
+      {swarmOpen && createPortal(
+        <GameErrorBoundary gameName="Swarm" onClose={closeSwarm}>
+          <Suspense fallback={null}>
+            <SwarmGame onClose={closeSwarm} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
         document.body

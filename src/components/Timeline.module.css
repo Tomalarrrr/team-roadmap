@@ -379,18 +379,6 @@
   text-align: center;
 }
 
-.emptyIcon {
-  font-size: var(--text-5xl);
-  margin-bottom: var(--space-3);
-  opacity: 0.6;
-  animation: float 3s ease-in-out infinite;
-}
-
-@keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
-}
-
 .emptyTitle {
   margin: 0 0 var(--space-2) 0;
   font-size: var(--text-lg);
@@ -422,8 +410,6 @@
   -webkit-overflow-scrolling: touch;
   /* Optimize scroll performance */
   overscroll-behavior: contain;
-  /* Hint to browser for scroll optimization */
-  will-change: scroll-position;
   /* Contain layout and paint to prevent layout thrash (not strict - size containment breaks scrolling) */
   contain: layout paint;
 }
@@ -441,14 +427,6 @@
   border-bottom: 1px solid var(--border-medium);
   z-index: 10;
   cursor: grab;
-  /* GPU acceleration for smooth zoom */
-  will-change: transform;
-  transform-origin: var(--zoom-origin-x, 0) top;
-}
-
-/* Smooth zoom animation for header */
-.header.zooming {
-  transition: transform var(--transition-slow);
 }
 
 .header:active {
@@ -462,7 +440,6 @@
   align-items: center;
   padding: 0 var(--space-4);
   border-right: 1px solid var(--border-light);
-  background: linear-gradient(to right, transparent 0%, rgba(0,0,0,0.02) 50%, transparent 100%);
 }
 
 .fyLabel {
@@ -534,14 +511,6 @@
 .lanes {
   position: relative;
   min-height: calc(100% - var(--timeline-header-height));
-  /* GPU acceleration for smooth zoom */
-  will-change: transform;
-  transform-origin: var(--zoom-origin-x, 0) top;
-}
-
-/* Smooth zoom animation class */
-.lanes.zooming {
-  transition: transform var(--transition-slow);
 }
 
 .lane {
@@ -560,14 +529,6 @@
   contain: layout style;
 }
 
-.lane:nth-child(even) {
-  background: rgba(0, 0, 0, 0.02);
-}
-
-.lane:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.01);
-}
-
 .laneOver {
   background: var(--accent-blue-light) !important;
   transition: background-color 100ms ease;
@@ -582,8 +543,35 @@
 
 /* Collapsed lane in timeline area */
 .laneCollapsed {
-  background: var(--bg-tertiary) !important;
   opacity: 0.6;
+}
+
+/* Someone who has left the team: lane and bars recede together. Opacity does
+   the work (html2canvas ignores filter, so the export still shows it); the
+   grayscale is the on-screen refinement. */
+/* A leaver's lane is washed out with a white veil above its pills, not with
+   opacity on the lane: translucent pills let the period-marker dots and grid
+   lines show through them. The veil also survives the html2canvas export, which
+   ignores filter. */
+.laneLeft {
+  filter: grayscale(0.6);
+}
+
+.laneLeft::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.memberLaneLeft .memberInfo {
+  opacity: 0.55;
+}
+
+.memberLaneLeft .railName {
+  opacity: 0.55;
 }
 
 .dragCreatePreview {
@@ -596,12 +584,6 @@
   opacity: 0.7;
   pointer-events: none;
   z-index: 3;
-  animation: previewPulse 1s ease-in-out infinite;
-}
-
-@keyframes previewPulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 0.8; }
 }
 
 /* Three-weight grid: faint months, clearer quarters, strongest FY boundaries —

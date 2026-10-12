@@ -7,6 +7,7 @@ import {
   filterProjects,
   parseStoredFilters,
   timeframeOf,
+  withKnownTags,
 } from '../projectFilters';
 
 // Fixed "today" so the timeframe tests don't drift with the real clock.
@@ -30,9 +31,9 @@ function makeProject(overrides: Partial<Project> & { id: string }): Project {
 }
 
 const projects: Project[] = [
-  makeProject({ id: 'alpha', title: 'Alpha Portal', owner: 'Amy', size: 'small', epr: true }),
-  makeProject({ id: 'beta', title: 'Beta Migration', owner: 'Ben', size: 'large' }),
-  makeProject({ id: 'gamma', title: 'Gamma Rollout', owner: 'Amy', size: 'medium', epr: false }),
+  makeProject({ id: 'alpha', title: 'Alpha Portal', owner: 'Amy', size: 'small', epr: true, tags: ['Clinical', 'Infrastructure'] }),
+  makeProject({ id: 'beta', title: 'Beta Migration', owner: 'Ben', size: 'large', tags: ['Infrastructure'] }),
+  makeProject({ id: 'gamma', title: 'Gamma Rollout', owner: 'Amy', size: 'medium', epr: false, tags: [] }),
   // Legacy record: no size field at all.
   makeProject({ id: 'delta', title: 'Delta Review', owner: 'Cat', size: undefined as never }),
 ];
@@ -74,6 +75,22 @@ describe('filterProjects', () => {
   it('selecting both EPR chips matches every project', () => {
     const result = filterProjects(projects, { ...INITIAL_FILTERS, epr: ['yes', 'no'] }, getStatus, TODAY);
     expect(result.map(p => p.id)).toEqual(projects.map(p => p.id));
+  });
+
+  it('a tag filter keeps projects carrying any selected tag', () => {
+    expect(filterProjects(projects, { ...INITIAL_FILTERS, tags: ['Clinical'] }, getStatus, TODAY).map(p => p.id)).toEqual(['alpha']);
+    expect(filterProjects(projects, { ...INITIAL_FILTERS, tags: ['Infrastructure'] }, getStatus, TODAY).map(p => p.id)).toEqual(['alpha', 'beta']);
+    expect(filterProjects(projects, { ...INITIAL_FILTERS, tags: ['Clinical', 'Infrastructure'] }, getStatus, TODAY).map(p => p.id)).toEqual(['alpha', 'beta']);
+  });
+
+  it('a tag filter excludes untagged projects — empty list AND no field', () => {
+    const result = filterProjects(projects, { ...INITIAL_FILTERS, tags: ['Infrastructure'] }, getStatus, TODAY);
+    expect(result.map(p => p.id)).not.toContain('gamma');
+    expect(result.map(p => p.id)).not.toContain('delta');
+  });
+
+  it('search matches tags too', () => {
+    expect(filterProjects(projects, { ...INITIAL_FILTERS, search: 'clin' }, getStatus, TODAY).map(p => p.id)).toEqual(['alpha']);
   });
 
   it('search matches title or owner, case-insensitively', () => {
@@ -140,8 +157,9 @@ describe('active filter counting', () => {
       sizes: ['large'],
       statuses: ['at-risk'],
       epr: ['yes'],
+      tags: ['Clinical'],
       timeframes: ['current'],
-    })).toBe(6);
+    })).toBe(7);
     // Both EPR chips count as two selections, matching the other dimensions.
     expect(countActiveFilters({ ...INITIAL_FILTERS, epr: ['yes', 'no'] })).toBe(2);
   });
@@ -166,6 +184,7 @@ describe('parseStoredFilters', () => {
       sizes: ['large', 'bogus'],
       statuses: ['at-risk', 'not-a-status'],
       epr: ['no', 'maybe'],
+      tags: ['Clinical', 7],
       timeframes: ['current', 'someday'],
     });
     expect(parsed).toEqual({
@@ -174,6 +193,7 @@ describe('parseStoredFilters', () => {
       sizes: ['large'],
       statuses: ['at-risk'],
       epr: ['no'],
+      tags: ['Clinical'],
       timeframes: ['current'],
     });
   });
@@ -186,13 +206,34 @@ describe('parseStoredFilters', () => {
   it('migrates the legacy single-select status shape', () => {
     expect(parseStoredFilters({ owners: [], status: 'on-hold' }).statuses).toEqual(['on-hold']);
     expect(parseStoredFilters({ status: 'all' }).statuses).toEqual([]);
-    // Legacy tags/dateRange fields are simply dropped.
-    expect(parseStoredFilters({ tags: ['x'], dateRange: { start: 'a', end: 'b' } })).toEqual(INITIAL_FILTERS);
+    // The legacy dateRange field is simply dropped.
+    expect(parseStoredFilters({ dateRange: { start: 'a', end: 'b' } })).toEqual(INITIAL_FILTERS);
   });
 
   it('ignores epr values that are neither a valid array nor the legacy boolean', () => {
     expect(parseStoredFilters({ epr: 'true' }).epr).toEqual([]);
     expect(parseStoredFilters({ epr: 1 }).epr).toEqual([]);
     expect(parseStoredFilters({ epr: ['nonsense'] }).epr).toEqual([]);
+  });
+});
+
+describe('withKnownTags', () => {
+  it('drops a selected tag no project carries, keeping the rest', () => {
+    const filters = { ...INITIAL_FILTERS, owners: ['Amy'], tags: ['Clinical', 'Retired'] };
+    expect(withKnownTags(filters, ['Clinical', 'Infrastructure'])).toEqual({ ...filters, tags: ['Clinical'] });
+  });
+
+  it('returns the same reference when every selected tag is still in use', () => {
+    const filters = { ...INITIAL_FILTERS, tags: ['Clinical'] };
+    expect(withKnownTags(filters, ['Clinical'])).toBe(filters);
+    expect(withKnownTags(INITIAL_FILTERS, [])).toBe(INITIAL_FILTERS);
+  });
+
+  // The pre-FilterMenu build persisted a `tags` filter of its own. Restored
+  // as-is it would hide every project, so it must not survive this.
+  it('neutralises a tag filter restored from an older build', () => {
+    const restored = parseStoredFilters({ tags: ['x'] });
+    expect(restored.tags).toEqual(['x']);
+    expect(filterProjects(projects, withKnownTags(restored, ['Clinical', 'Infrastructure']), getStatus, TODAY)).toBe(projects);
   });
 });

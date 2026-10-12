@@ -31,6 +31,12 @@ export interface Project {
   size: ProjectSize; // Effort size; historic projects default to 'small' on load.
   scoring?: ProjectScoring; // Capacity-matrix answers that derived the size.
   epr?: boolean; // Part of the EPR (Electronic Patient Record) programme. Absent = no.
+  tags?: string[]; // Free-text category labels (see utils/projectTags.ts). Absent = none.
+  programme?: string; // The one programme this work reports under (see utils/programmes.ts). Absent = unassigned.
+  // End date first agreed, kept so later moves show as slip. Stamped when the
+  // project is created; projects that predate the field have none.
+  baselineEndDate?: string;
+  statusSetOn?: string; // ISO date the status was last chosen by a person. Absent = never recorded.
   milestones: Milestone[];
   dependencies?: string[]; // IDs of projects this depends on
 }
@@ -68,6 +74,7 @@ export interface FilterState {
   sizes: ProjectSize[];
   statuses: ProjectStatus[];
   epr: EprFilter[];
+  tags: string[];
   timeframes: Timeframe[];
 }
 
@@ -77,6 +84,8 @@ export interface TeamMember {
   jobTitle: string;
   nameColor?: string; // Optional custom color for name display
   order?: number; // Explicit ordering for drag-reorder persistence
+  left?: boolean; // Has left the team; their lane is kept, greyed, at the bottom.
+  capacity?: number; // Slots this person has for project work, 1 to 4. Absent = all four.
 }
 
 export interface Waypoint {
@@ -153,13 +162,16 @@ export type UndoAction =
     })
   | (BaseUndoAction & {
       type: 'UPDATE_PROJECT';
-      data: Project;
-      inverse: { action: 'update'; data: Project };
+      // Field-level patches (see utils/objectDiff revertPatch), not whole
+      // projects: replaying a whole project would overwrite fields a colleague
+      // has changed since.
+      data: Pick<Project, 'id'> & Partial<Project>;
+      inverse: { action: 'update'; data: Pick<Project, 'id'> & Partial<Project> };
     })
   | (BaseUndoAction & {
       type: 'DELETE_PROJECT';
       data: Project;
-      inverse: { action: 'restore'; data: Project };
+      inverse: { action: 'restore'; data: Project; dependencies: Dependency[] };
     })
   | (BaseUndoAction & {
       type: 'CREATE_MILESTONE';
@@ -217,12 +229,22 @@ export interface PeriodMarker {
   label?: string;
 }
 
+// The board's own rules, editable from the Rules panel. Every field is optional:
+// a board that has never opened the panel runs on the defaults in
+// utils/boardSettings.ts.
+export interface BoardSettings {
+  graceDays?: number; // Days past its end date before an unconfirmed project is assumed complete.
+  recoveryDays?: number; // Days after a project ends before its owner's slots count as free again.
+  programmes?: string[]; // The programmes a project can report under, in display order.
+}
+
 export interface RoadmapData {
   projects: Project[];
   teamMembers: TeamMember[];
   dependencies?: Dependency[];
   leaveBlocks?: LeaveBlock[];
   periodMarkers?: PeriodMarker[];
+  settings?: BoardSettings;
 }
 
 // Clipboard types for copy/paste

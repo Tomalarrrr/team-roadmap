@@ -99,7 +99,7 @@ export function PeriodMarkerContextMenu({
       <div className={styles.menuHeader}>{isEditing ? 'Edit Period Marker' : 'Add Period Marker'}</div>
 
       <div className={styles.formGroup}>
-        <label className={styles.label}>Color</label>
+        <label className={styles.label}>Colour</label>
         <div style={{ display: 'flex', gap: '6px', padding: '4px 0' }}>
           {MARKER_COLORS.map(({ color, label: colorLabel, bg }) => (
             <button
@@ -122,7 +122,7 @@ export function PeriodMarkerContextMenu({
       </div>
 
       <div className={styles.formGroup}>
-        <label className={styles.label}>Start Date</label>
+        <label className={styles.label}>Start date</label>
         <input
           type="date"
           className={styles.dateInput}
@@ -131,7 +131,7 @@ export function PeriodMarkerContextMenu({
         />
       </div>
       <div className={styles.formGroup}>
-        <label className={styles.label}>End Date</label>
+        <label className={styles.label}>End date</label>
         <input
           type="date"
           className={styles.dateInput}

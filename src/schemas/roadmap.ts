@@ -35,6 +35,12 @@ export const projectSchema = z.object({
   // EPR programme flag. Optional (absent = no) so legacy projects validate;
   // must be declared here or Zod would strip it on load.
   epr: z.boolean().optional(),
+  // Category tags. Optional for the same two reasons as `epr`. Firebase drops
+  // an empty array, so a project with its last tag removed reads back absent.
+  tags: z.array(z.string().max(50)).max(20).optional(),
+  programme: z.string().min(1).max(50).optional(),
+  baselineEndDate: dateStringSchema.optional(),
+  statusSetOn: dateStringSchema.optional(),
   milestones: z.array(milestoneSchema).max(100).default([]),
   dependencies: z.array(z.string().max(100)).optional().default([])
 }).refine(
@@ -48,7 +54,9 @@ export const teamMemberSchema = z.object({
   name: z.string().min(1, 'Member name is required').max(100),
   jobTitle: z.string().max(100).default(''),
   nameColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Invalid color format').optional(),
-  order: z.number().min(0).max(200).optional()
+  order: z.number().min(0).max(200).optional(),
+  left: z.boolean().optional(),
+  capacity: z.number().int().min(1).max(4).optional()
 });
 
 // Waypoint schema (for dependency paths)
@@ -125,13 +133,22 @@ export const periodMarkerSchema = z.object({
   { message: 'Start date must be before or equal to end date', path: ['startDate'] }
 );
 
+// Board rules (see utils/boardSettings.ts for the defaults that apply when a
+// field is absent).
+export const boardSettingsSchema = z.object({
+  graceDays: z.number().int().min(0).max(60).optional(),
+  recoveryDays: z.number().int().min(0).max(60).optional(),
+  programmes: z.array(z.string().min(1).max(50)).max(30).optional()
+});
+
 // Complete roadmap data schema
 const roadmapDataSchema = z.object({
   projects: z.array(projectSchema).default([]),
   teamMembers: z.array(teamMemberSchema).default([]),
   dependencies: z.array(dependencySchema).optional().default([]),
   leaveBlocks: z.array(leaveBlockSchema).optional().default([]),
-  periodMarkers: z.array(periodMarkerSchema).optional().default([])
+  periodMarkers: z.array(periodMarkerSchema).optional().default([]),
+  settings: boardSettingsSchema.optional()
 });
 
 // Type exports derived from schemas

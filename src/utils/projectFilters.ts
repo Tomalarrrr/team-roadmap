@@ -4,7 +4,8 @@ import { STATUS_COLORS } from './statusColors';
 
 /**
  * Filtering engine for the roadmap view. App owns the FilterState; the header
- * Filter menu edits the persistent dimensions (owners / sizes / statuses / EPR)
+ * Filter menu edits the persistent dimensions (owners / sizes / statuses / EPR /
+ * tags)
  * and the search modal edits the transient `search` text. This module is the
  * single place the state is interpreted, so the badge count, the "n of m"
  * summary, and the board itself can never disagree.
@@ -16,6 +17,7 @@ export const INITIAL_FILTERS: FilterState = {
   sizes: [],
   statuses: [],
   epr: [],
+  tags: [],
   timeframes: [],
 };
 
@@ -39,6 +41,7 @@ export function countActiveFilters(filters: FilterState): number {
     filters.sizes.length +
     filters.statuses.length +
     filters.epr.length +
+    filters.tags.length +
     filters.timeframes.length
   );
 }
@@ -67,6 +70,7 @@ export function filterProjects(
   const sizes = new Set(filters.sizes);
   const statuses = new Set(filters.statuses);
   const epr = new Set(filters.epr);
+  const tags = new Set(filters.tags);
   const timeframes = new Set(filters.timeframes);
   const searchQuery = filters.search.trim().toLowerCase();
 
@@ -74,12 +78,13 @@ export function filterProjects(
   const hasSizeFilter = sizes.size > 0;
   const hasStatusFilter = statuses.size > 0;
   const hasEprFilter = epr.size > 0;
+  const hasTagFilter = tags.size > 0;
   const hasTimeframeFilter = timeframes.size > 0;
   const hasSearchFilter = searchQuery.length > 0;
 
   if (
     !hasOwnerFilter && !hasSizeFilter && !hasStatusFilter &&
-    !hasEprFilter && !hasTimeframeFilter && !hasSearchFilter
+    !hasEprFilter && !hasTagFilter && !hasTimeframeFilter && !hasSearchFilter
   ) {
     return projects;
   }
@@ -93,15 +98,30 @@ export function filterProjects(
     // Anything not explicitly flagged counts as non-EPR — including projects
     // created before the field existed. Selecting both chips matches everything.
     if (hasEprFilter && !epr.has(p.epr === true ? 'yes' : 'no')) return false;
+    // Any-of, like every other dimension: a project carrying one of the
+    // selected tags is in. An untagged project never matches a tag filter.
+    if (hasTagFilter && !p.tags?.some(t => tags.has(t))) return false;
     if (hasTimeframeFilter && !timeframes.has(timeframeOf(p, today))) return false;
     if (hasSearchFilter) {
       const matches =
         p.title.toLowerCase().includes(searchQuery) ||
-        p.owner.toLowerCase().includes(searchQuery);
+        p.owner.toLowerCase().includes(searchQuery) ||
+        p.tags?.some(t => t.toLowerCase().includes(searchQuery));
       if (!matches) return false;
     }
     return true;
   });
+}
+
+/**
+ * Drop selected tags that no project carries. A tag stops existing when it is
+ * removed from its last project, and a filter still holding it would empty the
+ * board with no chip left in the menu to untick. Returns the input untouched
+ * when nothing is dropped, so downstream memos don't re-fire.
+ */
+export function withKnownTags(filters: FilterState, knownTags: string[]): FilterState {
+  const tags = filters.tags.filter(t => knownTags.includes(t));
+  return tags.length === filters.tags.length ? filters : { ...filters, tags };
 }
 
 const VALID_SIZES = new Set<string>(Object.keys(SIZE_SLOTS));
@@ -146,6 +166,7 @@ export function parseStoredFilters(raw: unknown): FilterState {
     sizes: strings(stored.sizes, VALID_SIZES) as ProjectSize[],
     statuses: statuses.length > 0 ? statuses : legacyStatus,
     epr,
+    tags: strings(stored.tags),
     timeframes: strings(stored.timeframes, VALID_TIMEFRAMES) as Timeframe[],
   };
 }

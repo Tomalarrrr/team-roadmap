@@ -80,6 +80,9 @@ export function useClipboard({ onPasteProject, onShowToast }: UseClipboardOption
         statusColor: originalProject.statusColor,
         size: originalProject.size ?? DEFAULT_SIZE,
         epr: originalProject.epr,
+        programme: originalProject.programme,
+        scoring: originalProject.scoring,
+        tags: originalProject.tags,
         milestones: milestonesOffset,
         dependencies: [] // Don't copy dependencies
       };

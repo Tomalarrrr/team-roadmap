@@ -44,6 +44,26 @@
   gap: var(--space-2);
 }
 
+.checkRow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.checkRow input {
+  margin: 2px 0 0;
+  accent-color: var(--accent-blue);
+}
+
+.checkHint {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
 .row {
   display: grid;
   grid-template-columns: 1fr 1fr;

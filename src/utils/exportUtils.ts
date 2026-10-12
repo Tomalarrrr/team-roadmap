@@ -1,7 +1,7 @@
 import { format, addMonths, addDays, differenceInDays } from 'date-fns';
-import type { Project, TeamMember, Dependency } from '../types';
+import type { Project, RoadmapData } from '../types';
 import { analytics } from './analytics';
-import { getStatusNameByHex } from './statusColors';
+import { statusTextOf } from './completion';
 import { SIZE_LABELS, DEFAULT_SIZE } from './capacity';
 import { getTimelineBounds } from './timelineBounds';
 
@@ -539,15 +539,15 @@ async function copyTimelineForReport(projects: Project[]): Promise<'clipboard' |
   }
 }
 
-// JSON Export - exports the raw data as JSON
-function exportToJSON(projects: Project[], teamMembers: TeamMember[], dependencies: Dependency[]) {
+// The backup is the whole board as stored, whatever filter is on: time away,
+// period markers and board rules are lost for good if a backup leaves them out.
+export function boardBackup(board: RoadmapData, exportedAt: string) {
+  return { exportedAt, ...board };
+}
+
+function exportToJSON(board: RoadmapData) {
   const today = format(new Date(), 'yyyy-MM-dd');
-  const data = {
-    exportedAt: new Date().toISOString(),
-    projects,
-    teamMembers,
-    dependencies
-  };
+  const data = boardBackup(board, new Date().toISOString());
 
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -582,23 +582,34 @@ function escapeCSV(value: string | number): string {
 }
 
 // CSV Export - exports projects as CSV
-function exportToCSV(projects: Project[]) {
-  const today = format(new Date(), 'yyyy-MM-dd');
+export function projectsToCSV(projects: Project[], today: string, graceDays: number): string {
   // Status/size go out as their human labels, not the stored hex and slug — a
-  // spreadsheet reading "#457028" tells nobody anything.
-  const headers = ['Title', 'Owner', 'Start Date', 'End Date', 'Status', 'Size', 'EPR', 'Milestones Count'];
+  // spreadsheet reading "#457028" tells nobody anything. Status carries the
+  // same completion wording as the board, so an assumed completion is never
+  // exported as a confirmed one. A project with no first planned end date
+  // leaves that cell empty.
+  const headers = ['Title', 'Owner', 'Programme', 'Start Date', 'End Date', 'First Planned End', 'Status', 'Status Set On', 'Size', 'EPR', 'Tags', 'Milestones Count'];
   const rows = projects.map(p => [
     escapeCSV(p.title),
     escapeCSV(p.owner),
+    escapeCSV(p.programme ?? ''),
     p.startDate,
     p.endDate,
-    escapeCSV(getStatusNameByHex(p.statusColor) ?? p.statusColor),
+    p.baselineEndDate ?? '',
+    escapeCSV(statusTextOf(p, today, graceDays) ?? p.statusColor),
+    p.statusSetOn ?? '',
     escapeCSV(SIZE_LABELS[p.size ?? DEFAULT_SIZE]),
     p.epr === true ? 'Yes' : 'No',
+    escapeCSV((p.tags ?? []).join('; ')),
     p.milestones?.length ?? 0
   ]);
 
-  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  return [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+}
+
+function exportToCSV(projects: Project[], graceDays: number) {
+  const today = format(new Date(), 'yyyy-MM-dd');
+  const csv = projectsToCSV(projects, today, graceDays);
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -614,14 +625,15 @@ function exportToCSV(projects: Project[]) {
 // Get export options for the menu
 export function getExportOptions(
   projects: Project[],
-  teamMembers: TeamMember[],
-  dependencies: Dependency[],
+  board: RoadmapData,
+  // The board's grace period, so the CSV words completion the way the board does.
+  graceDays: number,
   // Projects the TIMELINE was rendered from (unfiltered). The image captures
   // derive their date range from this, because getTimelineBounds must agree with
   // what Timeline actually laid out — measuring the bounds off a filtered subset
   // while the component rendered the full range puts every crop offset and the
-  // per-day pixel width against the wrong origin. Data exports below stay on
-  // `projects`, so JSON/CSV still export what you can see. Defaults to
+  // per-day pixel width against the wrong origin. The CSV below stays on
+  // `projects`, so it still exports what you can see. Defaults to
   // `projects` for callers that don't filter.
   boundsProjects: Project[] = projects
 ): ExportOption[] {
@@ -642,13 +654,13 @@ export function getExportOptions(
       id: 'json',
       label: 'Export as JSON',
       description: 'Full data backup in JSON format',
-      action: () => exportToJSON(projects, teamMembers, dependencies)
+      action: () => exportToJSON(board)
     },
     {
       id: 'csv',
       label: 'Export as CSV',
       description: 'Spreadsheet-compatible format',
-      action: () => exportToCSV(projects)
+      action: () => exportToCSV(projects, graceDays)
     }
   ];
 }

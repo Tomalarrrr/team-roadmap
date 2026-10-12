@@ -54,6 +54,42 @@
   gap: var(--space-2);
 }
 
+/* People | Programmes. One control with two ends, so the selected half is
+   the only filled one. */
+.views {
+  display: flex;
+  flex-shrink: 0;
+  height: var(--control-size);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.viewBtn {
+  padding: 0 var(--space-3);
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.viewBtn:hover {
+  color: var(--text-primary);
+}
+
+.viewBtn:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: -2px;
+}
+
+.viewBtnOn,
+.viewBtnOn:hover {
+  background: var(--accent-blue-light);
+  color: var(--accent-blue);
+}
+
 .right {
   flex: 1;
   display: flex;
@@ -143,6 +179,19 @@
 }
 
 /* Responsive */
+/* Between phone and desktop the three groups are wider than the screen once
+   the board is unlocked, and the page scrolled sideways. The right-hand group
+   drops to its own line instead. */
+@media (max-width: 1100px) {
+  .toolbar {
+    flex-wrap: wrap;
+  }
+
+  .right {
+    flex-wrap: wrap;
+  }
+}
+
 @media (max-width: 768px) {
   .toolbar {
     flex-wrap: wrap;
@@ -158,12 +207,19 @@
 
   .center {
     order: 2;
-    flex: 1;
+    flex: 1 1 100%;
+    /* The layout switch, search and filter no longer fit one phone-width line. */
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
+  /* Wraps instead of holding one line: at phone width the zoom, actions and
+     logo together are wider than the screen and pushed the page sideways. */
   .right {
     order: 3;
-    flex: 0 0 auto;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 
   .title {

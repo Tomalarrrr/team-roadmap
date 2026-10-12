@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { projectAnchorY, heightForSize, UNIT_HEIGHT } from '../../utils/capacity';
+import { backwardDependencyCorners, projectAnchorY, heightForSize, UNIT_HEIGHT } from '../../utils/capacity';
 import type { ProjectSize } from '../../types';
 
 /**
@@ -56,5 +56,36 @@ describe('projectAnchorY (dependency endpoint vertical centre)', () => {
     // Second row (Small in row 0): stackOffset already accounts for prior rows.
     // Medium centre = height/2 = 62/2 = 31.
     expect(projectAnchorY('medium', 500, 90)).toBe(500 + 90 + 31);
+  });
+});
+
+describe('backwardDependencyCorners (target starts left of the source end)', () => {
+  const gap = 16;
+
+  it('runs back above a target that sits below the source, clear of the pill', () => {
+    const from = { x: 600, y: 100, height: 28 };
+    const to = { x: 200, y: 400, height: 62 };
+    const corners = backwardDependencyCorners(from, to, gap);
+    expect(corners).toEqual([
+      { x: 616, y: 100 },
+      { x: 616, y: 366 },
+      { x: 184, y: 366 },
+      { x: 184, y: 400 },
+    ]);
+    // 366 is above the pill's top edge (400 - 31 = 369), so the run never
+    // crosses the pill it points at.
+    expect(corners[1].y).toBeLessThan(to.y - to.height / 2);
+  });
+
+  it('runs back below a target that sits above the source', () => {
+    const corners = backwardDependencyCorners({ x: 600, y: 400, height: 28 }, { x: 200, y: 100, height: 28 }, gap);
+    expect(corners[1]).toEqual({ x: 616, y: 117 });
+    expect(corners[2]).toEqual({ x: 184, y: 117 });
+  });
+
+  it('loops beneath the taller pill when both share a row', () => {
+    const corners = backwardDependencyCorners({ x: 600, y: 100, height: 28 }, { x: 200, y: 117, height: 62 }, gap);
+    expect(corners[1].y).toBe(151);
+    expect(corners[2].y).toBe(151);
   });
 });

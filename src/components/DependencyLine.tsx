@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 import type { Project, Waypoint } from '../types';
 import { getBarDimensions } from '../utils/dateUtils';
-import { projectAnchorY, SLOT_PITCH } from '../utils/capacity';
+import { backwardDependencyCorners, heightForSize, projectAnchorY, SLOT_PITCH } from '../utils/capacity';
 import styles from './DependencyLine.module.css';
 
 // Dependencies are drawn project-to-project. (Milestones are no longer surfaced
@@ -315,51 +315,20 @@ export const DependencyLine = memo(function DependencyLine({
         }
         pathMidX = midX;
       } else {
-        // BACKWARD: Target is to the left of source
+        // BACKWARD: Target is to the left of source. Run back in the gap beside
+        // the target pill and enter at its start, so the line never crosses
+        // the pill it points at.
         const exitX = fromX + minGap;
         const entryX = toX - minGap;
-        const r = Math.max(2, Math.min(cornerRadius, absY / 2, minGap / 2));
-
-        if (absY < r * 2) {
-          const loopDepth = minGap;
-          const loopSign = 1;
-          path = [
-            `M ${fromX} ${adjustedFromY}`,
-            `H ${exitX - r}`,
-            `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (loopSign * r)}`,
-            `V ${adjustedFromY + (loopSign * loopDepth) - r}`,
-            `Q ${exitX} ${adjustedFromY + (loopSign * loopDepth)} ${exitX - r} ${adjustedFromY + (loopSign * loopDepth)}`,
-            `H ${entryX + r}`,
-            `Q ${entryX} ${adjustedFromY + (loopSign * loopDepth)} ${entryX} ${adjustedFromY + (loopSign * loopDepth) - (loopSign * r)}`,
-            `V ${adjustedToY + (loopSign * r)}`,
-            `Q ${entryX} ${adjustedToY} ${entryX + r} ${adjustedToY}`,
-            `H ${toX}`
-          ].join(' ');
-          controlPoints = [
-            { x: exitX, y: adjustedFromY },
-            { x: exitX, y: adjustedFromY + loopDepth },
-            { x: entryX, y: adjustedFromY + loopDepth },
-            { x: entryX, y: adjustedToY }
-          ];
-        } else {
-          path = [
-            `M ${fromX} ${adjustedFromY}`,
-            `H ${exitX - r}`,
-            `Q ${exitX} ${adjustedFromY} ${exitX} ${adjustedFromY + (ySign * r)}`,
-            `V ${adjustedToY - (ySign * r)}`,
-            `Q ${exitX} ${adjustedToY} ${exitX - r} ${adjustedToY}`,
-            `H ${toX}`
-          ].join(' ');
-          controlPoints = [
-            { x: exitX, y: adjustedFromY },
-            { x: exitX, y: adjustedToY }
-          ];
-        }
+        controlPoints = backwardDependencyCorners(
+          { x: fromX, y: adjustedFromY, height: heightForSize(fromProject.size) },
+          { x: toX, y: adjustedToY, height: heightForSize(toProject.size) },
+          minGap,
+        );
+        path = buildWaypointPath(controlPoints);
         pathMidX = (exitX + entryX) / 2;
       }
     }
-
-    const isForward = toX > fromX;
 
     return {
       fromX,
@@ -369,7 +338,6 @@ export const DependencyLine = memo(function DependencyLine({
       path,
       midX: pathMidX,
       midY: (adjustedFromY + adjustedToY) / 2,
-      approachFromRight: !isForward, // Backward connections approach from right
       controlPoints
     };
   }, [
@@ -628,19 +596,15 @@ export const DependencyLine = memo(function DependencyLine({
         strokeLinecap="round"
         className={styles.mainPath}
       />
-      {/* Arrow head outline - flips direction based on approach */}
+      {/* Arrow head outline */}
       <polygon
-        points={line.approachFromRight
-          ? `${line.toX},${line.toY} ${line.toX + 10},${line.toY - 5} ${line.toX + 10},${line.toY + 5}`
-          : `${line.toX},${line.toY} ${line.toX - 10},${line.toY - 5} ${line.toX - 10},${line.toY + 5}`}
+        points={`${line.toX},${line.toY} ${line.toX - 10},${line.toY - 5} ${line.toX - 10},${line.toY + 5}`}
         fill="rgba(255, 255, 255, 0.9)"
         className={styles.arrowOutline}
       />
-      {/* Arrow head - flips direction based on approach */}
+      {/* Arrow head */}
       <polygon
-        points={line.approachFromRight
-          ? `${line.toX},${line.toY} ${line.toX + 8},${line.toY - 4} ${line.toX + 8},${line.toY + 4}`
-          : `${line.toX},${line.toY} ${line.toX - 8},${line.toY - 4} ${line.toX - 8},${line.toY + 4}`}
+        points={`${line.toX},${line.toY} ${line.toX - 8},${line.toY - 4} ${line.toX - 8},${line.toY + 4}`}
         fill="var(--dependency-line, #666)"
         className={styles.arrowHead}
       />

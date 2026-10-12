@@ -35,3 +35,5 @@ backup-firebase.sh
 # Local dev preview harnesses (scratch, not shipped)
 wizard-preview.html
 src/wizardPreview.tsx
+swarm-preview.html
+src/swarmPreview.tsx

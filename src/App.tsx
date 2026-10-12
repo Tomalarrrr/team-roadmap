@@ -6,13 +6,16 @@ import { useToast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
 import { Timeline, type TimelineRef } from './components/Timeline';
 import { Modal } from './components/Modal';
-import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage, FilterState, ProjectStatus } from './types';
+import type { BoardSettings, Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage, FilterState, ProjectStatus } from './types';
 import { isProject } from './types';
-import { filterProjects, parseStoredFilters, hasActiveFilters, INITIAL_FILTERS } from './utils/projectFilters';
-import { revertPatch } from './utils/objectDiff';
-import { getSuggestedProjectDates, parseLocalDate, toDateString, isDatePast } from './utils/dateUtils';
+import { filterProjects, parseStoredFilters, hasActiveFilters, withKnownTags, INITIAL_FILTERS } from './utils/projectFilters';
+import { tagsInUse } from './utils/projectTags';
+import { revertPatch, valueChanges } from './utils/objectDiff';
+import { getSuggestedProjectDates, parseLocalDate, toDateString } from './utils/dateUtils';
 import { DEFAULT_SIZE } from './utils/capacity';
-import { getStatusSlugByHex, normalizeStatusColor, isAutoCompleteExempt } from './utils/statusColors';
+import { normalizeStatusColor } from './utils/statusColors';
+import { displayStatusOf, statusStamp } from './utils/completion';
+import { BoardRulesContext, boardRules } from './utils/boardSettings';
 import { hasModifierKey } from './utils/platformUtils';
 import { TimelineSkeleton } from './components/Skeleton';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -20,10 +23,15 @@ import { usePresence } from './hooks/usePresence';
 import { VaultUnlock } from './components/VaultUnlock';
 import { generateSessionId } from './utils/gameUtils';
 import { isEmbedMode } from './utils/embedMode';
+import { boardViewFromSearch, searchWithBoardView, type BoardView } from './utils/boardView';
+import { ProgrammeView } from './components/ProgrammeView';
+import { dimsLeavers } from './utils/teamMembers';
 import styles from './App.module.css';
 
 // Lazy load form components (not needed until user clicks)
 const ProjectWizard = lazy(() => import('./components/ProjectWizard').then(m => ({ default: m.ProjectWizard })));
+const BoardRulesPanel = lazy(() => import('./components/BoardRulesPanel').then(m => ({ default: m.BoardRulesPanel })));
+const CapacityView = lazy(() => import('./components/CapacityView').then(m => ({ default: m.CapacityView })));
 const TeamMemberForm = lazy(() => import('./components/TeamMemberForm').then(m => ({ default: m.TeamMemberForm })));
 const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then(m => ({ default: m.ShortcutsModal })));
 
@@ -37,6 +45,8 @@ type ModalType =
   | { type: 'edit-project'; project: Project }
   | { type: 'add-member' }
   | { type: 'edit-member'; member: TeamMember }
+  | { type: 'capacity' }
+  | { type: 'rules' }
   | null;
 
 // Generate a simple user ID for this session (in production, use auth)
@@ -100,7 +110,9 @@ function App() {
     deleteLeaveBlock,
     addPeriodMarker,
     updatePeriodMarker,
-    deletePeriodMarker
+    deletePeriodMarker,
+    updateSettings,
+    replaceProgramme
   } = useRoadmap();
 
   // Real-time presence for collaboration
@@ -111,6 +123,12 @@ function App() {
   });
 
   const [modal, setModal] = useState<ModalType>(null);
+  const [view, setView] = useState<BoardView>(() => boardViewFromSearch(window.location.search));
+  // Kept in the URL so the programme view can be linked to and embedded.
+  const handleViewChange = useCallback((next: BoardView) => {
+    setView(next);
+    window.history.replaceState(null, '', `${window.location.pathname}${searchWithBoardView(window.location.search, next)}${window.location.hash}`);
+  }, []);
   // Zoom level persistence - load from localStorage
   const [dayWidth, setDayWidth] = useState(() => {
     try {
@@ -127,13 +145,17 @@ function App() {
     return 3; // Default to month view (3 px/day)
   });
 
-  // Save zoom level to localStorage when it changes
+  // Save zoom level to localStorage once it settles: a pinch changes dayWidth
+  // every frame, and a synchronous storage write per frame is felt as stutter.
   useEffect(() => {
-    try {
-      localStorage.setItem('roadmap-zoom', String(dayWidth));
-    } catch {
-      // Ignore localStorage errors
-    }
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem('roadmap-zoom', String(dayWidth));
+      } catch {
+        // Ignore localStorage errors
+      }
+    }, 250);
+    return () => clearTimeout(timer);
   }, [dayWidth]);
 
   // Collapsed lanes state - persisted to localStorage
@@ -175,7 +197,7 @@ function App() {
   const timelineRef = useRef<TimelineRef>(null);
   // Filter persistence - load from localStorage (parseStoredFilters validates
   // entries and migrates the legacy single-select status shape)
-  const [filters, setFilters] = useState<FilterState>(() => {
+  const [storedFilters, setFilters] = useState<FilterState>(() => {
     try {
       const stored = localStorage.getItem('roadmap-filters');
       if (stored) return parseStoredFilters(JSON.parse(stored));
@@ -191,11 +213,12 @@ function App() {
       try {
         // Don't persist search text, only the filter selections
         const toStore = {
-          owners: filters.owners,
-          sizes: filters.sizes,
-          statuses: filters.statuses,
-          epr: filters.epr,
-          timeframes: filters.timeframes
+          owners: storedFilters.owners,
+          sizes: storedFilters.sizes,
+          statuses: storedFilters.statuses,
+          epr: storedFilters.epr,
+          tags: storedFilters.tags,
+          timeframes: storedFilters.timeframes
         };
         localStorage.setItem('roadmap-filters', JSON.stringify(toStore));
       } catch {
@@ -203,7 +226,12 @@ function App() {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [filters.owners, filters.sizes, filters.statuses, filters.epr, filters.timeframes]);
+  }, [storedFilters.owners, storedFilters.sizes, storedFilters.statuses, storedFilters.epr, storedFilters.tags, storedFilters.timeframes]);
+
+  // Tags live on the projects, so the board is the tag list. A stored tag
+  // filter is applied only while some project still carries that tag.
+  const projectTags = useMemo(() => tagsInUse(data.projects), [data.projects]);
+  const filters = useMemo(() => withKnownTags(storedFilters, projectTags), [storedFilters, projectTags]);
 
   // Live search text from the search modal (kept out of Toolbar's setFilters
   // path so SearchFilter's notify effect can't clobber menu-set filters)
@@ -216,7 +244,12 @@ function App() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showFullscreenHint, setShowFullscreenHint] = useState(false);
   const fullscreenHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [hoveredMember, setHoveredMember] = useState<string | null>(null);
+  // A ref, not state: only the N shortcut reads it, and as state every lane the
+  // cursor crossed re-rendered the whole app.
+  const hoveredMemberRef = useRef<string | null>(null);
+  const setHoveredMember = useCallback((memberName: string | null) => {
+    hoveredMemberRef.current = memberName;
+  }, []);
 
   // Ref to avoid re-registering keyboard handler on every Firebase snapshot
   const projectsRef = useRef(data.projects);
@@ -294,34 +327,22 @@ function App() {
 
   const closeModal = useCallback(() => setModal(null), []);
 
-  // Determine the display status of a project based on its dates and color
+  const rules = useMemo(() => boardRules(data.settings), [data.settings]);
+
+  // The status a project filters as: its own, or Complete once it is confirmed
+  // or assumed (utils/completion, the same rule the bar's badge follows).
   const getProjectDisplayStatus = useCallback((project: Project): ProjectStatus => {
     const today = new Date();
-    const startDate = parseLocalDate(project.startDate);
+    const status = displayStatusOf(project, toDateString(today), rules.graceDays);
+    if (status) return status;
 
-    // Past projects are always "complete" (auto-blue). Compare at day
-    // granularity (via isDatePast) so a project on its final day still counts
-    // as active — matches ProjectBar, which also uses isDatePast. A time-of-day
-    // comparison would mis-classify a project ending today as complete.
-    // Exception: pre-delivery/parked statuses (Discovery, Initiation, Ready to
-    // Start, On Hold, Deferred) are honoured even once the end date passes — an
-    // elapsed end date on those doesn't mean the work actually completed.
-    if (isDatePast(project.endDate) && !isAutoCompleteExempt(project.statusColor)) {
-      return 'complete';
-    }
-
-    // For active/future projects, determine status from color (handles legacy hex values)
-    const slug = getStatusSlugByHex(project.statusColor);
-    if (slug && slug !== 'complete') {
-      return slug as ProjectStatus;
-    }
-
-    // Default: if start date is in future, it's "ready-to-start", otherwise "on-track"
-    if (startDate > today) return 'ready-to-start';
+    // A colour that is not a known status: if the start date is in the future
+    // it's "ready-to-start", otherwise "on-track".
+    if (parseLocalDate(project.startDate) > today) return 'ready-to-start';
     return 'on-track';
-  }, []);
+  }, [rules.graceDays]);
 
-  // Apply the active filters (owners / sizes / statuses / EPR / timeframe /
+  // Apply the active filters (owners / sizes / statuses / EPR / tags / timeframe /
   // search) to the board. All the interpretation lives in utils/projectFilters
   // so the Filter menu's badge and summary count can never disagree with what's
   // shown. `today` is resolved once per render rather than inside the filter so
@@ -398,6 +419,31 @@ function App() {
     };
   }, [loading, data.projects, handleProjectSelect]);
 
+  // Puts a deleted project back along with the dependencies deleteProject
+  // removed with it. Shared by Ctrl+Z and the "Project deleted" toast so the two
+  // cannot restore different things.
+  const restoreProject = useCallback(async (project: Project, dependencies: Dependency[]) => {
+    // The toast's Undo and Ctrl+Z can both be used on the same delete.
+    if (projectsRef.current.some(p => p.id === project.id)) return;
+    await addProject(project);
+    for (const dep of dependencies) {
+      // A link to a project that has itself been deleted since would dangle.
+      const otherEnd = dep.fromProjectId === project.id ? dep.toProjectId : dep.fromProjectId;
+      if (!projectsRef.current.some(p => p.id === otherEnd)) continue;
+      try {
+        const restored = await addDependency(
+          dep.fromProjectId, dep.toProjectId,
+          dep.fromMilestoneId, dep.toMilestoneId, dep.type
+        );
+        // addDependency has no waypoints parameter, so the hand-shaped path
+        // goes on in a second write.
+        if (dep.waypoints) await updateDependency(restored.id, { waypoints: dep.waypoints });
+      } catch (error) {
+        showToast(`Could not restore a dependency: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
+      }
+    }
+  }, [addProject, addDependency, updateDependency, showToast]);
+
   // Handle undo
   const handleUndo = useCallback(() => {
     const action = undo();
@@ -426,28 +472,16 @@ function App() {
         break;
       case 'DELETE_PROJECT':
         if (inverseObj.action === 'restore' && isProject(inverseObj.data)) {
-          addProject(inverseObj.data);
-          // Restore dependencies that were cleaned up with the project
-          const deps = (inverse as { dependencies?: Dependency[] }).dependencies;
-          if (deps && deps.length > 0) {
-            for (const dep of deps) {
-              addDependency(
-                dep.fromProjectId, dep.toProjectId,
-                undefined, undefined, dep.type
-              ).catch(() => { /* target may have been deleted */ });
-            }
-          }
+          restoreProject(inverseObj.data, action.inverse.dependencies);
         } else if (inverseObj.action === 'restore') {
           console.warn('Undo DELETE_PROJECT failed: data is not a valid Project');
         }
         break;
-      case 'UPDATE_PROJECT':
-        if (inverseObj.action === 'update' && isProject(inverseObj.data)) {
-          updateProject(inverseObj.data.id, inverseObj.data);
-        } else if (inverseObj.action === 'update') {
-          console.warn('Undo UPDATE_PROJECT failed: data is not a valid Project');
-        }
+      case 'UPDATE_PROJECT': {
+        const { id, ...patch } = action.inverse.data;
+        updateProject(id, patch);
         break;
+      }
       // Currently only project operations are recorded for undo.
       // Milestone, member, dependency, and leave types are defined in the
       // ActionType union but not yet wired into recordAction calls.
@@ -455,7 +489,7 @@ function App() {
         console.warn(`Undo not implemented for action type: ${action.type}`);
         break;
     }
-  }, [undo, deleteProject, addProject, updateProject, addDependency]);
+  }, [undo, deleteProject, updateProject, restoreProject]);
 
   // Handle redo
   const handleRedo = useCallback(() => {
@@ -481,11 +515,8 @@ function App() {
         break;
       }
       case 'UPDATE_PROJECT': {
-        if (isProject(action.data)) {
-          updateProject(action.data.id, action.data);
-        } else {
-          console.warn('Redo UPDATE_PROJECT failed: data is not a valid Project');
-        }
+        const { id, ...patch } = action.data;
+        updateProject(id, patch);
         break;
       }
     }
@@ -518,8 +549,13 @@ function App() {
         return;
       }
 
-      // Escape to exit fullscreen or deselect (always handle, even in inputs)
+      // Escape exits fullscreen or deselects. In a field it belongs to that
+      // field's dialog, which closes itself; acting here too dropped the
+      // selection behind it.
       if (e.key === 'Escape') {
+        if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) {
+          return;
+        }
         e.preventDefault();
         if (isFullscreen) {
           setIsFullscreen(false);
@@ -574,6 +610,7 @@ function App() {
       }
 
       // Quick create project with N when hovering a lane
+      const hoveredMember = hoveredMemberRef.current;
       if (e.key.toLowerCase() === 'n' && !hasModifierKey(e) && hoveredMember && !isLocked) {
         e.preventDefault();
         const ownerProjects = projectsRef.current.filter(p => p.owner === hoveredMember);
@@ -601,7 +638,10 @@ function App() {
             endDate: newEnd,
             statusColor: normalizeStatusColor(project.statusColor),
             size: project.size ?? DEFAULT_SIZE,
-            epr: project.epr
+            epr: project.epr,
+            programme: project.programme,
+            scoring: project.scoring,
+            tags: project.tags
           }).then(() => {
             showToast('Project duplicated', 'success');
           }).catch(() => {
@@ -643,11 +683,11 @@ function App() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, isFullscreen, hoveredMember, isLocked, selectedProjectId, addProject, updateProject, showToast]);
+  }, [handleUndo, handleRedo, isFullscreen, isLocked, selectedProjectId, addProject, updateProject, showToast]);
 
   // Team member handlers
   const handleAddMember = useCallback(
-    async (values: { name: string; jobTitle: string }) => {
+    async (values: { name: string; jobTitle: string; capacity?: number }) => {
       try {
         await addTeamMember(values);
         closeModal();
@@ -659,7 +699,7 @@ function App() {
   );
 
   const handleEditMember = useCallback(
-    async (values: { name: string; jobTitle: string }) => {
+    async (values: { name: string; jobTitle: string; left?: boolean; capacity?: number }) => {
       if (modal?.type === 'edit-member') {
         try {
           await updateTeamMember(modal.member.id, values);
@@ -671,6 +711,20 @@ function App() {
     },
     [modal, updateTeamMember, closeModal, showToast]
   );
+
+  // The rules panel saves each change as it is made, with no form to submit,
+  // so a failed write has to surface here.
+  const saveRules = useCallback((updates: BoardSettings) => {
+    updateSettings(updates).catch(error => showToast(`Failed to save rules: ${error instanceof Error ? error.message : String(error)}`, 'error'));
+  }, [updateSettings, showToast]);
+
+  const saveProgramme = useCallback((from: string, to: string | null) => {
+    replaceProgramme(from, to).catch(error => showToast(`Failed to save programmes: ${error instanceof Error ? error.message : String(error)}`, 'error'));
+  }, [replaceProgramme, showToast]);
+
+  const saveMemberRule = useCallback((memberId: string, updates: Partial<TeamMember>) => {
+    updateTeamMember(memberId, updates).catch(error => showToast(`Failed to update member: ${error instanceof Error ? error.message : String(error)}`, 'error'));
+  }, [updateTeamMember, showToast]);
 
   const handleDeleteMember = useCallback(async () => {
     if (modal?.type === 'edit-member') {
@@ -696,7 +750,6 @@ function App() {
           return;
         }
         recordAction('CREATE_PROJECT', newProject, createInverse('CREATE_PROJECT', null, newProject));
-        showToast('Project created successfully', 'success');
         closeModal();
       } catch (error) {
         showToast(`Failed to create project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
@@ -705,44 +758,48 @@ function App() {
     [addProject, closeModal, recordAction, showToast]
   );
 
+  // Undo and redo each replay only the fields this edit changed, so neither
+  // overwrites what a colleague has done to the project's other fields since.
+  const recordProjectUpdate = useCallback((before: Project, updates: Partial<Project>) => {
+    const undoPatch = revertPatch(before, updates);
+    if (Object.keys(undoPatch).length === 0) return;
+    const redoPatch = revertPatch({ ...before, ...updates }, undoPatch);
+    const redoData = { id: before.id, ...redoPatch };
+    recordAction('UPDATE_PROJECT', redoData, createInverse('UPDATE_PROJECT', { id: before.id, ...undoPatch }, redoData));
+  }, [recordAction]);
+
   const handleEditProject = useCallback(
     async (values: Omit<Project, 'id' | 'milestones'> & { milestones?: Milestone[] }) => {
       if (modal?.type === 'edit-project') {
         try {
           const beforeState = modal.project;
           // Milestones aren't edited here; omit the field so existing milestone data is preserved.
-          const { milestones: _milestones, ...projectData } = values; // eslint-disable-line @typescript-eslint/no-unused-vars -- field intentionally dropped
+          const { milestones: _milestones, ...edited } = values; // eslint-disable-line @typescript-eslint/no-unused-vars -- field intentionally dropped
+          const projectData = valueChanges(beforeState, { ...edited, ...statusStamp(beforeState, edited, toDateString(new Date())) });
           await updateProject(modal.project.id, projectData);
-          // Record the full merged project (with id + preserved milestones) as the
-          // redo target — `projectData`/`values` alone lack an `id`, so redo's
-          // isProject() guard would reject it and silently do nothing.
-          const afterState: Project = { ...beforeState, ...projectData };
-          // Undo applies its payload as a MERGE, so the inverse must name every
-          // field this edit wrote — including one the project didn't have before
-          // (ticking `epr` on a pre-EPR project). Absent keys would survive the
-          // merge and the undo would silently not revert them.
-          recordAction(
-            'UPDATE_PROJECT',
-            afterState,
-            createInverse('UPDATE_PROJECT', revertPatch(beforeState, projectData), afterState)
-          );
+          recordProjectUpdate(beforeState, projectData);
           closeModal();
         } catch (error) {
           showToast(`Failed to update project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
         }
       }
     },
-    [modal, updateProject, closeModal, recordAction, showToast]
+    [modal, updateProject, closeModal, recordProjectUpdate, showToast]
   );
 
   // Update used by the timeline (drag to reassign / resize). Over-capacity moves
   // are allowed — a member can be deliberately overloaded — and surfaced visually
   // on the timeline with an over-allocation marker rather than being blocked here.
   const handleTimelineUpdateProject = useCallback(
-    async (projectId: string, updates: Partial<Project>) => {
+    async (projectId: string, change: Partial<Project>) => {
+      const before = projectsRef.current.find(p => p.id === projectId);
+      const updates = before ? { ...change, ...statusStamp(before, change, toDateString(new Date())) } : change;
       await updateProject(projectId, updates);
+      // Moves, resizes, reassignments and status changes made on the board are
+      // undoable like edits made in the form.
+      if (before) recordProjectUpdate(before, updates);
     },
-    [updateProject]
+    [updateProject, recordProjectUpdate]
   );
 
   const handleDeleteProject = useCallback(
@@ -756,31 +813,14 @@ function App() {
           );
           recordAction('DELETE_PROJECT', project, { action: 'restore', data: project, dependencies: affectedDeps });
           await deleteProject(projectId);
-          // Capture the deleted project for a targeted restore, rather than
-          // calling generic handleUndo which undoes the *most recent* action
-          // (which might not be this delete if the user acted in between).
-          const deletedProject = { ...project };
+          // Restore this project specifically, rather than calling generic
+          // handleUndo which undoes the *most recent* action (which might not be
+          // this delete if the user acted in between).
           showToast('Project deleted', {
             type: 'success',
             action: {
               label: 'Undo',
-              onClick: async () => {
-                await addProject(deletedProject);
-                // Restore dependencies that were cleaned up
-                for (const dep of affectedDeps) {
-                  try {
-                    await addDependency(
-                      dep.fromProjectId,
-                      dep.toProjectId,
-                      undefined,
-                      undefined,
-                      dep.type
-                    );
-                  } catch {
-                    // Dependency restore may fail if target was also deleted
-                  }
-                }
-              }
+              onClick: () => restoreProject(project, affectedDeps)
             }
           });
         }
@@ -788,7 +828,7 @@ function App() {
         showToast(`Failed to delete project: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
       }
     },
-    [data.projects, data.dependencies, deleteProject, recordAction, showToast, addProject, addDependency]
+    [data.projects, data.dependencies, deleteProject, recordAction, showToast, restoreProject]
   );
 
   // Dependency handlers (persisted to Firebase) — project-level only.
@@ -798,7 +838,6 @@ function App() {
   ) => {
     try {
       await addDependency(fromProjectId, toProjectId);
-      showToast('Dependency created', 'success');
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       showToast(errorMsg, 'error');
@@ -833,7 +872,6 @@ function App() {
   }) => {
     try {
       await addLeaveBlock(leaveData);
-      showToast('Leave added', 'success');
     } catch (error) {
       showToast(`Failed to add leave: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
@@ -856,7 +894,6 @@ function App() {
   }) => {
     try {
       await addPeriodMarker(markerData);
-      showToast('Period marker added', 'success');
     } catch (error) {
       showToast(`Failed to add marker: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
@@ -879,7 +916,6 @@ function App() {
   }) => {
     try {
       await updatePeriodMarker(markerId, updates);
-      showToast('Marker updated', 'success');
     } catch (error) {
       showToast(`Failed to update marker: ${error instanceof Error ? error.message : 'Unknown error'}`, 'error');
     }
@@ -898,6 +934,7 @@ function App() {
   }
 
   return (
+    <BoardRulesContext.Provider value={rules}>
     <div className={`${styles.app} ${isFullscreen ? styles.fullscreen : ''}`}>
       {/* Fullscreen hint */}
       {showFullscreenHint && (
@@ -911,8 +948,9 @@ function App() {
         <Toolbar
           projects={data.projects}
           teamMembers={data.teamMembers}
-          dependencies={data.dependencies || []}
+          board={data}
           filters={filters}
+          tags={projectTags}
           onFiltersChange={setFilters}
           onSearchChange={handleSearchChange}
           filteredProjects={filteredProjects}
@@ -932,6 +970,10 @@ function App() {
           isLocked={isLocked}
           onToggleLock={handleToggleLock}
           embedMode={embedMode}
+          view={view}
+          onViewChange={handleViewChange}
+          onOpenCapacity={() => setModal({ type: 'capacity' })}
+          onOpenRules={() => setModal({ type: 'rules' })}
           presenceUsers={presenceUsers}
           currentUserId={sessionInfo.userId}
         />
@@ -954,6 +996,7 @@ function App() {
       )}
 
       <main className={styles.main}>
+        {view === 'programmes' ? <ProgrammeView projects={filteredProjects} /> : (
         <Timeline
           ref={timelineRef}
           projects={filteredProjects}
@@ -964,6 +1007,7 @@ function App() {
           dayWidth={dayWidth}
           selectedProjectId={selectedProjectId}
           filteredOwners={filters.owners.length > 0 ? filters.owners : undefined}
+          dimLeavers={dimsLeavers(filters)}
           slimEmptyLanes={hasActiveFilters(filters)}
           newDependencyIds={newDependencyIds}
           isLocked={isLocked}
@@ -1000,21 +1044,42 @@ function App() {
           collapsedLanes={collapsedLanes}
           onToggleLaneCollapse={toggleLaneCollapse}
         />
+        )}
       </main>
 
-      {/* Add Team Member Modal */}
-      <Modal isOpen={modal?.type === 'add-member'} onClose={closeModal} title="Add Team Member">
+      <Modal isOpen={modal?.type === 'capacity'} onClose={closeModal} title="Capacity, next 26 weeks">
         <Suspense fallback={formFallback}>
-          <TeamMemberForm onSubmit={handleAddMember} onCancel={closeModal} />
+          {modal?.type === 'capacity' && <CapacityView teamMembers={data.teamMembers} projects={data.projects} />}
+        </Suspense>
+      </Modal>
+
+      <Modal isOpen={modal?.type === 'rules'} onClose={closeModal} title="Board rules">
+        <Suspense fallback={formFallback}>
+          {modal?.type === 'rules' && (
+            <BoardRulesPanel
+              teamMembers={data.teamMembers}
+              projects={data.projects}
+              onUpdateSettings={saveRules}
+              onReplaceProgramme={saveProgramme}
+              onUpdateMember={saveMemberRule}
+            />
+          )}
+        </Suspense>
+      </Modal>
+
+      {/* Add Team Member Modal */}
+      <Modal isOpen={modal?.type === 'add-member'} onClose={closeModal} title="Add team member">
+        <Suspense fallback={formFallback}>
+          <TeamMemberForm onSubmit={handleAddMember} onCancel={closeModal} otherNames={data.teamMembers.map(m => m.name)} />
         </Suspense>
       </Modal>
 
       {/* Edit Team Member Modal */}
-      <Modal isOpen={modal?.type === 'edit-member'} onClose={closeModal} title="Edit Team Member">
+      <Modal isOpen={modal?.type === 'edit-member'} onClose={closeModal} title="Edit team member">
         <Suspense fallback={formFallback}>
           {modal?.type === 'edit-member' && (
             <TeamMemberForm
-              initialValues={{ name: modal.member.name, jobTitle: modal.member.jobTitle }}
+              initialValues={{ name: modal.member.name, jobTitle: modal.member.jobTitle, left: modal.member.left, capacity: modal.member.capacity }}
               onSubmit={handleEditMember}
               onCancel={closeModal}
               onDelete={handleDeleteMember}
@@ -1025,13 +1090,14 @@ function App() {
               }}
               isEditing
               projectCount={data.projects.filter(p => p.owner === modal.member.name).length}
+              otherNames={data.teamMembers.filter(m => m.id !== modal.member.id).map(m => m.name)}
             />
           )}
         </Suspense>
       </Modal>
 
       {/* Add Project Modal */}
-      <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New Project">
+      <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New project">
         <Suspense fallback={formFallback}>
           {modal?.type === 'add-project' && (
             <ProjectWizard
@@ -1051,7 +1117,7 @@ function App() {
       </Modal>
 
       {/* Edit Project Modal */}
-      <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit Project">
+      <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit project">
         <Suspense fallback={formFallback}>
           {modal?.type === 'edit-project' && (
             <ProjectWizard
@@ -1062,7 +1128,10 @@ function App() {
                 endDate: modal.project.endDate,
                 statusColor: modal.project.statusColor,
                 size: modal.project.size,
-                epr: modal.project.epr
+                epr: modal.project.epr,
+                tags: modal.project.tags,
+                programme: modal.project.programme,
+                baselineEndDate: modal.project.baselineEndDate
               }}
               initialScoring={modal.project.scoring}
               initialMilestones={modal.project.milestones}
@@ -1099,6 +1168,7 @@ function App() {
         />
       )}
     </div>
+    </BoardRulesContext.Provider>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, type ReactElement } from 'react';
-import type { Project, TeamMember, Dependency } from '../types';
+import type { Project, RoadmapData } from '../types';
 import { getExportOptions } from '../utils/exportUtils';
+import { useBoardRules } from '../utils/boardSettings';
 import { getModifierKeySymbol } from '../utils/platformUtils';
 import styles from './ExportMenu.module.css';
 
@@ -38,15 +39,18 @@ const EXPORT_ICONS: Record<string, ReactElement> = {
 
 interface ExportMenuProps {
   projects: Project[];
-  teamMembers: TeamMember[];
-  dependencies: Dependency[];
+  // The whole board as stored, for the JSON backup.
+  board: RoadmapData;
   // Hide the "copy embed code" action when the app is itself the embedded view —
   // a framed viewer has no need to grab the embed snippet.
   embedMode?: boolean;
   // Unfiltered project list, used only to derive the timeline's date range for
-  // the image exports so they match what Timeline rendered. Data exports still
-  // use `projects` (the filtered set), so JSON/CSV export what's on screen.
+  // the image exports so they match what Timeline rendered. The CSV still uses
+  // `projects` (the filtered set), so it exports what's on screen.
   allProjects?: Project[];
+  // False while the programme view is showing: the image and PDF exports
+  // capture the people board, which is not on screen then.
+  boardVisible?: boolean;
 }
 
 // The ready-to-paste SharePoint snippet. Built from the live origin the app is
@@ -80,7 +84,7 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-export function ExportMenu({ projects, teamMembers, dependencies, embedMode = false, allProjects }: ExportMenuProps) {
+export function ExportMenu({ projects, board, embedMode = false, allProjects, boardVisible = true }: ExportMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
   // Which export is currently running (disables the list and shows progress),
   // and the last error message (so a failed export never fails silently).
@@ -96,7 +100,9 @@ export function ExportMenu({ projects, teamMembers, dependencies, embedMode = fa
   // Get platform-appropriate shortcut display
   const exportShortcut = `${getModifierKeySymbol()}E`;
 
-  const exportOptions = getExportOptions(projects, teamMembers, dependencies, allProjects ?? projects);
+  const { graceDays } = useBoardRules();
+  const exportOptions = getExportOptions(projects, board, graceDays, allProjects ?? projects)
+    .filter(option => boardVisible || (option.id !== 'report' && option.id !== 'pdf'));
 
   const runExport = async (option: (typeof exportOptions)[number]) => {
     if (busyId) return; // one export at a time

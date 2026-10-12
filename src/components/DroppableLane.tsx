@@ -16,6 +16,7 @@ interface DroppableLaneProps {
   dayWidth?: number;
   isLocked?: boolean;
   isCollapsed?: boolean; // When true, hide lane content
+  isDimmed?: boolean; // A leaver's lane, greyed back (see utils/teamMembers.ts)
   onDragCreate?: (startDate: string, endDate: string) => void;
 }
 
@@ -31,6 +32,7 @@ export function DroppableLane({
   dayWidth,
   isLocked,
   isCollapsed = false,
+  isDimmed = false,
   onDragCreate
 }: DroppableLaneProps) {
   const { setNodeRef, isOver } = useDroppable({
@@ -178,7 +180,7 @@ export function DroppableLane({
   return (
     <div
       ref={setRefs}
-      className={`${styles.lane} ${isOver ? styles.laneOver : ''} ${isDragging ? styles.laneDragging : ''} ${isCollapsed ? styles.laneCollapsed : ''}`}
+      className={`${styles.lane} ${isOver ? styles.laneOver : ''} ${isDragging ? styles.laneDragging : ''} ${isCollapsed ? styles.laneCollapsed : ''} ${isDimmed ? styles.laneLeft : ''}`}
       style={{ top, height }}
       data-member={memberName}
       onContextMenu={isCollapsed ? undefined : onContextMenu}

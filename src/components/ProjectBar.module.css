@@ -5,54 +5,31 @@
   min-height: 28px;
   border-radius: var(--radius-lg);
   cursor: pointer;
-  /* Only transform (compositor-only) is transitioned. box-shadow is intentionally
-     NOT animated: repainting a shadow every frame for 150ms on every hover in/out
-     is the costliest part of a cursor sweep across a dense board. The hover shadow
-     still changes — it just snaps instantly, which is imperceptible next to the lift. */
-  transition: transform 100ms var(--ease-out-quart, cubic-bezier(0.25, 1, 0.5, 1)),
-              filter var(--transition-fast);
   box-shadow: var(--shadow-raised);
   z-index: 2;
   min-width: 80px;
-  /* Force GPU layer for smooth animations */
-  transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
   /* Ensure child content respects the rounded corners */
   overflow: hidden;
+  /* A drag that leaves the bar would otherwise sweep a text selection across
+     every title it passes. */
+  user-select: none;
 }
 
 .projectBar:hover {
-  transform: translateY(-2px) translateZ(0);
-  box-shadow: var(--shadow-md), 0 0 0 1px rgba(255, 255, 255, 0.1);
-  filter: brightness(1.05);
+  box-shadow: var(--shadow-md);
   z-index: 4;
-}
-
-.projectBar:active:not(.dragging) {
-  transform: translateY(0) scale(0.995) translateZ(0);
-  transition-duration: 50ms;
 }
 
 .projectBar.dragging {
   cursor: grabbing;
-  /* Force GPU layer and prevent transform conflicts */
-  transform: translateZ(0) !important;
   will-change: left, width;
   box-shadow: var(--shadow-lg);
   z-index: 100;  /* Increased from 10 to be above everything */
   opacity: 0.8;  /* Match DnD kit inline opacity */
-  /* Disable ALL transitions during drag to prevent flickering */
-  transition: none !important;
-  /* Prevent filter effects during drag */
-  filter: none !important;
 }
 
-/* Disable hover transforms during drag to prevent conflicts */
 .projectBar.dragging:hover {
-  transform: translateZ(0) !important;
-  filter: none !important;
-  box-shadow: var(--shadow-lg) !important;
+  box-shadow: var(--shadow-lg);
 }
 
 /* Disable pointer events on inner content during drag to prevent interference */
@@ -68,12 +45,6 @@
 .projectBar.selected {
   box-shadow: 0 0 0 3px var(--accent-blue), var(--shadow-lg);
   z-index: 15;
-  animation: pulse 1s ease-in-out 2;
-}
-
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 0 0 3px var(--accent-blue), var(--shadow-lg); }
-  50% { box-shadow: 0 0 0 6px var(--accent-blue-light), var(--shadow-lg); }
 }
 
 /* On-hold pills are paused and excluded from the owner's 4-slot capacity total.
@@ -87,11 +58,6 @@
   filter: saturate(0.4);
 }
 
-.projectBar.onHold:hover {
-  /* Keep the parked read on hover; brightness alone would re-saturate it. */
-  filter: saturate(0.4) brightness(1.05);
-}
-
 /* Dependency creation states */
 .projectBar.targetable {
   cursor: crosshair;
@@ -99,17 +65,10 @@
 
 .projectBar.targetable:hover {
   box-shadow: 0 0 0 2px var(--accent-blue), var(--shadow-md);
-  filter: brightness(1.1);
 }
 
 .projectBar.isSource {
   box-shadow: 0 0 0 2px var(--accent-blue), var(--shadow-md);
-  animation: sourceGlow 1s ease-in-out infinite;
-}
-
-@keyframes sourceGlow {
-  0%, 100% { box-shadow: 0 0 0 2px var(--accent-blue), var(--shadow-md); }
-  50% { box-shadow: 0 0 0 4px var(--accent-blue-light), var(--shadow-md); }
 }
 
 .resizeHandle {
@@ -189,18 +148,6 @@
   flex-shrink: 0;
 }
 
-.dragHint {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: var(--text-sm);
-  color: rgba(255, 255, 255, 0.4);
-  pointer-events: none;
-  white-space: nowrap;
-  user-select: none;
-}
-
 .projectTitle {
   font-size: var(--text-base);
   font-weight: var(--fw-semibold);
@@ -256,104 +203,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.projectLabel {
-  font-size: var(--text-2xs);
-  font-weight: var(--fw-medium);
-  color: rgba(255, 255, 255, 0.75);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.milestonesContainer {
-  position: absolute;
-  bottom: 6px;
-  left: 12px;
-  right: 12px;
-  min-height: 20px;
-  pointer-events: none;
-  z-index: 10; /* Ensure milestone layer is above dragArea */
-  /* Create isolated stacking context and prevent layout thrashing */
-  isolation: isolate;
-  contain: layout style;
-}
-
-.contextMenu {
-  position: fixed;
-  z-index: 9999;
-  background: var(--bg-primary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-popover);
-  border: 1px solid var(--border-light);
-  overflow: hidden;
-  /* Faster, snappier menu appearance */
-  animation: menuFadeIn 80ms cubic-bezier(0.16, 1, 0.3, 1);
-  min-width: 140px;
-  /* Optimize paint */
-  transform: translateZ(0);
-}
-
-@keyframes menuFadeIn {
-  from {
-    opacity: 0;
-    transform: scale(0.96) translateY(-4px) translateZ(0);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0) translateZ(0);
-  }
-}
-
-.contextMenu button {
-  display: block;
-  width: 100%;
-  padding: var(--space-3) var(--space-4);
-  text-align: left;
-  font-size: var(--text-md);
-  color: var(--text-primary);
-  background: none;
-  border: none;
-  cursor: pointer;
-  white-space: nowrap;
-  /* Faster staggered entrance */
-  animation: menuItemIn 100ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
-  transition: background-color 60ms ease,
-              transform 50ms ease;
-}
-
-.contextMenu button:nth-child(1) { animation-delay: 0s; }
-.contextMenu button:nth-child(2) { animation-delay: 20ms; }
-.contextMenu button:nth-child(3) { animation-delay: 40ms; }
-.contextMenu button:nth-child(4) { animation-delay: 60ms; }
-
-@keyframes menuItemIn {
-  from {
-    opacity: 0;
-    transform: translateX(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.contextMenu button:hover {
-  background: var(--bg-tertiary);
-}
-
-.contextMenu button:active {
-  transform: scale(0.97);
-  background: var(--border-light);
-  transition-duration: 30ms;
-}
-
-.contextMenu .deleteBtn {
-  color: var(--error-red);
-}
-
-.contextMenu .deleteBtn:hover {
-  background: rgba(239, 68, 68, 0.1);
-}
-
 /* Tooltip styles */
 .tooltip {
   background: var(--bg-secondary);
@@ -389,10 +238,10 @@
   color: var(--text-secondary);
 }
 
-.tooltipMilestones {
+.tooltipTags {
+  margin-top: var(--space-1);
   font-size: var(--text-sm);
   color: var(--text-muted);
-  margin-top: var(--space-1);
 }
 
 .pastBadge {

@@ -14,6 +14,13 @@
           "statusColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
           "size": { ".validate": "newData.isString() && (newData.val() == 'full-time' || newData.val() == 'large' || newData.val() == 'medium' || newData.val() == 'small')" },
           "epr": { ".validate": "newData.isBoolean()" },
+          "programme": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50" },
+          "baselineEndDate": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "statusSetOn": { ".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}$/)" },
+          "tags": {
+            ".validate": true,
+            "$tag": { ".validate": "$tag.matches(/^1?[0-9]$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 50" }
+          },
           "scoring": {
             ".validate": "newData.hasChildren(['scores', 'total'])",
             "scores": {
@@ -50,6 +57,8 @@
           "jobTitle": { ".validate": "newData.isString() && newData.val().length <= 100" },
           "nameColor": { ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)" },
           "order": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 200" },
+          "left": { ".validate": "newData.isBoolean()" },
+          "capacity": { ".validate": "newData.isNumber() && newData.val() >= 1 && newData.val() <= 4" },
           "$other": { ".validate": false }
         }
       },
@@ -97,6 +106,15 @@
           "label": { ".validate": "newData.isString() && newData.val().length <= 200" },
           "$other": { ".validate": false }
         }
+      },
+      "settings": {
+        "graceDays": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 60" },
+        "recoveryDays": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 60" },
+        "programmes": {
+          ".validate": true,
+          "$i": { ".validate": "$i.matches(/^[12]?[0-9]$/) && newData.isString() && newData.val().length > 0 && newData.val().length <= 50" }
+        },
+        "$other": { ".validate": false }
       },
       "$other": { ".validate": false }
     },
@@ -345,6 +363,45 @@
             "hit": { ".validate": "newData.isNumber()" },
             "adj": { ".validate": "newData.isNumber()" },
             "ate": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
+    "swarm": {
+      ".read": true,
+      "$code": {
+        ".write": true,
+        ".validate": "newData.hasChild('m')",
+        "m": {
+          ".validate": "newData.hasChildren(['status', 'createdAt', 'seed', 'players', 'game', 'startAt'])",
+          "status": { ".validate": "newData.isString() && (newData.val() == 'waiting' || newData.val() == 'playing' || newData.val() == 'finished')" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "seed": { ".validate": "newData.isNumber()" },
+          "game": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "startAt": { ".validate": "newData.isNumber()" },
+          "winner": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b' || newData.val() == 'draw')" },
+          "gone": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b')" },
+          "players": {
+            "$seat": {
+              ".validate": "($seat == 'a' || $seat == 'b') && newData.hasChildren(['sessionId', 'name'])",
+              "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+              "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
+              "$other": { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        },
+        "s": {
+          "$seat": {
+            ".validate": "($seat == 'a' || $seat == 'b') && newData.hasChildren(['seq', 'at', 'game', 'k', 'orders'])",
+            "seq": { ".validate": "newData.isNumber()" },
+            "at": { ".validate": "newData.isNumber()" },
+            "game": { ".validate": "newData.isNumber()" },
+            "k": { ".validate": "newData.isNumber()" },
+            "orders": { ".validate": "newData.isString() && newData.val().length <= 30000" },
             "$other": { ".validate": false }
           }
         },

@@ -1,6 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { TeamMember } from '../types';
+import { CAPACITY, capacityOfMember } from '../utils/capacity';
 import styles from './Timeline.module.css';
 
 interface SortableMemberLaneProps {
@@ -14,12 +15,13 @@ interface SortableMemberLaneProps {
   // anything and clearing the filter restores the lane on its own.
   isEmpty?: boolean;
   railMode?: boolean; // When true, the whole sidebar is a thin vertical rail
+  isDimmed?: boolean; // A leaver's lane, greyed back (see utils/teamMembers.ts)
   onToggleCollapse?: () => void;
   onEdit: () => void;
   onAddProject: () => void;
 }
 
-export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, isEmpty = false, railMode = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
+export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, isEmpty = false, railMode = false, isDimmed = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
   const {
     attributes,
     listeners,
@@ -45,6 +47,11 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
     background: isDragging ? 'var(--bg-primary)' : undefined
   } as React.CSSProperties;
 
+  // Only said when it differs from the full lane, so a board where everyone
+  // carries four slots stays as quiet as it was.
+  const capacity = capacityOfMember(member);
+  const reducedCapacity = capacity < CAPACITY ? `${capacity} of ${CAPACITY} slots` : '';
+
   // Rail mode: the sidebar is collapsed to a thin strip, so we show only the
   // member's name turned 90° (reading bottom-to-top), centred in the lane. The
   // full name + title live in the tooltip, and clicking still opens the editor.
@@ -53,9 +60,9 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
       <div
         ref={setNodeRef}
         style={style}
-        className={`${styles.memberLane} ${styles.memberLaneRail}`}
+        className={`${styles.memberLane} ${styles.memberLaneRail} ${isDimmed ? styles.memberLaneLeft : ''}`}
         onClick={isLocked ? undefined : onEdit}
-        title={member.jobTitle ? `${member.name} — ${member.jobTitle}` : member.name}
+        title={[member.name, member.jobTitle, member.left ? 'Left the team' : reducedCapacity].filter(Boolean).join(' — ')}
       >
         <span className={styles.railName}>
           {member.name}
@@ -68,7 +75,7 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
     <div
       ref={setNodeRef}
       style={style}
-      className={`${styles.memberLane} ${isDragging ? styles.dragging : ''} ${isCollapsed || isEmpty ? styles.collapsed : ''}`}
+      className={`${styles.memberLane} ${isDragging ? styles.dragging : ''} ${isCollapsed || isEmpty ? styles.collapsed : ''} ${isDimmed ? styles.memberLaneLeft : ''}`}
     >
       <div className={styles.memberLaneContent}>
         {/* Collapse toggle button */}
@@ -112,10 +119,10 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
         </div>
         <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
           <span className={styles.memberName}>{member.name}</span>
-          {!isCollapsed && !isEmpty && <span className={styles.memberTitle}>{member.jobTitle}</span>}
+          {!isCollapsed && !isEmpty && <span className={styles.memberTitle}>{member.left ? 'Left the team' : [member.jobTitle, reducedCapacity].filter(Boolean).join(' \u00B7 ')}</span>}
         </div>
       </div>
-      {!isCollapsed && !isEmpty && (
+      {!isCollapsed && !isEmpty && !member.left && (
         <button
           className={styles.addProjectBtn}
           onClick={onAddProject}

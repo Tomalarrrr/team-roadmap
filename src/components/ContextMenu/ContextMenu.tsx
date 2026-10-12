@@ -61,15 +61,21 @@ export function ContextMenu({
     };
   }, [isOpen, onClose]);
 
-  if (!isOpen || !computedPosition) return null;
+  if (!isOpen || !position) return null;
+
+  // The menu has to be in the DOM before useViewportPosition can measure it, so
+  // it mounts hidden at the pointer and is shown once it has been fitted to the
+  // viewport.
+  const placed = computedPosition ?? position;
 
   const content = (
     <div
       ref={menuRef}
       className={styles.contextMenu}
       style={{
-        left: computedPosition.x,
-        top: computedPosition.y
+        left: placed.x,
+        top: placed.y,
+        visibility: computedPosition ? 'visible' : 'hidden'
       }}
       role="menu"
       aria-orientation="vertical"

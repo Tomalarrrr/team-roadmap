@@ -9,9 +9,11 @@ import {
   getBarDimensions,
   toISODateString,
   formatShortDate,
-  isDatePast
+  toDateString
 } from '../utils/dateUtils';
-import { getStatusNameByHex, AUTO_COMPLETE_COLOR, normalizeStatusColor, isOnHold, isAutoCompleteExempt } from '../utils/statusColors';
+import { STATUS_COLORS, getStatusNameByHex, normalizeStatusColor, isOnHold } from '../utils/statusColors';
+import { completionOf, describeSlip, displayColorOf, slipDays, statusTextOf } from '../utils/completion';
+import { useBoardRules } from '../utils/boardSettings';
 import { heightForSize, DEFAULT_SIZE, UNIT_HEIGHT } from '../utils/capacity';
 import { parseISO, differenceInDays } from 'date-fns';
 import styles from './ProjectBar.module.css';
@@ -94,21 +96,34 @@ export function ProjectBar({
       // Only show Copy option when locked (non-destructive action)
       return onCopy ? [{
         id: 'copy',
-        label: 'Copy Project',
+        label: 'Copy project',
         onClick: onCopy
       }] : [];
     }
+    // Status is the edit made most often, so it is one click here instead of a
+    // trip through the form.
+    const currentStatus = normalizeStatusColor(project.statusColor);
     return [
       {
         id: 'edit',
-        label: 'Edit Project',
-        onClick: onEdit
+        label: 'Edit project',
+        onClick: onEdit,
+        divider: !onCopy
       },
       ...(onCopy ? [{
         id: 'copy',
-        label: 'Copy Project',
-        onClick: onCopy
+        label: 'Copy project',
+        onClick: onCopy,
+        divider: true
       }] : []),
+      ...STATUS_COLORS.map(({ hex, name, slug }, i) => ({
+        id: `status-${slug}`,
+        label: hex === currentStatus ? `${name} \u00B7 current` : name,
+        icon: <span style={{ display: 'block', width: 10, height: 10, borderRadius: 5, background: hex }} />,
+        onClick: () => { void onUpdate({ statusColor: hex }); },
+        disabled: hex === currentStatus,
+        divider: i === STATUS_COLORS.length - 1
+      })),
       {
         id: 'delete',
         label: 'Delete',
@@ -116,7 +131,7 @@ export function ProjectBar({
         variant: 'danger' as const
       }
     ];
-  }, [onEdit, onCopy, onDelete, isLocked]);
+  }, [onEdit, onCopy, onDelete, onUpdate, isLocked, project.statusColor]);
 
   // Dependency creation context
   const { state: depState, startCreation, completeCreation } = useDependencyCreation();
@@ -168,14 +183,21 @@ export function ProjectBar({
     dayWidth
   );
 
-  // Auto-blue rule: turn blue if project end date is past — EXCEPT for pre-delivery
-  // or parked statuses (Discovery, Initiation, Ready to Start, On Hold, Deferred),
-  // whose chosen status is honoured even once the today line passes the end date.
-  const isPast = isDatePast(project.endDate) && !isAutoCompleteExempt(project.statusColor);
-  const displayColor = isPast ? AUTO_COMPLETE_COLOR : normalizeStatusColor(project.statusColor);
+  // Past its end date a project is overdue for the board's grace period, keeping
+  // its own colour, and only then turns the Complete colour as an assumption.
+  // The rule itself lives in utils/completion.
+  const { graceDays } = useBoardRules();
+  const today = toDateString(new Date());
+  const completion = completionOf(project, today, graceDays);
+  const isPast = completion === 'assumed';
+  const displayColor = displayColorOf(project, today, graceDays);
 
-  // Status label for badge and tooltip
-  const statusLabel = isPast ? 'Complete' : getStatusNameByHex(project.statusColor);
+  // The badge has room for one short word; the tooltip carries the full wording.
+  const statusLabel = completion === 'assumed' ? 'Assumed'
+    : completion === 'overdue' ? 'Overdue'
+    : getStatusNameByHex(project.statusColor);
+  const statusText = statusTextOf(project, today, graceDays);
+  const slip = slipDays(project);
 
   // On-hold projects are paused and excluded from the owner's capacity total, so
   // dim the pill to signal it isn't counted (only while still active — a past pill
@@ -427,13 +449,24 @@ export function ProjectBar({
       setDragMode(null);
     };
 
+    // Escape abandons the drag: the bar returns to where it was and nothing is saved.
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      onEdgeDragRef.current?.(0, false);
+      latestPreviewRef.current = null;
+      setPreviewDates(null);
+      setDragMode(null);
+    };
+
     // Use passive listeners where possible for better scroll performance
     document.addEventListener('mousemove', handleMouseMove, { passive: true });
     document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('keydown', handleKeyDown);
       // Cancel any pending animation frame on cleanup
       if (rafIdRef.current !== null) {
         cancelAnimationFrame(rafIdRef.current);
@@ -703,7 +736,7 @@ export function ProjectBar({
           // pill's accessible name as the "over capacity" suffix, so this stays out
           // of the visible-text match for WCAG 2.5.3. Keep the title for the tooltip.
           aria-hidden="true"
-          title="Over capacity — this pushes the owner past their 4 slots in this period"
+          title="Over capacity: this pushes the owner past their slots in this period"
         />
       )}
 
@@ -799,16 +832,26 @@ export function ProjectBar({
             {formatShortDate(project.startDate)} {'\u2013'} {formatShortDate(project.endDate)}
             {' \u00B7 '}{formatDuration(project.startDate, project.endDate)}
           </div>
-          {statusLabel && (
+          {statusText && (
             <div className={styles.pastBadge} style={!isPast ? { color: displayColor } : undefined}>
-              {statusLabel}
+              {statusText}
             </div>
+          )}
+          {slip !== null && slip !== 0 && project.baselineEndDate && (
+            <div className={styles.tooltipTags}>
+              First planned to end {formatShortDate(project.baselineEndDate)}, now {describeSlip(slip)}
+            </div>
+          )}
+          {project.tags && project.tags.length > 0 && (
+            <div className={styles.tooltipTags}>{project.tags.join(' \u00B7 ')}</div>
           )}
           {onHold && (
             <div className={styles.tooltipOnHold}>On hold {'\u2014'} not counted toward capacity</div>
           )}
           <div className={styles.tooltipHint}>
-            {isLocked ? 'Right-click for options' : 'Click to edit \u00B7 Right-click for menu'}
+            {isLocked ? 'Right-click for options'
+              : completion === 'overdue' || completion === 'assumed' ? 'Right-click and choose Complete to confirm, or move the end date'
+              : 'Double-click to edit \u00B7 Right-click for status'}
           </div>
         </div>,
         document.body
