@@ -16,9 +16,11 @@ const SITES = [
 describe('reachOf', () => {
   it('is half a 44px target in world units, at the size the board is drawn', () => {
     expect(MIN_TARGET_PX).toBe(44);
-    expect(reachOf(1000)).toBe(22);
-    expect(reachOf(500)).toBe(44);
-    expect(reachOf(250)).toBe(88);
+    expect(reachOf(1000, 1000)).toBe(22);
+    expect(reachOf(500, 1000)).toBe(44);
+    expect(reachOf(250, 1000)).toBe(88);
+    // A wider world drawn in the same width has more units under the same finger.
+    expect(reachOf(1000, 1400)).toBeCloseTo(30.8);
   });
 });
 

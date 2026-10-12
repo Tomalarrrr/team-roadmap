@@ -9,12 +9,13 @@ type Engine = {
 
 // The database is the local dev backend's engine, so these run against stored
 // values (and its server timestamps) and not against a script of responses.
-const db = vi.hoisted(() => ({ engine: null as unknown as Engine, now: 0, timeouts: [] as unknown[] }));
+const db = vi.hoisted(() => ({ engine: null as unknown as Engine, now: 0, timeouts: [] as unknown[], reads: [] as string[] }));
 
 vi.mock('../dbProxy', () => ({
   getServerTimestamp: () => ({ '.sv': 'timestamp' }),
   proxyGet: async (path: string, timeoutMs?: number) => {
     db.timeouts.push(timeoutMs);
+    db.reads.push(path);
     return structuredClone(db.engine.get(path.split('/')));
   },
   proxyPut: async (path: string, value: object, timeoutMs?: number) => {
@@ -23,6 +24,7 @@ vi.mock('../dbProxy', () => ({
   },
   proxyRemove: async (path: string) => db.engine.set(path.split('/'), null),
   proxyTransaction: async (path: string, updater: (current: unknown) => object | null | undefined) => {
+    db.reads.push(path);
     const current = structuredClone(db.engine.get(path.split('/')));
     const next = updater(current);
     if (next === undefined || next === null) return { committed: false, snapshot: current };
@@ -38,6 +40,7 @@ beforeEach(() => {
   db.now = 50_000;
   db.engine = createDbEngine({}, () => db.now) as Engine;
   db.timeouts = [];
+  db.reads = [];
 });
 
 const matchOf = async (code: string) => (await getRoom(code))?.m as SwarmMatch;
@@ -76,32 +79,78 @@ describe('rooms', () => {
   });
 });
 
+describe('a code that could not be a room', () => {
+  // The code goes into the path of the request, and it is typed by a person or read from a link.
+  it.each(['', 'AB', 'ABCDE', 'AB/D', 'A.CD', '../x', 'AB D'])('%j is refused without asking the database', async (code) => {
+    await expect(joinRoom(code, 's-cat', 'Cat')).rejects.toThrow('Room not found');
+    expect(db.reads).toEqual([]);
+  });
+
+  it('a code of the right shape is looked up', async () => {
+    await expect(joinRoom('ZZ99', 's-cat', 'Cat')).rejects.toThrow('Room not found');
+    expect(db.reads).toEqual(['swarm/ZZ99/m']);
+  });
+});
+
+describe('clearing out old rooms', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const aged = (code: string, ageMs: number) => {
+    const m = db.engine.get(['swarm', code, 'm']) as SwarmMatch;
+    db.engine.set(['swarm', code, 'm'], { ...m, createdAt: Date.now() - ageMs });
+  };
+
+  it('happens when a room is made, and spares a room somebody is still in however old it is', async () => {
+    const old = await createRoom('s-ann', 'Ann');
+    const kept = await seated();
+    aged(old, DAY + 60_000);
+    aged(kept, DAY + 60_000);
+    db.now = Date.now() - 2000;
+    await putSeat(kept, 'b', { seq: 1, game: 0, k: 0, orders: '' });
+    db.now = Date.now() - DAY - 1000;
+    await putSeat(old, 'a', { seq: 1, game: 0, k: 0, orders: '' });
+
+    const made = await createRoom('s-cat', 'Cat');
+    await vi.waitFor(() => expect(db.engine.get(['swarm', old])).toBeNull());
+    expect((await matchOf(kept)).players.b?.sessionId).toBe('s-bob');
+    expect((await matchOf(made)).players.a?.sessionId).toBe('s-cat');
+  });
+});
+
 describe('starting and finishing', () => {
   it('will not start with one seat empty', async () => {
     const code = await createRoom('s-ann', 'Ann');
-    await startMatch(code, 60_000);
+    await startMatch(code, 60_000, null);
     expect((await matchOf(code)).status).toBe('waiting');
   });
 
   it('starts game 1 a countdown after the server time given', async () => {
     const code = await seated();
-    await startMatch(code, 60_000.4);
+    await startMatch(code, 60_000.4, null);
     const m = await matchOf(code);
     expect(m).toMatchObject({ status: 'playing', game: 1, startAt: 60_000 + COUNTDOWN_MS });
     expect(m.winner).toBeUndefined();
   });
 
+  it('carries the map chosen, and drops it when the next game is left to the seed', async () => {
+    const code = await seated();
+    await startMatch(code, 60_000, 'thorns');
+    expect((await matchOf(code)).map).toBe('thorns');
+    await recordResult(code, 1, 'a');
+    await startMatch(code, 120_000, null);
+    expect(await matchOf(code)).not.toHaveProperty('map');
+  });
+
   it('does not restart a game that is being played', async () => {
     const code = await seated();
-    await startMatch(code, 60_000);
+    await startMatch(code, 60_000, null);
     const first = await matchOf(code);
-    await startMatch(code, 90_000);
+    await startMatch(code, 90_000, null);
     expect(await matchOf(code)).toEqual(first);
   });
 
   it('records a result once, and only for the game it belongs to', async () => {
     const code = await seated();
-    await startMatch(code, 60_000);
+    await startMatch(code, 60_000, null);
     await recordResult(code, 2, 'b');
     expect((await matchOf(code)).status).toBe('playing');
     await recordResult(code, 1, 'a');
@@ -111,10 +160,10 @@ describe('starting and finishing', () => {
 
   it('a rematch is a new game with a new seed and no winner carried over', async () => {
     const code = await seated();
-    await startMatch(code, 60_000);
+    await startMatch(code, 60_000, null);
     const first = await matchOf(code);
     await recordResult(code, 1, 'draw');
-    await startMatch(code, 120_000);
+    await startMatch(code, 120_000, null);
     const second = await matchOf(code);
     expect(second).toMatchObject({ status: 'playing', game: 2, startAt: 120_000 + COUNTDOWN_MS });
     expect(second.winner).toBeUndefined();
@@ -140,9 +189,15 @@ describe('a seat', () => {
     expect((await getRoom(code))?.s).toEqual({ b: { seq: 9, game: 1, k: 12, orders: '4:h03', at: 71_234 } });
   });
 
+  it('is written with the write it replaces, for the rules to hold it to', async () => {
+    const code = await seated();
+    await putSeat(code, 'b', { seq: 9, game: 1, k: 12, orders: '4:h03', base: 8 });
+    expect((await getRoom(code))?.s?.b).toMatchObject({ seq: 9, base: 8 });
+  });
+
   it('left during a game gives it to the other player', async () => {
     const code = await seated();
-    await startMatch(code, 60_000);
+    await startMatch(code, 60_000, null);
     await vacateSeat(code, 'a');
     expect(await matchOf(code)).toMatchObject({ status: 'finished', winner: 'b', gone: 'a' });
   });
@@ -158,7 +213,7 @@ describe('a seat', () => {
 
   it('left after a game clears the result with it', async () => {
     const code = await seated();
-    await startMatch(code, 60_000);
+    await startMatch(code, 60_000, null);
     await recordResult(code, 1, 'a');
     await vacateSeat(code, 'b');
     const m = await matchOf(code);

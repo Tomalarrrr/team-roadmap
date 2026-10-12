@@ -373,21 +373,23 @@
     "swarm": {
       ".read": true,
       "$code": {
-        ".write": true,
-        ".validate": "newData.hasChild('m')",
+        ".write": "!data.exists() || (!newData.exists() && (data.child('m/status').val() != 'playing' || (data.child('m/createdAt').val() < now - 86400000 && (!data.hasChild('s/a/at') || data.child('s/a/at').val() < now - 300000) && (!data.hasChild('s/b/at') || data.child('s/b/at').val() < now - 300000))))",
+        ".validate": "newData.hasChild('m') && $code.matches(/^[A-Z0-9]{4}$/)",
         "m": {
-          ".validate": "newData.hasChildren(['status', 'createdAt', 'seed', 'players', 'game', 'startAt'])",
+          ".write": true,
+          ".validate": "newData.hasChildren(['status', 'createdAt', 'seed', 'players', 'game', 'startAt']) && (data.exists() || newData.child('status').val() == 'waiting') && (newData.child('status').val() != 'playing' || (!newData.hasChild('winner') && !newData.hasChild('gone') && newData.hasChild('players/a') && newData.hasChild('players/b'))) && (newData.child('status').val() != 'waiting' || (!newData.hasChild('winner') && !newData.hasChild('gone'))) && (newData.child('status').val() != 'finished' || (newData.hasChild('winner') && (data.child('status').val() == 'playing' || (data.child('status').val() == 'finished' && newData.child('winner').val() == data.child('winner').val())))) && (!newData.hasChild('gone') || (newData.child('winner').val() != 'draw' && newData.child('winner').val() != newData.child('gone').val())) && (data.child('status').val() != 'playing' || (newData.child('status').val() != 'waiting' && newData.child('game').val() == data.child('game').val() && newData.child('seed').val() == data.child('seed').val() && newData.child('startAt').val() == data.child('startAt').val() && newData.child('map').val() == data.child('map').val() && newData.child('players/a/sessionId').val() == data.child('players/a/sessionId').val() && newData.child('players/b/sessionId').val() == data.child('players/b/sessionId').val())) && (!data.exists() || data.child('status').val() == 'playing' || newData.child('status').val() != 'playing' || (newData.child('game').val() == data.child('game').val() + 1 && newData.child('startAt').val() > now - 10000 && newData.child('startAt').val() < now + 30000))",
           "status": { ".validate": "newData.isString() && (newData.val() == 'waiting' || newData.val() == 'playing' || newData.val() == 'finished')" },
-          "createdAt": { ".validate": "newData.isNumber()" },
-          "seed": { ".validate": "newData.isNumber()" },
-          "game": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "createdAt": { ".validate": "newData.isNumber() && (!data.exists() || newData.val() == data.val())" },
+          "seed": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0 && newData.val() <= 4294967295" },
+          "game": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0 && (!data.exists() || newData.val() == data.val() || newData.val() == data.val() + 1)" },
           "startAt": { ".validate": "newData.isNumber()" },
+          "map": { ".validate": "newData.isString() && newData.val().matches(/^[a-z]{1,12}$/)" },
           "winner": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b' || newData.val() == 'draw')" },
           "gone": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b')" },
           "players": {
             "$seat": {
               ".validate": "($seat == 'a' || $seat == 'b') && newData.hasChildren(['sessionId', 'name'])",
-              "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+              "sessionId": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100 && (!data.exists() || newData.val() == data.val())" },
               "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
               "$other": { ".validate": false }
             }
@@ -396,12 +398,14 @@
         },
         "s": {
           "$seat": {
-            ".validate": "($seat == 'a' || $seat == 'b') && newData.hasChildren(['seq', 'at', 'game', 'k', 'orders'])",
+            ".write": "newData.exists()",
+            ".validate": "($seat == 'a' || $seat == 'b') && newData.hasChildren(['seq', 'at', 'game', 'k', 'orders']) && (!data.exists() || root.child('swarm').child($code).child('m').child('status').val() != 'playing' || data.child('game').val() != root.child('swarm').child($code).child('m').child('game').val() || (newData.child('game').val() == data.child('game').val() && newData.child('k').val() >= data.child('k').val() && newData.child('orders').val().beginsWith(data.child('orders').val()) && (!newData.hasChild('base') || newData.child('base').val() == data.child('seq').val())))",
             "seq": { ".validate": "newData.isNumber()" },
-            "at": { ".validate": "newData.isNumber()" },
-            "game": { ".validate": "newData.isNumber()" },
-            "k": { ".validate": "newData.isNumber()" },
-            "orders": { ".validate": "newData.isString() && newData.val().length <= 30000" },
+            "at": { ".validate": "newData.val() == now" },
+            "game": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0" },
+            "k": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0" },
+            "base": { ".validate": "newData.isNumber()" },
+            "orders": { ".validate": "newData.isString() && newData.val().length <= 30000 && newData.val().matches(/^([0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z](,[0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z])*)?$/)" },
             "$other": { ".validate": false }
           }
         },

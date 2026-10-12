@@ -4,10 +4,11 @@
 
 .popup {
   position: fixed;
-  width: min(96vw, 1040px);
+  /* The last term keeps the whole board inside a short window, with the score line over it. */
+  width: min(96vw, 1040px, calc((100dvh - 60px) * 1000 / 660));
   z-index: 11000;
   background: var(--bg-secondary);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-md);
   box-shadow:
     0 0 0 1px rgba(var(--shadow-rgb), 0.06),
     0 2px 6px rgba(var(--shadow-rgb), 0.06),
@@ -15,71 +16,62 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 
+.popup:active { cursor: grabbing; }
+
 /* The lobby and waiting room have little in them; size to that. */
-.popupCompact { width: min(94vw, 400px); }
+.popupCompact {
+  width: min(94vw, 400px);
+  border-radius: var(--radius-xl);
+}
 
 .popup :focus-visible {
   outline: 2px solid var(--text-primary);
   outline-offset: 2px;
 }
 
-.titleBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px 8px 16px;
-  border-bottom: 1px solid var(--border-light);
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-}
-
-.titleBar:active { cursor: grabbing; }
-
-.titleText {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.name {
+  padding-top: 22px;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary);
+  text-align: center;
 }
 
-.titleCode {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-full);
-  padding: 2px 9px;
+.corner {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  z-index: 1;
+  display: flex;
+  gap: 6px;
+  /* The fade tells a game in play from a popup at rest; these are never what is being looked for mid-game. */
+  transition: opacity 0.15s;
 }
 
-.reconnecting {
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: var(--text-muted);
-}
+.cornerQuiet { opacity: 0.35; }
 
-.closeBtn {
+.cornerQuiet:hover,
+.cornerQuiet:focus-within { opacity: 1; }
+
+.cornerBtn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-full);
-  background: none;
-  color: var(--text-muted);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
-.closeBtn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
+.cornerBtn:hover { color: var(--text-primary); }
 
 /* --- Lobby and waiting room --- */
 
@@ -88,7 +80,7 @@
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  padding: 26px 24px 24px;
+  padding: 14px 24px 24px;
 }
 
 .lobbyTitle,
@@ -141,6 +133,68 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
+}
+
+/* The map choice: a picture of each layout, quieter than the buttons that start a game. */
+.mapRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.mapBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 5px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.mapBtn:hover { background: var(--bg-tertiary); }
+
+.mapBtnOn,
+.mapBtnOn:hover {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--text-primary);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Every board is the shape of 1000 by 660, and the picture keeps that shape. */
+.mapThumb {
+  display: block;
+  width: 116px;
+  height: 77px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+
+/* Each map shows the slice down its middle, so five fit in the room of one. */
+.shuffleThumb {
+  display: flex;
+  overflow: hidden;
+}
+
+.shuffleThumb > span {
+  flex: 1 0 0;
+  display: flex;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.shuffleThumb .mapThumb {
+  flex: none;
+  border-radius: 0;
 }
 
 .codeInput {
@@ -205,8 +259,9 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
-  font-size: 0.85rem;
+  /* The same on both sides, so the clock stays over the middle of the board with the corner buttons in one of them. */
+  padding: 7px 72px;
+  font-size: 0.8rem;
   color: var(--text-primary);
 }
 
@@ -239,16 +294,14 @@
 
 .boardWrap {
   position: relative;
-  margin: 0 16px;
-  border: 1px solid var(--border-medium);
-  border-radius: var(--radius-sm);
   overflow: hidden;
+  cursor: default;
 }
 
 .board {
   display: block;
   width: 100%;
-  aspect-ratio: 1000 / 620;
+  aspect-ratio: 1000 / 660;
   touch-action: none;
   /* A long press on the board is a hold, not a request to select or save it. */
   user-select: none;
@@ -274,7 +327,7 @@
 .overlay > * { pointer-events: auto; }
 
 /* Over a finished game the board is no longer being read, so it can recede. */
-.overlayEnd { background: rgba(255, 255, 255, 0.72); }
+.overlayEnd { background: rgba(255, 255, 255, 0.3); }
 
 .overlayText {
   padding: 4px 12px;
@@ -297,10 +350,31 @@
 }
 
 .footer {
-  padding: 10px 16px 12px;
+  padding: 7px 16px 8px;
   font-size: 0.75rem;
   color: var(--text-muted);
   text-align: center;
+}
+
+/* Full screen: the board, the score over it, and nothing else. */
+.popupFull {
+  inset: 0;
+  width: auto;
+  border-radius: 0;
+  box-shadow: none;
+  justify-content: center;
+}
+
+.popupFull .scoreboard {
+  width: min(100vw, calc((100dvh - 40px) * 1000 / 660));
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+/* As wide as the window, or as wide as its height leaves room for under the score. */
+.popupFull .boardWrap {
+  width: min(100vw, calc((100dvh - 40px) * 1000 / 660));
+  margin: 0 auto;
 }
 
 @media (max-width: 560px) {

@@ -4,8 +4,6 @@
 // rules: it turns a pointer into an intention. Everything here is in world
 // units; the one thing taken from the screen is how wide the board was laid out.
 
-import { WORLD_W } from '../../swarmGameLogic';
-
 interface Point {
   x: number;
   y: number;
@@ -15,12 +13,13 @@ interface Point {
 export const MIN_TARGET_PX = 44;
 
 /**
- * How far from a centre a press still counts, in world units. The board is
- * 1000 units wide however small it is drawn, so on a phone a 44px target is
- * some 65 units across each way and on a desktop about 22.
+ * How far from a centre a press still counts, in world units. A world is as
+ * many units wide as its map says however small it is drawn, so with 1000 of
+ * them on a phone a 44px target is some 65 units across each way and on a
+ * desktop about 22.
  */
-export function reachOf(boardWidthPx: number): number {
-  return ((MIN_TARGET_PX / 2) * WORLD_W) / boardWidthPx;
+export function reachOf(boardWidthPx: number, worldWidth: number): number {
+  return ((MIN_TARGET_PX / 2) * worldWidth) / boardWidthPx;
 }
 
 /** The point nearest to x, y that is no further than `reach` from it. `skip` is never the answer. */

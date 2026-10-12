@@ -2,13 +2,15 @@
 //
 // Split the way Snake's room is, and for the same reason:
 //   m          the match (seats, game, result). Changed only by transaction.
-//   s/{seat}   one player's orders. Written by its own client and by nobody
-//              else, so a plain overwrite is safe.
+//   s/{seat}   one player's orders. Written by its own client, which can be
+//              two tabs or a page and its reload, so a write names the one
+//              it replaces and the rules refuse it when that has moved on.
 
 import {
   COUNTDOWN_MS,
   SEATS,
   otherSeat,
+  type MapId,
   type Seat,
   type SwarmMatch,
   type SwarmSeatState,
@@ -22,6 +24,13 @@ export interface SwarmRoom {
 }
 
 const STALE_ROOM_AGE_MS = 24 * 60 * 60 * 1000;
+/**
+ * A seat written this recently has a tab open on it, however old the room is.
+ * Five times the slowest a tab writes: a hidden one is throttled by the
+ * browser to about once a minute.
+ */
+const HEARD_RECENTLY_MS = 5 * 60 * 1000;
+const ROOM_CODE = /^[A-Z0-9]{4}$/;
 
 /**
  * How long a room read or a seat write may hang before it is dropped and sent
@@ -68,7 +77,12 @@ async function cleanupStaleRooms(): Promise<void> {
     const now = Date.now();
     await Promise.all(
       Object.entries(rooms)
-        .filter(([, room]) => !room.m || now - room.m.createdAt > STALE_ROOM_AGE_MS)
+        .filter(
+          ([, room]) =>
+            !room.m ||
+            (now - room.m.createdAt > STALE_ROOM_AGE_MS &&
+              !Object.values(room.s ?? {}).some((seat) => now - seat.at < HEARD_RECENTLY_MS))
+        )
         .map(([code]) => proxyRemove(`swarm/${code}`))
     );
   } catch (err) {
@@ -78,6 +92,8 @@ async function cleanupStaleRooms(): Promise<void> {
 
 /** Take the free seat, or the one this session already holds. */
 export async function joinRoom(code: string, sessionId: string, name: string): Promise<Seat> {
+  // The code is typed by a person or read from a link, and it goes into the path of the request.
+  if (!ROOM_CODE.test(code)) throw new Error('Room not found');
   let refusal = '';
   const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     refusal = 'Room not found';
@@ -99,13 +115,23 @@ export function getRoom(code: string): Promise<SwarmRoom | null> {
   return proxyGet<SwarmRoom>(`swarm/${code}`, LIVE_TIMEOUT_MS);
 }
 
-/** `at` is stamped by the server; reading it back is how a client finds the server clock. */
-export function putSeat(code: string, seat: Seat, state: Omit<SwarmSeatState, 'at'>): Promise<void> {
+/**
+ * `at` is stamped by the server; reading it back is how a client finds the
+ * server clock. `base` is the `seq` of the write this one was built on.
+ */
+export function putSeat(
+  code: string,
+  seat: Seat,
+  state: Omit<SwarmSeatState, 'at'> & { base?: number }
+): Promise<void> {
   return proxyPut(`swarm/${code}/s/${seat}`, { ...state, at: getServerTimestamp() }, LIVE_TIMEOUT_MS);
 }
 
-/** Start a game, or a fresh one in a finished room. Needs both seats filled. */
-export async function startMatch(code: string, serverNow: number): Promise<void> {
+/**
+ * Start a game, or a fresh one in a finished room. Needs both seats filled.
+ * `map` is the map chosen, or null to leave it to the seed.
+ */
+export async function startMatch(code: string, serverNow: number, map: MapId | null): Promise<void> {
   const seed = newSeed();
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     if (!current || current.status === 'playing' || !current.players.a || !current.players.b) return undefined;
@@ -117,6 +143,7 @@ export async function startMatch(code: string, serverNow: number): Promise<void>
       players: current.players,
       game: current.game + 1,
       startAt: Math.round(serverNow + COUNTDOWN_MS),
+      ...(map && { map }),
     };
   });
 }
