@@ -29,6 +29,16 @@ const STALE_ROOM_AGE_MS = 24 * 60 * 60 * 1000;
 /** A beat to read the last round's result before the next countdown starts. */
 const RESULT_PAUSE_MS = 1500;
 
+/**
+ * How long a room read or a seat write may hang before it is dropped and sent
+ * again. It has to sit well inside the silence a seat is given up after (see
+ * SnakeGame), or one stuck request reads to the other player as having left.
+ */
+const LIVE_TIMEOUT_MS = 2000;
+/** A read out this long is not waited on: another is sent beside it. */
+const HEDGE_MS = 250;
+const MAX_OPEN_READS = 3;
+
 const matchPath = (code: string) => `snake/${code}/m`;
 
 function seatOf(match: SnakeMatch, sessionId: string): Seat | undefined {
@@ -97,12 +107,47 @@ export async function joinRoom(code: string, sessionId: string, name: string): P
 }
 
 export function getRoom(code: string): Promise<SnakeRoom | null> {
-  return proxyGet<SnakeRoom>(`snake/${code}`);
+  return proxyGet<SnakeRoom>(`snake/${code}`, LIVE_TIMEOUT_MS);
+}
+
+/**
+ * The room reads of one client. A read stuck on a bad connection would freeze
+ * the other snake until it timed out, so reads do not queue: once one has been
+ * out for HEDGE_MS the next goes out beside it, and an answer asked for before
+ * one already delivered is dropped.
+ */
+export function createRoomReader(code: string, localNow: () => number) {
+  let asked = 0;
+  let delivered = 0;
+  let open = 0;
+  let askedAt = -Infinity;
+
+  return {
+    /** Whether a read should go out now; `gapMs` is the pace when none is held up. */
+    due(gapMs: number): boolean {
+      const waited = localNow() - askedAt;
+      return open === 0 ? waited >= gapMs : open < MAX_OPEN_READS && waited >= HEDGE_MS;
+    },
+    /** The room, or undefined when a read sent later has already answered. */
+    async read(): Promise<SnakeRoom | null | undefined> {
+      const mine = ++asked;
+      open++;
+      askedAt = localNow();
+      try {
+        const room = await getRoom(code);
+        if (mine < delivered) return undefined;
+        delivered = mine;
+        return room;
+      } finally {
+        open--;
+      }
+    },
+  };
 }
 
 /** `at` is stamped by the server; reading it back is how a client finds the server clock. */
 export function putSeat(code: string, seat: Seat, state: Omit<SnakeSeatState, 'at'>): Promise<void> {
-  return proxyPut(`snake/${code}/s/${seat}`, { ...state, at: getServerTimestamp() });
+  return proxyPut(`snake/${code}/s/${seat}`, { ...state, at: getServerTimestamp() }, LIVE_TIMEOUT_MS);
 }
 
 function nextRound(match: SnakeMatch, round: number, serverNow: number, pauseMs: number): SnakeMatch {

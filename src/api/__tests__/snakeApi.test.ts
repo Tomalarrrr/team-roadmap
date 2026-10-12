@@ -9,11 +9,17 @@ type Engine = {
 
 // The database is the local dev backend's engine, so these run against stored
 // values (and its server timestamps) and not against a script of responses.
-const db = vi.hoisted(() => ({ engine: null as unknown as Engine, now: 0 }));
+// `holds` are taken one per read, in order: a read waits on its hold after it
+// has taken its value, which is a request that was answered and then stuck.
+const db = vi.hoisted(() => ({ engine: null as unknown as Engine, now: 0, holds: [] as Promise<void>[] }));
 
 vi.mock('../dbProxy', () => ({
   getServerTimestamp: () => ({ '.sv': 'timestamp' }),
-  proxyGet: async (path: string) => structuredClone(db.engine.get(path.split('/'))),
+  proxyGet: async (path: string) => {
+    const value = structuredClone(db.engine.get(path.split('/')));
+    await db.holds.shift();
+    return value;
+  },
   proxyPut: async (path: string, value: object) => db.engine.set(path.split('/'), value),
   proxyRemove: async (path: string) => db.engine.set(path.split('/'), null),
   proxyTransaction: async (path: string, updater: (current: unknown) => object | null | undefined) => {
@@ -27,6 +33,7 @@ vi.mock('../dbProxy', () => ({
 
 import {
   createRoom,
+  createRoomReader,
   createServerClock,
   getRoom,
   joinRoom,
@@ -40,6 +47,7 @@ import type { SnakeMatch } from '../../snakeGameLogic';
 beforeEach(() => {
   db.now = 50_000;
   db.engine = createDbEngine({}, () => db.now) as Engine;
+  db.holds = [];
 });
 
 const matchOf = async (code: string) => (await getRoom(code))?.m as SnakeMatch;
@@ -303,5 +311,51 @@ describe('server clock', () => {
     clock.acked(1);
     clock.seen(1, 4_000);
     expect(clock.now()).toBeNull();
+  });
+});
+
+describe('room reads', () => {
+  it('paces reads by the gap while none is held up', async () => {
+    const code = await seated();
+    let now = 0;
+    const reader = createRoomReader(code, () => now);
+    expect(reader.due(60)).toBe(true);
+    expect((await reader.read())?.m.players.b?.name).toBe('Bob');
+    now = 59;
+    expect(reader.due(60)).toBe(false);
+    now = 60;
+    expect(reader.due(60)).toBe(true);
+  });
+
+  it('sends a second read beside a stuck one, and drops the stuck one when it lands late', async () => {
+    const code = await seated();
+    let release = () => {};
+    db.holds = [new Promise<void>((resolve) => { release = resolve; })];
+    let now = 0;
+    const reader = createRoomReader(code, () => now);
+    const stuck = reader.read();
+    now = 249;
+    expect(reader.due(60)).toBe(false);
+    now = 250;
+    expect(reader.due(60)).toBe(true);
+
+    await startMatch(code, 50_000);
+    expect((await reader.read())?.m.status).toBe('playing');
+    release();
+    // The stuck read took its value while the room was still waiting.
+    expect(await stuck).toBeUndefined();
+  });
+
+  it('holds at three reads out at once', async () => {
+    const code = await seated();
+    db.holds = [0, 1, 2].map(() => new Promise<void>(() => {}));
+    let now = 0;
+    const reader = createRoomReader(code, () => now);
+    for (let i = 0; i < 3; i++) {
+      void reader.read();
+      now += 250;
+    }
+    now += 5000;
+    expect(reader.due(60)).toBe(false);
   });
 });

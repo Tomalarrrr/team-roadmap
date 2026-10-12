@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   createRoom,
+  createRoomReader,
   createServerClock,
-  getRoom,
   joinRoom,
   putSeat,
   recordRound,
@@ -50,6 +50,8 @@ const KEY_DIR: Record<string, Dir> = {
 /** Gap between room reads. A round needs the other snake's turns promptly. */
 const POLL_LIVE_MS = 60;
 const POLL_IDLE_MS = 800;
+/** How often the reader is asked whether a read is due. */
+const POLL_CHECK_MS = 20;
 /** The simulation's own timer. It keeps running in a hidden tab, where animation frames stop. */
 const FRAME_MS = 15;
 /** With nothing new to say, a moving snake still reports this often, in ticks. */
@@ -207,7 +209,7 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
   useEffect(() => {
     if (!code) return;
     let stopped = false;
-    let pollTimer = 0;
+    const reader = createRoomReader(code, () => performance.now());
     let failures = 0;
     let room: SnakeRoom | null = null;
     let client: RoundClient | null = null;
@@ -242,8 +244,8 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
 
     const poll = async () => {
       try {
-        const next = await getRoom(code);
-        if (stopped) return;
+        const next = await reader.read();
+        if (stopped || next === undefined) return;
         failures = 0;
         setOffline(false);
         const seat = next && seatOf(next.m, sessionId);
@@ -275,7 +277,10 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
         // Silence is only counted against the other seat while this one can hear.
         oppHeardAt = performance.now();
       }
-      pollTimer = window.setTimeout(poll, room?.m.status === 'playing' ? POLL_LIVE_MS : POLL_IDLE_MS);
+    };
+
+    const pollIfDue = () => {
+      if (reader.due(room?.m.status === 'playing' ? POLL_LIVE_MS : POLL_IDLE_MS)) void poll();
     };
 
     const report = (seat: Seat, state: ReturnType<typeof seatStateOf>, key: string) => {
@@ -456,11 +461,12 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
     };
 
     void poll();
+    const pollTimer = window.setInterval(pollIfDue, POLL_CHECK_MS);
     const frameTimer = window.setInterval(frame, FRAME_MS);
     paintFrame = requestAnimationFrame(paint);
     return () => {
       stopped = true;
-      window.clearTimeout(pollTimer);
+      window.clearInterval(pollTimer);
       window.clearInterval(frameTimer);
       cancelAnimationFrame(paintFrame);
       steerRef.current = () => {};
