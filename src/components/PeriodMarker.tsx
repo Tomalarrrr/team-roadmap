@@ -1,8 +1,9 @@
 import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import type { PeriodMarker as PeriodMarkerType, PeriodMarkerColor } from '../types';
+import type { PeriodMarker as PeriodMarkerType } from '../types';
 import { differenceInDays } from 'date-fns';
 import { formatShortDate, getBarDimensions, parseLocalDate } from '../utils/dateUtils';
+import { MARKER_COLORS } from '../utils/periodMarkerColors';
 import styles from './PeriodMarker.module.css';
 
 interface PeriodMarkerProps {
@@ -13,15 +14,6 @@ interface PeriodMarkerProps {
   isLocked?: boolean;
   onContextMenu?: (e: React.MouseEvent) => void;
 }
-
-// Background and dot colors for the pattern (matching LeaveBlock style)
-const MARKER_COLORS: Record<PeriodMarkerColor, { bg: string; dot: string }> = {
-  grey:   { bg: '#eef0f2', dot: '#697883' },
-  yellow: { bg: '#fdf3d7', dot: '#986F00' },
-  orange: { bg: '#ffedd5', dot: '#e67635' },
-  red:    { bg: '#fce4e8', dot: '#B5444A' },
-  green:  { bg: '#e0f2e0', dot: '#457028' }
-};
 
 const TOOLTIP_DELAY_MS = 400;
 
@@ -109,7 +101,7 @@ export function PeriodMarker({
       }}
       aria-label={marker.label || `${marker.color} period marker: ${marker.startDate} to ${marker.endDate}`}
     >
-      {/* Translucent colored fill (behind the label, above the bars) */}
+      {/* Translucent colored fill */}
       <div
         className={styles.band}
         style={{
@@ -127,10 +119,6 @@ export function PeriodMarker({
         onMouseLeave={hideTooltip}
         data-period-marker={marker.id}
       />
-
-      {marker.label && (
-        <span className={styles.label} onContextMenu={handleContextMenu}>{marker.label}</span>
-      )}
 
       {/* Rich tooltip — portal to escape stacking context */}
       {showTooltip && tooltipPos && createPortal(

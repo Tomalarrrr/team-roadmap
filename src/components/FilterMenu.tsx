@@ -102,11 +102,12 @@ export const FilterMenu = memo(function FilterMenu({
         onClick={() => setIsOpen(open => !open)}
         aria-haspopup="dialog"
         aria-expanded={isOpen}
+        title="Filter"
+        aria-label={activeCount > 0 ? `Filter, ${activeCount} on` : 'Filter'}
       >
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <path d="M2 3.5H14M4.5 8H11.5M7 12.5H9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2.5 4h11M4.5 8h7M6.5 12h3" />
         </svg>
-        <span>Filter</span>
         {activeCount > 0 && <span className={styles.badge}>{activeCount}</span>}
       </button>
 

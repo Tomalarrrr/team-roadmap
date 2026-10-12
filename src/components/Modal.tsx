@@ -5,6 +5,8 @@ interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
   title: string;
+  // For forms laid out in two columns.
+  wide?: boolean;
   children: React.ReactNode;
 }
 
@@ -13,7 +15,7 @@ const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:
 
 const EXIT_ANIMATION_MS = 150;
 
-export function Modal({ isOpen, onClose, title, children }: ModalProps) {
+export function Modal({ isOpen, onClose, title, wide, children }: ModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
   const titleId = useId();
@@ -125,7 +127,7 @@ export function Modal({ isOpen, onClose, title, children }: ModalProps) {
     >
       <div
         ref={modalRef}
-        className={`${styles.modal} ${isClosing ? styles.exiting : ''}`}
+        className={`${styles.modal} ${wide ? styles.wide : ''} ${isClosing ? styles.exiting : ''}`}
         onClick={(e) => e.stopPropagation()}
         tabIndex={-1}
         role="dialog"

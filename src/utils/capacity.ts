@@ -1,4 +1,4 @@
-import { parseISO, addDays, differenceInDays, format } from 'date-fns';
+import { parseISO, addDays, addWeeks, differenceInDays, format } from 'date-fns';
 
 /**
  * Capacity model.
@@ -373,7 +373,7 @@ export interface SupportSegment {
  * Break an owner's timeline into maximal segments of constant load and report
  * the free capacity (capacity - load) in each.
  *
- * Drives the capacity view's per-person strip. Bounded to
+ * Drives each lane's availability line. Bounded to
  * [windowStart, windowEnd] so callers can scope it to the period they show.
  */
 export function supportSegments(
@@ -440,4 +440,23 @@ export function nextFreeDate(segments: SupportSegment[], slots: number, recovery
     if (recovered <= segment.endDate) return recovered;
   }
   return null;
+}
+
+/** How far ahead a lane looks for its next free slot. */
+export const AVAILABILITY_WEEKS = 26;
+
+/**
+ * The line under a person's name on the board: how many slots they have free
+ * today, or failing that the date the next one opens. `items` is the work that
+ * counts against them, so on-hold and exempt projects are filtered out upstream.
+ */
+export function availabilityLabel(items: CapacityItem[], today: string, capacity: number, recoveryDays: number): string {
+  const windowEnd = format(addWeeks(parseISO(today), AVAILABILITY_WEEKS), 'yyyy-MM-dd');
+  const segments = supportSegments(items, today, windowEnd, capacity);
+  const freeNow = segments[0].freeSlots;
+  if (freeNow > 0) return `${freeNow} of ${capacity} slots free`;
+  const nextFree = nextFreeDate(segments, 1, recoveryDays);
+  if (nextFree === null) return `No slot free in ${AVAILABILITY_WEEKS} weeks`;
+  const sameYear = nextFree.slice(0, 4) === today.slice(0, 4);
+  return `Free from ${format(parseISO(nextFree), sameYear ? 'd MMM' : 'd MMM yyyy')}`;
 }

@@ -1,23 +1,23 @@
-/* Trigger — a quiet, compact search chip that recedes until hovered. */
+/* Trigger — an icon button in the toolbar's own language (see .iconBtn in
+   Toolbar.module.css); the shortcut is in its tooltip. */
 .trigger {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  min-width: 200px;
-  background: var(--bg-tertiary);
-  border: 1px solid transparent;
+  justify-content: center;
+  width: var(--control-size);
+  height: var(--control-size);
+  background: none;
+  border: none;
   border-radius: var(--radius-md);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast),
+              color var(--transition-fast);
 }
 
 .trigger:hover {
   background: var(--bg-secondary);
-  border-color: var(--border-light);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .trigger:active {
@@ -27,25 +27,6 @@
 .trigger:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
-}
-
-.shortcut {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  /* Right-align the ⌘K hint so the chip reads "search …            ⌘K". */
-  margin-left: auto;
-  padding: 1px var(--space-1);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-2xs);
-  font-family: inherit;
-  color: var(--text-muted);
-}
-
-.shortcut span {
-  font-size: var(--text-xs);
 }
 
 /* Overlay */

@@ -1,4 +1,6 @@
 .view {
+  /* Where the timeline's quarter lines fall; set inline for the year shown. */
+  --quarter-lines: 0 0;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -53,6 +55,23 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+.tally {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.tallyItem {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
 .summary,
 .empty {
   margin: 0;
@@ -62,6 +81,10 @@
 
 .group + .group {
   margin-top: var(--space-5);
+}
+
+.head + .group {
+  margin-top: var(--space-3);
 }
 
 .groupName {
@@ -90,14 +113,63 @@
 
 .row {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.6fr) minmax(0, 3fr) minmax(0, 1.5fr);
-  grid-template-areas: 'title owner status track end';
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.2fr) 4.5rem minmax(0, 1.6fr) minmax(0, 3fr) minmax(0, 1.5fr);
+  grid-template-areas: 'title owner size status track end';
   align-items: center;
   gap: var(--space-4);
   min-height: var(--control-size);
   border-bottom: 1px solid var(--border-light);
   font-size: var(--text-base);
   color: var(--text-primary);
+}
+
+.head {
+  position: sticky;
+  /* Sticks inside the view's padding, so pull it up to the view's edge. */
+  top: calc(-1 * var(--space-4));
+  z-index: 2;
+  border-bottom-color: var(--border-medium);
+  background: var(--bg-secondary);
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.head .title,
+.head .owner {
+  font-weight: var(--fw-normal);
+  color: inherit;
+}
+
+.scale,
+.track {
+  grid-area: track;
+  position: relative;
+  align-self: stretch;
+  background-image:
+    linear-gradient(var(--border-light), var(--border-light)),
+    linear-gradient(var(--border-light), var(--border-light)),
+    linear-gradient(var(--border-light), var(--border-light)),
+    linear-gradient(var(--border-light), var(--border-light));
+  background-size: 1px 100%;
+  background-repeat: no-repeat;
+  background-position: var(--quarter-lines);
+}
+
+.tick {
+  position: absolute;
+  top: 50%;
+  padding: 0 var(--space-1);
+  transform: translateY(-50%);
+  white-space: nowrap;
+}
+
+.todayLabel {
+  color: var(--text-primary);
+  font-weight: var(--fw-medium);
+}
+
+.tickBefore {
+  transform: translate(-100%, -50%);
 }
 
 .title {
@@ -116,6 +188,16 @@
   color: var(--text-secondary);
 }
 
+.size {
+  grid-area: size;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.head .size {
+  color: inherit;
+}
+
 .status {
   grid-area: status;
   display: flex;
@@ -123,6 +205,13 @@
   gap: var(--space-2);
   min-width: 0;
   white-space: nowrap;
+}
+
+.statusText {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
 }
 
 .swatch {
@@ -139,28 +228,32 @@
   font-size: var(--text-sm);
 }
 
-.track {
-  grid-area: track;
-  position: relative;
-  height: 10px;
-  border-radius: var(--radius-full);
-  background: var(--bg-tertiary);
-}
-
+/* Height is set inline from the project's size. */
 .bar {
   position: absolute;
-  top: 0;
-  bottom: 0;
+  top: 50%;
   min-width: 3px;
   border-radius: var(--radius-full);
+  transform: translateY(-50%);
+}
+
+/* A bar that runs past the edge of the year is cut square there. */
+.cutStart {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.cutEnd {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .today {
   position: absolute;
-  top: -5px;
-  bottom: -5px;
+  top: 0;
+  bottom: 0;
   width: 1px;
-  background: var(--text-primary);
+  background: var(--text-muted);
   z-index: 1;
 }
 
@@ -174,10 +267,56 @@
   font-variant-numeric: tabular-nums;
 }
 
+.endDate {
+  min-width: 11ch;
+}
+
 .note {
   margin: var(--space-5) 0 0;
   font-size: var(--text-sm);
   color: var(--text-muted);
+}
+
+/* Too narrow for one line each: the small print drops under its status or
+   date, and a long project name takes a second line. */
+@media (min-width: 861px) and (max-width: 1200px) {
+  .row {
+    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.1fr) 4.5rem minmax(0, 1.5fr) minmax(0, 2.4fr) 7.5rem;
+    padding: var(--space-1) 0;
+  }
+
+  .row:not(.head) .title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
+  }
+
+  .status {
+    align-items: flex-start;
+  }
+
+  .swatch {
+    margin-top: calc((1lh - 10px) / 2);
+  }
+
+  .statusText {
+    display: block;
+    white-space: normal;
+  }
+
+  .statusText .quiet {
+    display: block;
+  }
+
+  .end {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .end .quiet {
+    flex-basis: 100%;
+  }
 }
 
 @media (max-width: 860px) {
@@ -189,13 +328,32 @@
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
       'title end'
-      'status owner'
+      'owner size'
+      'status status'
       'track track';
     gap: var(--space-1) var(--space-3);
     padding: var(--space-2) 0;
   }
 
-  .owner {
+  .head {
+    display: none;
+  }
+
+  .size {
     text-align: right;
+  }
+
+  /* The quarter lines have no labels once the header row is gone. */
+  .track {
+    height: 14px;
+    background-image: none;
+  }
+
+  .end {
+    justify-content: flex-end;
+  }
+
+  .endDate {
+    min-width: 0;
   }
 }

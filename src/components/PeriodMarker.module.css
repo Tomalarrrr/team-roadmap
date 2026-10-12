@@ -18,27 +18,49 @@
   opacity: 0.72;
 }
 
+/* Label chips sit in one row at the very top of the board, above the lanes; the
+   first lane starts just below them (MARKER_LABEL_CLEARANCE in Timeline) so its
+   top pill and the chips never share space. */
 .label {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 2; /* above the translucent band */
-  display: inline-block;
+  top: 4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 18px;
+  max-width: 180px;
+  box-sizing: border-box;
   font-size: var(--text-sm);
   font-weight: var(--fw-semibold);
   color: #374151;
-  background: rgba(255, 255, 255, 0.95);
+  background: rgb(255, 255, 255);
   box-shadow: 0 1px 3px rgba(var(--shadow-rgb), 0.12);
-  padding: 2px var(--space-2);
+  padding: 0 var(--space-2);
   border-radius: var(--radius-sm);
-  /* Allow the chip to extend beyond a narrow band so short labels (e.g. a
-     one-week "Christmas" marker) read in full rather than truncating to "C…". */
-  max-width: 180px;
   white-space: nowrap;
+  cursor: context-menu;
+}
+
+/* Chips whose bands start close together overlap. Hovering one brings it in
+   front of its neighbours (and of the Today flag, z-index 5 in Timeline) and
+   shows its text in full. */
+.label:hover {
+  z-index: 6;
+  max-width: none;
+}
+
+.labelDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-xs);
+  flex-shrink: 0;
+}
+
+.labelText {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  pointer-events: auto;
-  cursor: context-menu;
 }
 
 /* Hover zone for right-click context menu - covers full marker height */

@@ -6,7 +6,7 @@ import { useToast } from './components/Toast';
 import { Toolbar } from './components/Toolbar';
 import { Timeline, type TimelineRef } from './components/Timeline';
 import { Modal } from './components/Modal';
-import type { BoardSettings, Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage, FilterState, ProjectStatus } from './types';
+import type { Project, Milestone, TeamMember, Dependency, LeaveType, LeaveCoverage, FilterState, ProjectStatus } from './types';
 import { isProject } from './types';
 import { filterProjects, parseStoredFilters, hasActiveFilters, withKnownTags, INITIAL_FILTERS } from './utils/projectFilters';
 import { tagsInUse } from './utils/projectTags';
@@ -30,8 +30,6 @@ import styles from './App.module.css';
 
 // Lazy load form components (not needed until user clicks)
 const ProjectWizard = lazy(() => import('./components/ProjectWizard').then(m => ({ default: m.ProjectWizard })));
-const BoardRulesPanel = lazy(() => import('./components/BoardRulesPanel').then(m => ({ default: m.BoardRulesPanel })));
-const CapacityView = lazy(() => import('./components/CapacityView').then(m => ({ default: m.CapacityView })));
 const TeamMemberForm = lazy(() => import('./components/TeamMemberForm').then(m => ({ default: m.TeamMemberForm })));
 const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then(m => ({ default: m.ShortcutsModal })));
 
@@ -45,8 +43,6 @@ type ModalType =
   | { type: 'edit-project'; project: Project }
   | { type: 'add-member' }
   | { type: 'edit-member'; member: TeamMember }
-  | { type: 'capacity' }
-  | { type: 'rules' }
   | null;
 
 // Generate a simple user ID for this session (in production, use auth)
@@ -110,9 +106,7 @@ function App() {
     deleteLeaveBlock,
     addPeriodMarker,
     updatePeriodMarker,
-    deletePeriodMarker,
-    updateSettings,
-    replaceProgramme
+    deletePeriodMarker
   } = useRoadmap();
 
   // Real-time presence for collaboration
@@ -356,6 +350,10 @@ function App() {
   // Select a project from search and scroll to it. Selection is persistent (no
   // auto-clear) so the per-project shortcuts ([ ] / Cmd+D / Backspace) stay usable
   // — it clears on Escape or when another project is selected.
+  const handleJumpToToday = useCallback(() => {
+    timelineRef.current?.scrollToToday();
+  }, []);
+
   const handleProjectSelect = useCallback((projectId: string) => {
     if (selectionTimeoutRef.current) {
       clearTimeout(selectionTimeoutRef.current);
@@ -712,20 +710,6 @@ function App() {
     [modal, updateTeamMember, closeModal, showToast]
   );
 
-  // The rules panel saves each change as it is made, with no form to submit,
-  // so a failed write has to surface here.
-  const saveRules = useCallback((updates: BoardSettings) => {
-    updateSettings(updates).catch(error => showToast(`Failed to save rules: ${error instanceof Error ? error.message : String(error)}`, 'error'));
-  }, [updateSettings, showToast]);
-
-  const saveProgramme = useCallback((from: string, to: string | null) => {
-    replaceProgramme(from, to).catch(error => showToast(`Failed to save programmes: ${error instanceof Error ? error.message : String(error)}`, 'error'));
-  }, [replaceProgramme, showToast]);
-
-  const saveMemberRule = useCallback((memberId: string, updates: Partial<TeamMember>) => {
-    updateTeamMember(memberId, updates).catch(error => showToast(`Failed to update member: ${error instanceof Error ? error.message : String(error)}`, 'error'));
-  }, [updateTeamMember, showToast]);
-
   const handleDeleteMember = useCallback(async () => {
     if (modal?.type === 'edit-member') {
       try {
@@ -963,6 +947,7 @@ function App() {
           onPaste={() => paste()}
           dayWidth={dayWidth}
           onDayWidthChange={setDayWidth}
+          onJumpToToday={handleJumpToToday}
           isSaving={isSaving}
           lastSaved={lastSaved}
           saveError={saveError}
@@ -972,8 +957,6 @@ function App() {
           embedMode={embedMode}
           view={view}
           onViewChange={handleViewChange}
-          onOpenCapacity={() => setModal({ type: 'capacity' })}
-          onOpenRules={() => setModal({ type: 'rules' })}
           presenceUsers={presenceUsers}
           currentUserId={sessionInfo.userId}
         />
@@ -1047,26 +1030,6 @@ function App() {
         )}
       </main>
 
-      <Modal isOpen={modal?.type === 'capacity'} onClose={closeModal} title="Capacity, next 26 weeks">
-        <Suspense fallback={formFallback}>
-          {modal?.type === 'capacity' && <CapacityView teamMembers={data.teamMembers} projects={data.projects} />}
-        </Suspense>
-      </Modal>
-
-      <Modal isOpen={modal?.type === 'rules'} onClose={closeModal} title="Board rules">
-        <Suspense fallback={formFallback}>
-          {modal?.type === 'rules' && (
-            <BoardRulesPanel
-              teamMembers={data.teamMembers}
-              projects={data.projects}
-              onUpdateSettings={saveRules}
-              onReplaceProgramme={saveProgramme}
-              onUpdateMember={saveMemberRule}
-            />
-          )}
-        </Suspense>
-      </Modal>
-
       {/* Add Team Member Modal */}
       <Modal isOpen={modal?.type === 'add-member'} onClose={closeModal} title="Add team member">
         <Suspense fallback={formFallback}>
@@ -1097,7 +1060,7 @@ function App() {
       </Modal>
 
       {/* Add Project Modal */}
-      <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New project">
+      <Modal isOpen={modal?.type === 'add-project'} onClose={closeModal} title="New project" wide>
         <Suspense fallback={formFallback}>
           {modal?.type === 'add-project' && (
             <ProjectWizard
@@ -1117,7 +1080,7 @@ function App() {
       </Modal>
 
       {/* Edit Project Modal */}
-      <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit project">
+      <Modal isOpen={modal?.type === 'edit-project'} onClose={closeModal} title="Edit project" wide>
         <Suspense fallback={formFallback}>
           {modal?.type === 'edit-project' && (
             <ProjectWizard

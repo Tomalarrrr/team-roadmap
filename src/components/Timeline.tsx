@@ -24,6 +24,7 @@ import { DependencyCreationProvider } from '../contexts/DependencyCreationContex
 import { LeaveBlock } from './LeaveBlock';
 import { LeaveContextMenu } from './LeaveContextMenu';
 import { PeriodMarker } from './PeriodMarker';
+import { PeriodMarkerLabels } from './PeriodMarkerLabels';
 import { PeriodMarkerContextMenu } from './PeriodMarkerContextMenu';
 import { ItemContextMenu } from './ItemContextMenu';
 import {
@@ -37,6 +38,7 @@ import {
 import { differenceInDays as dateFnsDiff, addMonths, startOfMonth, format } from 'date-fns';
 import {
   CAPACITY,
+  availabilityLabel,
   capacityOfMember,
   UNIT_HEIGHT,
   SLOT_PITCH,
@@ -46,18 +48,13 @@ import {
   DEFAULT_SIZE,
 } from '../utils/capacity';
 import { isOnHold } from '../utils/statusColors';
+import { useBoardRules } from '../utils/boardSettings';
+import { zoomLevelOf, type ZoomLevel } from '../utils/zoomLevels';
 import { getTimelineBounds } from '../utils/timelineBounds';
 import { leaversLast } from '../utils/teamMembers';
 import { useKeyboardNavigation } from '../hooks/useKeyboardNavigation';
 import styles from './Timeline.module.css';
 
-type ZoomLevel = 'week' | 'month' | 'year';
-
-// Display mode thresholds based on dayWidth
-// dayWidth <= 1.5: year view (FY headers)
-// dayWidth > 1.5: month view (month headers)
-const YEAR_VIEW_THRESHOLD = 1.5;
-const WEEK_VIEW_THRESHOLD = 5;
 
 
 // Assign every project a vertical SLOT OFFSET (in slot units) so the lane reads
@@ -195,6 +192,10 @@ const COLLAPSED_LANE_HEIGHT = 40; // Height for collapsed lanes
 // Height for a lane a filter has emptied. Matches the collapsed height so a
 // filtered board reads as a consistent stack of slim strips.
 const EMPTY_LANE_HEIGHT = 40;
+// Period-marker label chips sit in the top 22px of the board. A lane already
+// leaves LANE_PADDING above its first pill, so starting the first lane this much
+// lower is enough for its top pill to clear them.
+const MARKER_LABEL_CLEARANCE = 14;
 
 // Stable empty defaults to avoid creating new references on each render
 const EMPTY_SET = new Set<string>();
@@ -261,11 +262,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
   const dayWidth = dayWidthProp ?? (zoomLevel ? ZOOM_DAY_WIDTHS[zoomLevel] : DEFAULT_DAY_WIDTH);
 
   // Derive display mode from dayWidth for header rendering
-  const displayMode: 'year' | 'month' | 'week' = useMemo(() => {
-    if (dayWidth <= YEAR_VIEW_THRESHOLD) return 'year';
-    if (dayWidth >= WEEK_VIEW_THRESHOLD) return 'week';
-    return 'month';
-  }, [dayWidth]);
+  const displayMode = zoomLevelOf(dayWidth);
 
   // Whole-sidebar collapse into a thin vertical rail to hand horizontal space
   // back to the timeline. Persisted so the choice sticks across sessions.
@@ -1002,16 +999,34 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
     return byOwner;
   }, [displayedTeamMembers, projectsByOwner, projectStacksByOwner, collapsedLanes]);
 
+  // Each lane says when its person next has room. Read off every project, not
+  // the filtered set: a filter hides work, it doesn't free anyone up.
+  const { recoveryDays } = useBoardRules();
+  const availabilityByMember = useMemo(() => {
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const byMember: Record<string, string> = {};
+    displayedTeamMembers.forEach(member => {
+      if (member.left || isCapacityExempt({ owner: member.name })) return;
+      const owned = boundsProjects
+        .filter(p => p.owner === member.name && !isCapacityExempt(p) && !isOnHold(p.statusColor));
+      byMember[member.id] = availabilityLabel(owned, today, capacityOfMember(member), recoveryDays);
+    });
+    return byMember;
+  }, [displayedTeamMembers, boundsProjects, recoveryDays]);
+
+  // Boards with no labelled marker give up no height.
+  const markerLabelClearance = periodMarkers.some(m => m.label) ? MARKER_LABEL_CLEARANCE : 0;
+
   // Calculate cumulative lane positions
   const lanePositions = useMemo(() => {
     const positions: number[] = [];
-    let cumulative = 0;
+    let cumulative = markerLabelClearance;
     laneHeights.forEach(height => {
       positions.push(cumulative);
       cumulative += height;
     });
     return positions;
-  }, [laneHeights]);
+  }, [laneHeights, markerLabelClearance]);
 
   // Create owner-to-lane-index mapping for dependency rendering
   const ownerToLaneIndex = useMemo(() => {
@@ -1138,6 +1153,8 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
               <p className={styles.emptyText}>Add team members to start planning your roadmap</p>
             </div>
           ) : (
+            <>
+            <div style={{ height: markerLabelClearance }} />
             <DndContext
               sensors={sensors}
               collisionDetection={closestCenter}
@@ -1157,6 +1174,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                     isEmpty={emptyLaneIds.has(member.id)}
                     railMode={sidebarCollapsed}
                     isDimmed={dimLeavers && member.left === true}
+                    availability={availabilityByMember[member.id]}
                     onToggleCollapse={onToggleLaneCollapse ? () => onToggleLaneCollapse(member.id) : undefined}
                     onEdit={() => onEditTeamMember(member)}
                     onAddProject={() => onAddProject(member.name)}
@@ -1164,6 +1182,7 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                 ))}
               </SortableContext>
             </DndContext>
+            </>
           )}
           {!sidebarCollapsed && (
             <button className={styles.addMemberBtn} onClick={onAddTeamMember} disabled={isLocked}>
@@ -1375,6 +1394,20 @@ export const Timeline = forwardRef<TimelineRef, TimelineProps>(function Timeline
                   </DroppableLane>
                 );
               })}
+
+              {/* Marker labels, after the lanes so they can be hovered and right-clicked */}
+              <PeriodMarkerLabels
+                markers={periodMarkers}
+                timelineStart={timelineStart}
+                dayWidth={dayWidth}
+                isLocked={isLocked}
+                onContextMenu={(e, marker) => setPeriodMarkerItemMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  markerId: marker.id,
+                  marker
+                })}
+              />
 
               {/* Dependency creation preview overlay */}
               <DependencyCreationOverlay

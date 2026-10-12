@@ -95,9 +95,9 @@ function initialScores(scoring?: ProjectScoring): Record<string, number | null> 
 
 /**
  * Single-screen project form built around the Capacity Scoring Matrix.
- * Everything is in view at once (no steps, no scrolling): details, the seven
- * scoring questions as one-click 0 to 3 rows, the resulting size, and a
- * reallocate control if the owner would be over capacity.
+ * Everything is in view at once (no steps, no scrolling): details on the left,
+ * and on the right the seven scoring questions as one-click 0 to 3 rows, the
+ * resulting size, and a reallocate control if the owner would be over capacity.
  */
 export function ProjectWizard({
   initialValues,
@@ -286,283 +286,289 @@ export function ProjectWizard({
       }}
       noValidate
     >
-      {/* Details */}
-      <div className={s.field}>
-        <label htmlFor="pw-title" className={s.label}>Project title</label>
-        <input
-          id="pw-title"
-          type="text"
-          value={title}
-          onChange={(e) => { setTitle(e.target.value); if (errors.title) setErrors(p => ({ ...p, title: '' })); }}
-          className={`${s.input} ${errors.title ? s.inputError : ''}`}
-          placeholder="Enter project title"
-          maxLength={100}
-          autoFocus
-        />
-      </div>
-
-      {!hideOwner && (
-        <div className={s.field}>
-          <label htmlFor="pw-owner" className={s.label}>Owner</label>
-          <div className={s.selectWrap}>
-            <select
-              id="pw-owner"
-              value={owner}
-              onChange={(e) => { setOwner(e.target.value); if (errors.owner) setErrors(p => ({ ...p, owner: '' })); }}
-              className={`${s.select} ${owner ? '' : s.selectEmpty} ${errors.owner ? s.inputError : ''}`}
-            >
-              <option value="" disabled>Choose a person</option>
-              {ownerOptions.map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
-            <svg className={s.selectChev} width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+      <div className={s.cols}>
+        <div className={s.col}>
+          <div className={s.field}>
+            <label htmlFor="pw-title" className={s.label}>Project title</label>
+            <input
+              id="pw-title"
+              type="text"
+              value={title}
+              onChange={(e) => { setTitle(e.target.value); if (errors.title) setErrors(p => ({ ...p, title: '' })); }}
+              className={`${s.input} ${errors.title ? s.inputError : ''}`}
+              placeholder="Enter project title"
+              maxLength={100}
+              autoFocus
+            />
           </div>
-        </div>
-      )}
 
-      <div className={s.field}>
-        <span className={s.label}>Dates</span>
-        <DateRangeRail
-          startDate={startDate}
-          endDate={endDate}
-          onChange={(sNew, eNew) => {
-            setStartDate(sNew);
-            setEndDate(eNew);
-            if (errors.startDate || errors.endDate) setErrors(p => ({ ...p, startDate: '', endDate: '' }));
-          }}
-        />
-        <div className={s.presets}>
-          {DURATION_PRESETS.map(preset => (
-            <button key={preset.label} type="button" className={s.preset} onClick={() => applyPreset(preset.end)}>
-              {preset.label}
-            </button>
-          ))}
-        </div>
-        {isEditing && endDate && (
-          <p className={s.baseline}>
-            {baselineEndDate
-              ? `First planned to end ${format(parseISO(baselineEndDate), 'd MMM yyyy')}${slip ? `, now ${describeSlip(slip)}` : ''}.`
-              : 'No first planned end date was recorded for this project.'}
-            {baselineEndDate !== endDate && (
-              <button type="button" className={s.baselineBtn} onClick={() => setBaselineEndDate(endDate)}>
-                {baselineEndDate ? 'Re-plan from this end date' : 'Record this end date'}
-              </button>
+          <div className={s.selects}>
+            {!hideOwner && (
+              <div className={s.field}>
+                <label htmlFor="pw-owner" className={s.label}>Owner</label>
+                <div className={s.selectWrap}>
+                  <select
+                    id="pw-owner"
+                    value={owner}
+                    onChange={(e) => { setOwner(e.target.value); if (errors.owner) setErrors(p => ({ ...p, owner: '' })); }}
+                    className={`${s.select} ${owner ? '' : s.selectEmpty} ${errors.owner ? s.inputError : ''}`}
+                  >
+                    <option value="" disabled>Choose a person</option>
+                    {ownerOptions.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <svg className={s.selectChev} width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+              </div>
             )}
-          </p>
-        )}
-      </div>
 
-      <div className={s.field}>
-        <span className={s.label}>Status</span>
-        <div className={s.statuses}>
-          {ORDERED_STATUSES.map(({ hex, name }) => {
-            const sel = statusColor === hex;
-            return (
-              <button
-                key={hex}
-                type="button"
-                className={`${s.status} ${sel ? s.statusSel : ''}`}
-                onClick={() => setStatusColor(hex)}
-                aria-pressed={sel}
-                title={name}
-              >
-                <span className={s.statusBarBox}>
-                  <span className={s.statusBar} style={{ backgroundColor: hex }} />
-                </span>
-                <span className={s.statusLabel}>{name}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {programmeOptions.length > 0 && (
-        <div className={s.field}>
-          <label htmlFor="pw-programme" className={s.label}>Programme</label>
-          <div className={s.selectWrap}>
-            <select
-              id="pw-programme"
-              value={programme}
-              onChange={(e) => setProgramme(e.target.value)}
-              className={`${s.select} ${programme ? '' : s.selectEmpty}`}
-            >
-              <option value="">No programme</option>
-              {programmeOptions.map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
-            <svg className={s.selectChev} width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-        </div>
-      )}
-
-      {/* EPR programme flag */}
-      <label className={s.eprRow} htmlFor="pw-epr">
-        <input
-          id="pw-epr"
-          type="checkbox"
-          checked={epr}
-          onChange={(e) => setEpr(e.target.checked)}
-          className={s.eprBox}
-        />
-        <span className={s.eprLabel}>EPR project</span>
-        <span className={s.eprHint}>Electronic Patient Record programme</span>
-      </label>
-
-      {/* Tags */}
-      <div className={s.tagRow}>
-        <label htmlFor="pw-tag" className={s.label}>Tags</label>
-        {tags.map(tag => (
-          <span key={tag} className={s.tag}>
-            {tag}
-            <button
-              type="button"
-              className={s.tagRemove}
-              onClick={() => setTags(prev => prev.filter(t => t !== tag))}
-              aria-label={`Remove tag ${tag}`}
-            >
-              <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-              </svg>
-            </button>
-          </span>
-        ))}
-        <input
-          id="pw-tag"
-          type="text"
-          value={tagDraft}
-          onChange={(e) => setTagDraft(e.target.value)}
-          onKeyDown={(e) => {
-            // Enter on an empty box falls through and saves the form.
-            if (e.key === ',' || (e.key === 'Enter' && tagDraft.trim())) {
-              e.preventDefault();
-              commitTagDraft();
-            } else if (e.key === 'Backspace' && !tagDraft && tags.length > 0) {
-              setTags(prev => prev.slice(0, -1));
-            }
-          }}
-          className={`${s.input} ${s.tagInput}`}
-          placeholder="Type a tag, press Enter"
-          autoComplete="off"
-          maxLength={50}
-        />
-        {knownTags.filter(t => !tags.includes(t)).map(t => (
-          <button
-            key={t}
-            type="button"
-            className={s.tagAdd}
-            onClick={() => setTags(prev => addTag(prev, t, knownTags))}
-            aria-label={`Add tag ${t}`}
-          >
-            + {t}
-          </button>
-        ))}
-      </div>
-
-      {/* Scoring matrix */}
-      <div className={s.sectionTitle}>Capacity score</div>
-      <div className={s.qList}>
-        {SCORING_CRITERIA.map(c => {
-          const missing = highlightMissing && scores[c.id] == null;
-          return (
-            <div
-              key={c.id}
-              className={`${s.q} ${missing ? s.qMissing : ''}`}
-              role="radiogroup"
-              aria-label={`${c.area}: ${c.question}`}
-              onKeyDown={(e) => {
-                const digit = Number(e.key);
-                if (e.key.length === 1 && digit >= 0 && digit <= 3 && !e.metaKey && !e.ctrlKey) {
-                  e.preventDefault();
-                  setScore(c.id, digit);
-                }
-              }}
-            >
-              <span className={s.qLabel}>{c.area}</span>
-              <span className={s.scoreBtns}>
-                {c.options.map(o => {
-                  const sel = scores[c.id] === o.score;
-                  return (
-                    <button
-                      key={o.score}
-                      type="button"
-                      role="radio"
-                      aria-checked={sel}
-                      aria-label={`${o.score}: ${o.detail}`}
-                      className={`${s.scoreBtn} ${sel ? s.scoreBtnSel : ''}`}
-                      onClick={() => setScore(c.id, o.score)}
-                      onMouseEnter={() => setHint({ criterionId: c.id, score: o.score })}
-                      onMouseLeave={() => setHint(null)}
-                      onFocus={() => setHint({ criterionId: c.id, score: o.score })}
-                      onBlur={() => setHint(null)}
-                    >
-                      {o.score}
-                    </button>
-                  );
-                })}
-              </span>
-              <span className={`${s.qAnswer} ${scores[c.id] != null ? s.qAnswered : ''}`}>
-                {scores[c.id] != null ? c.options[scores[c.id] as number].label : c.question}
-              </span>
+            <div className={s.field}>
+              <label htmlFor="pw-status" className={s.label}>Status</label>
+              <div className={s.selectWrap}>
+                <span className={s.statusDot} style={{ backgroundColor: statusColor }} />
+                <select
+                  id="pw-status"
+                  value={statusColor}
+                  onChange={(e) => setStatusColor(e.target.value)}
+                  className={`${s.select} ${s.statusSelect}`}
+                >
+                  {ORDERED_STATUSES.map(({ hex, name }) => <option key={hex} value={hex}>{name}</option>)}
+                </select>
+                <svg className={s.selectChev} width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
             </div>
-          );
-        })}
-      </div>
-      <p className={s.qHint} aria-live="polite">
-        {hintedCriterion && hint
-          ? <><strong>{hintedCriterion.area} {hint.score}.</strong> {hintedCriterion.options[hint.score].detail}</>
-          : 'Score each area 0 to 3. Point at a number, or tab to it, to read what it means.'}
-      </p>
 
-      {/* Outcome size */}
-      <div className={s.outcome}>
-        <span className={s.outcomeLabel}>Project size</span>
-        {allAnswered ? (
-          <>
-            <span className={s.sizePill}>{SIZE_LABELS[size]}</span>
-            <span className={s.outcomeMeaning}>{sizeBand.meaning} · {SIZE_SLOTS[size]} of {owner.trim() ? capacityOf(owner.trim()) : CAPACITY} slots</span>
-          </>
-        ) : (
-          <>
-            <span
-              className={s.progressTrack}
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={SCORING_CRITERIA.length}
-              aria-valuenow={answeredCount}
-              aria-label="Questions answered"
-            >
-              <span
-                className={s.progressFill}
-                style={{ width: `${(answeredCount / SCORING_CRITERIA.length) * 100}%` }}
-              />
-            </span>
-            <span className={s.outcomePending}>{answeredCount} of {SCORING_CRITERIA.length}</span>
-          </>
-        )}
-      </div>
+            {programmeOptions.length > 0 && (
+              <div className={s.field}>
+                <label htmlFor="pw-programme" className={s.label}>Programme</label>
+                <div className={s.selectWrap}>
+                  <select
+                    id="pw-programme"
+                    value={programme}
+                    onChange={(e) => setProgramme(e.target.value)}
+                    className={`${s.select} ${programme ? '' : s.selectEmpty}`}
+                  >
+                    <option value="">No programme</option>
+                    {programmeOptions.map(name => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  <svg className={s.selectChev} width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </div>
+              </div>
+            )}
+          </div>
 
-      {/* Capacity reallocation */}
-      {capacity && (
-        <div className={s.capacity}>
-          <span className={s.capacityMsg}>
-            <strong>{owner.trim()}</strong> is over capacity ({capacity.peakLoad} of {capacityOf(owner.trim())} slots). You can still save.
-          </span>
-          {capacity.alternativeOwners.length > 0 ? (
-            <div className={s.ownerPills}>
-              <span className={s.reassignLabel}>Reassign to</span>
-              {capacity.alternativeOwners.slice(0, 4).map(a => (
-                <button key={a.owner} type="button" className={s.ownerPill} onClick={() => setOwner(a.owner)}>
-                  {a.owner}<span className={s.ownerFree}>{a.freeSlots} free</span>
+          <div className={s.field}>
+            <span className={s.label}>Dates</span>
+            <DateRangeRail
+              startDate={startDate}
+              endDate={endDate}
+              onChange={(sNew, eNew) => {
+                setStartDate(sNew);
+                setEndDate(eNew);
+                if (errors.startDate || errors.endDate) setErrors(p => ({ ...p, startDate: '', endDate: '' }));
+              }}
+            />
+            <div className={s.presets}>
+              {DURATION_PRESETS.map(preset => (
+                <button key={preset.label} type="button" className={s.preset} onClick={() => applyPreset(preset.end)}>
+                  {preset.label}
                 </button>
               ))}
             </div>
-          ) : capacity.availableFrom ? (
-            <span className={s.capacityNote}>Frees up {format(parseISO(capacity.availableFrom), 'd MMM yyyy')}.</span>
-          ) : null}
+            {isEditing && endDate && (
+              <p className={s.baseline}>
+                {baselineEndDate
+                  ? `First planned to end ${format(parseISO(baselineEndDate), 'd MMM yyyy')}${slip ? `, now ${describeSlip(slip)}` : ''}.`
+                  : 'No first planned end date was recorded for this project.'}
+                {baselineEndDate !== endDate && (
+                  <button type="button" className={s.baselineBtn} onClick={() => setBaselineEndDate(endDate)}>
+                    {baselineEndDate ? 'Re-plan from this end date' : 'Record this end date'}
+                  </button>
+                )}
+              </p>
+            )}
+          </div>
+
+          {/* EPR programme flag */}
+          <label className={s.eprRow} htmlFor="pw-epr">
+            <input
+              id="pw-epr"
+              type="checkbox"
+              checked={epr}
+              onChange={(e) => setEpr(e.target.checked)}
+              className={s.eprBox}
+            />
+            <span className={s.eprLabel}>EPR project</span>
+            <span className={s.eprHint}>Electronic Patient Record programme</span>
+          </label>
+
+          {/* Tags */}
+          <div className={s.field}>
+            <label htmlFor="pw-tag" className={s.label}>Tags</label>
+            <div className={s.tagRow}>
+              {tags.map(tag => (
+                <span key={tag} className={s.tag}>
+                  {tag}
+                  <button
+                    type="button"
+                    className={s.tagRemove}
+                    onClick={() => setTags(prev => prev.filter(t => t !== tag))}
+                    aria-label={`Remove tag ${tag}`}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </span>
+              ))}
+              <input
+                id="pw-tag"
+                type="text"
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter on an empty box falls through and saves the form.
+                  if (e.key === ',' || (e.key === 'Enter' && tagDraft.trim())) {
+                    e.preventDefault();
+                    commitTagDraft();
+                  } else if (e.key === 'Backspace' && !tagDraft && tags.length > 0) {
+                    setTags(prev => prev.slice(0, -1));
+                  }
+                }}
+                className={`${s.input} ${s.tagInput}`}
+                placeholder="Type a tag, press Enter"
+                autoComplete="off"
+                maxLength={50}
+              />
+              {knownTags.filter(t => !tags.includes(t)).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  className={s.tagAdd}
+                  onClick={() => setTags(prev => addTag(prev, t, knownTags))}
+                  aria-label={`Add tag ${t}`}
+                >
+                  + {t}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-      )}
+
+        {/* Scoring matrix */}
+        <div className={`${s.col} ${s.scoreCol}`}>
+          <span className={s.label}>Capacity score</span>
+          <div className={s.qList}>
+            {SCORING_CRITERIA.map(c => {
+              const missing = highlightMissing && scores[c.id] == null;
+              return (
+                <div
+                  key={c.id}
+                  className={`${s.q} ${missing ? s.qMissing : ''}`}
+                  role="radiogroup"
+                  aria-label={`${c.area}: ${c.question}`}
+                  onKeyDown={(e) => {
+                    const digit = Number(e.key);
+                    if (e.key.length === 1 && digit >= 0 && digit <= 3 && !e.metaKey && !e.ctrlKey) {
+                      e.preventDefault();
+                      setScore(c.id, digit);
+                    }
+                  }}
+                >
+                  <span className={s.qText}>
+                    <span className={s.qLabel}>{c.area}</span>
+                    <span className={`${s.qAnswer} ${scores[c.id] != null ? s.qAnswered : ''}`}>
+                      {scores[c.id] != null ? c.options[scores[c.id] as number].label : c.question}
+                    </span>
+                  </span>
+                  <span className={s.scoreBtns}>
+                    {c.options.map(o => {
+                      const sel = scores[c.id] === o.score;
+                      return (
+                        <button
+                          key={o.score}
+                          type="button"
+                          role="radio"
+                          aria-checked={sel}
+                          aria-label={`${o.score}: ${o.detail}`}
+                          className={`${s.scoreBtn} ${sel ? s.scoreBtnSel : ''}`}
+                          onClick={() => setScore(c.id, o.score)}
+                          onMouseEnter={() => setHint({ criterionId: c.id, score: o.score })}
+                          onMouseLeave={() => setHint(null)}
+                          onFocus={() => setHint({ criterionId: c.id, score: o.score })}
+                          onBlur={() => setHint(null)}
+                        >
+                          {o.score}
+                        </button>
+                      );
+                    })}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className={s.qHint} aria-live="polite">
+            {hintedCriterion && hint
+              ? <><strong>{hintedCriterion.area} {hint.score}.</strong> {hintedCriterion.options[hint.score].detail}</>
+              : 'Score each area 0 to 3. Point at a number, or tab to it, to read what it means.'}
+          </p>
+
+          {/* Outcome size */}
+          <div className={s.outcome}>
+            <span className={s.outcomeLabel}>Project size</span>
+            {allAnswered ? (
+              <>
+                <span className={s.sizePill}>{SIZE_LABELS[size]}</span>
+                <span className={s.outcomeMeaning}>{sizeBand.meaning} · {SIZE_SLOTS[size]} of {owner.trim() ? capacityOf(owner.trim()) : CAPACITY} slots</span>
+              </>
+            ) : (
+              <>
+                <span
+                  className={s.progressTrack}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={SCORING_CRITERIA.length}
+                  aria-valuenow={answeredCount}
+                  aria-label="Questions answered"
+                >
+                  <span
+                    className={s.progressFill}
+                    style={{ width: `${(answeredCount / SCORING_CRITERIA.length) * 100}%` }}
+                  />
+                </span>
+                <span className={s.outcomePending}>{answeredCount} of {SCORING_CRITERIA.length}</span>
+                <span className={s.outcomeMeaning}>Set once all {SCORING_CRITERIA.length} areas are scored.</span>
+              </>
+            )}
+          </div>
+
+          {/* Capacity reallocation */}
+          {capacity && (
+            <div className={s.capacity}>
+              <span className={s.capacityMsg}>
+                <strong>{owner.trim()}</strong> is over capacity ({capacity.peakLoad} of {capacityOf(owner.trim())} slots). You can still save.
+              </span>
+              {capacity.alternativeOwners.length > 0 ? (
+                <div className={s.ownerPills}>
+                  <span className={s.reassignLabel}>Reassign to</span>
+                  {capacity.alternativeOwners.slice(0, 4).map(a => (
+                    <button key={a.owner} type="button" className={s.ownerPill} onClick={() => setOwner(a.owner)}>
+                      {a.owner}<span className={s.ownerFree}>{a.freeSlots} free</span>
+                    </button>
+                  ))}
+                </div>
+              ) : capacity.availableFrom ? (
+                <span className={s.capacityNote}>Frees up {format(parseISO(capacity.availableFrom), 'd MMM yyyy')}.</span>
+              ) : null}
+            </div>
+          )}
+        </div>
+      </div>
 
       {Object.values(errors).some(Boolean) && (
         <div className={form.error} role="alert">

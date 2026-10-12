@@ -3,25 +3,28 @@
   position: relative;
 }
 
-/* Trigger — same quiet chip language as the search trigger beside it. */
+/* Trigger — the same icon button as the search trigger beside it. It only
+   widens, to carry the count, while a filter is on. */
 .trigger {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-tertiary);
-  border: 1px solid transparent;
+  justify-content: center;
+  min-width: var(--control-size);
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  height: var(--control-size);
+  background: none;
+  border: none;
   border-radius: var(--radius-md);
-  color: var(--text-muted);
-  font-size: var(--text-sm);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast),
+              color var(--transition-fast);
 }
 
 .trigger:hover {
   background: var(--bg-secondary);
-  border-color: var(--border-light);
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }
 
 .trigger:focus-visible {
@@ -33,8 +36,8 @@
   transform: scale(0.98);
 }
 
-.trigger.active {
-  border-color: var(--accent-blue);
+.trigger.active,
+.trigger.active:hover {
   background: var(--accent-blue-light);
   color: var(--accent-blue);
 }

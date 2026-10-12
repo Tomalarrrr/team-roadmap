@@ -16,12 +16,15 @@ interface SortableMemberLaneProps {
   isEmpty?: boolean;
   railMode?: boolean; // When true, the whole sidebar is a thin vertical rail
   isDimmed?: boolean; // A leaver's lane, greyed back (see utils/teamMembers.ts)
+  // Slots free today or the date the next one opens (see availabilityLabel).
+  // Absent for lanes outside the capacity model: leavers and the Digital Queue.
+  availability?: string;
   onToggleCollapse?: () => void;
   onEdit: () => void;
   onAddProject: () => void;
 }
 
-export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, isEmpty = false, railMode = false, isDimmed = false, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
+export function SortableMemberLane({ member, height, isLocked = false, isCollapsed = false, isEmpty = false, railMode = false, isDimmed = false, availability, onToggleCollapse, onEdit, onAddProject }: SortableMemberLaneProps) {
   const {
     attributes,
     listeners,
@@ -62,7 +65,7 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
         style={style}
         className={`${styles.memberLane} ${styles.memberLaneRail} ${isDimmed ? styles.memberLaneLeft : ''}`}
         onClick={isLocked ? undefined : onEdit}
-        title={[member.name, member.jobTitle, member.left ? 'Left the team' : reducedCapacity].filter(Boolean).join(' — ')}
+        title={[member.name, member.jobTitle, member.left ? 'Left the team' : reducedCapacity, availability].filter(Boolean).join(' — ')}
       >
         <span className={styles.railName}>
           {member.name}
@@ -120,6 +123,7 @@ export function SortableMemberLane({ member, height, isLocked = false, isCollaps
         <div className={styles.memberInfo} onClick={isLocked ? undefined : onEdit} style={{ cursor: isLocked ? 'default' : 'pointer' }}>
           <span className={styles.memberName}>{member.name}</span>
           {!isCollapsed && !isEmpty && <span className={styles.memberTitle}>{member.left ? 'Left the team' : [member.jobTitle, reducedCapacity].filter(Boolean).join(' \u00B7 ')}</span>}
+          {!isCollapsed && !isEmpty && availability && <span className={styles.memberTitle}>{availability}</span>}
         </div>
       </div>
       {!isCollapsed && !isEmpty && !member.left && (

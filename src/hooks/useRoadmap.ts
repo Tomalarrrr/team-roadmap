@@ -20,7 +20,7 @@ import { getLastFirebaseActivity } from '../firebase';
 import { projectToFirebase } from '../utils/firebaseConversions';
 import { createWriteCoalescer } from '../utils/writeCoalescer';
 import { changedFields } from '../utils/objectDiff';
-import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker, BoardSettings } from '../types';
+import type { RoadmapData, Project, Milestone, TeamMember, Dependency, LeaveBlock, PeriodMarker } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
 import { withRetry } from '../utils/retry';
@@ -1013,37 +1013,6 @@ export function useRoadmap() {
     );
   }, [optimisticSave]);
 
-  // Board rules. Each field is written to its own path, so two people changing
-  // different rules at once don't overwrite each other.
-  const updateSettings = useCallback(async (updates: BoardSettings) => {
-    const currentData = dataRef.current;
-    const paths: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(updates)) paths[`settings/${key}`] = value;
-    await optimisticSave(
-      { ...currentData, settings: { ...currentData.settings, ...updates } },
-      () => batchWithRetry(paths)
-    );
-  }, [optimisticSave]);
-
-  // Renaming or removing a programme has to carry the projects under it in the
-  // same write, or they would be left pointing at a name that is off the list.
-  // `to` is the new name, or null to remove the programme and unassign its work.
-  const replaceProgramme = useCallback(async (from: string, to: string | null) => {
-    const currentData = dataRef.current;
-    const list = currentData.settings?.programmes ?? [];
-    const programmes = to === null ? list.filter(p => p !== from) : list.map(p => (p === from ? to : p));
-    const paths: Record<string, unknown> = { 'settings/programmes': programmes };
-    const projects = currentData.projects.map(p => {
-      if (p.programme !== from) return p;
-      paths[`projects/${p.id}/programme`] = to;
-      return { ...p, programme: to ?? undefined };
-    });
-    await optimisticSave(
-      { ...currentData, projects, settings: { ...currentData.settings, programmes } },
-      () => batchWithRetry(paths)
-    );
-  }, [optimisticSave]);
-
   return {
     data,
     loading,
@@ -1072,8 +1041,6 @@ export function useRoadmap() {
     deleteLeaveBlock,
     addPeriodMarker,
     updatePeriodMarker,
-    deletePeriodMarker,
-    updateSettings,
-    replaceProgramme
+    deletePeriodMarker
   };
 }

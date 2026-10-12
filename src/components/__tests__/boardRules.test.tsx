@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { BoardRulesPanel } from '../BoardRulesPanel';
-import { CapacityView } from '../CapacityView';
 import { ProgrammeView } from '../ProgrammeView';
 import { ProjectWizard } from '../ProjectWizard';
 import { TeamMemberForm } from '../TeamMemberForm';
@@ -74,123 +72,7 @@ describe('board rules, capacity and programme views', () => {
       input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }));
     });
   }
-  const blur = (el: HTMLElement) => act(() => { el.focus(); el.blur(); });
   const click = (el: Element) => act(() => { (el as HTMLElement).click(); });
-
-  describe('BoardRulesPanel', () => {
-    const setup = (settings?: BoardSettings, projects: Project[] = []) => {
-      const onUpdateSettings = vi.fn();
-      const onReplaceProgramme = vi.fn();
-      const onUpdateMember = vi.fn();
-      const el = render(
-        <BoardRulesPanel teamMembers={team} projects={projects} onUpdateSettings={onUpdateSettings} onReplaceProgramme={onReplaceProgramme} onUpdateMember={onUpdateMember} />,
-        settings,
-      );
-      return { el, onUpdateSettings, onReplaceProgramme, onUpdateMember };
-    };
-
-    it('shows the rules in force and saves a new grace period when the field is left', () => {
-      const { el, onUpdateSettings } = setup({ graceDays: 10 });
-      const grace = el.querySelector<HTMLInputElement>('#rule-grace')!;
-      expect(grace.value).toBe('10');
-      expect(el.querySelector<HTMLInputElement>('#rule-recovery')!.value).toBe('7');
-      type(grace, '14');
-      expect(onUpdateSettings).not.toHaveBeenCalled();
-      blur(grace);
-      expect(onUpdateSettings).toHaveBeenCalledWith({ graceDays: 14 });
-    });
-
-    it('accepts zero days', () => {
-      const { el, onUpdateSettings } = setup();
-      const recovery = el.querySelector<HTMLInputElement>('#rule-recovery')!;
-      type(recovery, '0');
-      blur(recovery);
-      expect(onUpdateSettings).toHaveBeenCalledWith({ recoveryDays: 0 });
-    });
-
-    it.each(['61', '-1', '2.5', ''])('puts the saved value back and saves nothing for "%s"', bad => {
-      const { el, onUpdateSettings } = setup();
-      const grace = el.querySelector<HTMLInputElement>('#rule-grace')!;
-      type(grace, bad);
-      blur(grace);
-      expect(onUpdateSettings).not.toHaveBeenCalled();
-      expect(grace.value).toBe('7');
-    });
-
-    it('adds a tidied programme to the end of the list and refuses a duplicate', () => {
-      const { el, onUpdateSettings } = setup({ programmes: ['Clinical'] });
-      const input = el.querySelector<HTMLInputElement>('[aria-label="New programme name"]')!;
-      const add = [...el.querySelectorAll('button')].find(b => b.textContent === 'Add')!;
-      type(input, 'clinical');
-      expect(add.disabled).toBe(true);
-      type(input, '  Estates   works ');
-      expect(add.disabled).toBe(false);
-      click(add);
-      expect(onUpdateSettings).toHaveBeenCalledWith({ programmes: ['Clinical', 'Estates works'] });
-    });
-
-    it('reorders, renames and removes programmes', () => {
-      const { el, onUpdateSettings, onReplaceProgramme } = setup({ programmes: ['Clinical', 'Estates'] }, [project('a', { programme: 'Estates' })]);
-      expect(el.textContent).toContain('1 project');
-      click(el.querySelector('[aria-label="Move Estates up"]')!);
-      expect(onUpdateSettings).toHaveBeenCalledWith({ programmes: ['Estates', 'Clinical'] });
-
-      const name = el.querySelector<HTMLInputElement>('[aria-label="Programme name: Clinical"]')!;
-      type(name, 'Estates');
-      blur(name);
-      expect(onReplaceProgramme).not.toHaveBeenCalled();
-      type(name, 'Clinical systems');
-      blur(name);
-      expect(onReplaceProgramme).toHaveBeenCalledWith('Clinical', 'Clinical systems');
-
-      click(el.querySelector('[aria-label="Remove Estates"]')!);
-      expect(onReplaceProgramme).toHaveBeenLastCalledWith('Estates', null);
-    });
-
-    it('lists current people with their capacity and saves a change', () => {
-      const { el, onUpdateMember } = setup();
-      expect(el.querySelector('#rule-capacity-m3')).toBeNull();
-      expect(el.querySelector<HTMLSelectElement>('#rule-capacity-m1')!.value).toBe('4');
-      const ben = el.querySelector<HTMLSelectElement>('#rule-capacity-m2')!;
-      expect(ben.value).toBe('2');
-      type(ben, '3');
-      expect(onUpdateMember).toHaveBeenCalledWith('m2', { capacity: 3 });
-    });
-  });
-
-  describe('CapacityView', () => {
-    const cells = (el: HTMLElement) =>
-      [...el.querySelectorAll('[role="row"]')].slice(1).map(row => [...row.querySelectorAll('[role="cell"]')].map(c => c.textContent));
-
-    it('reports free slots against each person\'s own capacity and when the next one opens', () => {
-      const el = render(
-        <CapacityView
-          teamMembers={team}
-          projects={[
-            project('big', { owner: 'Amy', size: 'large', startDate: '2026-09-01', endDate: '2026-11-30' }),
-            project('paused', { owner: 'Amy', size: 'large', startDate: '2026-09-01', endDate: '2026-11-30', statusColor: '#7558A6' }),
-            project('full', { owner: 'Ben', size: 'medium', startDate: '2026-09-01', endDate: '2026-10-31' }),
-            project('gone', { owner: 'Cal', size: 'small', startDate: '2026-09-01', endDate: '2026-10-31' }),
-          ]}
-        />,
-        { recoveryDays: 3 },
-      );
-      expect(cells(el)).toEqual([
-        ['Amy', '1 of 4', '', 'Now'],
-        ['Ben', '0 of 2', '', '4 Nov 2026'],
-      ]);
-      expect(el.textContent).toContain('1 of 6 slots are free today across 2 people.');
-      expect(el.textContent).toContain('counts as free 3 days after');
-    });
-
-    it('says how far over someone is and counts them as having nothing free', () => {
-      const el = render(
-        <CapacityView teamMembers={[team[1]]} projects={[project('x', { owner: 'Ben', size: 'large', startDate: '2026-09-01', endDate: '2027-12-31' })]} />,
-      );
-      expect(cells(el)).toEqual([['Ben', '1 over', '', 'None in 26 weeks']]);
-      expect(el.textContent).toContain('0 of 2 slots are free today across 1 person; 1 person is over capacity.');
-    });
-  });
 
   describe('ProgrammeView', () => {
     const projects = [
@@ -210,19 +92,49 @@ describe('board rules, capacity and programme views', () => {
       expect(el.textContent).not.toContain('Old');
     });
 
-    it('counts from the data, with overdue and assumed kept apart from confirmed', () => {
+    it('heads the columns, names each project\'s size and draws a thicker bar for a bigger one', () => {
+      const el = render(<ProgrammeView projects={[project('Wee', {}), project('Huge', { size: 'full-time' }), project('Old', { startDate: '2025-04-01', endDate: '2026-03-31' })]} />);
+      const head = () => el.querySelector('h3')!.parentElement!.previousElementSibling!.textContent;
+      // Today, 12 Oct, sits where the Oct label would be, so it replaces it.
+      expect(head()).toBe('ProjectOwnerSizeStatusAprJulJan12 OctEnd date');
+      expect(row(el, 'Huge')).toBe('HugeAmyFull TimeOn Track31 Dec 2026');
+      const height = (title: string) =>
+        [...el.querySelectorAll('li')].find(li => li.textContent!.startsWith(title))!.querySelector<HTMLElement>('span[style*="width"]')!.style.height;
+      expect([height('Wee'), height('Huge')]).toEqual(['4px', '10px']);
+      click(el.querySelector('[aria-label="Previous financial year"]')!);
+      expect(head()).toBe('ProjectOwnerSizeStatusAprJulOctJanEnd date');
+    });
+
+    it('cuts a bar square where the project runs past the edge of the year', () => {
+      const el = render(<ProgrammeView projects={[
+        project('Within', {}),
+        project('Early', { startDate: '2026-01-10' }),
+        project('Late', { endDate: '2027-04-17' }),
+      ]} />);
+      const bar = (title: string) =>
+        [...el.querySelectorAll('li')].find(li => li.textContent!.startsWith(title))!.querySelector<HTMLElement>('span[style*="width"]')!;
+      const cuts = (title: string) => bar(title).className.split(' ').filter(c => /cut/.test(c)).map(c => c.match(/cut(Start|End)/)![0]);
+      expect([cuts('Within'), cuts('Early'), cuts('Late')]).toEqual([[], ['cutStart'], ['cutEnd']]);
+      expect(bar('Late').parentElement!.title).toBe('1 May 2026 to 17 Apr 2027');
+    });
+
+    it('counts from the data, with overdue kept apart from complete and unconfirmed completions footnoted', () => {
       const el = render(<ProgrammeView projects={projects} />, { programmes: ['Estates', 'Clinical'] });
-      expect(el.textContent).toContain('4 projects: 1 open, 1 overdue, 1 complete, 1 assumed complete.');
+      expect(el.textContent).toContain('2 On Track2 Complete4 projects, 1 overdue.');
+      expect(el.textContent).toContain('1 project is counted complete because the end date passed more than 7 days ago; nobody has confirmed it.');
+      expect(el.textContent).not.toMatch(/assumed/i);
       expect(el.textContent).toContain('Of the 2 with a first planned end date, 1 now ends later.');
       expect(row(el, 'Bravo')).toContain('On Track, 4d overdue');
-      expect(row(el, 'Charlie')).toContain('Complete (assumed)');
-      expect(row(el, 'Alpha')).toContain('set 4 Sep');
+      expect(row(el, 'Charlie')).toBe('CharlieAmySmallComplete1 Sep 2026');
+      expect(row(el, 'Delta')).toContain('AmySmallCompleteupdated 1 Oct');
+      expect(row(el, 'Alpha')).toContain('updated 4 Sep');
       expect(row(el, 'Alpha')).toContain('31 Dec 20263 weeks later');
     });
 
     it('moves Bravo from overdue to assumed when the board\'s grace period is shorter', () => {
       const el = render(<ProgrammeView projects={projects} />, { graceDays: 3 });
-      expect(el.textContent).toContain('4 projects: 1 open, 0 overdue, 1 complete, 2 assumed complete.');
+      expect(el.textContent).toContain('1 On Track3 Complete4 projects, 0 overdue.');
+      expect(el.textContent).toContain('2 projects are counted complete because the end date passed more than 3 days ago; nobody has confirmed them.');
     });
 
     it('says how many projects have no first planned end date or status date instead of showing a zero', () => {

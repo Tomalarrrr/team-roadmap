@@ -276,15 +276,13 @@ export const SearchFilter = memo(function SearchFilter({
           setIsOpen(true);
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
+        title={`Search (${modifierKey}K)`}
+        aria-label="Search"
       >
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-          <path d="M7 12C9.76142 12 12 9.76142 12 7C12 4.23858 9.76142 2 7 2C4.23858 2 2 4.23858 2 7C2 9.76142 4.23858 12 7 12Z" stroke="currentColor" strokeWidth="1.5"/>
-          <path d="M14 14L10.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5" />
+          <path d="m10.5 10.5 3 3" />
         </svg>
-        <span>Search</span>
-        <kbd className={styles.shortcut}>
-          <span>{modifierKey}</span>K
-        </kbd>
       </button>
 
       {/* Modal */}

@@ -190,12 +190,12 @@ export function ExportMenu({ projects, board, embedMode = false, allProjects, bo
         className={styles.trigger}
         onClick={() => setIsOpen(o => !o)}
         title={`Export (${exportShortcut})`}
+        aria-label="Export"
       >
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M8 2V10M8 10L5 7M8 10L11 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          <path d="M3 13H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M8 2.5V10M5 7l3 3 3-3" />
+          <path d="M3 11v1.5a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V11" />
         </svg>
-        <span>Export</span>
       </button>
 
       {isOpen && (

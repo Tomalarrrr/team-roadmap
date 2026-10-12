@@ -9,6 +9,7 @@ import {
   evaluateAssignment,
   supportSegments,
   nextFreeDate,
+  availabilityLabel,
   capacityOfMember,
   capacityByOwner,
   isCapacityExempt,
@@ -362,5 +363,28 @@ describe('nextFreeDate', () => {
 
   it('is null when nothing that size opens in the window', () => {
     expect(nextFreeDate(segments, 5, 7)).toBeNull();
+  });
+});
+
+describe('availabilityLabel', () => {
+  const today = '2026-10-12';
+
+  it('counts the slots free today against the person\'s own capacity', () => {
+    expect(availabilityLabel([], today, 4, 7)).toBe('4 of 4 slots free');
+    expect(availabilityLabel([item('a', '2026-09-01', '2026-11-30', 'large')], today, 4, 7)).toBe('1 of 4 slots free');
+  });
+
+  it('gives the date the next slot opens, after recovery, when nothing is free today', () => {
+    const items = [item('a', '2026-09-01', '2026-10-31', 'medium')];
+    expect(availabilityLabel(items, today, 2, 3)).toBe('Free from 4 Nov');
+    expect(availabilityLabel(items, today, 2, 7)).toBe('Free from 8 Nov');
+  });
+
+  it('adds the year when the slot opens in a later one', () => {
+    expect(availabilityLabel([item('a', '2026-09-01', '2027-01-10', 'full-time')], today, 4, 7)).toBe('Free from 18 Jan 2027');
+  });
+
+  it('says so when someone is full or over for the whole look-ahead', () => {
+    expect(availabilityLabel([item('a', '2026-09-01', '2027-12-31', 'large')], today, 2, 7)).toBe('No slot free in 26 weeks');
   });
 });

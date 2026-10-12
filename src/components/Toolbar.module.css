@@ -54,23 +54,21 @@
   gap: var(--space-2);
 }
 
-/* People | Programmes. One control with two ends, so the selected half is
-   the only filled one. */
+/* A switch written as plain words, no box: the one in use takes the accent
+   colour. Used for the layout (People | Programmes) and the zoom level. */
 .views {
   display: flex;
   flex-shrink: 0;
-  height: var(--control-size);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-md);
-  overflow: hidden;
 }
 
 .viewBtn {
-  padding: 0 var(--space-3);
+  height: var(--control-size);
+  padding: 0 var(--space-2);
   border: 0;
+  border-radius: var(--radius-md);
   background: none;
   font: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   color: var(--text-muted);
   cursor: pointer;
 }
@@ -86,7 +84,6 @@
 
 .viewBtnOn,
 .viewBtnOn:hover {
-  background: var(--accent-blue-light);
   color: var(--accent-blue);
 }
 
@@ -95,9 +92,8 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  /* One consistent gap separates the three groups (status · view · actions),
-     and the same gap sits either side of each divider. */
-  gap: var(--space-3);
+  /* Space alone separates the groups (people here · zoom · actions · logo). */
+  gap: var(--space-4);
 }
 
 /* One consistent action-button group: undo / redo / lock / export */
@@ -148,21 +144,9 @@
   cursor: not-allowed;
 }
 
-.divider {
-  width: 1px;
-  height: 20px;
-  background: var(--border-light);
-  flex-shrink: 0;
-}
-
-/* Lock button states */
-.iconBtn.locked {
-  color: var(--accent-blue);
-  background: var(--accent-blue-light);
-}
-
+/* Locked is the state worth noticing, so it alone takes the accent. */
+.iconBtn.locked,
 .iconBtn.locked:hover {
-  background: var(--accent-blue-light);
   color: var(--accent-blue);
 }
 
@@ -181,14 +165,22 @@
 /* Responsive */
 /* Between phone and desktop the three groups are wider than the screen once
    the board is unlocked, and the page scrolled sideways. The right-hand group
-   drops to its own line instead. */
+   drops to its own line instead. It is sized to its content here: sharing the
+   spare width equally with the title left it too narrow, so it broke inside
+   itself and stranded the logo on a third row while the title sat in slack. */
 @media (max-width: 1100px) {
   .toolbar {
     flex-wrap: wrap;
   }
 
+  .left {
+    flex: 1 1 auto;
+  }
+
   .right {
+    flex: 0 1 auto;
     flex-wrap: wrap;
+    margin-left: auto;
   }
 }
 
@@ -220,6 +212,7 @@
     flex: 0 1 auto;
     flex-wrap: wrap;
     justify-content: flex-start;
+    margin-left: 0;
   }
 
   .title {

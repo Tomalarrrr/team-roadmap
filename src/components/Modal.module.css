@@ -40,6 +40,10 @@
   transform: translateZ(0);
 }
 
+.wide {
+  max-width: 960px;
+}
+
 @keyframes modalSlideIn {
   from {
     opacity: 0;
