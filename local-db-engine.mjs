@@ -9,6 +9,10 @@
 //   PATCH path {k: v, …}  -> multi-path update: each key may itself be a
 //                            slash-delimited deep path *relative to path*, set
 //                            independently; a null value deletes that path.
+//   {".sv": "timestamp"}  -> anywhere in a written value, replaced by the
+//                            server's clock in ms. The games read these back to
+//                            agree on one clock, so a stand-in that stored the
+//                            placeholder verbatim would leave them unable to start.
 // The roadmap app depends on the PATCH deep-key behaviour: every add/delete op
 // sends batchUpdate({ "projects/<id>": {...}, "dependencies/<id>": null, … })
 // as a single PATCH to /roadmap.
@@ -22,8 +26,16 @@ export function segments(pathname) {
     .map(decodeURIComponent);
 }
 
-export function createDbEngine(initial = {}) {
+export function createDbEngine(initial = {}, now = Date.now) {
   let db = initial && typeof initial === 'object' ? initial : {};
+
+  function resolveServerValues(value) {
+    if (!value || typeof value !== 'object') return value;
+    if (value['.sv'] === 'timestamp') return now();
+    const out = Array.isArray(value) ? [] : {};
+    for (const [key, child] of Object.entries(value)) out[key] = resolveServerValues(child);
+    return out;
+  }
 
   function getAt(parts) {
     let node = db;
@@ -70,8 +82,8 @@ export function createDbEngine(initial = {}) {
 
   return {
     get: (parts) => getAt(parts),
-    set: (parts, value) => setAt(parts, value),
-    patch: (parts, obj) => patchAt(parts, obj),
+    set: (parts, value) => setAt(parts, resolveServerValues(value)),
+    patch: (parts, obj) => patchAt(parts, resolveServerValues(obj)),
     snapshot: () => db,
   };
 }

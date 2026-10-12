@@ -61,6 +61,16 @@ export async function proxyGetWithEtag<T = unknown>(path: string): Promise<{ val
   return { value, etag };
 }
 
+/** Unconditional overwrite, for a node only one client ever writes. */
+export async function proxyPut(path: string, value: object): Promise<void> {
+  const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(value),
+  }, REQUEST_TIMEOUT_MS);
+  if (!res.ok) throw new Error(`PUT ${path} failed: ${res.status}`);
+}
+
 export async function proxyRemove(path: string): Promise<void> {
   const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, { method: 'DELETE' }, REQUEST_TIMEOUT_MS);
   if (!res.ok) throw new Error(`DELETE ${path} failed: ${res.status}`);

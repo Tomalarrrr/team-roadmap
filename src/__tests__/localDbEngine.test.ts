@@ -95,3 +95,13 @@ describe('PATCH multi-path deep-key semantics (the save-path contract)', () => {
     expect((e.get(['roadmap', 'projects', 'a b']) as { title: string }).title).toBe('Spaced');
   });
 });
+
+describe('server values', () => {
+  it('replaces a timestamp placeholder with the clock, at any depth, on PUT and PATCH', () => {
+    const e = createDbEngine({}, () => 1234) as Engine;
+    e.set(['snake', 'ABCD', 's', 'a'], { seq: 1, at: { '.sv': 'timestamp' } });
+    expect(e.get(['snake', 'ABCD', 's', 'a'])).toEqual({ seq: 1, at: 1234 });
+    e.patch(['ludo4', 'ABCD'], { turnStartedAt: { '.sv': 'timestamp' }, tokens: 'bas' });
+    expect(e.get(['ludo4', 'ABCD'])).toEqual({ turnStartedAt: 1234, tokens: 'bas' });
+  });
+});

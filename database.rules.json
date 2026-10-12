@@ -301,6 +301,55 @@
       }
     },
 
+    "snake": {
+      ".read": true,
+      "$code": {
+        ".write": true,
+        ".validate": "newData.hasChild('m')",
+        "m": {
+          ".validate": "newData.hasChildren(['status', 'createdAt', 'seed', 'players', 'round', 'startAt', 'scoreA', 'scoreB'])",
+          "status": { ".validate": "newData.isString() && (newData.val() == 'waiting' || newData.val() == 'playing' || newData.val() == 'finished')" },
+          "createdAt": { ".validate": "newData.isNumber()" },
+          "seed": { ".validate": "newData.isNumber()" },
+          "round": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "startAt": { ".validate": "newData.isNumber()" },
+          "scoreA": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99" },
+          "scoreB": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99" },
+          "lastWinner": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b' || newData.val() == 'draw')" },
+          "lastWhy": { ".validate": "newData.isString() && (newData.val() == 'crash' || newData.val() == 'clock')" },
+          "winner": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b')" },
+          "gone": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b')" },
+          "players": {
+            "$seat": {
+              ".validate": "($seat == 'a' || $seat == 'b') && newData.hasChildren(['sessionId', 'name'])",
+              "sessionId": { ".validate": "newData.isString() && newData.val().length <= 100" },
+              "name": { ".validate": "newData.isString() && newData.val().length <= 50" },
+              "$other": { ".validate": false }
+            }
+          },
+          "$other": { ".validate": false }
+        },
+        "s": {
+          "$seat": {
+            ".validate": "($seat == 'a' || $seat == 'b') && newData.hasChildren(['seq', 'at', 'round', 'k', 'path', 'len', 'dir', 'adj', 'ate'])",
+            "seq": { ".validate": "newData.isNumber()" },
+            "at": { ".validate": "newData.isNumber()" },
+            "round": { ".validate": "newData.isNumber()" },
+            "k": { ".validate": "newData.isNumber()" },
+            "path": { ".validate": "newData.isString() && newData.val().length <= 1600" },
+            "len": { ".validate": "newData.isNumber()" },
+            "dir": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 3" },
+            "dead": { ".validate": "newData.isNumber()" },
+            "hit": { ".validate": "newData.isNumber()" },
+            "adj": { ".validate": "newData.isNumber()" },
+            "ate": { ".validate": "newData.isString() && newData.val().length <= 40" },
+            "$other": { ".validate": false }
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    },
+
     ".read": false,
     ".write": false
   }

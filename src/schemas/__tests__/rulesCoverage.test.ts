@@ -149,3 +149,26 @@ describe.each(LUDO_CASES)('Firebase security rules cover every $game state field
     expect(allowedFields(gameNode)).toContain('host');
   });
 });
+
+// Snake has two written shapes, the match and a seat's live state, each under
+// its own rules node. A seat state is written several times a second, so a
+// field missing here would refuse every one of those writes.
+const SNAKE_CASES = [
+  { name: 'SnakeMatch', node: (r: RuleNode) => r.m as RuleNode },
+  { name: 'SnakeSeatState', node: (r: RuleNode) => (r.s as RuleNode).$seat as RuleNode },
+];
+
+describe.each(SNAKE_CASES)('Firebase security rules cover every snake $name field', ({ name, node }) => {
+  const ruleNode = node((rules.rules.snake as RuleNode).$code as RuleNode);
+
+  it('every field is permitted by the rules', () => {
+    const fields = interfaceFields(ludoSource('src/snakeGameLogic.ts'), name);
+    expect(fields.length).toBeGreaterThan(5);
+    const allowed = new Set(allowedFields(ruleNode));
+    expect(fields.filter((k) => !allowed.has(k))).toEqual([]);
+  });
+
+  it('has the strict "$other" guard (so extra fields are caught)', () => {
+    expect((ruleNode.$other as RuleNode)?.['.validate']).toBe(false);
+  });
+});

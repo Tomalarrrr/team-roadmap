@@ -42,6 +42,12 @@ describe('proxy path/root validation', () => {
     expect(fetchMock).toHaveBeenCalledWith(`${DB}/ludo/ABCD.json`, expect.anything());
   });
 
+  it('allows the snake subtree, down to a seat', async () => {
+    const r = await handler(makeReq('snake/ABCD/s/a'));
+    expect(r.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(`${DB}/snake/ABCD/s/a.json`, expect.anything());
+  });
+
   it('allows the ludo3 subtree', async () => {
     const r = await handler(makeReq('ludo3/ABCD'));
     expect(r.status).toBe(200);

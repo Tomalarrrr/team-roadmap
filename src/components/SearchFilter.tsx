@@ -8,6 +8,7 @@ import styles from './SearchFilter.module.css';
 const LudoGame = lazy(() => import('./LudoGame').then(m => ({ default: m.LudoGame })));
 const Ludo3Game = lazy(() => import('./ludo3/Ludo3Game').then(m => ({ default: m.Ludo3Game })));
 const Ludo4Game = lazy(() => import('./ludo4/Ludo4Game').then(m => ({ default: m.Ludo4Game })));
+const SnakeGame = lazy(() => import('./snake/SnakeGame').then(m => ({ default: m.SnakeGame })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 import { CyclesiteEmbed } from './CyclesiteEmbed';
 
@@ -66,15 +67,16 @@ export const SearchFilter = memo(function SearchFilter({
   const [search, setSearch] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(loadRecentProjectIds);
-  // Hidden features (Ludo game, Cyclesite traffic-flow embed). Reached by the
+  // Hidden features (Ludo and Snake games, Cyclesite traffic-flow embed). Reached by the
   // secret search term below, which is gated on the vault being unlocked — so a
   // locked viewer or read-only embed can never reach them.
   //
-  // The one exception is a Ludo invite link, handled further down, and it sits
+  // The one exception is a Ludo or Snake invite link, handled further down, and it sits
   // behind the same unlock: a URL still cannot carry anyone around the lock.
   const [showLudo, setShowLudo] = useState(false);
   const [showLudo3, setShowLudo3] = useState(false);
   const [showLudo4, setShowLudo4] = useState(false);
+  const [showSnake, setShowSnake] = useState(false);
   const [showCyclesite, setShowCyclesite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -119,6 +121,7 @@ export const SearchFilter = memo(function SearchFilter({
     if (magic === 'ludo') open = () => setShowLudo(true);
     else if (magic === 'ludo3') open = () => setShowLudo3(true);
     else if (magic === 'ludo4') open = () => setShowLudo4(true);
+    else if (magic === 'snake') open = () => setShowSnake(true);
     else if (magic === 'cyclesite') open = () => setShowCyclesite(true);
     if (!open) return;
     const timer = setTimeout(() => {
@@ -166,6 +169,18 @@ export const SearchFilter = memo(function SearchFilter({
   const closeLudo4 = useCallback(() => {
     setShowLudo4(false);
     setInvite4Dismissed(true);
+  }, []);
+
+  // Snake invite links: the same contract again on ?snake=CODE.
+  const snakeInviteCode = useMemo(() => {
+    const code = new URLSearchParams(window.location.search).get('snake');
+    return code && /^[a-z0-9]{4}$/i.test(code) ? code : null;
+  }, []);
+  const [snakeInviteDismissed, setSnakeInviteDismissed] = useState(false);
+  const snakeOpen = showSnake || (!isLocked && snakeInviteCode !== null && !snakeInviteDismissed);
+  const closeSnake = useCallback(() => {
+    setShowSnake(false);
+    setSnakeInviteDismissed(true);
   }, []);
 
   // Compute search results as derived state (no effect needed)
@@ -354,6 +369,14 @@ export const SearchFilter = memo(function SearchFilter({
         <GameErrorBoundary gameName="Ludo 4" onClose={closeLudo4}>
           <Suspense fallback={null}>
             <Ludo4Game onClose={closeLudo4} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
+        document.body
+      )}
+      {snakeOpen && createPortal(
+        <GameErrorBoundary gameName="Snake" onClose={closeSnake}>
+          <Suspense fallback={null}>
+            <SnakeGame onClose={closeSnake} isSearchOpen={isOpen} />
           </Suspense>
         </GameErrorBoundary>,
         document.body
