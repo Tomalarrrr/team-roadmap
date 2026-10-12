@@ -266,12 +266,26 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   useEffect(() => {
     const url = new URL(window.location.href);
     const invite = url.searchParams.get('swarm');
-    if (!invite) return;
+    if (!invite) {
+      // A reload mid-game has 20 seconds before the other client counts this
+      // seat as gone, so the room this tab was in is rejoined without asking.
+      // One that refuses (closed, or cleared out) is forgotten.
+      const recalled = recallRoom();
+      if (!recalled) return;
+      setBusy(true);
+      joinRoom(recalled, sessionId, userName)
+        .then(() => enterRoom(recalled), (err: Error) => {
+          rememberRoom(null);
+          setError(err.message);
+        })
+        .finally(() => setBusy(false));
+      return;
+    }
     url.searchParams.delete('swarm');
     window.history.replaceState({}, '', url.toString());
     setJoinCode(invite.toUpperCase());
     join(invite);
-  }, [join]);
+  }, [join, sessionId, userName, enterRoom]);
 
   // --- The game: reads, the simulation, reports, input, drawing ---
   useEffect(() => {
