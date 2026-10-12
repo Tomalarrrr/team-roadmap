@@ -23,6 +23,13 @@ export interface SwarmRoom {
 
 const STALE_ROOM_AGE_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * How long a room read or a seat write may hang before it is dropped and sent
+ * again. It has to sit well inside the silence a seat is given up after (see
+ * SwarmGame), or one stuck request reads to the other player as having left.
+ */
+const LIVE_TIMEOUT_MS = 2000;
+
 const matchPath = (code: string) => `swarm/${code}/m`;
 const newSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];
 
@@ -89,12 +96,12 @@ export async function joinRoom(code: string, sessionId: string, name: string): P
 }
 
 export function getRoom(code: string): Promise<SwarmRoom | null> {
-  return proxyGet<SwarmRoom>(`swarm/${code}`);
+  return proxyGet<SwarmRoom>(`swarm/${code}`, LIVE_TIMEOUT_MS);
 }
 
 /** `at` is stamped by the server; reading it back is how a client finds the server clock. */
 export function putSeat(code: string, seat: Seat, state: Omit<SwarmSeatState, 'at'>): Promise<void> {
-  return proxyPut(`swarm/${code}/s/${seat}`, { ...state, at: getServerTimestamp() });
+  return proxyPut(`swarm/${code}/s/${seat}`, { ...state, at: getServerTimestamp() }, LIVE_TIMEOUT_MS);
 }
 
 /** Start a game, or a fresh one in a finished room. Needs both seats filled. */

@@ -9,12 +9,18 @@ type Engine = {
 
 // The database is the local dev backend's engine, so these run against stored
 // values (and its server timestamps) and not against a script of responses.
-const db = vi.hoisted(() => ({ engine: null as unknown as Engine, now: 0 }));
+const db = vi.hoisted(() => ({ engine: null as unknown as Engine, now: 0, timeouts: [] as unknown[] }));
 
 vi.mock('../dbProxy', () => ({
   getServerTimestamp: () => ({ '.sv': 'timestamp' }),
-  proxyGet: async (path: string) => structuredClone(db.engine.get(path.split('/'))),
-  proxyPut: async (path: string, value: object) => db.engine.set(path.split('/'), value),
+  proxyGet: async (path: string, timeoutMs?: number) => {
+    db.timeouts.push(timeoutMs);
+    return structuredClone(db.engine.get(path.split('/')));
+  },
+  proxyPut: async (path: string, value: object, timeoutMs?: number) => {
+    db.timeouts.push(timeoutMs);
+    db.engine.set(path.split('/'), value);
+  },
   proxyRemove: async (path: string) => db.engine.set(path.split('/'), null),
   proxyTransaction: async (path: string, updater: (current: unknown) => object | null | undefined) => {
     const current = structuredClone(db.engine.get(path.split('/')));
@@ -31,6 +37,7 @@ import { COUNTDOWN_MS, type SwarmMatch } from '../../swarmGameLogic';
 beforeEach(() => {
   db.now = 50_000;
   db.engine = createDbEngine({}, () => db.now) as Engine;
+  db.timeouts = [];
 });
 
 const matchOf = async (code: string) => (await getRoom(code))?.m as SwarmMatch;
@@ -116,6 +123,16 @@ describe('starting and finishing', () => {
 });
 
 describe('a seat', () => {
+  // A request left on the shared 12s timeout outlasts the silence a seat is
+  // given up after, which forfeits the game for a player on a slow VPN.
+  it('is read and written on a timeout far inside the silence that forfeits it', async () => {
+    const code = await seated();
+    db.timeouts = [];
+    await putSeat(code, 'a', { seq: 1, game: 1, k: 0, orders: '' });
+    await getRoom(code);
+    expect(db.timeouts).toEqual([2000, 2000]);
+  });
+
   it('is stamped with the server time when written', async () => {
     const code = await seated();
     db.now = 71_234;

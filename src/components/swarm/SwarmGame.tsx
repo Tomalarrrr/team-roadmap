@@ -56,8 +56,12 @@ const HEARTBEAT_MS = 1000;
 const ORDER_DELAY = 4;
 /** Against the computer there is nobody to reach. */
 const ORDER_DELAY_SOLO = 1;
-/** Same reasoning as Snake's: short in a game, long outside one. */
-const SILENT_LIVE_MS = 10_000;
+/**
+ * Short in a game, long outside one, as in Snake, but twice Snake's in a game:
+ * an army keeps marching through a bad patch on a VPN, where a snake would
+ * have died, so a slow connection is worth waiting out.
+ */
+const SILENT_LIVE_MS = 20_000;
 const SILENT_IDLE_MS = 90_000;
 /** rAF stops in a hidden tab; this keeps the seat reporting from there. */
 const BACKGROUND_PUMP_MS = 250;
