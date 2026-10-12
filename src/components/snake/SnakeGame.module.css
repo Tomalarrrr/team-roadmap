@@ -3,7 +3,9 @@
 
 .popup {
   position: fixed;
-  width: min(94vw, 720px);
+  /* The last term keeps the board, at its 34:22, inside a short window (a
+     phone on its side) once the bars above and below it are allowed for. */
+  width: min(94vw, 720px, calc((100dvh - 150px) * 34 / 22));
   z-index: 11000;
   background: var(--bg-secondary);
   border-radius: var(--radius-xl);
@@ -14,6 +16,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  container-type: inline-size;
 }
 
 /* The lobby and waiting room have little in them; size to that. */
@@ -228,22 +231,32 @@
   white-space: nowrap;
 }
 
-.score {
-  font-size: 1rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
+.pips {
+  display: flex;
+  gap: 4px;
+}
+
+.pip {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
 }
 
 .clock {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
+  min-width: 2.4em;
+  text-align: center;
 }
 
+/* The edge of the board is a wall that ends the round, so it is the firmest
+   line in the popup. */
 .boardWrap {
   position: relative;
   margin: 0 16px;
-  border: 1px solid var(--border-medium);
+  border: 2px solid var(--text-primary);
   border-radius: var(--radius-sm);
   overflow: hidden;
 }
@@ -289,6 +302,11 @@
   color: var(--text-primary);
 }
 
+.tally {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
 .footer {
   padding: 10px 16px 12px;
   font-size: 0.75rem;
@@ -296,6 +314,27 @@
   text-align: center;
 }
 
-@media (max-width: 480px) {
+.footerResult {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.footerConfirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.footerConfirm .primaryBtn,
+.footerConfirm .secondaryBtn {
+  padding: 5px 14px;
+  font-size: 0.78rem;
+}
+
+/* By the popup's own width: on a phone held sideways the screen is wide and the popup is not. */
+@container (max-width: 480px) {
   .sideLen { display: none; }
 }

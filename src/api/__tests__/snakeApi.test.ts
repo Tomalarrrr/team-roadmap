@@ -148,6 +148,61 @@ describe('a match', () => {
   });
 });
 
+describe('the tally of matches', () => {
+  const win = async (code: string, winner: 'a' | 'b') => {
+    await startMatch(code, 10_000);
+    const from = (await matchOf(code)).round;
+    for (const round of [from, from + 1, from + 2]) await recordRound(code, round, { winner, why: 'crash' }, 20_000);
+  };
+
+  it('counts a match when it is won, not round by round', async () => {
+    const code = await seated();
+    await startMatch(code, 10_000);
+    await recordRound(code, 1, { winner: 'a', why: 'crash' }, 20_000);
+    await recordRound(code, 2, { winner: 'a', why: 'crash' }, 20_000);
+    expect((await matchOf(code)).winsA).toBeUndefined();
+    await recordRound(code, 3, { winner: 'a', why: 'crash' }, 20_000);
+    expect(await matchOf(code)).toMatchObject({ status: 'finished', winsA: 1, winsB: 0 });
+  });
+
+  it('carries through rematches', async () => {
+    const code = await seated();
+    await win(code, 'a');
+    await win(code, 'b');
+    await win(code, 'b');
+    expect(await matchOf(code)).toMatchObject({ winner: 'b', winsA: 1, winsB: 2 });
+    await startMatch(code, 90_000);
+    expect(await matchOf(code)).toMatchObject({ status: 'playing', scoreB: 0, winsA: 1, winsB: 2 });
+  });
+
+  it('counts a forfeit for the player who stayed', async () => {
+    const code = await seated();
+    await win(code, 'b');
+    await startMatch(code, 60_000);
+    await vacateSeat(code, 'b');
+    expect(await matchOf(code)).toMatchObject({ winner: 'a', gone: 'b', winsA: 1, winsB: 1 });
+  });
+
+  it('starts again when one of the two leaves the room', async () => {
+    const code = await seated();
+    await win(code, 'a');
+    await vacateSeat(code, 'b');
+    const m = await matchOf(code);
+    expect(m.status).toBe('waiting');
+    expect(m.winsA).toBeUndefined();
+    expect(m.winsB).toBeUndefined();
+  });
+
+  it('counts from none in a room made before there was a tally', async () => {
+    const code = await seated();
+    await startMatch(code, 10_000);
+    const m = await matchOf(code);
+    expect('winsA' in m).toBe(false);
+    for (const round of [1, 2, 3]) await recordRound(code, round, { winner: 'b', why: 'crash' }, 20_000);
+    expect(await matchOf(code)).toMatchObject({ winsA: 0, winsB: 1 });
+  });
+});
+
 describe('leaving', () => {
   it('frees the seat before a match and keeps the other player where they sit', async () => {
     const code = await seated();

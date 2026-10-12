@@ -20,6 +20,13 @@
 
 export const COLS = 34;
 export const ROWS = 22;
+/**
+ * One pace all round, so a gap that was safe at the start is safe at the end.
+ * It is set by the transport and not by taste: a read through the proxy took
+ * 90 to 150ms against production (six reads, 12 Oct 2026), so at this step the
+ * other snake's report is about a cell or two old. Faster, and the stretch of
+ * its path this client has to guess at grows with it.
+ */
 export const STEP_MS = 130;
 /** A round the clock ends: 460 ticks of 130ms is just under a minute. */
 export const ROUND_TICKS = 460;
@@ -67,6 +74,12 @@ export interface SnakeMatch {
   winner?: Seat;
   /** The seat that walked away or went silent, when that is how it ended. */
   gone?: Seat;
+  /**
+   * Matches won in this room since these two sat down. Optional: a room made
+   * by a tab still running the build before this field has none.
+   */
+  winsA?: number;
+  winsB?: number;
 }
 
 /** `snake/{code}/s/{seat}` — one snake, written only by its own client. */
@@ -259,14 +272,20 @@ export function surelyOccupied(view: OppView, cell: number, tick: number): boole
 }
 
 /**
- * The other snake's body as drawn at `tick`: its report, run straight on for
- * the ticks since. Right whenever it has not turned in the meantime, which is
- * most of the time; a turn shows a report or two late and the body snaps.
+ * The other snake's body as drawn at `tick`. A tick its report already covers
+ * is read off the trail. Past the report it is run straight on, which is right
+ * whenever it has not turned in the meantime; a turn shows a report or two late
+ * and the body snaps.
  */
 export function ghostCells(view: OppView, tick: number): number[] {
+  // Before tick 0 the snake sits where it starts.
+  const back = view.k - Math.max(tick, 0);
+  // The trail runs one cell past the body, so the tick before the report is
+  // whole; further back the tail comes up short.
+  if (back > 0 && back < view.path.length) return view.path.slice(back, back + view.len);
   const cells = view.path.slice(0, view.len);
   if (view.dead !== null) return cells;
-  const ahead = Math.min(Math.max(tick - view.k, 0), MAX_EXTRAPOLATE);
+  const ahead = Math.min(Math.max(-back, 0), MAX_EXTRAPOLATE);
   for (let i = 0; i < ahead; i++) {
     const next = neighbour(cells[0], view.dir);
     if (next < 0) break;
@@ -274,6 +293,31 @@ export function ghostCells(view: OppView, tick: number): number[] {
     cells.pop();
   }
   return cells;
+}
+
+const centreOf = (cell: number): [number, number] => [(cell % COLS) + 0.5, Math.floor(cell / COLS) + 0.5];
+
+function between(from: number, to: number, f: number): [number, number] {
+  const [x0, y0] = centreOf(from);
+  const [x1, y1] = centreOf(to);
+  return [x0 + (x1 - x0) * f, y0 + (y1 - y0) * f];
+}
+
+/**
+ * The line to draw for a snake `f` of the way (0 to 1) from body `prev` to body
+ * `cur`, a tick apart and head first. Points are cell centres, in cells.
+ *
+ * The head arrives at its cell as the tick ends, which is the moment the next
+ * move is fixed: a turn pressed while the head is still sliding in is in time.
+ * Bodies that are not one step apart (a rewind, a late report) are drawn as `cur`.
+ */
+export function glide(prev: number[], cur: number[], f: number): [number, number][] {
+  const points = cur.map(centreOf);
+  if (f >= 1 || cur.length < 2 || cur[1] !== prev[0]) return points;
+  points[0] = between(prev[0], cur[0], f);
+  // A growing snake keeps its tail where it was; otherwise the tip follows on.
+  if (cur.length === prev.length) points.push(between(prev[prev.length - 1], cur[cur.length - 1], f));
+  return points;
 }
 
 /** One client's side of a round: its own snake, and its rulings on the other. */
@@ -352,7 +396,7 @@ function roundLimit(client: RoundClient): number {
 /** What this client publishes about the round; the caller adds `seq` and `at`. */
 export function seatStateOf(client: RoundClient): Omit<SnakeSeatState, 'seq' | 'at'> {
   const { sim } = client;
-  const count = Math.min(Math.max(sim.lens[sim.k], TRAIL_MIN), sim.heads.length);
+  const count = Math.min(Math.max(sim.lens[sim.k] + 1, TRAIL_MIN), sim.heads.length);
   const cells: number[] = [];
   for (let i = 0; i < count; i++) cells.push(sim.heads[sim.k + BASE - i]);
   return {

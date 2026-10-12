@@ -109,6 +109,17 @@ function nextRound(match: SnakeMatch, round: number, serverNow: number, pauseMs:
   return { ...match, status: 'playing', round, startAt: Math.round(serverNow + pauseMs + COUNTDOWN_MS) };
 }
 
+/** The match goes to `winner`, and onto the room's running tally. */
+function wonBy(match: SnakeMatch, winner: Seat): SnakeMatch {
+  // An absent count is a room that predates the tally, where none have been counted.
+  return {
+    ...match,
+    winner,
+    winsA: (match.winsA ?? 0) + (winner === 'a' ? 1 : 0),
+    winsB: (match.winsB ?? 0) + (winner === 'b' ? 1 : 0),
+  };
+}
+
 /** Start the match, or a fresh one in a finished room. Needs both seats filled. */
 export async function startMatch(code: string, serverNow: number): Promise<void> {
   const seed = crypto.getRandomValues(new Uint32Array(1))[0];
@@ -124,6 +135,8 @@ export async function startMatch(code: string, serverNow: number): Promise<void>
       startAt: 0,
       scoreA: 0,
       scoreB: 0,
+      ...(current.winsA === undefined ? {} : { winsA: current.winsA }),
+      ...(current.winsB === undefined ? {} : { winsB: current.winsB }),
     };
     // Rounds keep counting across rematches. The seats still hold their last
     // published states, and a reused round number would let those settle the
@@ -147,7 +160,7 @@ export async function recordRound(code: string, round: number, result: RoundResu
       lastWhy: result.why,
     };
     if (result.winner !== 'draw' && Math.max(scored.scoreA, scored.scoreB) >= WIN_ROUNDS) {
-      return { ...scored, status: 'finished', winner: result.winner };
+      return wonBy({ ...scored, status: 'finished' }, result.winner);
     }
     return nextRound(scored, round + 1, serverNow, RESULT_PAUSE_MS);
   });
@@ -163,7 +176,7 @@ export async function vacateSeat(code: string, seat: Seat): Promise<void> {
     empty = false;
     if (!current || !current.players[seat]) return undefined;
     if (current.status === 'playing') {
-      return { ...current, status: 'finished', winner: otherSeat(seat), gone: seat };
+      return { ...wonBy({ ...current, status: 'finished' }, otherSeat(seat)), gone: seat };
     }
     const other = current.players[otherSeat(seat)];
     if (!other) {
@@ -173,6 +186,9 @@ export async function vacateSeat(code: string, seat: Seat): Promise<void> {
     const rest = { ...current };
     delete rest.winner;
     delete rest.gone;
+    // The tally is between two players, and one of them has gone.
+    delete rest.winsA;
+    delete rest.winsB;
     return { ...rest, status: 'waiting', players: { [otherSeat(seat)]: other } };
   });
   // proxyTransaction reads a null return as an abort, so emptying is its own step.

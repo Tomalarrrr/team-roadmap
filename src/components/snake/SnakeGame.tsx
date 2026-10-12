@@ -23,6 +23,7 @@ import {
   bodyAt,
   foodCells,
   ghostCells,
+  glide,
   newRoundClient,
   newSim,
   otherSeat,
@@ -49,6 +50,7 @@ const KEY_DIR: Record<string, Dir> = {
 /** Gap between room reads. A round needs the other snake's turns promptly. */
 const POLL_LIVE_MS = 60;
 const POLL_IDLE_MS = 800;
+/** The simulation's own timer. It keeps running in a hidden tab, where animation frames stop. */
 const FRAME_MS = 15;
 /** With nothing new to say, a moving snake still reports this often, in ticks. */
 const REPORT_EVERY = 3;
@@ -99,25 +101,34 @@ interface Hud {
 
 const HUD_IDLE: Hud = { count: null, pre: true, secs: 0, lenA: START_LEN, lenB: START_LEN };
 
-function strokeSnake(ctx: CanvasRenderingContext2D, cells: number[], cell: number, color: string, dead: boolean) {
-  if (cells.length === 0) return;
-  const cx = (c: number) => ((c % COLS) + 0.5) * cell;
-  const cy = (c: number) => (Math.floor(c / COLS) + 0.5) * cell;
+function strokeSnake(ctx: CanvasRenderingContext2D, points: [number, number][], cell: number, color: string, dead: boolean) {
+  if (points.length === 0) return;
+  const [hx, hy] = points[0];
   ctx.globalAlpha = dead ? 0.35 : 1;
   ctx.strokeStyle = color;
   ctx.lineWidth = cell * 0.72;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  ctx.moveTo(cx(cells[0]), cy(cells[0]));
-  // A one-cell line has no length and would not draw its caps.
-  if (cells.length === 1) ctx.lineTo(cx(cells[0]) + 0.01, cy(cells[0]));
-  for (let i = 1; i < cells.length; i++) ctx.lineTo(cx(cells[i]), cy(cells[i]));
+  ctx.moveTo(hx * cell, hy * cell);
+  // A one-point line has no length and would not draw its caps.
+  if (points.length === 1) ctx.lineTo(hx * cell + 0.01, hy * cell);
+  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0] * cell, points[i][1] * cell);
   ctx.stroke();
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath();
-  ctx.arc(cx(cells[0]), cy(cells[0]), cell * 0.15, 0, Math.PI * 2);
-  ctx.fill();
+  // Two eyes set across the heading: they mark the head and show which way it
+  // faces, which matters most in the countdown, before anything has moved.
+  const neck = points.find(([x, y]) => x !== hx || y !== hy);
+  if (neck) {
+    const span = Math.hypot(hx - neck[0], hy - neck[1]);
+    const fx = (hx - neck[0]) / span;
+    const fy = (hy - neck[1]) / span;
+    ctx.fillStyle = '#ffffff';
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc((hx + fx * 0.06 - fy * side * 0.17) * cell, (hy + fy * 0.06 + fx * side * 0.17) * cell, cell * 0.085, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -145,6 +156,8 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
   const [synced, setSynced] = useState(false);
   const [copied, setCopied] = useState(false);
   const [hud, setHud] = useState<Hud>(HUD_IDLE);
+  // The match (by its seed) the close button was pressed in, while it waits to be confirmed.
+  const [leavingSeed, setLeavingSeed] = useState<number | null>(null);
 
   const [clock] = useState(() => createServerClock(() => performance.now()));
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -209,11 +222,16 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
     let oppSeq: number | undefined;
     let oppHeardAt = performance.now();
     let drawn = '';
+    let paintFrame = 0;
+    // Food as it stood a tick ago, which is the moment the gliding snakes are drawn at.
+    let foodTick = -1;
+    let foodHeld: number[] = [];
+    let foodShown: number[] = [];
     let hudKey = '';
 
     const style = getComputedStyle(document.documentElement);
-    const boardColor = style.getPropertyValue('--bg-secondary').trim();
-    const foodColor = style.getPropertyValue('--text-primary').trim();
+    const boardColor = style.getPropertyValue('--bg-primary').trim();
+    const inkColor = style.getPropertyValue('--text-primary').trim();
 
     const leaveRoom = (message: string) => {
       rememberRoom(null);
@@ -286,11 +304,12 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
         });
     };
 
-    const draw = (canvas: HTMLCanvasElement, seat: Seat, tick: number, live: boolean) => {
+    // `at` is the round's time in ticks, fractions and all; null once the round is over.
+    const draw = (canvas: HTMLCanvasElement, seat: Seat, at: number | null) => {
       const width = Math.round(canvas.clientWidth * window.devicePixelRatio);
       if (width === 0) return;
       const key = client
-        ? `${width}|${client.round}|${client.sim.k}|${client.sim.dead}|${client.hit}|${client.opp?.k}|${client.opp?.dead}|${tick}|${live}`
+        ? `${width}|${client.round}|${client.sim.k}|${client.sim.dead}|${client.hit}|${client.opp?.k}|${client.opp?.dead}|${at}`
         : `${width}`;
       if (key === drawn) return;
       drawn = key;
@@ -305,21 +324,67 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       if (!client) return;
 
-      if (live) {
-        ctx.fillStyle = foodColor;
-        for (const food of foodCells(client)) {
+      if (at !== null && at < ROUND_TICKS) {
+        ctx.fillStyle = inkColor;
+        for (const food of foodShown) {
           ctx.beginPath();
           ctx.arc(((food % COLS) + 0.5) * cell, (Math.floor(food / COLS) + 0.5) * cell, cell * 0.26, 0, Math.PI * 2);
           ctx.fill();
         }
       }
+
       const opp = otherSeat(seat);
-      const { sim } = client;
-      // Once this client has ruled the other head into its body, that is where it stopped.
-      const oppCells = client.opp ? ghostCells(client.opp, client.hit ?? tick) : bodyAt(newSim(opp), 0);
-      const oppDead = client.hit !== null || (client.opp !== null && client.opp.dead !== null);
-      strokeSnake(ctx, oppCells, cell, SEAT_COLOR[opp], oppDead);
-      strokeSnake(ctx, bodyAt(sim, sim.k), cell, SEAT_COLOR[seat], sim.dead !== null);
+      const { sim, opp: view } = client;
+      const upTo = at ?? Infinity;
+      const mine = glide(bodyAt(sim, Math.max(sim.k - 1, 0)), bodyAt(sim, sim.k), Math.max(upTo - sim.k, 0));
+      let theirs = glide([], bodyAt(newSim(opp), 0), 1);
+      if (view) {
+        // A snake this client has ruled into its body stopped there, and a
+        // finished round is drawn as its last report left it.
+        const oppTick = Math.min(Math.floor(upTo), client.hit ?? Infinity, at === null ? view.k : Infinity);
+        theirs = glide(ghostCells(view, oppTick - 1), ghostCells(view, oppTick), Math.max(upTo - oppTick, 0));
+      }
+      // A head slides into its last cell over the tick it ends on, so the
+      // snake is only shown as stopped once it has got there.
+      const oppEnd = client.hit ?? view?.dead ?? null;
+      const oppDead = oppEnd !== null && upTo >= oppEnd + 1;
+      const mineDead = sim.dead !== null && upTo >= sim.dead + 1;
+      strokeSnake(ctx, theirs, cell, SEAT_COLOR[opp], oppDead);
+      strokeSnake(ctx, mine, cell, SEAT_COLOR[seat], mineDead);
+
+      // Ring where a snake ended, so a round lost to a late ruling can be read off the board.
+      ctx.strokeStyle = inkColor;
+      ctx.lineWidth = Math.max(1, cell * 0.1);
+      for (const [points, dead] of [[theirs, oppDead], [mine, mineDead]] as const) {
+        if (!dead) continue;
+        // Held off the wall, where a head in an edge cell would have it cut off.
+        const inset = 0.8 + ctx.lineWidth / cell / 2;
+        const x = Math.min(Math.max(points[0][0], inset), COLS - inset);
+        const y = Math.min(Math.max(points[0][1], inset), ROWS - inset);
+        ctx.beginPath();
+        ctx.arc(x * cell, y * cell, cell * 0.8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Through the countdown, say which snake is this player's.
+      if (at !== null && at < 0) {
+        ctx.fillStyle = inkColor;
+        ctx.font = `600 ${Math.round(cell * 0.85)}px ${getComputedStyle(canvas).fontFamily}`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        const middle = (mine[0][0] + mine[mine.length - 1][0]) / 2;
+        ctx.fillText('You', middle * cell, (mine[0][1] - 0.75) * cell);
+      }
+    };
+
+    const paint = () => {
+      paintFrame = requestAnimationFrame(paint);
+      const canvas = canvasRef.current;
+      const seat = room && seatOf(room.m, sessionId);
+      if (!canvas || !room || !seat) return;
+      const m = room.m;
+      const now = clock.now();
+      draw(canvas, seat, m.status === 'playing' && now !== null && client?.round === m.round ? (now - m.startAt) / STEP_MS : null);
     };
 
     const frame = () => {
@@ -334,6 +399,7 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
       // The last round stays on the board until the next one's countdown begins.
       if (playing && client?.round !== m.round && now >= m.startAt - COUNTDOWN_MS) {
         client = newRoundClient(seat, m.seed, m.round);
+        foodTick = -1;
       }
       const tick = playing ? Math.floor((now - m.startAt) / STEP_MS) : 0;
       const current = playing && client?.round === m.round;
@@ -342,6 +408,12 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
         const theirs = room.s?.[opp];
         receive(client, theirs);
         advance(client, tick);
+        if (foodTick < 0) foodHeld = foodCells(client);
+        if (client.sim.k !== foodTick) {
+          foodTick = client.sim.k;
+          foodShown = foodHeld;
+        }
+        foodHeld = foodCells(client);
         const state = seatStateOf(client);
         const result = settleRound(seat === 'a' ? state : theirs, seat === 'a' ? theirs : state, m.round);
         if (result && recorded !== m.round) {
@@ -381,15 +453,16 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
       steerRef.current = (dir) => {
         if (client && current) steer(client.sim, dir);
       };
-      if (canvasRef.current) draw(canvasRef.current, seat, tick, Boolean(current) && tick < ROUND_TICKS);
     };
 
     void poll();
     const frameTimer = window.setInterval(frame, FRAME_MS);
+    paintFrame = requestAnimationFrame(paint);
     return () => {
       stopped = true;
       window.clearTimeout(pollTimer);
       window.clearInterval(frameTimer);
+      cancelAnimationFrame(paintFrame);
       steerRef.current = () => {};
     };
   }, [code, sessionId, clock]);
@@ -405,6 +478,13 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
   }, [code, mySeat, onClose]);
 
   const live = match?.status === 'playing';
+  const confirmingLeave = live && leavingSeed === match.seed;
+
+  // Closing a live match forfeits it, so the close button asks first.
+  const handleCloseButton = () => {
+    if (live && !confirmingLeave) setLeavingSeed(match.seed);
+    else handleClose();
+  };
 
   useEffect(() => {
     // Capture phase, and stopped there: the roadmap underneath has its own
@@ -414,8 +494,9 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
       // Not during a match: a stray Escape there would forfeit it.
-      if (e.key === 'Escape' && !live) {
-        handleClose();
+      if (e.key === 'Escape') {
+        if (live) setLeavingSeed(null);
+        else handleClose();
         return;
       }
       if (!live || e.metaKey || e.ctrlKey || e.altKey || !(e.key in KEY_DIR)) return;
@@ -509,6 +590,25 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
     return match.winner === mySeat ? `You won, ${score}` : `${match.players[match.winner]?.name} won, ${score}`;
   };
 
+  const tallyText = () => {
+    // One match in, the tally only repeats the result above it.
+    if (match?.winsA === undefined || match.winsB === undefined || match.winsA + match.winsB < 2) return null;
+    return `Matches: ${nameOf('a')} ${match.winsA}, ${nameOf('b')} ${match.winsB}`;
+  };
+
+  // Rounds taken, filling in towards the clock from either side.
+  const pips = (seat: Seat, score: number) => (
+    <span className={styles.pips} role="img" aria-label={`${score} of ${WIN_ROUNDS} rounds`}>
+      {Array.from({ length: WIN_ROUNDS }, (_, i) => (
+        <span
+          key={i}
+          className={styles.pip}
+          style={(seat === 'a' ? i >= WIN_ROUNDS - score : i < score) ? { background: SEAT_COLOR[seat], borderColor: SEAT_COLOR[seat] } : undefined}
+        />
+      ))}
+    </span>
+  );
+
   const bothSeated = Boolean(match?.players.a && match.players.b);
 
   return (
@@ -537,7 +637,7 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
             </span>
           )}
         </span>
-        <button className={styles.closeBtn} onClick={handleClose} aria-label="Close Snake" title="Close">
+        <button className={styles.closeBtn} onClick={handleCloseButton} aria-label="Close Snake" title="Close">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
@@ -613,11 +713,11 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
               <span className={styles.sideLen}>length {hud.lenA}</span>
             </span>
             <span className={styles.side}>
-              <span className={styles.score}>{match.scoreA}</span>
+              {pips('a', match.scoreA)}
               <span className={styles.clock}>
                 {Math.floor(hud.secs / 60)}:{String(hud.secs % 60).padStart(2, '0')}
               </span>
-              <span className={styles.score}>{match.scoreB}</span>
+              {pips('b', match.scoreB)}
             </span>
             <span className={styles.side}>
               <span className={styles.sideLen}>length {hud.lenB}</span>
@@ -636,17 +736,19 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
             />
             {match.status === 'playing' && hud.pre && (
               <div className={styles.overlay}>
-                {roundText() && <span className={styles.overlayText}>{roundText()}</span>}
                 {hud.count !== null && <span className={styles.countdown}>{hud.count}</span>}
               </div>
             )}
             {match.status === 'finished' && (
               <div className={`${styles.overlay} ${styles.overlayEnd}`}>
                 <span className={styles.overlayText}>{matchText()}</span>
+                {tallyText() && <span className={styles.tally}>{tallyText()}</span>}
                 <div className={styles.buttonRow}>
-                  <button className={styles.primaryBtn} onClick={handleStart} disabled={!bothSeated || !synced}>
-                    Rematch
-                  </button>
+                  {!match.gone && (
+                    <button className={styles.primaryBtn} onClick={handleStart} disabled={!bothSeated || !synced}>
+                      Rematch
+                    </button>
+                  )}
                   <button className={styles.secondaryBtn} onClick={handleClose}>
                     Leave
                   </button>
@@ -654,9 +756,20 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
               </div>
             )}
           </div>
-          <div className={styles.footer}>
-            {error || `Arrow keys or WASD to steer, or swipe on the board. First to ${WIN_ROUNDS} rounds.`}
-          </div>
+          {confirmingLeave ? (
+            <div className={`${styles.footer} ${styles.footerConfirm}`}>
+              Leaving now gives {match.players[otherSeat(mySeat ?? 'a')]?.name} the match.
+              <button className={styles.secondaryBtn} onClick={handleClose}>Forfeit and leave</button>
+              <button className={styles.primaryBtn} onClick={() => setLeavingSeed(null)}>Keep playing</button>
+            </div>
+          ) : !error && match.status === 'playing' && hud.pre && roundText() ? (
+            // Under the board and not on it: the result must not cover the crash it describes.
+            <div className={`${styles.footer} ${styles.footerResult}`} role="status">{roundText()}</div>
+          ) : (
+            <div className={styles.footer}>
+              {error || `Arrow keys, WASD or a swipe to steer. First to ${WIN_ROUNDS} rounds.`}
+            </div>
+          )}
         </>
       )}
     </div>

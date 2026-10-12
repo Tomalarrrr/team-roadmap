@@ -315,6 +315,8 @@
           "startAt": { ".validate": "newData.isNumber()" },
           "scoreA": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99" },
           "scoreB": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 99" },
+          "winsA": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "winsB": { ".validate": "newData.isNumber() && newData.val() >= 0" },
           "lastWinner": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b' || newData.val() == 'draw')" },
           "lastWhy": { ".validate": "newData.isString() && (newData.val() == 'crash' || newData.val() == 'clock')" },
           "winner": { ".validate": "newData.isString() && (newData.val() == 'a' || newData.val() == 'b')" },

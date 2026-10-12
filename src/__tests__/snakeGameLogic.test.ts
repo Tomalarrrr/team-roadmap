@@ -14,6 +14,7 @@ import {
   foodCell,
   foodCells,
   ghostCells,
+  glide,
   headAt,
   newRoundClient,
   newSim,
@@ -187,6 +188,61 @@ describe('what is known of the other snake', () => {
   it('is drawn stopping at the wall', () => {
     const atWall = { ...view, path: [cellOf(33, 5), cellOf(32, 5), cellOf(31, 5), cellOf(30, 5)] };
     expect(ghostCells(atWall, 13)).toEqual(atWall.path);
+  });
+
+  it('is drawn from its trail at a tick the report has passed, dead or not', () => {
+    const trailed = { ...view, path: [...view.path, cellOf(6, 5), cellOf(5, 5)] };
+    expect(ghostCells(trailed, 8)).toEqual([cellOf(8, 5), cellOf(7, 5), cellOf(6, 5), cellOf(5, 5)]);
+    expect(ghostCells({ ...trailed, dead: 10 }, 9)[0]).toBe(cellOf(9, 5));
+    // The trail ends with the body, so the tail is short by the ticks gone back.
+    expect(ghostCells(view, 8)).toEqual([cellOf(8, 5), cellOf(7, 5)]);
+    // Further back than the trail reaches, there is only the report.
+    expect(ghostCells(view, 2)).toEqual(view.path);
+  });
+
+  it('is reported with enough trail to draw the tick before, however long it has grown', () => {
+    const client = newRoundClient('a', 7, 1);
+    for (let k = 1; k <= 16; k++) step(client.sim, NO_FOOD, open);
+    // Longer than the shortest trail sent, which would otherwise hide the cut.
+    client.sim.lens[15] = 18;
+    client.sim.lens[16] = 18;
+    const reported = viewOf({ ...seatStateOf(client), seq: 1, at: 0 });
+    expect(ghostCells(reported, 16)).toEqual(bodyAt(client.sim, 16));
+    expect(ghostCells(reported, 15)).toHaveLength(18);
+    expect(ghostCells(reported, 15)).toEqual(bodyAt(client.sim, 15));
+  });
+});
+
+describe('gliding between ticks', () => {
+  const prev = [cellOf(10, 5), cellOf(9, 5), cellOf(8, 5)];
+  const moved = [cellOf(11, 5), cellOf(10, 5), cellOf(9, 5)];
+
+  it('starts the tick covering exactly the body it had', () => {
+    expect(glide(prev, moved, 0)).toEqual([[10.5, 5.5], [10.5, 5.5], [9.5, 5.5], [8.5, 5.5]]);
+  });
+
+  it('slides the head in and the tail out by the same fraction', () => {
+    expect(glide(prev, moved, 0.25)).toEqual([[10.75, 5.5], [10.5, 5.5], [9.5, 5.5], [8.75, 5.5]]);
+  });
+
+  it('ends the tick on the cell centres', () => {
+    expect(glide(prev, moved, 1)).toEqual([[11.5, 5.5], [10.5, 5.5], [9.5, 5.5]]);
+  });
+
+  it('turns a corner along the grid, not across it', () => {
+    const turned = [cellOf(10, 4), cellOf(10, 5), cellOf(9, 5)];
+    expect(glide(prev, turned, 0.5)[0]).toEqual([10.5, 5]);
+  });
+
+  it('holds the tail still on a tick the snake grows', () => {
+    const grown = [cellOf(11, 5), ...prev];
+    expect(glide(prev, grown, 0.5)).toEqual([[11, 5.5], [10.5, 5.5], [9.5, 5.5], [8.5, 5.5]]);
+  });
+
+  it('does not slide between bodies that are not one step apart', () => {
+    const rewound = [cellOf(9, 5), cellOf(8, 5), cellOf(7, 5)];
+    expect(glide(prev, rewound, 0.5)).toEqual([[9.5, 5.5], [8.5, 5.5], [7.5, 5.5]]);
+    expect(glide(prev, prev, 0.5)).toEqual([[10.5, 5.5], [9.5, 5.5], [8.5, 5.5]]);
   });
 });
 
