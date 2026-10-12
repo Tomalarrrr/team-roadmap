@@ -550,7 +550,7 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
     const drag = dragRef.current;
     const popup = popupRef.current;
     if (!drag || !popup) return;
-    // Keep a strip of title bar on screen to grab it back by.
+    // Keep a strip of the popup on screen to grab it back by.
     setPosition({
       x: Math.min(Math.max(e.clientX - drag.dx, 80 - popup.offsetWidth), window.innerWidth - 80),
       y: Math.min(Math.max(e.clientY - drag.dy, 0), window.innerHeight - 40),
@@ -620,35 +620,29 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
   return (
     <div
       ref={popupRef}
-      className={`${styles.popup} ${wide ? '' : styles.popupCompact}`}
+      className={`${styles.popup} ${wide ? styles.popupBoard : styles.popupCompact}`}
       style={{ left: position.x, top: position.y }}
+      // With no title bar, the popup is moved by any part of it that is not a control or the board.
+      onPointerDown={(e) => {
+        if ((e.target as HTMLElement).closest('button, input, canvas')) return;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        dragRef.current = { dx: e.clientX - position.x, dy: e.clientY - position.y };
+      }}
+      onPointerMove={handleDragMove}
+      onPointerUp={() => { dragRef.current = null; }}
+      onPointerCancel={() => { dragRef.current = null; }}
     >
-      <div
-        className={styles.titleBar}
-        onPointerDown={(e) => {
-          if ((e.target as HTMLElement).closest('button')) return;
-          e.currentTarget.setPointerCapture(e.pointerId);
-          dragRef.current = { dx: e.clientX - position.x, dy: e.clientY - position.y };
-        }}
-        onPointerMove={handleDragMove}
-        onPointerUp={() => { dragRef.current = null; }}
-        onPointerCancel={() => { dragRef.current = null; }}
+      <button
+        className={`${styles.closeBtn} ${match?.status === 'playing' ? styles.closeQuiet : ''}`}
+        onClick={handleCloseButton}
+        aria-label="Close Snake"
+        title="Close"
       >
-        <span className={styles.titleText}>
-          Snake
-          {code && <span className={styles.titleCode}>{code}</span>}
-          {offline && code && (
-            <span className={styles.reconnecting} title="Lost contact with the game server, retrying">
-              reconnecting…
-            </span>
-          )}
-        </span>
-        <button className={styles.closeBtn} onClick={handleCloseButton} aria-label="Close Snake" title="Close">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
-      </div>
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+          <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      </button>
+      {!wide && <span className={styles.name}>Snake</span>}
 
       {!code && (
         <div className={styles.lobby}>
@@ -716,7 +710,7 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
             <span className={styles.side}>
               <span className={styles.dot} style={{ background: SEAT_COLOR.a }} />
               <span className={styles.sideName}>{nameOf('a')}</span>
-              <span className={styles.sideLen}>length {hud.lenA}</span>
+              <span className={styles.sideLen} title="Length">{hud.lenA}</span>
             </span>
             <span className={styles.side}>
               {pips('a', match.scoreA)}
@@ -726,7 +720,7 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
               {pips('b', match.scoreB)}
             </span>
             <span className={styles.side}>
-              <span className={styles.sideLen}>length {hud.lenB}</span>
+              <span className={styles.sideLen} title="Length">{hud.lenB}</span>
               <span className={styles.sideName}>{nameOf('b')}</span>
               <span className={styles.dot} style={{ background: SEAT_COLOR.b }} />
             </span>
@@ -768,13 +762,15 @@ export function SnakeGame({ onClose, isSearchOpen }: SnakeGameProps) {
               <button className={styles.secondaryBtn} onClick={handleClose}>Forfeit and leave</button>
               <button className={styles.primaryBtn} onClick={() => setLeavingSeed(null)}>Keep playing</button>
             </div>
-          ) : !error && match.status === 'playing' && hud.pre && roundText() ? (
-            // Under the board and not on it: the result must not cover the crash it describes.
-            <div className={`${styles.footer} ${styles.footerResult}`} role="status">{roundText()}</div>
+          ) : error ? (
+            <div className={styles.footer} role="alert">{error}</div>
+          ) : offline ? (
+            <div className={styles.footer} title="Lost contact with the game server, retrying">reconnecting…</div>
           ) : (
-            <div className={styles.footer}>
-              {error || `Arrow keys, WASD or a swipe to steer. First to ${WIN_ROUNDS} rounds.`}
-            </div>
+            match.status === 'playing' && hud.pre && roundText() && (
+              // Under the board and not on it: the result must not cover the crash it describes.
+              <div className={`${styles.footer} ${styles.footerResult}`} role="status">{roundText()}</div>
+            )
           )}
         </>
       )}

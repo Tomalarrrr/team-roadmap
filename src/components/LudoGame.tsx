@@ -3301,7 +3301,15 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // --- Drag ---
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest(`.${styles.closeBtn}`)) return;
+    const target = e.target as HTMLElement;
+    // With no title bar the whole popup is the handle, so a press that belongs
+    // to a control or to the board must not start a drag.
+    if (target.closest(`button, input, [role="button"], .${styles.board}`)) return;
+    // Nor one on a scrollbar, which lies outside its element's client box,
+    // nor one on the browser's resize corner: both reach the popup as presses.
+    if (target.scrollHeight > target.clientHeight && e.nativeEvent.offsetX > target.clientWidth) return;
+    const box = e.currentTarget.getBoundingClientRect();
+    if (box.right - e.clientX < 18 && box.bottom - e.clientY < 18) return;
     e.preventDefault();
     dragCleanupRef.current?.();
     dragStartRef.current = {
@@ -3334,6 +3342,7 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // --- Derived values ---
 
   const isMyTurn = myColor === currentTurn;
+  const offline = !isConnected || !isBrowserOnline;
   const diceCanRoll = isMyTurn && turnPhase === 'roll' && !isRolling && !winner && introPhase !== 'running' && !gamePaused;
   const showRollReminder = diceCanRoll && timeLeft <= TURN_SECONDS - 5;
 
@@ -3531,52 +3540,29 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
   // --- Render ---
 
   return (
-    <div className={`${styles.popup} ${gamePhase === 'playing' ? '' : styles.popupCompact}`} style={{ left: position.x, top: position.y }}>
-      {/* Title bar */}
-      <div className={styles.titleBar} onMouseDown={handleDragStart}>
-        <span className={styles.titleText}>
-          <span>🎲</span>
-          Ludo
-          {gameCode && gamePhase === 'playing' && (
-            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontWeight: 400 }}>
-              #{gameCode}
-            </span>
-          )}
-          {isSpectating && gamePhase === 'playing' && (
-            <span className={styles.spectateBadge}>Spectating</span>
-          )}
-          {gamePhase !== 'lobby' && (!isConnected || !isBrowserOnline) && (
-            <span
-              className={styles.reconnectingPill}
-              role="status"
-              aria-live="polite"
-              title="Lost connection to the game server — retrying"
-            >
-              <span className={styles.reconnectingDot} />
-              Reconnecting…
-            </span>
-          )}
-        </span>
+    <div className={`${styles.popup} ${gamePhase === 'playing' ? '' : styles.popupCompact}`} style={{ left: position.x, top: position.y }} onMouseDown={handleDragStart}>
+      <div className={styles.popupControls}>
         {gamePhase === 'playing' && !winner && !isSpectating && (
-          <button className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={() => gameCode && toggleGamePause(gameCode)} aria-label={gamePaused ? 'Resume game' : 'Pause game'}>
+          <button className={`${styles.closeBtn} ${styles.closeQuiet} ${gamePaused ? styles.pauseBtnActive : ''}`} onClick={() => gameCode && toggleGamePause(gameCode)} aria-label={gamePaused ? 'Resume game' : 'Pause game'}>
             {gamePaused ? (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
               </svg>
             ) : (
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                 <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
                 <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
               </svg>
             )}
           </button>
         )}
-        <button className={styles.closeBtn} onClick={onClose} aria-label="Close Ludo">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <button className={`${styles.closeBtn} ${gamePhase === 'playing' && !winner ? styles.closeQuiet : ''}`} onClick={onClose} aria-label="Close Ludo">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
             <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
       </div>
+      {gamePhase !== 'playing' && <span className={styles.name}>Ludo</span>}
 
       {gamePaused && gamePhase === 'playing' && (
         <div className={styles.pauseOverlay} onClick={() => !isSpectating && gameCode && toggleGamePause(gameCode)} onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isSpectating && gameCode) { e.preventDefault(); toggleGamePause(gameCode); } }} role="button" tabIndex={0} aria-label="Resume game">
@@ -3737,6 +3723,11 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
             <button className={styles.resetBtn} onClick={handleBackToLobby} style={{ marginTop: 4 }}>
               Back
             </button>
+            {offline && (
+              <div className={styles.shareHint} role="status" aria-live="polite" title="Lost connection to the game server, retrying">
+                Reconnecting…
+              </div>
+            )}
             {error && <div className={styles.errorText}>{error}</div>}
           </div>
         )}
@@ -3928,6 +3919,17 @@ export function LudoGame({ onClose, isSearchOpen }: LudoGameProps) {
 
             {/* Side panel */}
             <div className={styles.sidePanel}>
+              {/* The code stays up in play: it is what a spectator is given to watch. */}
+              <div className={styles.sideNote}>
+                <span>#{gameCode}</span>
+                {isSpectating && <span>Spectating</span>}
+                {offline && (
+                  <span role="status" aria-live="polite" title="Lost connection to the game server, retrying">
+                    Reconnecting…
+                  </span>
+                )}
+              </div>
+
               {/* Turn indicator */}
               <div className={styles.turnIndicator}>
                 {introPhase === 'running' ? (

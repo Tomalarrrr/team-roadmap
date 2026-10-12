@@ -341,7 +341,7 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
   const clampToViewport = useCallback((x: number, y: number) => {
     const rect = popupRef.current?.getBoundingClientRect();
     const width = rect?.width ?? 760;
-    const EDGE = 80; // a graspable strip of title bar, whichever side it leaves by
+    const EDGE = 80; // a graspable strip of the popup, whichever side it leaves by
     return {
       x: Math.min(Math.max(x, EDGE - width), window.innerWidth - EDGE),
       y: Math.min(Math.max(y, 0), Math.max(0, window.innerHeight - 40)),
@@ -1435,13 +1435,18 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
 
   // --- Dragging ---
   const handleDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    // The title bar carries the close and pause buttons. Without this a press
-    // on either starts a drag, and the smallest wobble between press and
-    // release moves the window instead of pressing the button.
-    if ((e.target as HTMLElement).closest(`.${styles.closeBtn}`)) return;
+    // With no title bar the whole popup is the handle, so a press that belongs
+    // to something else must not start a drag: the smallest wobble between
+    // press and release would move the window instead of pressing the control,
+    // and the board resolves its own presses to the nearest counter.
+    if ((e.target as HTMLElement).closest(`button, input, [role="button"], .${styles.board}, .${styles.helpOverlay}`)) return;
+    const point = 'touches' in e ? e.touches[0] : e;
+    // The resize corner is the browser's, but its press reaches the popup too:
+    // without this, resizing the window would also carry it across the screen.
+    const box = e.currentTarget.getBoundingClientRect();
+    if (box.right - point.clientX < 18 && box.bottom - point.clientY < 18) return;
     dragCleanupRef.current?.();
 
-    const point = 'touches' in e ? e.touches[0] : e;
     dragStartRef.current = {
       mouseX: point.clientX,
       mouseY: point.clientY,
@@ -1499,6 +1504,8 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
   // far shorter than the rules — so while those are open the popup takes its
   // full height rather than making the panel scroll inside a stub.
   const isCompact = gamePhase !== 'playing' && !showHelp;
+  // Mid-game the controls are never the thing being looked for, so they sit back.
+  const quiet = gamePhase === 'playing' && !winner ? styles.closeQuiet : '';
 
   // Which corner a seat's card belongs in. The plate spins so the local
   // player's arm points straight down (see Ludo3Board), which makes this fixed
@@ -1518,64 +1525,53 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
       ref={popupRef}
       className={`${styles.popup} ${isCompact ? styles.popupCompact : ''}`}
       style={{ left: position.x, top: position.y }}
+      onMouseDown={handleDragStart}
+      onTouchStart={handleDragStart}
     >
-      <div className={styles.titleBar} onMouseDown={handleDragStart} onTouchStart={handleDragStart}>
-        <span className={styles.titleText}>
-          Ludo 3
-          {gameCode && <span className={styles.titleCode}>{gameCode}</span>}
-          {offlineBanner && gamePhase !== 'lobby' && (
-            <span
-              className={styles.reconnecting}
-              title="Lost contact with the game server — retrying"
-            >
-              reconnecting…
-            </span>
-          )}
-        </span>
-        <span className={styles.titleButtons}>
+      <div className={styles.controls}>
+        <button
+          className={`${styles.closeBtn} ${quiet} ${showHelp ? styles.helpBtnActive : ''}`}
+          onClick={() => setShowHelp(h => !h)}
+          aria-label="How to play"
+          aria-expanded={showHelp}
+          title="How to play"
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M6.1 6.05a2 2 0 1 1 2.6 2.2c-.5.2-.75.6-.75 1.1v.4"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+            />
+            <circle cx="7.95" cy="12" r="0.85" fill="currentColor" />
+          </svg>
+        </button>
+        {gamePhase === 'playing' && !winner && (
           <button
-            className={`${styles.closeBtn} ${showHelp ? styles.helpBtnActive : ''}`}
-            onClick={() => setShowHelp(h => !h)}
-            aria-label="How to play"
-            aria-expanded={showHelp}
-            title="How to play"
+            className={`${styles.closeBtn} ${quiet} ${gamePaused ? styles.pauseBtnActive : ''}`}
+            onClick={() => gameCode && toggleGamePause(gameCode)}
+            aria-label={gamePaused ? 'Resume game' : 'Pause game'}
+            title={gamePaused ? 'Resume game' : 'Pause game'}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M6.1 6.05a2 2 0 1 1 2.6 2.2c-.5.2-.75.6-.75 1.1v.4"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-              />
-              <circle cx="7.95" cy="12" r="0.85" fill="currentColor" />
-            </svg>
+            {gamePaused ? (
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
+              </svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+                <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
+              </svg>
+            )}
           </button>
-          {gamePhase === 'playing' && !winner && (
-            <button
-              className={`${styles.closeBtn} ${gamePaused ? styles.pauseBtnActive : ''}`}
-              onClick={() => gameCode && toggleGamePause(gameCode)}
-              aria-label={gamePaused ? 'Resume game' : 'Pause game'}
-              title={gamePaused ? 'Resume game' : 'Pause game'}
-            >
-              {gamePaused ? (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <path d="M5 3L13 8L5 13V3Z" fill="currentColor" />
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                  <rect x="3" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
-                  <rect x="9.5" y="3" width="3.5" height="10" rx="0.75" fill="currentColor" />
-                </svg>
-              )}
-            </button>
-          )}
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Close Ludo 3">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        </span>
+        )}
+        <button className={`${styles.closeBtn} ${quiet}`} onClick={onClose} aria-label="Close Ludo 3" title="Close">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
       </div>
+      {gamePhase !== 'playing' && <span className={styles.name}>Ludo 3</span>}
 
       {gamePaused && gamePhase === 'playing' && (
         <div
@@ -1776,6 +1772,9 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
             })()}
             <button className={styles.linkBtn} onClick={handleBackToLobby}>Back</button>
             {statusHint && <div className={styles.shareHint}>{statusHint}</div>}
+            {offlineBanner && (
+              <div className={styles.shareHint} title="Lost contact with the game server, retrying">reconnecting…</div>
+            )}
             {error && <div className={styles.errorText}>{error}</div>}
           </div>
         )}
@@ -1972,6 +1971,13 @@ export function Ludo3Game({ onClose, isSearchOpen }: Ludo3GameProps) {
                   <span className={styles.diceIdle} />
                 )}
               </button>
+            </div>
+
+            {/* The code stays up in play: a seat can still be taken mid-game, and
+                whoever is taking it has to be told this. */}
+            <div className={styles.playNote}>
+              {gameCode}
+              {offlineBanner && <span title="Lost contact with the game server, retrying">reconnecting…</span>}
             </div>
 
             {/* Game-over overlay */}

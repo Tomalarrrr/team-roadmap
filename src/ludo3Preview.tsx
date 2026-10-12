@@ -107,17 +107,12 @@ function Preview() {
         ...(q.get('h') ? { height: `${q.get('h')}px` } : {}),
       }}
     >
-      <div className={styles.titleBar}>
-        <span className={styles.titleText}>
-          Ludo 3<span className={styles.titleCode}>LN84</span>
-        </span>
-        <span className={styles.titleButtons}>
-          <button className={styles.closeBtn} aria-label="close">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
-        </span>
+      <div className={styles.controls}>
+        <button className={`${styles.closeBtn} ${styles.closeQuiet}`} aria-label="close">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+            <path d="M12 4L4 12M4 4L12 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </button>
       </div>
       <div className={styles.gameArea}>
         <div className={styles.playingLayout}>
@@ -216,6 +211,7 @@ function Preview() {
               </div>
             </button>
           </div>
+          <div className={styles.playNote}>LN84</div>
         </div>
       </div>
     </div>

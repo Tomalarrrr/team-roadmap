@@ -31,6 +31,7 @@
   max-width: 95vw;
   animation: popupIn 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
   transform: translateZ(0);
+  cursor: grab;
 }
 
 /* Lobby / waiting room has little content — size to content instead of inheriting
@@ -45,63 +46,53 @@
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-/* Title bar */
-.titleBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 5px 12px;
-  background: linear-gradient(to bottom, var(--bg-secondary), var(--bg-tertiary));
-  border-bottom: 1px solid var(--border-light);
-  cursor: grab;
-  user-select: none;
-  flex-shrink: 0;
-}
+.popup:active { cursor: grabbing; }
 
-.titleBar:active { cursor: grabbing; }
-
-.titleText {
+.name {
+  padding-top: 22px;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary);
+  text-align: center;
+}
+
+/* Over the game-over card, under the pause screen. */
+.popupControls {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 60;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .closeBtn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-md);
-  border: none;
-  background: none;
-  color: var(--text-muted);
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease, transform 150ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  /* The fade tells a game in play from a popup at rest; mid-game the controls are never the thing being looked for. */
+  transition: opacity 0.15s;
 }
 
-.closeBtn:hover {
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  transform: rotate(90deg);
-}
+.closeBtn:hover { color: var(--text-primary); }
 
-.closeBtn:active {
-  transform: rotate(90deg) scale(0.85);
-  transition-duration: 50ms;
-}
+.closeQuiet { opacity: 0.35; }
+
+.closeQuiet:hover,
+.closeQuiet:focus-visible { opacity: 1; }
 
 .pauseBtnActive {
   color: #ef4444;
 }
 
-.pauseBtnActive:hover {
-  color: #ef4444;
-  transform: none;
-}
+.pauseBtnActive:hover { color: #ef4444; }
 
 .pauseOverlay {
   position: absolute;
@@ -155,7 +146,6 @@
 /* Game area */
 .gameArea {
   flex: 1;
-  padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -183,7 +173,6 @@
 /* --- Playing phase layout --- */
 .playingLayout {
   display: flex;
-  gap: 16px;
   flex: 1;
   min-height: 0;
   position: relative;
@@ -241,16 +230,30 @@
 }
 
 .sidePanel {
-  width: 210px;
+  width: 235px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding-top: 2px;
+  padding: 7px 12px 12px;
+  border-left: 1px solid var(--border-light);
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--border-medium) transparent;
+  cursor: default;
+}
+
+/* One line at the head of the panel, held clear of the controls over its corner. */
+.sideNote {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 24px;
+  padding-right: 56px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
 }
 
 .sideDice {
@@ -413,15 +416,13 @@
   grid-template-columns: repeat(15, 1fr);
   grid-template-rows: repeat(15, 1fr);
   aspect-ratio: 1;
-  border-radius: var(--radius-md);
-  border: 2px solid var(--border-medium);
+  cursor: default;
   background:
     repeating-linear-gradient(0deg, transparent, transparent 19px, rgba(0, 0, 0, 0.018) 19px, rgba(0, 0, 0, 0.018) 20px),
     repeating-linear-gradient(90deg, transparent, transparent 19px, rgba(0, 0, 0, 0.018) 19px, rgba(0, 0, 0, 0.018) 20px),
     #fffdf8;
   overflow: hidden;
   position: relative;
-  box-shadow: 0 2px 12px rgba(var(--shadow-rgb), 0.08);
   /* Isolate layout/paint so token animations don't trigger reflow outside the board */
   contain: layout style paint;
   transform: translateZ(0);
@@ -891,7 +892,7 @@
   align-items: center;
   justify-content: center;
   gap: 20px;
-  padding: 32px 16px;
+  padding: 26px 32px 48px;
 }
 
 .lobbyDivider {
@@ -1017,48 +1018,6 @@
 .spectateBtn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
-}
-
-.spectateBadge {
-  font-size: 0.6rem;
-  font-weight: 500;
-  color: var(--text-muted);
-  background: var(--bg-primary);
-  padding: 2px 6px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--border-light);
-}
-
-/* Connection-lost indicator (proxy poll failing or browser offline) */
-.reconnectingPill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.6rem;
-  font-weight: 600;
-  color: #b45309;
-  background: #fffbeb;
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  border: 1px solid #fcd34d;
-  white-space: nowrap;
-}
-
-.reconnectingDot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #f59e0b;
-  animation: reconnectingPulse 1s ease-in-out infinite;
-}
-
-@keyframes reconnectingPulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .reconnectingDot { animation: none; }
 }
 
 /* Waiting screen */

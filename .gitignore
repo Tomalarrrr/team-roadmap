@@ -37,3 +37,7 @@ wizard-preview.html
 src/wizardPreview.tsx
 swarm-preview.html
 src/swarmPreview.tsx
+snake-preview.html
+src/snakePreview.tsx
+ludo-preview.html
+src/ludoPreview.tsx

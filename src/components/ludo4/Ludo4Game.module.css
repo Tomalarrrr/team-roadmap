@@ -34,7 +34,8 @@
 .popup {
   position: fixed;
   width: min(94vw, 760px);
-  height: min(94vh, 803px);
+  /* The width again plus the strip the controls sit in, so the board fills both ways. */
+  height: min(94vh, 792px);
   /* min() not a bare px: min-width beats max-width in CSS, so a flat 560px
      would punch straight through 96vw and overflow a phone. */
   min-width: min(560px, 94vw);
@@ -54,7 +55,10 @@
   resize: both;
   animation: popupIn 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
   transform: translateZ(0);
+  cursor: grab;
 }
+
+.popup:active { cursor: grabbing; }
 
 /* The native resize grip is an OS artefact and reads as "web app". Hide it and
    draw our own: two tapered rules in the corner, only once you go looking. */
@@ -88,74 +92,50 @@
   to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-.titleBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px 8px 16px;
-  border-bottom: 1px solid var(--border-light);
-  cursor: grab;
-  user-select: none;
-  flex-shrink: 0;
-}
-
-.titleBar:active { cursor: grabbing; }
-
-.titleText {
+.name {
+  padding-top: 22px;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary);
+  text-align: center;
+}
+
+/* Above the game-over card so the way out is never covered; under the pause
+   and rules screens, which take the whole popup and carry their own. */
+.controls {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 160;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
-.titleCode {
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  background: var(--bg-tertiary);
-  border-radius: var(--radius-full);
-  padding: 2px 9px;
-}
-
-.titleButtons {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.reconnecting {
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: #d97706;
-  animation: reconnectPulse 1.2s ease-in-out infinite alternate;
-}
-
-@keyframes reconnectPulse {
-  from { opacity: 0.5; }
-  to { opacity: 1; }
+.popupCompact .controls {
+  top: 7px;
+  right: 8px;
 }
 
 .closeBtn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border-medium);
   border-radius: var(--radius-full);
-  border: none;
-  background: none;
-  color: var(--text-muted);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: opacity 0.15s;
 }
 
-.closeBtn:hover {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
+.closeBtn:hover { color: var(--text-primary); }
+
+.closeQuiet { opacity: 0.35; }
+
+.closeQuiet:hover,
+.closeQuiet:focus-visible { opacity: 1; }
 
 .pauseBtnActive { color: #ef4444; }
 
@@ -213,6 +193,7 @@
   padding: 22px;
   border-radius: inherit;
   overflow-y: auto;
+  cursor: default;
   animation: overlayIn 200ms ease;
 }
 
@@ -278,7 +259,7 @@
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding: 30px 24px 26px;
+  padding: 14px 24px 26px;
 }
 
 /* Groups are separated by space, not rules */
@@ -445,8 +426,9 @@
 
 .playingLayout {
   display: flex;
-  gap: 16px;
-  padding: 14px 16px 16px;
+  /* Room for the controls and nothing else: the top two seat cards keep the
+     corners they were measured for, clear of the buttons. */
+  padding-top: 32px;
   flex: 1;
   min-height: 0;
   animation: boardIn 400ms ease;
@@ -493,6 +475,7 @@
   inset: 0;
   container-type: size;
   contain: layout style;
+  cursor: default;
 }
 
 /* No drawn rim. The board is its places: the ring of cells, the corridors and
@@ -1084,6 +1067,21 @@
   pointer-events: none;
 }
 
+/* The room code and the connection note share the strip beside the controls,
+   the one place in play that is neither board nor seat card. */
+.playNote {
+  position: absolute;
+  top: 9px;
+  left: 10px;
+  display: flex;
+  gap: 10px;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.playNote span { letter-spacing: normal; }
+
 /* --- The die ---
    In the hub, which is where you would actually throw it. Flat like everything
    else on this board: white face, hairline edge, solid pips. */
@@ -1217,8 +1215,7 @@
   .playerDot,
   .cell,
   .spokeCell,
-  .safeStar,
-  .reconnecting {
+  .safeStar {
     animation: none !important;
     transition: none !important;
   }
