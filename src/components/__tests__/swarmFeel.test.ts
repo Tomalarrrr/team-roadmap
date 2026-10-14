@@ -54,6 +54,7 @@ function mapOf(scene: SwarmMap['scene'] = 'meadow'): SwarmMap {
   const sites = [site(100, 'a'), site(260, null), site(420, null, { tower: true }), site(580, null, { fort: true }), site(740, null), site(900, 'b')];
   return {
     id: 'meadow',
+    sides: ['a', 'b'],
     scene,
     sites,
     links: sites.map((_, i) => [i - 1, i + 1].filter((j) => j >= 0 && j < sites.length)),

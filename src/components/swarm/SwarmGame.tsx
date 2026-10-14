@@ -27,20 +27,25 @@ import {
   upgradeCost,
   type OrderKind,
   type Seat,
+  type Side,
   type MapId,
   type SwarmMatch,
   type SwarmState,
 } from '../../swarmGameLogic';
+import { BADGE } from './swarmSceneKit';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
 import { latch, nearest, reachOf } from './swarmPick';
 import { orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
 import styles from './SwarmGame.module.css';
 
-const SIDE: Record<Seat, { colour: string; army: string }> = {
-  a: { colour: '#8f2f1a', army: 'Ants' },
-  b: { colour: '#f0b429', army: 'Bees' },
+const SIDE: Record<Side, { colour: string; army: string }> = {
+  a: { colour: BADGE.a.fill, army: 'Ants' },
+  b: { colour: BADGE.b.fill, army: 'Bees' },
+  c: { colour: BADGE.c.fill, army: 'Black ants' },
 };
+
+const THIRD_ABOUT = 'The computer plays black ants from a base in the middle of the board, and fights both of you.';
 
 /** What the lobby says of each map: its name, and the one thing that is different about it. */
 const MAPS: Record<MapId, { name: string; about: string }> = {
@@ -54,11 +59,11 @@ const MAPS: Record<MapId, { name: string; about: string }> = {
 /** The layout each map shows in the lobby. Any seed would do; one keeps the picture still between visits. */
 const THUMB_SEED = 1;
 
-function MapThumb({ id }: { id: MapId }) {
+function MapThumb({ id, third }: { id: MapId; third: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useLayoutEffect(() => {
-    drawThumb(ref.current!, buildMap(THUMB_SEED, id), THUMB_SEED);
-  }, [id]);
+    drawThumb(ref.current!, buildMap(THUMB_SEED, id, third), THUMB_SEED);
+  }, [id, third]);
   return <canvas ref={ref} className={styles.mapThumb} />;
 }
 
@@ -67,19 +72,26 @@ const HOW_TO =
   'Every hut you hold breeds units. Drag from your hut to any other to send half of it. Rest on the target for a moment, or hold Shift, to send all of it. Sweep over more of your huts on the way to send from them too, or over spikes or a ford to take that short cut. Units fight one for one. Tap a hut to upgrade it. Take every hut to win.';
 
 /** The shuffle tile: every map's picture in a strip, since any of them may come up. */
-function ShuffleThumb() {
+function ShuffleThumb({ third }: { third: boolean }) {
   return (
     <span className={`${styles.mapThumb} ${styles.shuffleThumb}`}>
       {MAP_IDS.map((id) => (
         <span key={id}>
-          <MapThumb id={id} />
+          <MapThumb id={id} third={third} />
         </span>
       ))}
     </span>
   );
 }
 
-function MapPicker({ pick, onPick }: { pick: MapId | null; onPick: (id: MapId | null) => void }) {
+interface MapPickerProps {
+  pick: MapId | null;
+  onPick: (id: MapId | null) => void;
+  third: boolean;
+  onThird: (third: boolean) => void;
+}
+
+function MapPicker({ pick, onPick, third, onThird }: MapPickerProps) {
   return (
     <>
       <div className={styles.mapRow} role="radiogroup" aria-label="Map">
@@ -91,12 +103,17 @@ function MapPicker({ pick, onPick }: { pick: MapId | null; onPick: (id: MapId | 
             aria-checked={id === pick}
             onClick={() => onPick(id)}
           >
-            {id ? <MapThumb id={id} /> : <ShuffleThumb />}
+            {id ? <MapThumb id={id} third={third} /> : <ShuffleThumb third={third} />}
             {id ? MAPS[id].name : 'Shuffle'}
           </button>
         ))}
       </div>
       <span className={styles.rules}>{pick ? MAPS[pick].about : 'A different map each game.'}</span>
+      <label className={styles.thirdToggle}>
+        <input type="checkbox" checked={third} onChange={(e) => onThird(e.target.checked)} />
+        Add the computer as a third side
+      </label>
+      {third && <span className={styles.rules}>{THIRD_ABOUT}</span>}
     </>
   );
 }
@@ -168,13 +185,15 @@ interface Hud {
   secs: number;
   hutsA: number;
   hutsB: number;
+  hutsC: number;
   unitsA: number;
   unitsB: number;
+  unitsC: number;
   /** A hut is in hand, with its upgrades showing. */
   picked: boolean;
 }
 
-const HUD_IDLE: Hud = { count: null, secs: 0, hutsA: 1, hutsB: 1, unitsA: 0, unitsB: 0, picked: false };
+const HUD_IDLE: Hud = { count: null, secs: 0, hutsA: 1, hutsB: 1, hutsC: 1, unitsA: 0, unitsB: 0, unitsC: 0, picked: false };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -218,6 +237,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   const [hud, setHud] = useState<Hud>(HUD_IDLE);
   // null leaves the map to the seed, so each game is played somewhere new.
   const [mapPick, setMapPick] = useState<MapId | null>(null);
+  const [thirdPick, setThirdPick] = useState(false);
   const [full, setFull] = useState(false);
 
   const [clock] = useState(() => createServerClock(() => performance.now()));
@@ -264,13 +284,14 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       game: (soloRef.current?.game ?? 0) + 1,
       startAt: performance.now() + COUNTDOWN_MS,
       ...(mapPick && { map: mapPick }),
+      ...(thirdPick && { third: true }),
     };
     soloRef.current = next;
     setError('');
     setHud(HUD_IDLE);
     setMatch(next);
     setSolo(true);
-  }, [sessionId, userName, mapPick]);
+  }, [sessionId, userName, mapPick, thirdPick]);
 
   // An invite link (?swarm=CODE) joins straight away. The parameter is taken
   // off the URL first, so a reload or a second mount does not join again.
@@ -504,7 +525,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         });
     };
 
-    const finishSolo = (winner: Seat | 'draw') => {
+    const finishSolo = (winner: Side | 'draw') => {
       const current = soloRef.current;
       if (!current || current.status !== 'playing') return;
       soloRef.current = { ...current, status: 'finished', winner };
@@ -522,7 +543,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
       // A finished game stays on the board until the next one starts.
       if (playing && game?.game !== m.game) {
-        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map));
+        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), m.third === true);
         const start = newState(map);
         game = {
           game: m.game,
@@ -579,17 +600,22 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         secs: Math.ceil(((MATCH_TICKS - Math.min(Math.max(tick, 0), MATCH_TICKS)) * TICK_MS) / 1000),
         hutsA: 1,
         hutsB: 1,
+        hutsC: 1,
         unitsA: 0,
         unitsB: 0,
+        unitsC: 0,
         picked: false,
       };
       if (game) {
         const a = countOf(game.shown, 'a');
         const b = countOf(game.shown, 'b');
+        const c = countOf(game.shown, 'c');
         next.hutsA = a.huts;
         next.hutsB = b.huts;
+        next.hutsC = c.huts;
         next.unitsA = a.units;
         next.unitsB = b.units;
+        next.unitsC = c.units;
         // A hut lost while it was in hand is put down.
         if (selected !== null && game.shown.huts[selected].owner !== seat) selected = null;
         if (drag) drag.sources = drag.sources.filter((hut) => game?.shown.huts[hut].owner === seat);
@@ -911,12 +937,13 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     if (solo) return startSolo();
     const now = clock.now();
     if (!code || now === null) return;
-    startMatch(code, now, mapPick).catch((err: Error) => setError(err.message));
+    startMatch(code, now, mapPick, thirdPick).catch((err: Error) => setError(err.message));
   };
 
-  const nameOf = (seat: Seat) => {
-    const name = match?.players[seat]?.name ?? 'Nobody';
-    return seat === mySeat ? `${name} (you)` : name;
+  const nameOf = (side: Side) => {
+    if (side === 'c') return 'Computer';
+    const name = match?.players[side]?.name ?? 'Nobody';
+    return side === mySeat ? `${name} (you)` : name;
   };
 
   const resultText = () => {
@@ -926,10 +953,11 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     }
     if (match.winner === 'draw') return 'A draw: the same huts and the same numbers on the clock';
     const how = hud.secs === 0 ? ' on the clock' : '';
+    if (match.winner === 'c') return `The computer's black ants won${how}`;
     return match.winner === mySeat ? `You won${how}` : `${match.players[match.winner]?.name} won${how}`;
   };
 
-  const tally = (seat: Seat, huts: number, units: number) =>
+  const tally = (seat: Side, huts: number, units: number) =>
     `${huts} ${huts === 1 ? 'hut' : 'huts'}, ${units} ${units === 1 ? SIDE[seat].army.toLowerCase().slice(0, -1) : SIDE[seat].army.toLowerCase()}`;
 
   // The popup fills the window either way; where the browser can also drop its
@@ -955,7 +983,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       style={full && wide ? undefined : { left: position.x, top: position.y }}
       // With no title bar, the popup is moved by any part of it that is not a control or the board.
       onPointerDown={(e) => {
-        if (full || (e.target as HTMLElement).closest('button, input, canvas')) return;
+        if (full || (e.target as HTMLElement).closest('button, input, label, canvas')) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         dragRef.current = { dx: e.clientX - position.x, dy: e.clientY - position.y };
       }}
@@ -1017,7 +1045,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               Join
             </button>
           </form>
-          <MapPicker pick={mapPick} onPick={setMapPick} />
+          <MapPicker pick={mapPick} onPick={setMapPick} third={thirdPick} onThird={setThirdPick} />
           <button className={styles.secondaryBtn} onClick={startSolo} disabled={busy}>
             Play the computer
           </button>
@@ -1038,8 +1066,14 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                 {match.players[seat] ? `${nameOf(seat)}, ${SIDE[seat].army.toLowerCase()}` : 'Waiting for a second player'}
               </div>
             ))}
+            {thirdPick && (
+              <div className={styles.seat}>
+                <span className={styles.dot} style={{ background: SIDE.c.colour }} />
+                {`${nameOf('c')}, ${SIDE.c.army.toLowerCase()}`}
+              </div>
+            )}
           </div>
-          <MapPicker pick={mapPick} onPick={setMapPick} />
+          <MapPicker pick={mapPick} onPick={setMapPick} third={thirdPick} onThird={setThirdPick} />
           <div className={styles.buttonRow}>
             <button className={styles.secondaryBtn} onClick={handleCopyLink}>
               {copied ? 'Link copied' : 'Copy invite link'}
@@ -1061,8 +1095,17 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               <span className={styles.sideName}>{nameOf('a')}</span>
               <span className={styles.sideCount}>{tally('a', hud.hutsA, hud.unitsA)}</span>
             </span>
-            <span className={styles.clock}>
-              {Math.floor(hud.secs / 60)}:{String(hud.secs % 60).padStart(2, '0')}
+            <span className={styles.middle}>
+              <span className={styles.clock}>
+                {Math.floor(hud.secs / 60)}:{String(hud.secs % 60).padStart(2, '0')}
+              </span>
+              {match.third && (
+                <span className={styles.side}>
+                  <span className={styles.dot} style={{ background: SIDE.c.colour }} />
+                  <span className={styles.sideName}>{nameOf('c')}</span>
+                  <span className={styles.sideCount}>{tally('c', hud.hutsC, hud.unitsC)}</span>
+                </span>
+              )}
             </span>
             <span className={styles.side}>
               <span className={styles.sideCount}>{tally('b', hud.hutsB, hud.unitsB)}</span>

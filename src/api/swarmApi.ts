@@ -12,6 +12,7 @@ import {
   otherSeat,
   type MapId,
   type Seat,
+  type Side,
   type SwarmMatch,
   type SwarmSeatState,
 } from '../swarmGameLogic';
@@ -200,9 +201,10 @@ export function putSeat(
 
 /**
  * Start a game, or a fresh one in a finished room. Needs both seats filled.
- * `map` is the map chosen, or null to leave it to the seed.
+ * `map` is the map chosen, or null to leave it to the seed. With `third` the
+ * computer plays a third side.
  */
-export async function startMatch(code: string, serverNow: number, map: MapId | null): Promise<void> {
+export async function startMatch(code: string, serverNow: number, map: MapId | null, third: boolean): Promise<void> {
   const seed = newSeed();
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     if (!current || current.status === 'playing' || !current.players.a || !current.players.b) return undefined;
@@ -215,6 +217,7 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
       game: current.game + 1,
       startAt: Math.round(serverNow + COUNTDOWN_MS),
       ...(map && { map }),
+      ...(third && { third: true }),
     };
   });
 }
@@ -223,7 +226,7 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
  * Record how game `game` ended. Both clients call this with the same winner,
  * read from the confirmed state; the game check lets only the first one land.
  */
-export async function recordResult(code: string, game: number, winner: Seat | 'draw'): Promise<void> {
+export async function recordResult(code: string, game: number, winner: Side | 'draw'): Promise<void> {
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     if (!current || current.status !== 'playing' || current.game !== game) return undefined;
     return { ...current, status: 'finished', winner };

@@ -15,6 +15,7 @@ import {
   pathLength,
   type Hut,
   type Seat,
+  type Side,
   type SwarmMap,
   type SwarmState,
   type Unit,
@@ -24,8 +25,8 @@ import { WIND } from './swarmSceneGround';
 
 const TAU = Math.PI * 2;
 
-/** What a dead unit leaves on the ground: ants a dark red-brown, bees a darker amber than they fly in. */
-const STAIN: Record<Seat, string> = { a: '#4d1c12', b: '#75501a' };
+/** What a dead unit leaves on the ground: ants a dark red-brown, bees a darker amber than they fly in, black ants near black. */
+const STAIN: Record<Side, string> = { a: '#4d1c12', b: '#75501a', c: '#1e1d1c' };
 const DUST = '#d2c3a2';
 
 const laneKey = (a: number, b: number): number => Math.min(a, b) * 64 + Math.max(a, b);
@@ -207,7 +208,7 @@ export interface Mark {
   at: number;
   /** How many died here within a moment. */
   weight: number;
-  seat: Seat;
+  seat: Side;
   /** What gives this pool its own outline. */
   grain: number;
 }
@@ -231,7 +232,7 @@ export function markLife(mark: Mark): number {
   return POOL_MS + POOL_MS_PER_WEIGHT * (mark.weight - 1);
 }
 
-function addMark(feel: Feel, kind: MarkKind, x: number, y: number, seat: Seat, at: number): void {
+function addMark(feel: Feel, kind: MarkKind, x: number, y: number, seat: Side, at: number): void {
   for (const mark of feel.marks) {
     if (mark.kind !== kind || mark.seat !== seat || at - mark.at > MERGE_MS) continue;
     if ((mark.x - x) * (mark.x - x) + (mark.y - y) * (mark.y - y) > MERGE_R * MERGE_R) continue;
@@ -282,17 +283,19 @@ export const WEAR_FULL = 6000;
 export interface March {
   from: number;
   to: number;
-  seat: Seat;
+  seat: Side;
   count: number;
   /** How far along the path its last unit and its first are. */
   rear: number;
   head: number;
 }
 
+const MARCH_SIDE: Record<Side, number> = { a: 0, b: 1, c: 2 };
+
 export function marchesOf(state: SwarmState): March[] {
   const marches = new Map<number, March>();
   for (const unit of state.units) {
-    const key = (unit.from * 64 + unit.to) * 2 + (unit.seat === 'a' ? 0 : 1);
+    const key = (unit.from * 64 + unit.to) * 3 + MARCH_SIDE[unit.seat];
     const march = marches.get(key);
     if (!march) {
       marches.set(key, { from: unit.from, to: unit.to, seat: unit.seat, count: 1, rear: unit.d, head: unit.d });
@@ -767,7 +770,7 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
       // The event does not say which side lost a unit, so that is read from who is missing on this path.
       const key = laneKey(event.from, event.to);
       const p = pathPoint(map, event.from, event.to, event.d / pathLength(map, event.from, event.to));
-      const lost = new Set<Seat>();
+      const lost = new Set<Side>();
       for (const item of gone) if (laneKey(item.unit.from, item.unit.to) === key && fell(item)) lost.add(item.unit.seat);
       for (const loser of lost) addMark(feel, 'pool', p.x, p.y, loser, now);
     } else if (event.kind === 'toll') {
@@ -1360,12 +1363,18 @@ function paintCritters(ctx: CanvasRenderingContext2D, critters: Critter[], now: 
   }
 }
 
-function tinyAnt(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, stride: number) {
+/** The ants about a mound, in the colours of the ants that built it. */
+const MILLER: Record<'a' | 'c', { leg: string; body: string; head: string }> = {
+  a: { leg: '#2a120b', body: '#4a1d10', head: '#3a160c' },
+  c: { leg: '#121212', body: '#2a2927', head: '#1c1b1a' },
+};
+
+function tinyAnt(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, stride: number, tone: (typeof MILLER)['a']) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
   ctx.scale(MILL_SCALE, MILL_SCALE);
-  ctx.strokeStyle = '#2a120b';
+  ctx.strokeStyle = tone.leg;
   ctx.lineWidth = 0.55;
   ctx.beginPath();
   for (let leg = -1; leg <= 1; leg++) {
@@ -1375,11 +1384,11 @@ function tinyAnt(ctx: CanvasRenderingContext2D, x: number, y: number, angle: num
     ctx.lineTo(leg * 1.7 - swing, 3.3);
   }
   ctx.stroke();
-  ctx.fillStyle = '#4a1d10';
+  ctx.fillStyle = tone.body;
   ctx.beginPath();
   blob(ctx, -3.3, 0, 2.6, 1.9);
   ctx.fill();
-  ctx.fillStyle = '#3a160c';
+  ctx.fillStyle = tone.head;
   ctx.beginPath();
   blob(ctx, 0, 0, 1.6, 1.25);
   blob(ctx, 2.7, 0, 1.5, 1.4);
@@ -1434,13 +1443,13 @@ function paintMillers(ctx: CanvasRenderingContext2D, feel: Feel, map: SwarmMap, 
       const out = smooth(Math.min(1, shown - k));
       const id = index * 16 + k;
       const phase = hash01(id) * TAU;
-      if (hut.owner === 'a') {
+      if (hut.owner !== 'b') {
         const pace = 0.0009 + hash01(id + 5) * 0.0006;
         const a = now * pace + phase;
         const b = now * pace * 0.7 + phase * 2;
         const x = site.x + ((hash01(id + 1) * 2 - 1) * r * 0.85 + Math.sin(a) * 8) * out;
         const y = site.y + 4 + (3 + hash01(id + 2) * r * 0.3 + Math.sin(b) * 3) * out;
-        tinyAnt(ctx, x, y, Math.atan2(Math.cos(b) * 3 * 0.7, Math.cos(a) * 8), now * 0.012 + phase);
+        tinyAnt(ctx, x, y, Math.atan2(Math.cos(b) * 3 * 0.7, Math.cos(a) * 8), now * 0.012 + phase, MILLER[hut.owner]);
       } else {
         const round = hash01(id + 1) * TAU;
         const a = now * (0.0022 + hash01(id + 5) * 0.001) + phase;

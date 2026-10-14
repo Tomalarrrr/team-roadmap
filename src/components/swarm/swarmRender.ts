@@ -3,7 +3,8 @@
 // each pose of a unit once into a sheet, and the units copied from it, the
 // badges and the effects every frame on top.
 //
-// Ants build earth mounds, bees build coiled straw skeps, and a hut nobody
+// Ants build earth mounds (the computer's black ants too, under blue flags),
+// bees build coiled straw skeps, and a hut nobody
 // holds is a house of whatever its place is made of. The three differ in
 // outline as well as in colour, so the sides can be told apart without relying
 // on hue. The ground is in swarmSceneGround, the buildings in swarmSceneHuts,
@@ -404,6 +405,12 @@ const ANT_COATS = [
   { leg: '#24100a', body: '#3d190f', back: '#592515', head: '#2f130a' },
 ];
 
+/** The computer's third side: black ants, a little grey on the back where the light catches them. */
+const BLACK_COATS: AntCoat[] = [
+  { leg: '#101010', body: '#262524', back: '#3a3937', head: '#1a1918' },
+  { leg: '#141312', body: '#2e2c2a', back: '#43413e', head: '#201f1d' },
+];
+
 type AntCoat = (typeof ANT_COATS)[number];
 
 function paintAnt(ctx: CanvasRenderingContext2D, stride: number, coat: AntCoat, army: Army, hair: number) {
@@ -487,8 +494,9 @@ function paintBee(ctx: CanvasRenderingContext2D, flap: number, army: Army, hair:
 const STRIDES = 12;
 /** How many openings of a bee's wings are painted, from half to fully. */
 const FLAPS = 8;
-/** The row of the sheet under the ants' coats that the bees are on, and the one their two shadows are on. */
-const BEE_ROW = ANT_COATS.length;
+/** The rows of the sheet under the ants' coats that the black ants are on, the bees, and the two shadows. */
+const BLACK_ROW = ANT_COATS.length;
+const BEE_ROW = BLACK_ROW + BLACK_COATS.length;
 const SHADOW_ROW = BEE_ROW + 1;
 /** No part of a unit is further from its middle than this, in its own units: the lines of air behind the fastest ant come nearest. */
 const UNIT_REACH = 10;
@@ -501,8 +509,8 @@ const SHEET_OVER = 2;
  * once: a row for each coat of ant with a walk along it, a row of bees with
  * their wings at each opening, and the shadows of the two.
  */
-function sheetOf(scene: Scene, a: Army, b: Army): Sheet {
-  const ranks = `${a.speed}|${a.strength}|${b.speed}|${b.strength}`;
+function sheetOf(scene: Scene, a: Army, b: Army, c: Army): Sheet {
+  const ranks = `${a.speed}|${a.strength}|${b.speed}|${b.strength}|${c.speed}|${c.strength}`;
   if (scene.sheet && scene.sheet.ranks === ranks) return scene.sheet;
   const res = scene.scale * UNIT_SCALE * SHEET_OVER;
   const cell = Math.ceil(UNIT_REACH * 2 * res);
@@ -518,6 +526,12 @@ function sheetOf(scene: Scene, a: Army, b: Army): Sheet {
       for (let step = 0; step < STRIDES * 2; step++) {
         pose(step, row);
         paintAnt(ctx, (step * Math.PI * 2) / STRIDES, coat, a, hair);
+      }
+    });
+    BLACK_COATS.forEach((coat, row) => {
+      for (let step = 0; step < STRIDES * 2; step++) {
+        pose(step, BLACK_ROW + row);
+        paintAnt(ctx, (step * Math.PI * 2) / STRIDES, coat, c, hair);
       }
     });
     for (let step = 0; step < FLAPS; step++) {
@@ -960,6 +974,8 @@ interface Marcher {
   /** Its id scrambled, for what is its own: its size, its coat, how high it flies. */
   own: number;
   size: number;
+  /** The row of the sheet its coat is on. Only an ant has one. */
+  row: number;
 }
 
 /** How much wider than the path's own column a column of bees flies: the banks of a track do not hem in what is over them. */
@@ -997,7 +1013,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     const lane = reach * spreadAt(d, length);
     // While the column is opening out of a door or closing on one, each unit walks the way it is going, not sideways.
     const angle = p.angle + Math.atan(reach * (spreadAt(d + 1, length) - spreadAt(d, length)));
-    (unit.seat === 'a' ? ants : bees).push({
+    (unit.seat === 'b' ? bees : ants).push({
       x: p.x - Math.sin(p.angle) * lane,
       y: p.y + Math.cos(p.angle) * lane,
       angle,
@@ -1006,6 +1022,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       id: unit.id,
       own,
       size: UNIT_SCALE * (0.92 + ((own >>> 8) % 9) * 0.02),
+      row: unit.seat === 'c' ? BLACK_ROW + ((own >>> 20) % BLACK_COATS.length) : (own >>> 20) % ANT_COATS.length,
     });
   }
   if (scene.slots.size > state.units.length + SLOTS_SPARE) {
@@ -1017,7 +1034,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     scene.slots = live;
   }
 
-  const sheet = sheetOf(scene, state.army.a, state.army.b);
+  const sheet = sheetOf(scene, state.army.a, state.army.b, state.army.c);
   // Every shadow goes down before any body, or the shadow of one ant falls across the back of the next and a crowd goes dark.
   for (const ant of ants) {
     ctx.globalAlpha = ant.out;
@@ -1035,7 +1052,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     for (const ant of bands[row]) {
       ctx.globalAlpha = ant.out;
       const step = Math.floor(((ant.d * 0.55 + ant.id) * STRIDES) / (Math.PI * 2)) % (STRIDES * 2);
-      stamp(ctx, sheet, scale, step, (ant.own >>> 20) % ANT_COATS.length, ant.x, ant.y, ant.angle + Math.sin(ant.d * 0.09 + ant.id) * 0.07, ant.size);
+      stamp(ctx, sheet, scale, step, ant.row, ant.x, ant.y, ant.angle + Math.sin(ant.d * 0.09 + ant.id) * 0.07, ant.size);
     }
     ctx.globalAlpha = 1;
     ctx.setTransform(scale, 0, 0, scale, 0, 0);

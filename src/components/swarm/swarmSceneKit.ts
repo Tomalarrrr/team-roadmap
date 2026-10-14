@@ -2,7 +2,7 @@
 // board, the line a path takes, the course of a river, and the colours of
 // each of the five places a map can be set in.
 
-import { centreOf, pathOf, type Path, type PathKind, type SceneId, type Site, type SwarmMap } from '../../swarmGameLogic';
+import { centreOf, pathOf, type Path, type PathKind, type SceneId, type Side, type Site, type SwarmMap } from '../../swarmGameLogic';
 
 export type Rnd = () => number;
 export type Ctx = CanvasRenderingContext2D;
@@ -27,9 +27,10 @@ export const TOWER_BALL = 15;
 /** From a tower's foot to the top of its cannon ball. */
 const TOWER_TOP = TOWER_H + TOWER_BALL * 1.8;
 
-export const BADGE: Record<'a' | 'b' | 'none', { fill: string; text: string }> = {
+export const BADGE: Record<Side | 'none', { fill: string; text: string }> = {
   a: { fill: '#8f2f1a', text: '#ffffff' },
   b: { fill: '#f0b429', text: '#2a1c00' },
+  c: { fill: '#2c5b8c', text: '#ffffff' },
   none: { fill: '#5f5f5a', text: '#ffffff' },
 };
 

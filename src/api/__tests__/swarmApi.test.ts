@@ -119,13 +119,13 @@ describe('clearing out old rooms', () => {
 describe('starting and finishing', () => {
   it('will not start with one seat empty', async () => {
     const code = await createRoom('s-ann', 'Ann');
-    await startMatch(code, 60_000, null);
+    await startMatch(code, 60_000, null, false);
     expect((await matchOf(code)).status).toBe('waiting');
   });
 
   it('starts game 1 a countdown after the server time given', async () => {
     const code = await seated();
-    await startMatch(code, 60_000.4, null);
+    await startMatch(code, 60_000.4, null, false);
     const m = await matchOf(code);
     expect(m).toMatchObject({ status: 'playing', game: 1, startAt: 60_000 + COUNTDOWN_MS });
     expect(m.winner).toBeUndefined();
@@ -133,24 +133,34 @@ describe('starting and finishing', () => {
 
   it('carries the map chosen, and drops it when the next game is left to the seed', async () => {
     const code = await seated();
-    await startMatch(code, 60_000, 'thorns');
+    await startMatch(code, 60_000, 'thorns', false);
     expect((await matchOf(code)).map).toBe('thorns');
     await recordResult(code, 1, 'a');
-    await startMatch(code, 120_000, null);
+    await startMatch(code, 120_000, null, false);
     expect(await matchOf(code)).not.toHaveProperty('map');
+  });
+
+  it('carries the third side for the game it was asked for, and lets the computer win it', async () => {
+    const code = await seated();
+    await startMatch(code, 60_000, null, true);
+    expect((await matchOf(code)).third).toBe(true);
+    await recordResult(code, 1, 'c');
+    expect(await matchOf(code)).toMatchObject({ status: 'finished', winner: 'c' });
+    await startMatch(code, 120_000, null, false);
+    expect(await matchOf(code)).not.toHaveProperty('third');
   });
 
   it('does not restart a game that is being played', async () => {
     const code = await seated();
-    await startMatch(code, 60_000, null);
+    await startMatch(code, 60_000, null, false);
     const first = await matchOf(code);
-    await startMatch(code, 90_000, null);
+    await startMatch(code, 90_000, null, false);
     expect(await matchOf(code)).toEqual(first);
   });
 
   it('records a result once, and only for the game it belongs to', async () => {
     const code = await seated();
-    await startMatch(code, 60_000, null);
+    await startMatch(code, 60_000, null, false);
     await recordResult(code, 2, 'b');
     expect((await matchOf(code)).status).toBe('playing');
     await recordResult(code, 1, 'a');
@@ -160,10 +170,10 @@ describe('starting and finishing', () => {
 
   it('a rematch is a new game with a new seed and no winner carried over', async () => {
     const code = await seated();
-    await startMatch(code, 60_000, null);
+    await startMatch(code, 60_000, null, false);
     const first = await matchOf(code);
     await recordResult(code, 1, 'draw');
-    await startMatch(code, 120_000, null);
+    await startMatch(code, 120_000, null, false);
     const second = await matchOf(code);
     expect(second).toMatchObject({ status: 'playing', game: 2, startAt: 120_000 + COUNTDOWN_MS });
     expect(second.winner).toBeUndefined();
@@ -197,7 +207,7 @@ describe('a seat', () => {
 
   it('left during a game gives it to the other player', async () => {
     const code = await seated();
-    await startMatch(code, 60_000, null);
+    await startMatch(code, 60_000, null, false);
     await vacateSeat(code, 'a');
     expect(await matchOf(code)).toMatchObject({ status: 'finished', winner: 'b', gone: 'a' });
   });
@@ -213,7 +223,7 @@ describe('a seat', () => {
 
   it('left after a game clears the result with it', async () => {
     const code = await seated();
-    await startMatch(code, 60_000, null);
+    await startMatch(code, 60_000, null, false);
     await recordResult(code, 1, 'a');
     await vacateSeat(code, 'b');
     const m = await matchOf(code);

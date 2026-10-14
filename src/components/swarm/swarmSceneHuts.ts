@@ -1672,7 +1672,7 @@ export function paintSite(ctx: Ctx, rnd: Rnd, scene: SceneId, site: Site, owner:
   const r = siteRadius(site, level);
   if (site.tower) paintTower(ctx, rnd, scene, owner);
   else if (site.fort) paintFort(ctx, rnd, scene, r, level, owner);
-  else if (owner === 'a') paintAntHill(ctx, rnd, scene, r, level);
+  else if (owner === 'a' || owner === 'c') paintAntHill(ctx, rnd, scene, r, level);
   else if (owner === 'b') paintBeeHive(ctx, rnd, scene, r, level);
   else NEUTRAL[scene](ctx, rnd, r, level);
 }
@@ -1682,7 +1682,7 @@ function mastFoot(scene: SceneId, site: Site, owner: Owner, level: number): Poin
   const r = siteRadius(site, level);
   // A fort of one level has no keep, so its mast goes up from the wall over the gate.
   if (site.fort) return { x: FORT_PEAK[level - 1] * r, y: -r * (level === 1 ? FORT_WALL : FORT_RISE[level - 1]) };
-  const off = owner === 'a' ? 0 : owner === 'b' ? SKEP_X[level - 1] : PEAK_X[scene][level - 1];
+  const off = owner === 'a' || owner === 'c' ? 0 : owner === 'b' ? SKEP_X[level - 1] : PEAK_X[scene][level - 1];
   return { x: off * r, y: -r * HUT_RISE[level - 1] };
 }
 

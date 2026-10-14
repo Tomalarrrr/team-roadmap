@@ -29,6 +29,7 @@ function mapOf(): SwarmMap {
   const sites = [site(100, 300, 'a'), site(300, 200, 'a'), site(500, 300, null), site(700, 300, 'b'), site(300, 50, 'a'), site(900, 550, null)];
   return {
     id: 'meadow',
+    sides: ['a', 'b'],
     scene: 'meadow',
     sites,
     links: sites.map((_, i) => PATHS.flatMap(([a, b]) => (a === i ? [b] : b === i ? [a] : []))),

@@ -36,6 +36,7 @@ import {
   type Path,
   type PathKind,
   type Seat,
+  type Side,
   type Shot,
   type Site,
   type SwarmEvent,
@@ -54,7 +55,7 @@ function mapOf(sites: Site[], links: number[][], named: Path[] = []): SwarmMap {
   links.forEach((linked, a) => {
     for (const b of linked) if (a < b) paths.push(named.find((p) => p.a === a && p.b === b) ?? { a, b, kind: 'road' });
   });
-  return { id: 'meadow', scene: 'meadow', sites, links, paths, rivers: [], w: 1000, h: 660 };
+  return { id: 'meadow', scene: 'meadow', sites, links, paths, rivers: [], w: 1000, h: 660, sides: ['a', 'b'] };
 }
 
 // Two huts 60 apart: ten ticks' walk at the starting speed.
@@ -1655,7 +1656,7 @@ function faults(state: SwarmState, map: SwarmMap, lastNextId: number): string[] 
   return found;
 }
 
-type Stand = { lane: number; at: number; seat: Seat };
+type Stand = { lane: number; at: number; seat: Side };
 // Where each unit stands, measured from the lower-numbered hut of its path.
 const standing = (state: SwarmState, map: SwarmMap) =>
   new Map<number, Stand>(
@@ -1667,11 +1668,11 @@ const standing = (state: SwarmState, map: SwarmMap) =>
 // The pairs of enemies that were on one path before and after a tick and are level now or have changed places.
 function passed(before: Map<number, Stand>, after: Map<number, Stand>): string[] {
   const found: string[] = [];
-  const lanes = new Map<number, Record<Seat, [was: number, now: number][]>>();
+  const lanes = new Map<number, Record<Side, [was: number, now: number][]>>();
   for (const [id, now] of after) {
     const was = before.get(id);
     if (was?.lane !== now.lane) continue;
-    const lane = lanes.get(now.lane) ?? { a: [], b: [] };
+    const lane = lanes.get(now.lane) ?? { a: [], b: [], c: [] };
     lanes.set(now.lane, lane);
     lane[now.seat].push([was.at, now.at]);
   }
@@ -1877,7 +1878,7 @@ describe('neither seat has the better end', () => {
         taken += state.events.filter((event) => event.kind === 'capture').length;
         if (state.tick % 20 > 0) continue;
         const plain = seen(state, twin.map((_, index) => index), (owner) => owner);
-        expect(seen(state, twin, (owner) => owner && otherSeat(owner))).toEqual(plain);
+        expect(seen(state, twin, (owner) => (owner === 'a' || owner === 'b' ? otherSeat(owner) : owner))).toEqual(plain);
       }
       expect(state.winner).toBeNull();
       expect(countOf(state, 'a')).toEqual(countOf(state, 'b'));
@@ -1959,5 +1960,73 @@ describe('neither seat has the better end', () => {
     // Before, the ant and the second bee both stood at the start of the path to hut 2, and the bee walked off ahead.
     expect(state.units).toEqual([]);
     expect(state.huts[1]).toMatchObject({ owner: 'b', n: 1 });
+  });
+});
+
+describe('the computer as a third side', () => {
+  const IDLE: Record<Seat, Order[]> = { a: [], b: [] };
+  const reach = (map: SwarmMap, from: number) => {
+    const seen = new Set([from]);
+    for (const at of seen) for (const next of map.links[at]) seen.add(next);
+    return seen.size;
+  };
+
+  it('gets one base of its own, linked into the board, only when asked for', () => {
+    for (const id of MAP_IDS) {
+      for (const seed of SEEDS) {
+        const plain = buildMap(seed, id);
+        expect(plain.sides).toEqual(['a', 'b']);
+        expect(plain.sites.some((site) => site.owner === 'c')).toBe(false);
+
+        const map = buildMap(seed, id, true);
+        expect(map.sides).toEqual(['a', 'b', 'c']);
+        const bases = map.sites.flatMap((site, index) => (site.owner === 'c' ? [index] : []));
+        expect(bases, `${id} ${seed}`).toHaveLength(1);
+        expect(map.sites[bases[0]].n).toBe(map.sites.find((site) => site.owner === 'a')!.n);
+        expect(map.links[bases[0]].length, `${id} ${seed}`).toBeGreaterThan(0);
+        expect(reach(map, bases[0]), `${id} ${seed}`).toBe(map.sites.length);
+      }
+    }
+  });
+
+  it('plays without orders from either seat, and takes huts', () => {
+    for (const id of MAP_IDS) {
+      const map = buildMap(SEEDS[4], id, true);
+      const state = newState(map);
+      let taken = 0;
+      while (state.winner === null && state.tick < 600) {
+        step(state, map, IDLE);
+        taken += state.events.filter((event) => event.kind === 'capture' && event.seat === 'c').length;
+      }
+      expect(taken, id).toBeGreaterThan(0);
+    }
+  });
+
+  it('plays the same game on both screens', () => {
+    const map = buildMap(SEEDS[2], 'bridges', true);
+    const run = () => {
+      const state = newState(map);
+      while (state.winner === null && state.tick < MATCH_TICKS) step(state, map, IDLE);
+      return state;
+    };
+    const first = run();
+    expect(first.tick).toBeGreaterThan(CPU_THINK_TICKS);
+    expect(run()).toEqual(first);
+  });
+
+  it('wins when it is the only side left, and is ignored when it is not playing', () => {
+    const sites: Site[] = [
+      { x: 100, y: 300, owner: 'c', n: 5, level: 1 },
+      { x: 300, y: 300, owner: null, n: 5, level: 1 },
+    ];
+    const three = { ...mapOf(sites, [[1], [0]]), sides: ['a', 'b', 'c'] as const };
+    const withC = newState(three);
+    step(withC, three, IDLE);
+    expect(withC.winner).toBe('c');
+
+    const two = mapOf(sites.map((site) => ({ ...site, owner: null })), [[1], [0]]);
+    const without = newState(two);
+    step(without, two, IDLE);
+    expect(without.winner).toBe('draw');
   });
 });

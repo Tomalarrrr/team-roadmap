@@ -1,8 +1,11 @@
-// Swarm: ants against bees over a map of huts joined by paths. Rules,
-// simulation, and the scheme that keeps two clients on one game over a
-// transport with no realtime channel (see dbProxy.ts).
+// Swarm: ants against bees over a map of huts joined by paths, and when the
+// host asks for it a third side, black ants played by the computer from the
+// middle of the board. Rules, simulation, and the scheme that keeps two
+// clients on one game over a transport with no realtime channel (see dbProxy.ts).
 //
-// The whole game is a pure function of the seed and the two players' orders:
+// The whole game is a pure function of the seed and the two players' orders.
+// The third side's orders are worked out inside each tick from the state, so
+// both clients give it the same ones and it has nothing to publish:
 //
 //  - Each client publishes only its own orders, each stamped with the tick it
 //    takes effect on, a few ticks ahead of when it was given.
@@ -68,8 +71,11 @@ export const TOLL_EVERY = 4;
  */
 export const FORT_LIVES = 2;
 
+/** The two sides a person can play. */
 export type Seat = 'a' | 'b';
-export type Owner = Seat | null;
+/** Every side there can be on the board: the computer's third side is `c`. */
+export type Side = Seat | 'c';
+export type Owner = Side | null;
 export const SEATS: readonly Seat[] = ['a', 'b'];
 export const otherSeat = (seat: Seat): Seat => (seat === 'a' ? 'b' : 'a');
 
@@ -90,7 +96,9 @@ export interface SwarmMatch {
   startAt: number;
   /** The map the host chose. Without one the seed picks. */
   map?: MapId;
-  winner?: Seat | 'draw';
+  /** The computer plays a third side, from a base in the middle of the board. */
+  third?: boolean;
+  winner?: Side | 'draw';
   /** The seat that walked away or went silent, when that is how it ended. */
   gone?: Seat;
 }
@@ -195,6 +203,8 @@ export interface SwarmMap {
   paths: Path[];
   /** Each river as the line of its middle, for the drawing. Paths over one are bridges or fords. */
   rivers: { x: number; y: number }[][];
+  /** The sides on the board: the two seats, and the computer's when it plays. */
+  sides: readonly Side[];
   /** The size of the world the map lies in. A function of `id`, so it is never sent. */
   w: number;
   h: number;
@@ -254,7 +264,7 @@ export function pathLength(map: SwarmMap, a: number, b: number): number {
  * board, and paths that are a function of the positions alone. With `columns`
  * a column of two to four towers stands in front of each side.
  */
-function scatter(rnd: () => number, columns: boolean, w: number, h: number, least: number): { sites: Site[]; paths: Path[] } {
+function scatter(rnd: () => number, columns: boolean, w: number, h: number, least: number, third: boolean): { sites: Site[]; paths: Path[] } {
   const int = (n: number) => Math.floor(rnd() * n);
   const centre = centreOf({ w, h });
   const field = h - FIELD_SHORT;
@@ -268,7 +278,7 @@ function scatter(rnd: () => number, columns: boolean, w: number, h: number, leas
         ? (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) >= TOWER_RANGE * TOWER_RANGE && (Math.abs(s.x - x) >= TOWER_SHADE_X || Math.abs(s.y - y) >= TOWER_SHADE_Y)
         : (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y) >= MIN_GAP * MIN_GAP,
     );
-  const addPair = (x: number, y: number, owner: Owner, n: number, level: number) => {
+  const addPair = (x: number, y: number, owner: Seat | null, n: number, level: number) => {
     sites.push({ x, y, owner, n, level });
     sites.push({ x: w - x, y: 2 * centre.y - y, owner: owner && otherSeat(owner), n, level });
   };
@@ -278,13 +288,16 @@ function scatter(rnd: () => number, columns: boolean, w: number, h: number, leas
   // Towers go down before the huts, so the huts keep their distance from them.
   // An even gap keeps each column the same about the middle, so every tower
   // faces one of the other column straight across.
-  const towers = columns ? 2 + int(3) : 0;
+  // An odd column puts a tower level with the middle, and the third side's base there would be under its fire.
+  const towers = columns ? (third ? 2 + 2 * int(2) : 2 + int(3)) : 0;
   const gap = 2 * Math.floor(field / (2 * (towers + 1)));
   for (let k = 0; k < towers; k++) {
     const y = centre.y + ((2 * k - (towers - 1)) * gap) / 2;
     sites.push({ x: TOWER_X, y, owner: null, n: TOWER_START, level: 1, tower: true });
     sites.push({ x: w - TOWER_X, y: 2 * centre.y - y, owner: null, n: TOWER_START, level: 1, tower: true });
   }
+  // The third side's base goes down before the huts too, so they keep their distance from it.
+  const base = third ? sites.push({ x: centre.x, y: centre.y, owner: 'c', n: START_UNITS, level: 1 }) - 1 : -1;
 
   const pairs = least + int(3);
   const big = int(pairs);
@@ -301,7 +314,7 @@ function scatter(rnd: () => number, columns: boolean, w: number, h: number, leas
   }
 
   // Between two columns of towers a hut would be a way round them.
-  if (towers === 0 && clear(centre.x, centre.y)) {
+  if (!third && towers === 0 && clear(centre.x, centre.y)) {
     sites.push({ x: centre.x, y: centre.y, owner: null, n: 20 + int(11), level: 2 });
   }
 
@@ -310,10 +323,12 @@ function scatter(rnd: () => number, columns: boolean, w: number, h: number, leas
   // On a tower map the only way over the middle is from a tower to the one
   // facing it. Each half stays joined up without the paths that are lost: a
   // circle wide enough to hold a hut of the far half holds a near tower first.
+  // The third side's base in the middle is reached only from the towers.
   const across = (p: Site, q: Site) => towers > 0 && (p.x - centre.x) * (q.x - centre.x) < 0;
   const paths: Path[] = [];
   for (let i = 0; i < sites.length; i++) {
     for (let j = i + 1; j < sites.length; j++) {
+      if (towers > 0 && (i === base || j === base) && !sites[i === base ? j : i].tower) continue;
       const blocked = across(sites[i], sites[j])
         ? !sites[i].tower || !sites[j].tower || sites[i].y !== sites[j].y
         : sites.some((k, index) => {
@@ -437,7 +452,7 @@ const LAYOUTS: Record<'thorns' | 'bridges' | 'hill', Layout[]> = {
  * A layout as the seed has it: upside down on half the seeds, each hut a few
  * steps from where it was drawn, each garrison a few over what it was given.
  */
-function lay(layout: Layout, rnd: () => number, fort: boolean, w: number, h: number): { sites: Site[]; paths: Path[]; rivers: SwarmMap['rivers'] } {
+function lay(layout: Layout, rnd: () => number, fort: boolean, w: number, h: number, third: boolean): { sites: Site[]; paths: Path[]; rivers: SwarmMap['rivers'] } {
   const int = (n: number) => Math.floor(rnd() * n);
   const centre = centreOf({ w, h });
   const sink = centre.y - DRAWN_H / 2;
@@ -451,16 +466,27 @@ function lay(layout: Layout, rnd: () => number, fort: boolean, w: number, h: num
     sites.push({ x, y, owner: k === 0 ? 'a' : null, n, level });
     sites.push({ x: w - x, y: 2 * centre.y - y, owner: k === 0 ? 'b' : null, n, level });
   });
+  // The third side's base takes the hut in the middle, the fort and all, and starts it as small as the two seats' own.
+  const middle = 2 * layout.half.length;
   if (layout.centre) {
     const [held, level] = layout.centre;
-    sites.push({ x: centre.x, y: centre.y, owner: null, n: held + int(4), level, ...(fort && { fort: true }) });
+    const n = held + int(4);
+    sites.push({ x: centre.x, y: centre.y, ...(third ? { owner: 'c', n: START_UNITS, level: 1 } : { owner: null, n, level }), ...(fort && { fort: true }) });
+  } else if (third) {
+    sites.push({ x: centre.x, y: centre.y, owner: 'c', n: START_UNITS, level: 1 });
   }
 
-  const twin = (hut: number) => (hut < 2 * layout.half.length ? hut ^ 1 : hut);
+  const twin = (hut: number) => (hut < middle ? hut ^ 1 : hut);
   const paths: Path[] = [];
   const add = (a: number, b: number, kind: PathKind, up?: number) =>
     paths.push({ a: Math.min(a, b), b: Math.max(a, b), kind, ...(up !== undefined && { up }) });
   for (const [a, b, kind, up] of layout.paths) {
+    // A path between a hut and its own twin runs through the middle, so a base put there splits it in two.
+    if (third && !layout.centre && twin(a) === b) {
+      add(a, middle, kind);
+      add(b, middle, kind);
+      continue;
+    }
     add(a, b, kind, up);
     // The path between a hut and its own twin is its own twin.
     if (twin(a) !== b) add(twin(a), twin(b), kind, up === undefined ? up : twin(up));
@@ -487,20 +513,24 @@ const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', brid
  *  bridges  a river between the sides, with two bridges and a shorter ford
  *  guns     a column of two to four towers in front of each side
  *  hill     a fort in the middle, at the top of the climbs
+ *
+ * With `third` the computer's side starts in the middle, the one place as far
+ * from each seat as from the other.
  */
-export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length]): SwarmMap {
+export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length], third = false): SwarmMap {
   const rnd = mulberry32(seed);
   const { w, h } = SIZES[id];
   const drawn =
     id === 'meadow' || id === 'guns'
-      ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id]), rivers: [] }
-      : lay(LAYOUTS[id][Math.floor(rnd() * LAYOUTS[id].length)], rnd, id === 'hill', w, h);
+      ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id], third), rivers: [] }
+      : lay(LAYOUTS[id][Math.floor(rnd() * LAYOUTS[id].length)], rnd, id === 'hill', w, h, third);
   const links: number[][] = drawn.sites.map(() => []);
   for (const path of drawn.paths) {
     links[path.a].push(path.b);
     links[path.b].push(path.a);
   }
-  return { id, scene: SCENES[id], sites: drawn.sites, links, paths: drawn.paths, rivers: drawn.rivers, w, h };
+  const sides: readonly Side[] = third ? ['a', 'b', 'c'] : SEATS;
+  return { id, scene: SCENES[id], sites: drawn.sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, w, h };
 }
 
 /** What a tick asks of every unit about the path it is on, worked out once for a map. */
@@ -574,7 +604,7 @@ const isTower = (hut: Hut): boolean => hut.reload !== undefined;
 
 export interface Unit {
   id: number;
-  seat: Seat;
+  seat: Side;
   from: number;
   to: number;
   /** The hut it was sent to, which can be several paths on from `to`. */
@@ -592,28 +622,28 @@ export interface Army {
 }
 
 export type SwarmEvent =
-  | { kind: 'capture'; hut: number; seat: Seat }
+  | { kind: 'capture'; hut: number; seat: Side }
   | { kind: 'hit'; hut: number }
   | { kind: 'upgrade'; hut: number }
   | { kind: 'clash'; from: number; to: number; d: number }
   /** A unit of `seat` died to the spikes or the water, `d` along the path from `from`. */
-  | { kind: 'toll'; from: number; to: number; d: number; seat: Seat };
+  | { kind: 'toll'; from: number; to: number; d: number; seat: Side };
 
 /** A tower killed a unit of `seat` standing at x, y. */
 export interface Shot {
   tower: number;
   x: number;
   y: number;
-  seat: Seat;
+  seat: Side;
 }
 
 export interface SwarmState {
   tick: number;
   huts: Hut[];
   units: Unit[];
-  army: Record<Seat, Army>;
+  army: Record<Side, Army>;
   nextId: number;
-  winner: Seat | 'draw' | null;
+  winner: Side | 'draw' | null;
   /** For each of the map's paths, how many units have walked past the middle of it. Only spikes and fords count. */
   tolls: number[];
   /** What happened on the last tick, for the drawing to react to. */
@@ -627,7 +657,7 @@ export function newState(map: SwarmMap): SwarmState {
     tick: 0,
     huts: map.sites.map((s) => ({ owner: s.owner, n: s.n, level: s.level, grow: 0, out: [], ...(s.tower && { reload: 0 }), ...(s.fort && { hurt: 0 }) })),
     units: [],
-    army: { a: { speed: 0, strength: 0, luck: 0 }, b: { speed: 0, strength: 0, luck: 0 } },
+    army: { a: { speed: 0, strength: 0, luck: 0 }, b: { speed: 0, strength: 0, luck: 0 }, c: { speed: 0, strength: 0, luck: 0 } },
     nextId: 1,
     winner: null,
     tolls: map.paths.map(() => 0),
@@ -641,7 +671,7 @@ export function cloneState(state: SwarmState): SwarmState {
     tick: state.tick,
     huts: state.huts.map((h) => ({ ...h, out: h.out.map((q) => ({ ...q })) })),
     units: state.units.map((u) => ({ ...u })),
-    army: { a: { ...state.army.a }, b: { ...state.army.b } },
+    army: { a: { ...state.army.a }, b: { ...state.army.b }, c: { ...state.army.c } },
     nextId: state.nextId,
     winner: state.winner,
     tolls: state.tolls.slice(),
@@ -718,7 +748,7 @@ export function upgradeCost(state: SwarmState, hutIndex: number, kind: 'hut' | '
 }
 
 /** An order that no longer holds when its tick comes (the hut fell, the units left) does nothing. */
-function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
+function applyOrder(state: SwarmState, map: SwarmMap, seat: Side, order: Order): void {
   const hut = state.huts[order.from];
   if (!hut || hut.owner !== seat) return;
   if (order.kind === 'half' || order.kind === 'all') {
@@ -775,7 +805,7 @@ interface Walker {
 }
 
 /**
- * Units of the two sides never pass on a path: any two that were apart before
+ * Units of two sides never pass on a path: any two that were apart before
  * this tick's walk and are level or crossed after it fight where they met,
  * whichever way each is walking and whoever of their own side is in front.
  * Along the path the units fall into runs of one side. Two runs that touch
@@ -783,17 +813,20 @@ interface Walker {
  * winner's side of the fight, so a unit that outlives a whole run goes on to
  * meet the next.
  */
+const SIDE_BIT: Record<Side, number> = { a: 1, b: 2, c: 4 };
+
 function clashOnPaths(state: SwarmState, map: SwarmMap): void {
   const { index, length: lengths } = lanesOf(map);
   // Most paths carry one side's column and nothing else, and are done with here.
   const sides = map.paths.map(() => 0);
-  for (const unit of state.units) sides[index[unit.from][unit.to]] |= unit.seat === 'a' ? 1 : 2;
-  if (!sides.includes(3)) return;
+  for (const unit of state.units) sides[index[unit.from][unit.to]] |= SIDE_BIT[unit.seat];
+  const mixed = (bits: number) => (bits & (bits - 1)) !== 0;
+  if (!sides.some(mixed)) return;
   // Kept in the order their first unit was made: the fights of a tick draw on each army's luck in turn.
   const lanes = new Map<number, Walker[]>();
   for (const unit of state.units) {
     const at = index[unit.from][unit.to];
-    if (sides[at] !== 3) continue;
+    if (!mixed(sides[at])) continue;
     const path = map.paths[at];
     const pace = paceOf(path, unit.to, state.army[unit.seat].speed);
     let lane = lanes.get(at);
@@ -838,29 +871,38 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
 }
 
 /**
- * Units of the two sides that reach one hut on one tick meet at its door, and
+ * Units of two sides that reach one hut on one tick meet at its door, and
  * fight one for one before any of them goes in. Sent in one after the other,
  * the unit made first would find the last defender dead or still standing by
  * what the other side's unit did a moment before, and units leave seat a's
  * huts before their twins: a hut both sides marched on in step went to
  * whichever seat the size of its garrison happened to suit.
+ *
+ * The two seats fight it out first, so the third side meets whichever of them
+ * is left and neither seat is put in front of it by its letter.
  */
+const DOOR_FIGHTS: [Side, Side][] = [['a', 'b'], ['a', 'c'], ['b', 'c']];
+
 function clashAtDoors(state: SwarmState, map: SwarmMap, arriving: Unit[]): Set<Unit> {
   const dead = new Set<Unit>();
-  const doors = new Map<number, Record<Seat, Unit[]>>();
+  const doors = new Map<number, Record<Side, Unit[]>>();
   for (const unit of arriving) {
     let door = doors.get(unit.to);
-    if (!door) doors.set(unit.to, (door = { a: [], b: [] }));
+    if (!door) doors.set(unit.to, (door = { a: [], b: [], c: [] }));
     door[unit.seat].push(unit);
   }
   const { index, length } = lanesOf(map);
   for (const [hut, door] of doors) {
-    for (let i = 0, j = 0; i < door.a.length && j < door.b.length; ) {
-      const at = index[door.a[i].from][hut];
-      const result = fight(state, 'a', 'b');
-      state.events.push({ kind: 'clash', from: map.paths[at].a, to: map.paths[at].b, d: map.paths[at].b === hut ? length[at] : 0 });
-      if (result.xDies) dead.add(door.a[i++]);
-      if (result.yDies) dead.add(door.b[j++]);
+    for (const [x, y] of DOOR_FIGHTS) {
+      const xs = door[x].filter((unit) => !dead.has(unit));
+      const ys = door[y].filter((unit) => !dead.has(unit));
+      for (let i = 0, j = 0; i < xs.length && j < ys.length; ) {
+        const at = index[xs[i].from][hut];
+        const result = fight(state, x, y);
+        state.events.push({ kind: 'clash', from: map.paths[at].a, to: map.paths[at].b, d: map.paths[at].b === hut ? length[at] : 0 });
+        if (result.xDies) dead.add(xs[i++]);
+        if (result.yDies) dead.add(ys[j++]);
+      }
     }
   }
   return dead;
@@ -975,7 +1017,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
 }
 
 /** A tower is not a hut, but the units in it are units. */
-export function countOf(state: SwarmState, seat: Seat): { huts: number; units: number } {
+export function countOf(state: SwarmState, seat: Side): { huts: number; units: number } {
   let huts = 0;
   let units = 0;
   for (const hut of state.huts) {
@@ -987,28 +1029,32 @@ export function countOf(state: SwarmState, seat: Seat): { huts: number; units: n
   return { huts, units };
 }
 
-function judge(state: SwarmState): void {
-  const a = countOf(state, 'a');
-  const b = countOf(state, 'b');
+/**
+ * The game ends when one side is left, or on the clock, when the side holding
+ * the most huts, then the most units, takes it. A tie at the top is a draw.
+ */
+function judge(state: SwarmState, map: SwarmMap): void {
   // A side with no hut can still win one back with the units it has on the road.
-  const aOut = a.huts === 0 && a.units === 0;
-  const bOut = b.huts === 0 && b.units === 0;
-  if (aOut || bOut) {
-    state.winner = aOut && bOut ? 'draw' : aOut ? 'b' : 'a';
+  const counts = map.sides.map((side) => ({ side, ...countOf(state, side) })).filter((count) => count.huts > 0 || count.units > 0);
+  if (counts.length <= 1) {
+    state.winner = counts.length === 1 ? counts[0].side : 'draw';
   } else if (state.tick >= MATCH_TICKS) {
-    const lead = a.huts - b.huts || a.units - b.units;
-    state.winner = lead > 0 ? 'a' : lead < 0 ? 'b' : 'draw';
+    counts.sort((p, q) => q.huts - p.huts || q.units - p.units);
+    const [first, second] = counts;
+    state.winner = first.huts === second.huts && first.units === second.units ? 'draw' : first.side;
   }
 }
 
-/** Advance one tick. Orders are applied seat `a` first, each list in the order given. */
+/** Advance one tick. Orders are applied seat `a` first, each list in the order given, and the third side's last. */
 export function step(state: SwarmState, map: SwarmMap, orders: Record<Seat, Order[]>): void {
+  const third = map.sides.includes('c') && state.tick % CPU_THINK_TICKS === 0 ? cpuOrders(state, map, 'c') : [];
   const tick = ++state.tick;
   state.events = [];
   state.shots = [];
   for (const seat of SEATS) {
     for (const order of orders[seat]) if (order.tick === tick) applyOrder(state, map, seat, order);
   }
+  for (const order of third) applyOrder(state, map, 'c', order);
 
   for (const hut of state.huts) {
     if (!hut.owner || isTower(hut)) continue;
@@ -1058,12 +1104,13 @@ export function step(state: SwarmState, map: SwarmMap, orders: Record<Seat, Orde
     state.units = walking;
   }
   shoot(state, map);
-  judge(state);
+  judge(state, map);
 }
 
 /**
  * Run `state` on to tick `to`. With `cpu` set, that seat is played by the
- * computer, whose orders are added to `orders` as it goes. `onStep` sees the
+ * computer, whose orders are added to `orders` as it goes. The third side
+ * plays itself inside `step`. `onStep` sees the
  * state after each tick.
  */
 export function advance(
@@ -1082,7 +1129,7 @@ export function advance(
 }
 
 /** For each hut, how many paths it is from the nearest hut `seat` does not hold, by the paths that take no toll. */
-function stepsToFront(state: SwarmState, map: SwarmMap, seat: Seat): number[] {
+function stepsToFront(state: SwarmState, map: SwarmMap, seat: Side): number[] {
   const steps = state.huts.map((hut) => (hut.owner === seat ? Infinity : 0));
   const queue = steps.flatMap((s, index) => (s === 0 ? [index] : []));
   for (let head = 0; head < queue.length; head++) {
@@ -1104,7 +1151,7 @@ function stepsToFront(state: SwarmState, map: SwarmMap, seat: Seat): number[] {
  * what the hut breeds while the column walks, which is more up a climb. It
  * crosses a toll only to take the hut at the far end.
  */
-export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[] {
+export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Side): Order[] {
   const orders: Order[] = [];
   const tick = state.tick + 1;
   const steps = stepsToFront(state, map, seat);
@@ -1117,8 +1164,11 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     if (hut.owner !== seat || hut.out.length > 0) return;
     const tolled = (to: number) => takesToll(map.paths[pathIndex(map, from, to)].kind);
     const targets = map.links[from].filter((to) => state.huts[to].owner !== seat);
+    // A hut every path out of which takes a toll (the third side's island in a ford) has no safe way to the front.
     const reinforce = () => {
-      const nearer = map.links[from].filter((to) => !tolled(to)).reduce((best, to) => (steps[to] < steps[best] ? to : best));
+      const safe = map.links[from].filter((to) => !tolled(to));
+      if (safe.length === 0) return;
+      const nearer = safe.reduce((best, to) => (steps[to] < steps[best] ? to : best));
       orders.push({ tick, kind: 'all', from, to: nearer });
     };
 
