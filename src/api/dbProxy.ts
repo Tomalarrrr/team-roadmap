@@ -36,7 +36,7 @@ export function getServerTimestamp(): object {
 // loop never commits, and the join silently fails. Appending a unique param
 // makes each GET URL distinct so no intermediary can serve a cached copy. The
 // Vercel proxy only reads `dbpath`, so `_cb` is ignored and never hits Firebase.
-function bust(path: string): string {
+export function bust(path: string): string {
   const sep = path.includes('?') ? '&' : '?';
   return `${PROXY_BASE}/${path}${sep}_cb=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }

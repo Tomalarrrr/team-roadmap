@@ -69,6 +69,32 @@ export default async function handler(request: Request): Promise<Response> {
 
   const upstreamUrl = `${databaseUrl.replace(/\/$/, '')}/${path}.json`;
 
+  // A live game holds one connection open and is sent each change as it is
+  // written, instead of reading the room several times a second. Firebase
+  // streams server-sent events for a read that asks for them; they are passed
+  // through unread, so nothing here waits on the stream to finish.
+  if (request.method === 'GET' && request.headers.get('accept')?.includes('text/event-stream')) {
+    let stream: Response;
+    try {
+      stream = await fetch(upstreamUrl, { headers: { Accept: 'text/event-stream' } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Upstream fetch failed';
+      return jsonError(502, `Upstream error: ${message}`);
+    }
+    if (!stream.ok || !stream.body) {
+      return jsonError(stream.ok ? 502 : stream.status, 'Upstream stream refused');
+    }
+    return new Response(stream.body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/event-stream',
+        // no-transform keeps a compressing intermediary from holding events back to fill a block.
+        'Cache-Control': 'no-store, no-transform',
+        'X-Accel-Buffering': 'no',
+      },
+    });
+  }
+
   // For mutating requests, read body as text and forward verbatim.
   let body: string | undefined;
   if (request.method !== 'GET' && request.method !== 'DELETE') {

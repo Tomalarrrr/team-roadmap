@@ -16,7 +16,7 @@ import {
   type SwarmSeatState,
 } from '../swarmGameLogic';
 import { generateGameCode } from '../utils/gameUtils';
-import { getServerTimestamp, proxyGet, proxyPut, proxyRemove, proxyTransaction } from './dbProxy';
+import { bust, getServerTimestamp, proxyGet, proxyPut, proxyRemove, proxyTransaction } from './dbProxy';
 
 export interface SwarmRoom {
   m: SwarmMatch;
@@ -113,6 +113,77 @@ export async function joinRoom(code: string, sessionId: string, name: string): P
 
 export function getRoom(code: string): Promise<SwarmRoom | null> {
   return proxyGet<SwarmRoom>(`swarm/${code}`, LIVE_TIMEOUT_MS);
+}
+
+type Tree = { [key: string]: unknown };
+const isTree = (value: unknown): value is Tree => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * `tree` with `data` written at `path`, as the database would hold it: null
+ * removes, and a node left with no children goes too. Copies along the path
+ * and shares the rest.
+ */
+export function putAt(tree: unknown, path: string, data: unknown): unknown {
+  const keys = path.split('/').filter(Boolean);
+  const write = (node: unknown, depth: number): unknown => {
+    if (depth === keys.length) return data ?? null;
+    const copy: Tree = isTree(node) ? { ...node } : {};
+    const child = write(copy[keys[depth]], depth + 1);
+    if (child === null) delete copy[keys[depth]];
+    else copy[keys[depth]] = child;
+    return Object.keys(copy).length ? copy : null;
+  };
+  return write(tree, 0);
+}
+
+/**
+ * The room after one event from its stream. A `put` replaces what is at
+ * `path`; a `patch` holds paths under it, each replaced.
+ */
+export function applyRoomEvent(tree: unknown, kind: 'put' | 'patch', path: string, data: unknown): unknown {
+  if (kind === 'put') return putAt(tree, path, data);
+  if (!isTree(data)) throw new Error(`patch at ${path} is not an object`);
+  return Object.entries(data).reduce((next, [key, value]) => putAt(next, `${path}/${key}`, value), tree);
+}
+
+/**
+ * Follow the room over one held connection: `onRoom` is given the whole room
+ * after every change, its own copy each time, and null once the room is gone.
+ * `onEnd` is called once if the stream breaks or is refused, and nothing
+ * follows it. Firebase's first event is the room as it stands.
+ */
+export function followRoom(code: string, onRoom: (room: SwarmRoom | null) => void, onEnd: () => void): () => void {
+  const source = new EventSource(bust(`swarm/${code}`));
+  let tree: unknown = null;
+  let ended = false;
+  const take = (kind: 'put' | 'patch') => (event: MessageEvent<string>) => {
+    if (ended) return;
+    try {
+      const { path, data } = JSON.parse(event.data) as { path: string; data: unknown };
+      tree = applyRoomEvent(tree, kind, path, data);
+    } catch (err) {
+      // The room can no longer be known from this stream, so it is given up and the room read instead.
+      console.warn('[Swarm] Room stream sent an event it could not apply:', err);
+      end();
+      return;
+    }
+    onRoom(tree === null ? null : (structuredClone(tree) as SwarmRoom));
+  };
+  const end = () => {
+    if (ended) return;
+    ended = true;
+    source.close();
+    onEnd();
+  };
+  source.addEventListener('put', take('put'));
+  source.addEventListener('patch', take('patch'));
+  // An EventSource reconnects by itself, but quietly and on its own clock; the caller chooses instead.
+  source.addEventListener('error', end);
+  source.addEventListener('cancel', end);
+  return () => {
+    ended = true;
+    source.close();
+  };
 }
 
 /**

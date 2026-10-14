@@ -153,6 +153,40 @@ describe('proxy conditional GET (poll 304s)', () => {
   });
 });
 
+describe('proxy event stream (live rooms)', () => {
+  const streamReq = (dbpath: string) => makeReq(dbpath, { headers: { Accept: 'text/event-stream' } });
+
+  it('asks Firebase for a stream and passes its body through as it arrives', async () => {
+    const events = 'event: put\ndata: {"path":"/","data":{"m":1}}\n\n';
+    fetchMock.mockResolvedValue(new Response(events, { status: 200 }));
+    const r = await handler(streamReq('swarm/ABCD'));
+    expect(fetchMock).toHaveBeenCalledWith(`${DB}/swarm/ABCD.json`, { headers: { Accept: 'text/event-stream' } });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('Content-Type')).toBe('text/event-stream');
+    expect(r.headers.get('Cache-Control')).toBe('no-store, no-transform');
+    expect(await r.text()).toBe(events);
+  });
+
+  it('passes on a refusal from Firebase as an error, not a stream', async () => {
+    fetchMock.mockResolvedValue(new Response('{"error":"Permission denied"}', { status: 401 }));
+    const r = await handler(streamReq('swarm/ABCD'));
+    expect(r.status).toBe(401);
+    expect(r.headers.get('Content-Type')).toBe('application/json');
+  });
+
+  it('still refuses a root outside the allowed list', async () => {
+    const r = await handler(streamReq('presence'));
+    expect(r.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('leaves a plain read as a plain read', async () => {
+    const r = await handler(makeReq('swarm/ABCD'));
+    expect(r.headers.get('Content-Type')).toBe('application/json');
+    expect(fetchMock).toHaveBeenCalledWith(`${DB}/swarm/ABCD.json`, expect.objectContaining({ method: 'GET' }));
+  });
+});
+
 describe('proxy configuration errors', () => {
   it('returns 500 when the database URL is not configured', async () => {
     vi.stubEnv('FIREBASE_DATABASE_URL', '');

@@ -33,7 +33,7 @@ vi.mock('../dbProxy', () => ({
   },
 }));
 
-import { createRoom, getRoom, joinRoom, putSeat, recordResult, startMatch, vacateSeat } from '../swarmApi';
+import { applyRoomEvent, createRoom, getRoom, joinRoom, putSeat, recordResult, startMatch, vacateSeat } from '../swarmApi';
 import { COUNTDOWN_MS, type SwarmMatch } from '../../swarmGameLogic';
 
 beforeEach(() => {
@@ -225,5 +225,50 @@ describe('a seat', () => {
     const code = await createRoom('s-ann', 'Ann');
     await vacateSeat(code, 'a');
     expect(await getRoom(code)).toBeNull();
+  });
+});
+
+// The events are the shapes Firebase's REST stream sends: the room as it stands
+// first, then each write at the path it was made to.
+describe('the room followed from its stream', () => {
+  const start = { m: { status: 'waiting', game: 0 }, s: { a: { seq: 1, k: 0 } } };
+
+  it('starts from the room as it stands', () => {
+    expect(applyRoomEvent(null, 'put', '/', start)).toEqual(start);
+  });
+
+  it('takes a seat write at its own path and leaves the rest as it was', () => {
+    const before = structuredClone(start);
+    const next = applyRoomEvent(start, 'put', '/s/b', { seq: 7, k: 3 });
+    expect(next).toEqual({ ...start, s: { a: { seq: 1, k: 0 }, b: { seq: 7, k: 3 } } });
+    expect(start).toEqual(before);
+  });
+
+  it('replaces a seat outright, dropping fields the new write does not have', () => {
+    const next = applyRoomEvent(start, 'put', '/s/a', { seq: 2 });
+    expect(next).toEqual({ ...start, s: { a: { seq: 2 } } });
+  });
+
+  it('merges a patch field by field, and removes what it sets to null', () => {
+    const playing = applyRoomEvent(start, 'put', '/m/winner', 'a');
+    const next = applyRoomEvent(playing, 'patch', '/m', { status: 'playing', winner: null, game: 1 });
+    expect(next).toEqual({ m: { status: 'playing', game: 1 }, s: start.s });
+  });
+
+  it('follows a patch whose keys are paths further down', () => {
+    const next = applyRoomEvent(start, 'patch', '/', { 's/a/k': 9, 'm/game': 2 });
+    expect(next).toEqual({ m: { status: 'waiting', game: 2 }, s: { a: { seq: 1, k: 9 } } });
+  });
+
+  it('drops a node left with no children, as the database does', () => {
+    expect(applyRoomEvent(start, 'put', '/s/a', null)).toEqual({ m: start.m });
+  });
+
+  it('is null once the room is removed', () => {
+    expect(applyRoomEvent(start, 'put', '/', null)).toBeNull();
+  });
+
+  it('refuses a patch that is not an object', () => {
+    expect(() => applyRoomEvent(start, 'patch', '/m', 3)).toThrow('patch at /m is not an object');
   });
 });

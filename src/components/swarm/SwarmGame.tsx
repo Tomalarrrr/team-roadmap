@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { createServerClock } from '../../api/snakeApi';
 import {
   createRoom,
+  followRoom,
   getRoom,
   joinRoom,
   putSeat,
@@ -112,6 +113,16 @@ const ORDER_DELAY = 4;
 const ORDER_DELAY_SOLO = 1;
 /** rAF stops in a hidden tab; this keeps the seat reporting from there. */
 const BACKGROUND_PUMP_MS = 250;
+/**
+ * The room's stream has this long to send the room as it stands. Once it has,
+ * it may be quiet this much longer than twice this seat's own beat, since every
+ * write of the seat comes back on it. A proxy holding events back fails the first.
+ */
+const STREAM_FIRST_MS = 3000;
+const STREAM_GRACE_MS = 2000;
+/** After a stream that never delivered, the next is tried this much later, doubling to the cap. */
+const REFOLLOW_MS = 5000;
+const REFOLLOW_MAX_MS = 60_000;
 /**
  * How far a press may wander, in CSS px, and still be a tap. A fingertip rolls
  * as it lands and lifts; a mouse button does not move the mouse.
@@ -356,48 +367,100 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       setError(message);
     };
 
+    // The room is followed over its stream while that delivers, and read on a
+    // timer while it does not. Only one of them feeds the game at a time, so a
+    // read that set off before the stream caught up cannot put the room back.
+    let unfollow: (() => void) | null = null;
+    let followedAt = 0;
+    /** When the stream last delivered; 0 while it has not, which is when the room is read instead. */
+    let heardAt = 0;
+    let followAt = 0;
+    let refollow = REFOLLOW_MS;
+
+    const follow = () => {
+      if (!code) return;
+      followedAt = performance.now();
+      unfollow = followRoom(
+        code,
+        (next) => {
+          if (stopped) return;
+          heardAt = performance.now();
+          refollow = REFOLLOW_MS;
+          take(next);
+          pump();
+        },
+        () => {
+          if (!stopped) dropStream(heardAt === 0);
+        }
+      );
+    };
+
+    // A stream that delivered and then ended (the host closes held requests after some minutes) is reopened at once.
+    const dropStream = (neverDelivered: boolean) => {
+      unfollow?.();
+      unfollow = null;
+      heardAt = 0;
+      followAt = performance.now() + (neverDelivered ? refollow : 0);
+      if (neverDelivered) refollow = Math.min(refollow * 2, REFOLLOW_MAX_MS);
+    };
+
+    const take = (next: SwarmRoom | null) => {
+      if (!code) return;
+      failures = 0;
+      setOffline(false);
+      const seat = next && seatOf(next.m, sessionId);
+      if (!next || !seat) {
+        leaveRoom('That room has closed.');
+        return;
+      }
+      // Anyone can write a seat. A state the game cannot be run on is dropped
+      // here, so that it counts as silence and whoever holds the seat forfeits.
+      for (const each of SEATS) {
+        const state = next.s?.[each];
+        if (next.s && state && !sound(state)) delete next.s[each];
+      }
+      room = next;
+      setMatch((prev) => (JSON.stringify(prev) === JSON.stringify(next.m) ? prev : next.m));
+
+      const mine = next.s?.[seat];
+      if (mine) clock.seen(mine.seq, mine.at);
+      if (clock.now() !== null) setSynced(true);
+
+      const opp = otherSeat(seat);
+      const theirs = next.s?.[opp];
+      if (silent(ear, Boolean(next.m.players[opp]), theirs?.seq, next.m.status === 'playing', performance.now())) {
+        vacateSeat(code, opp).catch((err) => console.warn('[Swarm] Could not release the silent seat:', err));
+      }
+    };
+
     const poll = async () => {
       if (!code) return;
-      pollBusy = true;
-      try {
-        const next = await getRoom(code);
-        if (stopped) return;
-        failures = 0;
-        setOffline(false);
-        const seat = next && seatOf(next.m, sessionId);
-        if (!next || !seat) {
-          leaveRoom('That room has closed.');
-          return;
-        }
-        // Anyone can write a seat. A state the game cannot be run on is dropped
-        // here, so that it counts as silence and whoever holds the seat forfeits.
-        for (const each of SEATS) {
-          const state = next.s?.[each];
-          if (next.s && state && !sound(state)) delete next.s[each];
-        }
-        room = next;
-        setMatch((prev) => (JSON.stringify(prev) === JSON.stringify(next.m) ? prev : next.m));
-
-        const mine = next.s?.[seat];
-        if (mine) clock.seen(mine.seq, mine.at);
-        if (clock.now() !== null) setSynced(true);
-
-        const opp = otherSeat(seat);
-        const theirs = next.s?.[opp];
-        if (silent(ear, Boolean(next.m.players[opp]), theirs?.seq, next.m.status === 'playing', performance.now())) {
-          vacateSeat(code, opp).catch((err) => console.warn('[Swarm] Could not release the silent seat:', err));
-        }
-      } catch (err) {
-        if (stopped) return;
-        console.warn('[Swarm] Room read failed:', err);
-        if (++failures >= 3) setOffline(true);
-        // Silence is only counted against the other seat while this one can hear.
-        ear.at = performance.now();
+      const { beat } = pace(room?.m.status === 'playing', document.hidden, clock.now() !== null);
+      const now = performance.now();
+      if (unfollow && (heardAt ? now - heardAt > beat * 2 + STREAM_GRACE_MS : now - followedAt > STREAM_FIRST_MS)) {
+        console.warn(heardAt ? '[Swarm] Room stream went quiet; reading the room instead' : '[Swarm] Room stream sent nothing; reading the room instead');
+        dropStream(heardAt === 0);
       }
-      pollBusy = false;
+      if (!unfollow && now >= followAt) follow();
+      if (!heardAt) {
+        pollBusy = true;
+        try {
+          const next = await getRoom(code);
+          if (stopped) return;
+          if (!heardAt) take(next);
+        } catch (err) {
+          if (stopped) return;
+          console.warn('[Swarm] Room read failed:', err);
+          if (++failures >= 3) setOffline(true);
+          // Silence is only counted against the other seat while this one can hear.
+          ear.at = performance.now();
+        }
+        pollBusy = false;
+      }
       // A tab hidden for some minutes has its repeating timer held to once a
       // minute, which in a game is a forfeit. A timer set after a request is
-      // not held, so the seat is also kept reporting from here.
+      // not held, so the seat is also kept reporting from here. While the
+      // stream delivers, each event does the same.
       pump();
       pollTimer = window.setTimeout(poll, pace(room?.m.status === 'playing', document.hidden, clock.now() !== null).poll);
     };
@@ -757,6 +820,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       window.clearInterval(pumpTimer);
       cancelAnimationFrame(frameId);
       unwatch?.();
+      unfollow?.();
       controlsRef.current = null;
     };
   }, [code, solo, sessionId, clock]);
