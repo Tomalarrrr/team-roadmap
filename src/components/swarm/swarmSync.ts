@@ -40,11 +40,13 @@ export const BEAT_LIVE_MS = 1000;
 export const BEAT_IDLE_MS = 5000;
 export const BEAT_AWAY_MS = 15_000;
 /**
- * Short in a game, long outside one, as in Snake, but twice Snake's in a game:
- * an army keeps marching through a bad patch on a VPN, where a snake would
- * have died, so a slow connection is worth waiting out.
+ * As long in a game as outside one, unlike Snake: an army keeps marching
+ * through a bad patch on a VPN, where a snake would have died. A friend on a
+ * work VPN was measured on 2026-10-14 (Vercel logs) going 23s, 30s and 44s
+ * without a write landing, then writing normally again; at 20s each of those
+ * was a forfeit. A player who leaves through the game frees the seat at once.
  */
-export const SILENT_LIVE_MS = 20_000;
+export const SILENT_LIVE_MS = 90_000;
 export const SILENT_IDLE_MS = 90_000;
 
 /** What one client has heard of the other seat: its last write, and when that was first read. */

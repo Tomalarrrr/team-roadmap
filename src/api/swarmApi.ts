@@ -36,8 +36,11 @@ const ROOM_CODE = /^[A-Z0-9]{4}$/;
  * How long a room read or a seat write may hang before it is dropped and sent
  * again. It has to sit well inside the silence a seat is given up after (see
  * SwarmGame), or one stuck request reads to the other player as having left.
+ * Not shorter: through the proxy 11 of 300 requests took over 2s from home
+ * broadband, and dropping a slow one costs a fresh connection, which on a
+ * corporate VPN is slower again, so a 2s limit fed its own timeouts.
  */
-const LIVE_TIMEOUT_MS = 2000;
+const LIVE_TIMEOUT_MS = 6000;
 
 const matchPath = (code: string) => `swarm/${code}/m`;
 const newSeed = () => crypto.getRandomValues(new Uint32Array(1))[0];

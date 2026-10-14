@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 // @ts-expect-error — .mjs dev script, no type declarations needed for this test.
 import { createDbEngine } from '../../../local-db-engine.mjs';
+import { SILENT_LIVE_MS } from '../../components/swarm/swarmSync';
 
 type Engine = {
   get: (parts: string[]) => unknown;
@@ -172,14 +173,15 @@ describe('starting and finishing', () => {
 });
 
 describe('a seat', () => {
-  // A request left on the shared 12s timeout outlasts the silence a seat is
-  // given up after, which forfeits the game for a player on a slow VPN.
+  // Short enough to be sent again many times inside the silence a seat is
+  // given up after, and not so short that an ordinary slow request is dropped.
   it('is read and written on a timeout far inside the silence that forfeits it', async () => {
     const code = await seated();
     db.timeouts = [];
     await putSeat(code, 'a', { seq: 1, game: 1, k: 0, orders: '' });
     await getRoom(code);
-    expect(db.timeouts).toEqual([2000, 2000]);
+    expect(db.timeouts).toEqual([6000, 6000]);
+    expect(6000 * 10).toBeLessThanOrEqual(SILENT_LIVE_MS);
   });
 
   it('is stamped with the server time when written', async () => {
