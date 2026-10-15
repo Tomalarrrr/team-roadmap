@@ -9,10 +9,11 @@
 import {
   COUNTDOWN_MS,
   SEATS,
-  otherSeat,
+  sidesOf,
+  type Kind,
   type MapId,
   type Seat,
-  type Side,
+  type SizeId,
   type SwarmMatch,
   type SwarmSeatState,
 } from '../swarmGameLogic';
@@ -94,7 +95,11 @@ async function cleanupStaleRooms(): Promise<void> {
   }
 }
 
-/** Take the free seat, or the one this session already holds. */
+/**
+ * Take an open seat, or the one this session already holds. A finished room
+ * takes new players for the next game, and one who was taken out of the last
+ * game and comes back to it is in the next.
+ */
 export async function joinRoom(code: string, sessionId: string, name: string): Promise<Seat> {
   // The code is typed by a person or read from a link, and it goes into the path of the request.
   if (!ROOM_CODE.test(code)) throw new Error('Room not found');
@@ -102,9 +107,14 @@ export async function joinRoom(code: string, sessionId: string, name: string): P
   const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     refusal = 'Room not found';
     if (!current) return undefined;
-    if (seatOf(current, sessionId)) return current;
-    const free = SEATS.find((seat) => !current.players[seat]);
-    if (!free || current.status !== 'waiting') {
+    const held = seatOf(current, sessionId);
+    if (held) return current.status === 'finished' ? withoutOut(current, held) : current;
+    if (current.status === 'playing') {
+      refusal = 'That room is in a game. Join when it ends.';
+      return undefined;
+    }
+    const free = SEATS.find((seat) => !current.players[seat] && !current.cpu?.includes(seat));
+    if (!free) {
       refusal = 'That room is full';
       return undefined;
     }
@@ -113,6 +123,15 @@ export async function joinRoom(code: string, sessionId: string, name: string): P
   const seat = result.snapshot && result.committed ? seatOf(result.snapshot, sessionId) : undefined;
   if (!seat) throw new Error(refusal);
   return seat;
+}
+
+function withoutOut(match: SwarmMatch, seat: Seat): SwarmMatch {
+  if (match.out?.[seat] === undefined) return match;
+  const out = { ...match.out };
+  delete out[seat];
+  const rest = { ...match };
+  delete rest.out;
+  return Object.keys(out).length > 0 ? { ...rest, out } : rest;
 }
 
 export function getRoom(code: string): Promise<SwarmRoom | null> {
@@ -202,34 +221,76 @@ export function putSeat(
   return proxyPut(`swarm/${code}/s/${seat}`, { ...state, at: getServerTimestamp() }, LIVE_TIMEOUT_MS);
 }
 
+/** Choose the creature this session plays as. Only in the lobby, and only one nobody else has chosen. */
+export async function setKind(code: string, sessionId: string, kind: Kind): Promise<void> {
+  let refusal = '';
+  const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    refusal = 'Room not found';
+    const seat = current && seatOf(current, sessionId);
+    if (!current || !seat) return undefined;
+    if (current.status !== 'waiting') {
+      refusal = 'The creatures are chosen before a game starts.';
+      return undefined;
+    }
+    if (SEATS.some((each) => each !== seat && current.players[each]?.kind === kind)) {
+      refusal = 'Another player has chosen that one.';
+      return undefined;
+    }
+    return { ...current, players: { ...current.players, [seat]: { ...current.players[seat], kind } } };
+  });
+  if (!result.committed) throw new Error(refusal);
+}
+
 /**
- * Start a game, or a fresh one in a finished room. Needs both seats filled.
- * `map` is the map chosen, or null to leave it to the seed. With `third` the
- * computer plays a third side.
+ * Put the computer in an open seat, or take it out again. Only between games,
+ * and never in a seat a person sits in.
  */
-export async function startMatch(code: string, serverNow: number, map: MapId | null, third: boolean): Promise<void> {
+export async function setComputer(code: string, seat: Seat, on: boolean): Promise<void> {
+  await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    if (!current || current.status === 'playing' || current.players[seat]) return undefined;
+    const cpu = SEATS.filter((each) => (each === seat ? on : current.cpu?.includes(each))).join('');
+    const rest = { ...current };
+    delete rest.cpu;
+    return cpu ? { ...rest, cpu } : rest;
+  });
+}
+
+/**
+ * Start a game, or a fresh one in a finished room. Needs two sides at least,
+ * people or the computer. `map` and `size` are the ones chosen, or null to
+ * leave the map to the seed and the size to the map.
+ */
+export async function startMatch(code: string, serverNow: number, map: MapId | null, size: SizeId | null): Promise<void> {
   const seed = newSeed();
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
-    if (!current || current.status === 'playing' || !current.players.a || !current.players.b) return undefined;
-    // Rebuilt rather than spread: the last game's winner must not carry over.
+    if (!current || current.status === 'playing') return undefined;
+    // Whoever left the last game partway through, and has not come back, is not in this one.
+    const players: SwarmMatch['players'] = {};
+    for (const seat of SEATS) {
+      const player = current.players[seat];
+      if (player && current.out?.[seat] === undefined) players[seat] = player;
+    }
+    if (sidesOf({ players, cpu: current.cpu }).length < 2) return undefined;
+    // Rebuilt rather than spread: the last game's result must not carry over.
     return {
       status: 'playing',
       createdAt: current.createdAt,
       seed,
-      players: current.players,
+      players,
       game: current.game + 1,
       startAt: Math.round(serverNow + COUNTDOWN_MS),
       ...(map && { map }),
-      ...(third && { third: true }),
+      ...(size && { size }),
+      ...(current.cpu && { cpu: current.cpu }),
     };
   });
 }
 
 /**
- * Record how game `game` ended. Both clients call this with the same winner,
+ * Record how game `game` ended. Every client calls this with the same winner,
  * read from the confirmed state; the game check lets only the first one land.
  */
-export async function recordResult(code: string, game: number, winner: Side | 'draw'): Promise<void> {
+export async function recordResult(code: string, game: number, winner: Seat | 'draw'): Promise<void> {
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     if (!current || current.status !== 'playing' || current.game !== game) return undefined;
     return { ...current, status: 'finished', winner };
@@ -237,26 +298,62 @@ export async function recordResult(code: string, game: number, winner: Side | 'd
 }
 
 /**
- * Take `seat` out of the room: it left, or it has been silent too long.
- * Before the game that frees the seat; during it, the other player wins.
+ * A write of the seat's own can land between its promise being read and the
+ * seat being marked out, and the rules refuse a mark behind that promise. The
+ * promise is read again and the mark tried again.
  */
-export async function vacateSeat(code: string, seat: Seat): Promise<void> {
+const VACATE_TRIES = 3;
+
+/**
+ * Take `seat` out of the room: it left, or it has been silent too long.
+ *
+ * Between games that frees the seat, and the room goes with its last person.
+ * In a game of two sides the other side wins. In a game of more the game goes
+ * on, and the computer plays the seat from the tick after its last promise:
+ * `k` as the caller last read it, or the room's own where that is further on.
+ * Once no person is left playing nobody is there to see the end, and the room
+ * goes.
+ */
+export async function vacateSeat(code: string, seat: Seat, k: number): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await vacateOnce(code, seat, k);
+      return;
+    } catch (err) {
+      if (attempt === VACATE_TRIES) throw err;
+    }
+  }
+}
+
+async function vacateOnce(code: string, seat: Seat, k: number): Promise<void> {
+  const stored = await proxyGet<SwarmSeatState>(`swarm/${code}/s/${seat}`, LIVE_TIMEOUT_MS);
   let empty = false;
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     empty = false;
     if (!current || !current.players[seat]) return undefined;
     if (current.status === 'playing') {
-      return { ...current, status: 'finished', winner: otherSeat(seat), gone: seat };
+      const sides = sidesOf(current);
+      if (sides.length === 2) {
+        const [winner] = sides.filter((each) => each !== seat);
+        return { ...current, status: 'finished', winner, gone: seat };
+      }
+      if (current.out?.[seat] !== undefined) return undefined;
+      const out = { ...current.out, [seat]: Math.max(k, stored?.game === current.game ? stored.k : 0) };
+      empty = !SEATS.some((each) => current.players[each] && out[each] === undefined);
+      return { ...current, out };
     }
-    const other = current.players[otherSeat(seat)];
-    if (!other) {
+    // Back to waiting, where nobody is out: whoever left the last game partway through and has not come back goes too.
+    const players = { ...current.players };
+    for (const each of SEATS) if (each === seat || current.out?.[each] !== undefined) delete players[each];
+    if (!SEATS.some((each) => players[each])) {
       empty = true;
       return undefined;
     }
     const rest = { ...current };
     delete rest.winner;
     delete rest.gone;
-    return { ...rest, status: 'waiting', players: { [otherSeat(seat)]: other } };
+    delete rest.out;
+    return { ...rest, status: 'waiting', players };
   });
   // proxyTransaction reads a null return as an abort, so emptying is its own step.
   if (empty) await proxyRemove(`swarm/${code}`);

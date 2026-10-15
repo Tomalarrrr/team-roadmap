@@ -3,12 +3,13 @@
 // each pose of a unit once into a sheet, and the units copied from it, the
 // badges and the effects every frame on top.
 //
-// Ants build earth mounds (the computer's black ants too, under blue flags),
-// bees build coiled straw skeps, and a hut nobody
-// holds is a house of whatever its place is made of. The three differ in
-// outline as well as in colour, so the sides can be told apart without relying
-// on hue. The ground is in swarmSceneGround, the buildings in swarmSceneHuts,
-// and the orders a player gives in swarmAim.
+// Each side is a kind of creature, ants, bees, beetles or spiders, and no two
+// sides in a game are the same kind. Bees build coiled straw skeps, the rest
+// earth mounds, and a hut nobody holds is a house of whatever its place is
+// made of. The creatures and the buildings differ in outline as well as in
+// colour, so the sides can be told apart without relying on hue; the side's own
+// colour is on its flags and its badges. The ground is in swarmSceneGround, the
+// buildings in swarmSceneHuts, and the orders a player gives in swarmAim.
 
 import {
   TOWER_RANGE,
@@ -19,6 +20,7 @@ import {
   sendSize,
   upgradeCost,
   type Army,
+  type Kind,
   type Owner,
   type Seat,
   type Site,
@@ -59,6 +61,8 @@ interface Fx {
   y: number;
   at: number;
   seat: Owner;
+  /** Who `seat` fought, for a clash. */
+  foe?: Owner;
   /** The tower a shot was fired from. */
   tower?: number;
   /** The ball has come down and burnt its mark into the ground. */
@@ -99,13 +103,19 @@ interface Sheet {
   /** One pose's square of the sheet across, in its pixels, and how many of them go to one of a unit's own units. */
   cell: number;
   res: number;
-  /** The ranks of the two armies it was painted for. */
+  /** The ranks of the armies it was painted for. */
   ranks: string;
+  /** The first row of each side's creature: a row for each of its coats, or one for a bee. Only the sides in the game have one. */
+  first: Partial<Record<Seat, number>>;
+  /** The row the two shadows are on, under everything else. */
+  shadow: number;
 }
 
 export interface Scene {
   map: SwarmMap;
   seed: number;
+  /** The creature each side is drawn as. */
+  kinds: Record<Seat, Kind>;
   ground: HTMLCanvasElement | null;
   sprites: Map<string, Sprite>;
   sheet: Sheet | null;
@@ -157,11 +167,12 @@ function glintsOf(map: SwarmMap, seed: number, rivers: River[]): Glint[] {
   return glints;
 }
 
-export function newScene(map: SwarmMap, seed: number): Scene {
+export function newScene(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>): Scene {
   const rivers = map.rivers.map(riverOf);
   return {
     map,
     seed,
+    kinds,
     ground: null,
     sprites: new Map(),
     sheet: null,
@@ -178,7 +189,7 @@ export function newScene(map: SwarmMap, seed: number): Scene {
     sent: new Uint32Array(64 * 64),
     rivers,
     glints: glintsOf(map, seed, rivers),
-    feel: newFeel(map, seed),
+    feel: newFeel(map, seed, kinds),
   };
 }
 
@@ -310,7 +321,9 @@ export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[],
       scene.hitAt[event.hut] = now;
     } else if (event.kind === 'clash') {
       const p = pathPoint(scene.map, event.from, event.to, event.d / pathLength(scene.map, event.from, event.to));
-      scene.fx.push({ kind: 'clash', x: p.x, y: p.y, at: now, seat: null });
+      // A clash does not say who fought, and the units that did may be dead already. With two sides it can only have been them.
+      const [seat, foe] = scene.map.sides.length === 2 ? scene.map.sides : [null, null];
+      scene.fx.push({ kind: 'clash', x: p.x, y: p.y, at: now, seat, foe });
     } else if (event.kind === 'upgrade') {
       const site = scene.map.sites[event.hut];
       scene.fx.push({ kind: event.kind, x: site.x, y: site.y, at: now, seat: state.huts[event.hut].owner });
@@ -351,7 +364,7 @@ function spriteOf(scene: Scene, index: number, owner: Owner, level: number): Spr
   const ctx = canvas.getContext('2d');
   if (ctx) {
     ctx.setTransform(scale, 0, 0, scale, site.x * scale - left, site.y * scale - top);
-    paintSite(ctx, mulberry32(scene.seed ^ Math.imul(index + 1, 0x85ebca6b)), scene.map.scene, site, owner, level);
+    paintSite(ctx, mulberry32(scene.seed ^ Math.imul(index + 1, 0x85ebca6b)), scene.map.scene, site, owner, owner && scene.kinds[owner], level);
   }
   const sprite = { canvas, left, top };
   scene.sprites.set(key, sprite);
@@ -403,12 +416,6 @@ const ANT_COATS = [
   { leg: '#27130b', body: '#43200f', back: '#61301a', head: '#33180b' },
   { leg: '#2c110b', body: '#531f13', back: '#74301b', head: '#41170d' },
   { leg: '#24100a', body: '#3d190f', back: '#592515', head: '#2f130a' },
-];
-
-/** The computer's third side: black ants, a little grey on the back where the light catches them. */
-const BLACK_COATS: AntCoat[] = [
-  { leg: '#101010', body: '#262524', back: '#3a3937', head: '#1a1918' },
-  { leg: '#141312', body: '#2e2c2a', back: '#43413e', head: '#201f1d' },
 ];
 
 type AntCoat = (typeof ANT_COATS)[number];
@@ -490,64 +497,172 @@ function paintBee(ctx: CanvasRenderingContext2D, flap: number, army: Army, hair:
   drawRank(ctx, army, -5.7, 1.3, hair);
 }
 
-/** An ant's legs come round to where they began once in this many poses, and its feelers once in twice as many. */
+/** A beetle is all shell: green-black with a bronze shine, or bronze through and through. */
+const BEETLE_COATS = [
+  { leg: '#141710', shell: '#1f2a1a', shine: '#5c6a3a', dark: '#10140c' },
+  { leg: '#17120b', shell: '#3b2c15', shine: '#80652f', dark: '#1d150a' },
+];
+
+type BeetleCoat = (typeof BEETLE_COATS)[number];
+
+/** The legs are short and the shell is wide and round, so at the size of an ant it reads as a pebble that walks and not as a thinner ant. */
+function paintBeetle(ctx: CanvasRenderingContext2D, stride: number, coat: BeetleCoat, army: Army, hair: number) {
+  ctx.strokeStyle = coat.leg;
+  ctx.lineWidth = Math.max(0.6, hair);
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let leg = -1; leg <= 1; leg++) {
+    for (let side = -1; side <= 1; side += 2) {
+      // The same three-and-three as an ant, in shorter steps.
+      const swing = Math.sin(stride + (leg === 0 ? side : -side) * (Math.PI / 2)) * 0.8;
+      ctx.moveTo(leg * 1.4 + 0.4, side * 1.8);
+      ctx.lineTo(leg * 1.9 + 0.4 + swing * 0.4, side * 3.1);
+      ctx.lineTo(leg * 2.4 + 0.4 + swing, side * 3.6);
+    }
+  }
+  ctx.moveTo(3.8, -0.5);
+  ctx.lineTo(4.9, -1.3);
+  ctx.moveTo(3.8, 0.5);
+  ctx.lineTo(4.9, 1.3);
+  ctx.stroke();
+  ctx.fillStyle = coat.dark;
+  ctx.beginPath();
+  blob(ctx, 2.4, 0, 1.3, 1.8);
+  blob(ctx, 3.6, 0, 0.8, 0.9);
+  ctx.fill();
+  ctx.fillStyle = coat.shell;
+  ellipse(ctx, -0.9, 0, 3.6, 2.8);
+  ctx.fill();
+  ctx.fillStyle = coat.shine;
+  ellipse(ctx, -0.6, -1.3, 2.2, 0.6, -0.08);
+  ctx.fill();
+  // Where the two wing cases meet, down the middle of the back.
+  ctx.strokeStyle = coat.dark;
+  ctx.lineWidth = Math.max(0.45, hair);
+  ctx.beginPath();
+  ctx.moveTo(1.6, 0);
+  ctx.lineTo(-4.3, 0);
+  ctx.stroke();
+  drawRank(ctx, army, -4.6, -1, hair);
+}
+
+/** Grey-brown, with dark bands across the back of the abdomen. */
+const SPIDER_COATS = [
+  { leg: '#3a3128', abdomen: '#75664f', band: '#3d342a', head: '#4a3f33' },
+  { leg: '#2f2a24', abdomen: '#655d50', band: '#35302a', head: '#413b33' },
+];
+
+type SpiderCoat = (typeof SPIDER_COATS)[number];
+
+/** Where each of a spider's four legs a side reaches, front to back, and where it bends. */
+const SPIDER_FOOT = [4.6, 2.4, -0.7, -3];
+const SPIDER_KNEE = [3.1, 1.8, 0.1, -1.6];
+
+/** Eight bent legs round a small head and a big round body behind it: nothing else on the board has that outline. */
+function paintSpider(ctx: CanvasRenderingContext2D, stride: number, coat: SpiderCoat, army: Army, hair: number) {
+  ctx.strokeStyle = coat.leg;
+  ctx.lineWidth = Math.max(0.5, hair);
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let leg = 0; leg < 4; leg++) {
+    for (let side = -1; side <= 1; side += 2) {
+      // Four feet down and four up: the first and third of one side step with the second and fourth of the other.
+      const swing = Math.sin(stride + (leg % 2 === 0 ? side : -side) * (Math.PI / 2)) * 0.9;
+      ctx.moveTo(1.9 - leg * 0.4, side * 0.6);
+      ctx.lineTo(SPIDER_KNEE[leg] + swing * 0.5, side * 3);
+      ctx.lineTo(SPIDER_FOOT[leg] + swing, side * 4.4);
+    }
+  }
+  ctx.stroke();
+  ctx.fillStyle = coat.abdomen;
+  ellipse(ctx, -2.5, 0, 2.5, 2.2);
+  ctx.fill();
+  ctx.fillStyle = coat.band;
+  ctx.beginPath();
+  blob(ctx, -1.6, 0, 0.45, 1.9);
+  blob(ctx, -3.3, 0, 0.45, 1.6);
+  ctx.fill();
+  ctx.fillStyle = coat.head;
+  ellipse(ctx, 1.3, 0, 1.6, 1.3);
+  ctx.fill();
+  drawRank(ctx, army, -5, -2.5, hair);
+}
+
+/** How many rows of the sheet a side of each creature takes: one for each coat it comes in, and a bee's one row of wing beats. */
+const COATS = { ant: ANT_COATS.length, beetle: BEETLE_COATS.length, spider: SPIDER_COATS.length, bee: 1 } satisfies Record<Kind, number>;
+
+/** A walker's legs come round to where they began once in this many poses, and an ant's feelers once in twice as many. */
 const STRIDES = 12;
 /** How many openings of a bee's wings are painted, from half to fully. */
 const FLAPS = 8;
-/** The rows of the sheet under the ants' coats that the black ants are on, the bees, and the two shadows. */
-const BLACK_ROW = ANT_COATS.length;
-const BEE_ROW = BLACK_ROW + BLACK_COATS.length;
-const SHADOW_ROW = BEE_ROW + 1;
 /** No part of a unit is further from its middle than this, in its own units: the lines of air behind the fastest ant come nearest. */
 const UNIT_REACH = 10;
 /** A pose is painted this many times the size it is seen at. It is turned to the way its unit faces as it is copied, and a picture turned at its own size goes soft. */
 const SHEET_OVER = 2;
 
+/** The rows of the sheet: each side in the game from the top, its creature's coats in turn, and the shadows last. */
+export function sheetRows(sides: readonly Seat[], kinds: Record<Seat, Kind>): { first: Partial<Record<Seat, number>>; shadow: number } {
+  const first: Partial<Record<Seat, number>> = {};
+  let row = 0;
+  for (const seat of sides) {
+    first[seat] = row;
+    row += COATS[kinds[seat]];
+  }
+  return { first, shadow: row };
+}
+
 /**
  * Several hundred units each drawn as a dozen shapes was most of a crowded
  * frame. A copy of a picture costs a fraction of that, so every pose is painted
- * once: a row for each coat of ant with a walk along it, a row of bees with
- * their wings at each opening, and the shadows of the two.
+ * once: a row for each coat of each side's creature with a walk along it, or
+ * for bees their wings at each opening, and the shadows of walkers and fliers.
+ * Only the sides in the game get rows.
  */
-function sheetOf(scene: Scene, a: Army, b: Army, c: Army): Sheet {
-  const ranks = `${a.speed}|${a.strength}|${b.speed}|${b.strength}|${c.speed}|${c.strength}`;
+function sheetOf(scene: Scene, army: Record<Seat, Army>): Sheet {
+  const { sides } = scene.map;
+  const ranks = sides.map((seat) => `${army[seat].speed}|${army[seat].strength}`).join('|');
   if (scene.sheet && scene.sheet.ranks === ranks) return scene.sheet;
+  const { first, shadow } = sheetRows(sides, scene.kinds);
   const res = scene.scale * UNIT_SCALE * SHEET_OVER;
   const cell = Math.ceil(UNIT_REACH * 2 * res);
   const canvas = document.createElement('canvas');
   canvas.width = cell * STRIDES * 2;
-  canvas.height = cell * (SHADOW_ROW + 1);
+  canvas.height = cell * (shadow + 1);
   const ctx = canvas.getContext('2d');
   if (ctx) {
     // One pixel of the board is this wide here: a leg or a feeler thinner than that is a grey smear.
     const hair = SHEET_OVER / res;
     const pose = (column: number, row: number) => ctx.setTransform(res, 0, 0, res, (column + 0.5) * cell, (row + 0.5) * cell);
-    ANT_COATS.forEach((coat, row) => {
+    const walk = (row: number, paint: (stride: number) => void) => {
       for (let step = 0; step < STRIDES * 2; step++) {
         pose(step, row);
-        paintAnt(ctx, (step * Math.PI * 2) / STRIDES, coat, a, hair);
+        paint((step * Math.PI * 2) / STRIDES);
       }
-    });
-    BLACK_COATS.forEach((coat, row) => {
-      for (let step = 0; step < STRIDES * 2; step++) {
-        pose(step, BLACK_ROW + row);
-        paintAnt(ctx, (step * Math.PI * 2) / STRIDES, coat, c, hair);
+    };
+    for (const seat of sides) {
+      const top = first[seat]!;
+      const ranked = army[seat];
+      const kind = scene.kinds[seat];
+      if (kind === 'ant') ANT_COATS.forEach((coat, row) => walk(top + row, (stride) => paintAnt(ctx, stride, coat, ranked, hair)));
+      else if (kind === 'beetle') BEETLE_COATS.forEach((coat, row) => walk(top + row, (stride) => paintBeetle(ctx, stride, coat, ranked, hair)));
+      else if (kind === 'spider') SPIDER_COATS.forEach((coat, row) => walk(top + row, (stride) => paintSpider(ctx, stride, coat, ranked, hair)));
+      else {
+        for (let step = 0; step < FLAPS; step++) {
+          pose(step, top);
+          paintBee(ctx, 0.5 + (step / (FLAPS - 1)) * 0.5, ranked, hair);
+        }
       }
-    });
-    for (let step = 0; step < FLAPS; step++) {
-      pose(step, BEE_ROW);
-      paintBee(ctx, 0.5 + (step / (FLAPS - 1)) * 0.5, b, hair);
     }
-    pose(0, SHADOW_ROW);
+    pose(0, shadow);
     ctx.fillStyle = 'rgba(22, 30, 12, 0.22)';
     ellipse(ctx, 0, 0, 5.4, 2.3);
     ctx.fill();
-    pose(1, SHADOW_ROW);
+    pose(1, shadow);
     ctx.fillStyle = 'rgba(22, 30, 12, 0.2)';
     ellipse(ctx, 0, 0, 3.4, 1.7);
     ctx.fill();
   }
-  scene.sheet = { canvas, cell, res, ranks };
+  scene.sheet = { canvas, cell, res, ranks, first, shadow };
   return scene.sheet;
 }
 
@@ -888,7 +1003,7 @@ function drawFx(ctx: CanvasRenderingContext2D, scene: Scene, now: number) {
   for (const fx of scene.fx) {
     const t = (now - fx.at) / FX_MS[fx.kind];
     if (fx.kind === 'clash') {
-      // A scuffle kicks up what is underfoot where the two columns met: dust, two clods, and one fleck of each side.
+      // A scuffle kicks up what is underfoot where the two columns met: dust, two clods, and one fleck of each side when it is known who they were.
       ctx.fillStyle = ice ? '#f1f6fa' : '#e2d0aa';
       ctx.globalAlpha = 0.5 * (1 - t);
       for (let puff = 0; puff < 3; puff++) {
@@ -900,7 +1015,8 @@ function drawFx(ctx: CanvasRenderingContext2D, scene: Scene, now: number) {
       const out = easeOut(t);
       for (let fleck = 0; fleck < 4; fleck++) {
         const angle = fleck * 1.57 + fx.at * 1.3;
-        ctx.fillStyle = fleck < 2 ? (ice ? '#8fa3b3' : '#5a4632') : BADGE[fleck === 2 ? 'a' : 'b'].fill;
+        const side = fleck === 2 ? fx.seat : fleck === 3 ? fx.foe : null;
+        ctx.fillStyle = side ? BADGE[side].fill : ice ? '#8fa3b3' : '#5a4632';
         ellipse(ctx, fx.x + Math.cos(angle) * out * 10, fx.y + Math.sin(angle) * out * 5 - Math.sin(Math.PI * t) * (4 + fleck), 1.2, 1.2);
         ctx.fill();
       }
@@ -974,7 +1090,7 @@ interface Marcher {
   /** Its id scrambled, for what is its own: its size, its coat, how high it flies. */
   own: number;
   size: number;
-  /** The row of the sheet its coat is on. Only an ant has one. */
+  /** The row of the sheet its coat is on, or a bee's row of wing beats. */
   row: number;
 }
 
@@ -985,14 +1101,16 @@ const BEE_ROOM = 2.5;
 const SLOTS_SPARE = 400;
 
 /**
- * Ants walk the ground between the huts, so they and the huts are drawn
- * back to front together. Bees fly over everything.
+ * Ants, beetles and spiders walk the ground between the huts, so they and the
+ * huts are drawn back to front together. Bees fly over everything.
  */
 function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmState, view: View, scale: number) {
   const { map, rows, bands } = scene;
+  const sheet = sheetOf(scene, state.army);
   const ants: Marcher[] = [];
   const bees: Marcher[] = [];
   for (const unit of state.units) {
+    const kind = scene.kinds[unit.seat];
     const length = pathLength(map, unit.from, unit.to);
     // Everything that tells one unit from the next is read off its id, so it is the same unit in every frame.
     const own = Math.imul(unit.id, 0x9e3779b1) >>> 0;
@@ -1009,11 +1127,11 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     if (out === 0) continue;
     const p = pathPoint(map, unit.from, unit.to, d / length);
     // A column fills the path it is on, so it thins on a track and spreads on a highway.
-    const reach = (7 * LANE[pathOf(map, unit.from, unit.to)!.kind] + (unit.seat === 'b' ? BEE_ROOM : 0)) * fileOf(slot) + ((own >>> 12) % 7 - 3) * 0.2;
+    const reach = (7 * LANE[pathOf(map, unit.from, unit.to)!.kind] + (kind === 'bee' ? BEE_ROOM : 0)) * fileOf(slot) + ((own >>> 12) % 7 - 3) * 0.2;
     const lane = reach * spreadAt(d, length);
     // While the column is opening out of a door or closing on one, each unit walks the way it is going, not sideways.
     const angle = p.angle + Math.atan(reach * (spreadAt(d + 1, length) - spreadAt(d, length)));
-    (unit.seat === 'b' ? bees : ants).push({
+    (kind === 'bee' ? bees : ants).push({
       x: p.x - Math.sin(p.angle) * lane,
       y: p.y + Math.cos(p.angle) * lane,
       angle,
@@ -1022,7 +1140,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       id: unit.id,
       own,
       size: UNIT_SCALE * (0.92 + ((own >>> 8) % 9) * 0.02),
-      row: unit.seat === 'c' ? BLACK_ROW + ((own >>> 20) % BLACK_COATS.length) : (own >>> 20) % ANT_COATS.length,
+      row: sheet.first[unit.seat]! + ((own >>> 20) % COATS[kind]),
     });
   }
   if (scene.slots.size > state.units.length + SLOTS_SPARE) {
@@ -1034,11 +1152,10 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     scene.slots = live;
   }
 
-  const sheet = sheetOf(scene, state.army.a, state.army.b, state.army.c);
   // Every shadow goes down before any body, or the shadow of one ant falls across the back of the next and a crowd goes dark.
   for (const ant of ants) {
     ctx.globalAlpha = ant.out;
-    stamp(ctx, sheet, scale, 0, SHADOW_ROW, ant.x + 1.2, ant.y + 2, ant.angle, ant.size);
+    stamp(ctx, sheet, scale, 0, sheet.shadow, ant.x + 1.2, ant.y + 2, ant.angle, ant.size);
   }
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   // An ant is drawn over the ants that left before it, wherever the path leads: it is the head of the one behind that shows in a crush, and a column of heads is a column of ants.
@@ -1073,18 +1190,18 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       const painted = scene.scale;
       ctx.drawImage(sprite.canvas, sprite.left / painted, site.y - (site.y - sprite.top / painted) * stand, sprite.canvas.width / painted, (sprite.canvas.height / painted) * stand);
     }
-    drawFlags(ctx, map.scene, site, hut.owner, hut.level, view.now);
+    drawFlags(ctx, map.scene, site, hut.owner, hut.owner && scene.kinds[hut.owner], hut.level, view.now);
   }
 
   // A bee flies, so its shadow is on the ground below and it is drawn above it. They do not all fly at one height.
   for (const bee of bees) {
     ctx.globalAlpha = bee.out;
-    stamp(ctx, sheet, scale, 1, SHADOW_ROW, bee.x + 3, bee.y + 1.5, bee.angle, bee.size);
+    stamp(ctx, sheet, scale, 1, sheet.shadow, bee.x + 3, bee.y + 1.5, bee.angle, bee.size);
   }
   for (const bee of bees) {
     const beat = view.now * 0.05 + bee.id;
     ctx.globalAlpha = bee.out;
-    stamp(ctx, sheet, scale, Math.round(Math.abs(Math.sin(beat)) * (FLAPS - 1)), BEE_ROW, bee.x, bee.y - 9 - ((bee.own >>> 20) % 5) + Math.sin(beat * 0.21) * 1.2, bee.angle, bee.size);
+    stamp(ctx, sheet, scale, Math.round(Math.abs(Math.sin(beat)) * (FLAPS - 1)), bee.row, bee.x, bee.y - 9 - ((bee.own >>> 20) % 5) + Math.sin(beat * 0.21) * 1.2, bee.angle, bee.size);
   }
   ctx.globalAlpha = 1;
   ctx.setTransform(scale, 0, 0, scale, 0, 0);

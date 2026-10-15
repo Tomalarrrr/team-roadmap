@@ -1,19 +1,19 @@
-// Two clients, one room, and whether they end on the same board.
+// Clients in one room, and whether they end on the same board.
 //
 // What has to hold: whatever the connection does to reads and writes, and
 // whatever a player does with their tab, the state a client has run for good
-// is the state the other client has run for good. Each test here plays a game
-// through the functions the board itself calls and compares the two.
+// is the state every other client has run for good. Each test here plays a
+// game through the functions the board itself calls and compares the boards.
 
 import { describe, it, expect } from 'vitest';
 import {
-  MATCH_TICKS,
+  SEATS,
   buildMap,
   countOf,
   decodeOrders,
   encodeOrders,
   newState,
-  otherSeat,
+  sidesOf,
   type Order,
   type OrderKind,
   type Seat,
@@ -26,6 +26,7 @@ import {
   POLL_AWAY_MS,
   SILENT_IDLE_MS,
   SILENT_LIVE_MS,
+  newLockstep,
   orderTick,
   pace,
   restingReport,
@@ -54,24 +55,39 @@ function dice(seed: number): () => number {
 type Seats = Partial<Record<Seat, SwarmSeatState>>;
 
 /**
- * The room, with the two things the database does to a write: stamp it, and
- * under the rules refuse one that takes back what a seat has said or that was
- * built on a write the room has since replaced.
+ * The room, with the things the database does to a write: stamp it, and under
+ * the rules refuse one that takes back what a seat has said, that was built on
+ * a write the room has since replaced, or that promises past the tick the
+ * computer took the seat over from.
  */
 class Room {
-  m: SwarmMatch = { status: 'playing', createdAt: 0, seed: SEED, players: { a: { sessionId: 'a', name: 'A' }, b: { sessionId: 'b', name: 'B' } }, game: 1, startAt: 0 };
+  m: SwarmMatch;
   s: Seats = {};
   history: Seats[] = [{}];
   refused = 0;
   private stamp = 0;
   private rules: boolean;
 
-  constructor(rules: boolean) {
+  /** `people` sit in their seats; `cpu` are the seats the computer plays. */
+  constructor(rules: boolean, people: readonly Seat[] = ['a', 'b'], cpu = '') {
     this.rules = rules;
+    const players = Object.fromEntries(people.map((seat) => [seat, { sessionId: seat, name: seat.toUpperCase() }]));
+    this.m = { status: 'playing', createdAt: 0, seed: SEED, players, game: 1, startAt: 0, ...(cpu && { cpu }) };
+  }
+
+  /** What vacateSeat does to a seat in a game of more than two: the computer plays it after its promise. */
+  leave(seat: Seat) {
+    const stored = this.s[seat];
+    this.m = { ...this.m, out: { ...this.m.out, [seat]: stored?.game === this.m.game ? stored.k : 0 } };
   }
 
   put(seat: Seat, { base, ...state }: SeatWrite): boolean {
     const stored = this.s[seat];
+    const out = this.m.out?.[seat];
+    if (this.rules && out !== undefined && state.game === this.m.game && state.k > out) {
+      this.refused++;
+      return false;
+    }
     if (this.rules && stored && stored.game === this.m.game) {
       const moved = base !== undefined && base !== stored.seq;
       if (moved || state.game !== stored.game || state.k < stored.k || !state.orders.startsWith(stored.orders)) {
@@ -131,7 +147,7 @@ class Tab {
 
   poll() {
     this.view = this.room.read(Math.floor(this.rand() * (this.faults.lag + 1)));
-    for (const seat of ['a', 'b'] as Seat[]) {
+    for (const seat of SEATS) {
       const state = this.view[seat];
       if (state && !sound(state)) this.view = { ...this.view, [seat]: undefined };
     }
@@ -155,18 +171,14 @@ class Tab {
       if (this.flying.length === 0) this.send(restingReport(this.room.m, this.view[this.seat], ++this.seq), 'rest');
       return;
     }
-    if (!this.lock) {
-      const map = buildMap(SEED);
-      const start = newState(map);
-      this.lock = { game: 1, map, orders: { a: [], b: [] }, confirmed: start, shown: start, theirText: '', ownSeq: undefined, sent: [], promised: 0 };
-    }
+    if (!this.lock) this.lock = newLockstep(1, buildMap(SEED, undefined, sidesOf(this.room.m)));
     const lock = this.lock;
-    settle(lock, this.seat, this.view, tick);
+    settle(lock, this.seat, this.room.m, this.view, tick);
     for (let i = 0; i < orders; i++) this.give(tick);
     const key = `1|${lock.orders[this.seat].length}`;
     // One write at a time, as the board sends them: the promise waits for the last to come back.
     if (this.flying.length > 0) return;
-    if (beat || key !== this.sentKey || Math.min(tick, MATCH_TICKS) - this.sentK >= 4) this.send(sending(lock, this.seat, ++this.seq, tick), key);
+    if (beat || key !== this.sentKey || Math.min(tick, lock.map.ticks) - this.sentK >= 4) this.send(sending(lock, this.seat, ++this.seq, tick), key);
   }
 
   private give(tick: number) {
@@ -225,11 +237,11 @@ interface Play {
   tickOf?: (tab: Tab, tick: number) => number | null;
   tabs?: (room: Room, rand: () => number) => Tab[];
   seed?: number;
+  room?: Room;
 }
 
-function play({ rules, ticks, script, tickOf, tabs: make, seed = 5 }: Play) {
+function play({ rules, ticks, script, tickOf, tabs: make, seed = 5, room = new Room(rules) }: Play) {
   const rand = dice(seed);
-  const room = new Room(rules);
   const tabs = make ? make(room, rand) : [new Tab('a', room, rand, ROUGH), new Tab('b', room, rand, ROUGH)];
   for (let tick = -10; tick <= ticks; tick++) {
     script?.(tick, tabs, room);
@@ -304,6 +316,75 @@ describe.each([
   });
 });
 
+describe('more than two sides', () => {
+  it('three people and the computer end on the same board through lost, late and stale requests', () => {
+    const room = new Room(true, ['a', 'b', 'd'], 'c');
+    const { tabs } = play({
+      rules: true,
+      ticks: 400,
+      room,
+      tabs: (room, rand) => [new Tab('a', room, rand, ROUGH), new Tab('b', room, rand, ROUGH), new Tab('d', room, rand, ROUGH)],
+    });
+    const [a, b, d] = tabs;
+    expect((a.lock as Lockstep).map.sides).toEqual(['a', 'b', 'c', 'd']);
+    expect((a.lock as Lockstep).confirmed.tick).toBe(400);
+    for (const tab of tabs) expect(tab.given).toBeGreaterThan(20);
+    expect(board(a)).toBe(board(b));
+    expect(board(a)).toBe(board(d));
+    expect(room.s).not.toHaveProperty('c');
+  });
+
+  it('a person who leaves mid-game is played on by the computer, and the rest end on the same board', () => {
+    const room = new Room(true, ['a', 'b', 'c']);
+    const gone: { tab?: Tab } = {};
+    const { tabs } = play({
+      rules: true,
+      ticks: 450,
+      room,
+      tabs: (room, rand) => [new Tab('a', room, rand, ROUGH), new Tab('b', room, rand, ROUGH), new Tab('c', room, rand, ROUGH)],
+      script: (tick, tabs, room) => {
+        if (tick !== 200) return;
+        gone.tab = tabs.pop();
+        room.leave('c');
+      },
+    });
+    const [a, b] = tabs;
+    const out = room.m.out?.c as number;
+    expect(out).toBeGreaterThan(150);
+    // The confirmed state ran past the seat that stopped writing, which only the computer taking it over allows.
+    expect((a.lock as Lockstep).confirmed.tick).toBe(450);
+    expect((room.s.c as SwarmSeatState).k).toBe(out);
+    expect(board(a)).toBe(board(b));
+    // A write from the tab that left, promising past the tick it left at, is refused.
+    const left = gone.tab as Tab;
+    left.faults = CLEAN;
+    left.flying = [];
+    const refused = room.refused;
+    left.frame(460, true, 0, true);
+    left.frame(461, true, 0, true);
+    expect(room.refused).toBe(refused + 1);
+    expect((room.s.c as SwarmSeatState).k).toBe(out);
+  });
+
+  it('without the computer taking over, the others could not run past the seat that stopped writing', () => {
+    const room = new Room(true, ['a', 'b', 'c']);
+    let stopped = 0;
+    const { tabs } = play({
+      rules: true,
+      ticks: 450,
+      room,
+      tabs: (room, rand) => [new Tab('a', room, rand, ROUGH), new Tab('b', room, rand, ROUGH), new Tab('c', room, rand, ROUGH)],
+      script: (tick, tabs, room) => {
+        if (tick !== 200) return;
+        tabs.pop();
+        stopped = (room.s.c as SwarmSeatState).k;
+      },
+    });
+    expect((tabs[0].lock as Lockstep).confirmed.tick).toBeLessThanOrEqual(200);
+    expect((tabs[0].lock as Lockstep).confirmed.tick).toBeGreaterThanOrEqual(stopped);
+  });
+});
+
 describe('one seat open in two tabs', () => {
   it('plays as one seat, and all three boards agree, when the rules refuse a stale write', () => {
     const { tabs, room } = play({
@@ -352,7 +433,7 @@ describe('sound', () => {
   it('passes what the game writes', () => {
     expect(sound(state({}))).toBe(true);
     expect(sound(state({ orders: '' }))).toBe(true);
-    expect(sound(state({ orders: encodeOrders([{ tick: MATCH_TICKS + 4, kind: 'strength', from: 35, to: 0, risky: true }]) }))).toBe(true);
+    expect(sound(state({ orders: encodeOrders([{ tick: buildMap(SEED).ticks + 4, kind: 'strength', from: 35, to: 0, risky: true }]) }))).toBe(true);
   });
 
   it.each([',', '5:', '5:h01,', '5:h0', ':h01', '5:h012', '5;h01'])('refuses orders %j, which the decoder cannot be trusted with', (orders) => {
@@ -385,41 +466,86 @@ describe('orderTick', () => {
 });
 
 describe('settle', () => {
-  const lock = (): Lockstep => {
-    const map = buildMap(SEED);
-    const start = newState(map);
-    return { game: 1, map, orders: { a: [], b: [] }, confirmed: start, shown: start, theirText: '', ownSeq: undefined, sent: [], promised: 0 };
-  };
+  const lock = (sides: readonly Seat[] = ['a', 'b']): Lockstep => newLockstep(1, buildMap(SEED, undefined, sides));
   const stored = (seq: number, k: number, orders: string): SwarmSeatState => ({ seq, at: 1, game: 1, k, orders });
+  const people = {};
 
   it('runs for good only as far as the other seat has promised, and shows on to now', () => {
     const game = lock();
-    settle(game, 'a', { b: stored(1, 30, '') }, 50);
+    settle(game, 'a', people, { b: stored(1, 30, '') }, 50);
     expect(game.confirmed.tick).toBe(30);
     expect(game.shown.tick).toBe(50);
-    settle(game, 'a', { b: stored(2, 90, '') }, 60);
+    settle(game, 'a', people, { b: stored(2, 90, '') }, 60);
     expect(game.confirmed.tick).toBe(60);
+  });
+
+  it('runs for good only as far as the lowest promise of all the other people', () => {
+    const game = lock(['a', 'b', 'c', 'd']);
+    settle(game, 'b', people, { a: stored(1, 70, ''), c: stored(2, 25, ''), d: stored(3, 40, '') }, 80);
+    expect(game.confirmed.tick).toBe(25);
+    expect(game.shown.tick).toBe(80);
+    settle(game, 'b', people, { a: stored(1, 70, ''), c: stored(4, 90, ''), d: stored(3, 40, '') }, 80);
+    expect(game.confirmed.tick).toBe(40);
+  });
+
+  it('does not wait on a person who has written nothing in this game', () => {
+    const game = lock(['a', 'b', 'c']);
+    settle(game, 'a', people, { b: stored(1, 60, ''), c: { ...stored(2, 400, ''), game: 0 } }, 70);
+    expect(game.confirmed.tick).toBe(0);
+  });
+
+  it('does not wait on a seat the computer plays from the start', () => {
+    const game = lock(['a', 'b', 'c']);
+    settle(game, 'a', { cpu: 'c' }, { b: stored(1, 60, '') }, 70);
+    expect(game.confirmed.tick).toBe(60);
+    settle(game, 'a', { cpu: 'bc' }, {}, 75);
+    expect(game.confirmed.tick).toBe(75);
+  });
+
+  it('waits on a seat that left until the room holds its promise through the tick it left at, and not after', () => {
+    const game = lock(['a', 'b', 'c']);
+    const left = { out: { c: 50 } };
+    settle(game, 'a', left, { b: stored(1, 200, ''), c: stored(2, 35, '') }, 100);
+    expect(game.confirmed.tick).toBe(35);
+    settle(game, 'a', left, { b: stored(1, 200, ''), c: stored(3, 50, '') }, 100);
+    expect(game.confirmed.tick).toBe(100);
+  });
+
+  it('runs the orders of a seat that left up to the tick it left at, and the computer\'s after it', () => {
+    const map = buildMap(SEED, undefined, ['a', 'b', 'c']);
+    const start = newState(map);
+    const hut = start.huts.findIndex((h) => h.owner === 'c');
+    const away = start.huts.findIndex((h) => h.owner === 'a');
+    const orders = encodeOrders([{ tick: 40, kind: 'all', from: hut, to: away }]);
+    const before = lock(['a', 'b', 'c']);
+    settle(before, 'a', { out: { c: 45 } }, { b: stored(1, 60, ''), c: stored(2, 45, orders) }, 60);
+    const after = lock(['a', 'b', 'c']);
+    settle(after, 'a', { out: { c: 39 } }, { b: stored(1, 60, ''), c: stored(2, 39, orders) }, 60);
+    expect(before.confirmed.tick).toBe(60);
+    expect(after.confirmed.tick).toBe(60);
+    expect(before.orders.c).toHaveLength(1);
+    expect(before.confirmed.huts[hut].n).not.toBe(after.confirmed.huts[hut].n);
   });
 
   it('builds its next write on the room it read, and not on a read that crossed a later write of its own', () => {
     const game = lock();
     const first = sending(game, 'a', 7, 10);
-    settle(game, 'a', { a: { ...first, at: 1 } }, 11);
+    settle(game, 'a', people, { a: { ...first, at: 1 } }, 11);
     expect(game.ownSeq).toBe(7);
     sending(game, 'a', 8, 14);
     game.ownSeq = 8;
-    settle(game, 'a', { a: { ...first, at: 1 } }, 15);
+    settle(game, 'a', people, { a: { ...first, at: 1 } }, 15);
     expect(game.ownSeq).toBe(8);
     // Another tab's write is not this tab's past: it is taken in whatever its number.
-    settle(game, 'a', { a: stored(3, 16, '') }, 16);
+    settle(game, 'a', people, { a: stored(3, 16, '') }, 16);
     expect(game.ownSeq).toBe(3);
     expect(game.promised).toBe(16);
   });
 
   it('ignores what the room holds from another game', () => {
     const game = lock();
-    settle(game, 'a', { a: { seq: 5, at: 1, game: 9, k: 400, orders: '4:h01' }, b: { seq: 6, at: 1, game: 9, k: 400, orders: '4:h10' } }, 20);
-    expect(game.orders).toEqual({ a: [], b: [] });
+    settle(game, 'a', people, { a: { seq: 5, at: 1, game: 9, k: 400, orders: '4:h01' }, b: { seq: 6, at: 1, game: 9, k: 400, orders: '4:h10' } }, 20);
+    expect(game.orders).toEqual({ a: [], b: [], c: [], d: [] });
     expect(game.promised).toBe(0);
     expect(game.confirmed.tick).toBe(0);
   });
@@ -444,17 +570,17 @@ describe('restingReport', () => {
 
 describe('sending', () => {
   const lock = (): Lockstep => {
-    const map = buildMap(SEED);
-    const start = newState(map);
-    return { game: 3, map, orders: { a: [{ tick: 9, kind: 'all', from: 0, to: 1 }], b: [] }, confirmed: start, shown: start, theirText: '', ownSeq: undefined, sent: [], promised: 0 };
+    const game = newLockstep(3, buildMap(SEED));
+    game.orders.a.push({ tick: 9, kind: 'all', from: 0, to: 1 });
+    return game;
   };
 
-  it('promises through the tick it is sent on and no further than the match runs', () => {
+  it('promises through the tick it is sent on and no further than the map\'s game runs', () => {
     const game = lock();
     expect(sending(game, 'a', 41, 12)).toEqual({ seq: 41, game: 3, k: 12, orders: '9:a01' });
     expect(game.promised).toBe(12);
     expect(sending(game, 'a', 42, 7).k).toBe(12);
-    expect(sending(game, 'a', 43, MATCH_TICKS + 50).k).toBe(MATCH_TICKS);
+    expect(sending(game, 'a', 43, game.map.ticks + 50).k).toBe(game.map.ticks);
     expect(sending(lock(), 'a', 44, -20).k).toBe(0);
   });
 
@@ -488,10 +614,9 @@ describe('pace', () => {
 });
 
 describe('the board the tests play on', () => {
-  it('is one where both seats hold something to give orders from', () => {
-    const start = newState(buildMap(SEED));
-    expect(countOf(start, 'a').huts).toBeGreaterThan(0);
-    expect(countOf(start, otherSeat('a')).huts).toBeGreaterThan(0);
+  it.each([[['a', 'b']], [['a', 'b', 'c']], [['a', 'b', 'c', 'd']]] as Seat[][][])('is one where every seat of %j holds something to give orders from', (sides) => {
+    const start = newState(buildMap(SEED, undefined, sides));
+    for (const seat of sides) expect(countOf(start, seat).huts).toBeGreaterThan(0);
   });
 });
 

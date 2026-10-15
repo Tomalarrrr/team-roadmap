@@ -8,7 +8,7 @@
 // without limit; and the life on the map is the same for the same seed.
 
 import { describe, it, expect } from 'vitest';
-import { cloneState, newState, pathLength, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
+import { MATCH_TICKS, SEATS, cloneState, kindsOf, newState, pathLength, type Kind, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
 import { pathPoint, riverGap, riverOf } from '../swarm/swarmSceneKit';
 import {
   BANNER_GAP_MS,
@@ -55,6 +55,7 @@ function mapOf(scene: SwarmMap['scene'] = 'meadow'): SwarmMap {
   return {
     id: 'meadow',
     sides: ['a', 'b'],
+    homes: (['a', 'b'] as const).map((seat) => sites.findIndex((site) => site.owner === seat)),
     scene,
     sites,
     links: sites.map((_, i) => [i - 1, i + 1].filter((j) => j >= 0 && j < sites.length)),
@@ -62,8 +63,13 @@ function mapOf(scene: SwarmMap['scene'] = 'meadow'): SwarmMap {
     rivers: [[{ x: 500, y: 0 }, { x: 500, y: 660 }]],
     w: 1000,
     h: 660,
+    size: 'small',
+    ticks: MATCH_TICKS,
   };
 }
+
+/** What each side is drawn as when nobody has picked: ants, bees, beetles and spiders, in seat order. */
+const LOOKS = kindsOf({ players: {} }, SEATS);
 
 function unit(id: number, seat: Seat, from: number, to: number, d: number, dest = to): Unit {
   return { id, seat, from, to, dest, d };
@@ -222,7 +228,7 @@ describe('the callout queue', () => {
 describe('feelStep', () => {
   /** A feel that has seen `state`, ready to be told about the tick after it. */
   function seen(map: SwarmMap, state: SwarmState) {
-    const feel = newFeel(map, 7);
+    const feel = newFeel(map, 7, LOOKS);
     feelStep(feel, map, state, 'a', 0);
     return feel;
   }
@@ -484,7 +490,7 @@ describe('feelStep', () => {
 
   it('puts a butterfly up when a unit passes close, away from the unit, and leaves a distant one alone', () => {
     const map = mapOf();
-    const feel = newFeel(map, 7);
+    const feel = newFeel(map, 7, LOOKS);
     const [near, far] = feel.ambient.critters;
     // Each stands at the middle of its own stretch of road, at the time it will be looked at.
     const home = critterPoint(near, 5000);
@@ -515,9 +521,9 @@ describe('the dust of a column', () => {
   }
 
   /** What `ticks` ticks of these units standing where they are leave in the air. */
-  function raised(units: Unit[], ticks: number, scene: SwarmMap['scene'] = 'scrub') {
+  function raised(units: Unit[], ticks: number, scene: SwarmMap['scene'] = 'scrub', looks: Record<Seat, Kind> = LOOKS) {
     const map = mapOf(scene);
-    const feel = newFeel(map, 1);
+    const feel = newFeel(map, 1, looks);
     let state = newState(map);
     state.units = units;
     for (let tick = 0; tick < ticks; tick++) {
@@ -535,6 +541,17 @@ describe('the dust of a column', () => {
       { from: 1, to: 0, seat: 'b', count: 2, rear: 50, head: 54 },
       { from: 0, to: 1, seat: 'b', count: 1, rear: 70, head: 70 },
       { from: 4, to: 5, seat: 'a', count: 1, rear: 10, head: 10 },
+    ]);
+  });
+
+  it('keeps the columns of all four sides apart where they share a path and a way', () => {
+    const state = newState(mapOf());
+    state.units = [...column(2, 'c', 0, 1, 20), ...column(3, 'd', 0, 1, 30), unit(950, 'a', 0, 2, 10), unit(951, 'b', 0, 1, 60)];
+    expect(marchesOf(state)).toEqual([
+      { from: 0, to: 1, seat: 'c', count: 2, rear: 20, head: 24 },
+      { from: 0, to: 1, seat: 'd', count: 3, rear: 30, head: 38 },
+      { from: 0, to: 2, seat: 'a', count: 1, rear: 10, head: 10 },
+      { from: 0, to: 1, seat: 'b', count: 1, rear: 60, head: 60 },
     ]);
   });
 
@@ -594,9 +611,19 @@ describe('the dust of a column', () => {
     expect(raised(column(18, 'b', 2, 3, 64, 2), 6)).toHaveLength(0);
   });
 
+  it('flies whichever side is drawn as bees, whatever its seat', () => {
+    const swapped: Record<Seat, Kind> = { ...LOOKS, a: 'bee', b: 'ant' };
+    const bees = raised(column(20, 'a', 0, 1, 40), 6, 'scrub', swapped);
+    expect(bees.length).toBeGreaterThan(0);
+    expect(bees.every((puff) => puff.faint)).toBe(true);
+    const ants = raised(column(20, 'b', 0, 1, 40), 6, 'scrub', swapped);
+    expect(ants.length).toBeGreaterThan(0);
+    expect(ants.some((puff) => puff.faint)).toBe(false);
+  });
+
   it('never holds more than its limit, and lets go of all of it once the column has gone', () => {
     const map = mapOf('scrub');
-    const feel = newFeel(map, 1);
+    const feel = newFeel(map, 1, LOOKS);
     let state = newState(map);
     state.units = [0, 1, 4].flatMap((from) => [...column(30, 'a', from, from + 1, 30, 3), ...column(30, 'a', from + 1, from, 30, 3)]);
     let most = 0;
@@ -637,37 +664,37 @@ describe('the life on the map', () => {
   it('is the same for the same seed and different for another', () => {
     for (const scene of ['meadow', 'scrub', 'valley', 'ice', 'terrace'] as const) {
       const map = mapOf(scene);
-      const one = newFeel(map, 11).ambient;
-      expect(newFeel(map, 11).ambient).toEqual(one);
-      expect(Array.from(newFeel(map, 12).ambient.motes)).not.toEqual(Array.from(one.motes));
+      const one = newFeel(map, 11, LOOKS).ambient;
+      expect(newFeel(map, 11, LOOKS).ambient).toEqual(one);
+      expect(Array.from(newFeel(map, 12, LOOKS).ambient.motes)).not.toEqual(Array.from(one.motes));
       expect(one.motes.length).toBeGreaterThan(0);
     }
   });
 
   it('has each scene\'s own: grass and butterflies in the meadow, reeds and dragonflies by the river', () => {
-    const meadow = newFeel(mapOf('meadow'), 3).ambient;
+    const meadow = newFeel(mapOf('meadow'), 3, LOOKS).ambient;
     expect(meadow.blades.length / 3).toBe(420);
     expect(meadow.critters.map((critter) => critter.kind)).toEqual(['butterfly', 'butterfly', 'butterfly', 'butterfly']);
     expect(meadow.reeds).toHaveLength(0);
-    const valley = newFeel(mapOf('valley'), 3).ambient;
+    const valley = newFeel(mapOf('valley'), 3, LOOKS).ambient;
     expect(valley.blades).toHaveLength(0);
     expect(valley.reeds.length / 4).toBe(48);
     expect(valley.streams.map((stream) => stream.length / 5)).toEqual([riverOf(mapOf().rivers[0]).pts.length]);
-    expect(newFeel(mapOf('ice'), 3).ambient.drifts.length / 3).toBeGreaterThan(0);
+    expect(newFeel(mapOf('ice'), 3, LOOKS).ambient.drifts.length / 3).toBeGreaterThan(0);
     expect(meadow.drifts).toHaveLength(0);
     expect(valley.critters.map((critter) => critter.kind)).toEqual(['dragonfly', 'dragonfly', 'dragonfly', 'dragonfly']);
-    expect(newFeel(mapOf('ice'), 3).ambient.critters).toEqual([]);
+    expect(newFeel(mapOf('ice'), 3, LOOKS).ambient.critters).toEqual([]);
   });
 
   it('keeps the wind\'s grass off the paths and the reeds on the banks of the river', () => {
     const map = mapOf('meadow');
-    const { blades } = newFeel(map, 3).ambient;
+    const { blades } = newFeel(map, 3, LOOKS).ambient;
     // Every path of this map lies along y = 300 between the first hut and the last.
     for (let i = 0; i < blades.length; i += 3) {
       const onRoad = blades[i] > 100 && blades[i] < 900 && Math.abs(blades[i + 1] - 300) < 20;
       expect(onRoad).toBe(false);
     }
-    const { reeds } = newFeel(mapOf('valley'), 3).ambient;
+    const { reeds } = newFeel(mapOf('valley'), 3, LOOKS).ambient;
     // Out of the water and within the wet margin beside it, and not under the ford that crosses at y = 300.
     const rivers = map.rivers.map(riverOf);
     for (let i = 0; i < reeds.length; i += 4) {
@@ -679,12 +706,12 @@ describe('the life on the map', () => {
   });
 
   it('wheels the terrace birds over the fort', () => {
-    expect(newFeel(mapOf('terrace'), 3).ambient.hub).toEqual({ x: 580, y: 300 });
+    expect(newFeel(mapOf('terrace'), 3, LOOKS).ambient.hub).toEqual({ x: 580, y: 300 });
   });
 
   it('moves a creature as a function of the clock alone, and keeps it near its home', () => {
     for (const scene of ['meadow', 'valley'] as const) {
-      const [critter] = newFeel(mapOf(scene), 5).ambient.critters;
+      const [critter] = newFeel(mapOf(scene), 5, LOOKS).ambient.critters;
       for (let now = 0; now < 20000; now += 333) expect(critterPoint(critter, now)).toEqual(critterPoint(critter, now));
       expect(critterPoint(critter, 123456)).not.toEqual(critterPoint(critter, 125456));
       for (let now = 0; now < 60000; now += 777) {

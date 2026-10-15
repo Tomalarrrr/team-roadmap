@@ -8,44 +8,53 @@ import {
   putSeat,
   recordResult,
   seatOf,
+  setComputer,
+  setKind,
   startMatch,
   vacateSeat,
   type SwarmRoom,
 } from '../../api/swarmApi';
 import {
   COUNTDOWN_MS,
-  MATCH_TICKS,
+  KINDS,
   SEATS,
+  SIZE_IDS,
   TICK_MS,
   advance,
   buildMap,
+  computerOf,
   MAP_IDS,
   countOf,
-  newState,
-  otherSeat,
+  kindsOf,
   sendSize,
+  sidesOf,
+  sizeOf,
   upgradeCost,
+  type Kind,
   type OrderKind,
   type Seat,
-  type Side,
   type MapId,
+  type SizeId,
   type SwarmMatch,
   type SwarmState,
 } from '../../swarmGameLogic';
 import { BADGE } from './swarmSceneKit';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
+import { columnOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
-import { orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
+import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
 import styles from './SwarmGame.module.css';
 
-const SIDE: Record<Side, { colour: string; army: string }> = {
-  a: { colour: BADGE.a.fill, army: 'Ants' },
-  b: { colour: BADGE.b.fill, army: 'Bees' },
-  c: { colour: BADGE.c.fill, army: 'Black ants' },
+/** What a side drawn as each creature is called, and one of its units. */
+const KIND_NAME: Record<Kind, { many: string; one: string }> = {
+  ant: { many: 'Ants', one: 'ant' },
+  bee: { many: 'Bees', one: 'bee' },
+  beetle: { many: 'Beetles', one: 'beetle' },
+  spider: { many: 'Spiders', one: 'spider' },
 };
 
-const THIRD_ABOUT = 'The computer plays black ants from a base in the middle of the board, and fights both of you.';
+const SIZE_NAME: Record<SizeId, string> = { small: 'Small', medium: 'Medium', large: 'Large' };
 
 /** What the lobby says of each map: its name, and the one thing that is different about it. */
 const MAPS: Record<MapId, { name: string; about: string }> = {
@@ -54,16 +63,27 @@ const MAPS: Record<MapId, { name: string; about: string }> = {
   bridges: { name: 'Two Bridges', about: 'A river splits the map. Cross dry by a bridge, or wade the ford and lose one in four.' },
   guns: { name: 'Frozen Guns', about: 'Two lines of cannon guard the middle and fire on whoever marches at them.' },
   hill: { name: 'The Hill', about: 'A fort on high ground. The climb is slow and its defenders each take two to kill.' },
+  crossroads: { name: 'Crossroads', about: 'Cannon on the busiest crossings and forts half way out. Roads round the edge are fast, tracks through the middle slow.' },
 };
 
 /** The layout each map shows in the lobby. Any seed would do; one keeps the picture still between visits. */
 const THUMB_SEED = 1;
 
-function MapThumb({ id, third }: { id: MapId; third: boolean }) {
+/**
+ * The seats a map picture is laid out for, as their letters. A room with one
+ * person in it shows the map as two would play it, since a game needs two.
+ */
+function thumbSeats(sides: readonly Seat[]): string {
+  return (sides.length < 2 ? SEATS.slice(0, 2) : sides).join('');
+}
+
+// The seats come as a string so that a new array each render does not draw the picture again.
+function MapThumb({ id, seats, size }: { id: MapId; seats: string; size: SizeId | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useLayoutEffect(() => {
-    drawThumb(ref.current!, buildMap(THUMB_SEED, id, third), THUMB_SEED);
-  }, [id, third]);
+    const sides = SEATS.filter((seat) => seats.includes(seat));
+    drawThumb(ref.current!, buildMap(THUMB_SEED, id, sides, size ?? undefined), THUMB_SEED);
+  }, [id, seats, size]);
   return <canvas ref={ref} className={styles.mapThumb} />;
 }
 
@@ -72,12 +92,12 @@ const HOW_TO =
   'Every hut you hold breeds units. Drag from your hut to any other to send half of it. Rest on the target for a moment, or hold Shift, to send all of it. Sweep over more of your huts on the way to send from them too, or over spikes or a ford to take that short cut. Units fight one for one. Tap a hut to upgrade it. Take every hut to win.';
 
 /** The shuffle tile: every map's picture in a strip, since any of them may come up. */
-function ShuffleThumb({ third }: { third: boolean }) {
+function ShuffleThumb({ seats, size }: { seats: string; size: SizeId | null }) {
   return (
     <span className={`${styles.mapThumb} ${styles.shuffleThumb}`}>
       {MAP_IDS.map((id) => (
         <span key={id}>
-          <MapThumb id={id} third={third} />
+          <MapThumb id={id} seats={seats} size={size} />
         </span>
       ))}
     </span>
@@ -87,11 +107,17 @@ function ShuffleThumb({ third }: { third: boolean }) {
 interface MapPickerProps {
   pick: MapId | null;
   onPick: (id: MapId | null) => void;
-  third: boolean;
-  onThird: (third: boolean) => void;
+  size: SizeId | null;
+  onSize: (size: SizeId | null) => void;
+  /** The seats the game would be played from. */
+  sides: readonly Seat[];
 }
 
-function MapPicker({ pick, onPick, third, onThird }: MapPickerProps) {
+function MapPicker({ pick, onPick, size, onSize, sides }: MapPickerProps) {
+  const seats = thumbSeats(sides);
+  const four = sides.length === 4;
+  // The size the game would be played at: as sizeOf has it, four sides are never played small.
+  const shown = size === null ? pick && sizeOf(pick, sides.length) : four && size === 'small' ? 'medium' : size;
   return (
     <>
       <div className={styles.mapRow} role="radiogroup" aria-label="Map">
@@ -103,17 +129,27 @@ function MapPicker({ pick, onPick, third, onThird }: MapPickerProps) {
             aria-checked={id === pick}
             onClick={() => onPick(id)}
           >
-            {id ? <MapThumb id={id} third={third} /> : <ShuffleThumb third={third} />}
+            {id ? <MapThumb id={id} seats={seats} size={size} /> : <ShuffleThumb seats={seats} size={size} />}
             {id ? MAPS[id].name : 'Shuffle'}
           </button>
         ))}
       </div>
       <span className={styles.rules}>{pick ? MAPS[pick].about : 'A different map each game.'}</span>
-      <label className={styles.thirdToggle}>
-        <input type="checkbox" checked={third} onChange={(e) => onThird(e.target.checked)} />
-        Add the computer as a third side
-      </label>
-      {third && <span className={styles.rules}>{THIRD_ABOUT}</span>}
+      <div className={styles.choiceRow} role="radiogroup" aria-label="Size">
+        {/* With the map left to the seed, there is no one size that is the map's own to show. */}
+        {(pick ? SIZE_IDS : [null, ...SIZE_IDS]).map((each) => (
+          <button
+            key={each ?? 'own'}
+            className={`${styles.choiceBtn} ${each === shown ? styles.choiceBtnOn : ''}`}
+            role="radio"
+            aria-checked={each === shown}
+            disabled={four && each === 'small'}
+            onClick={() => onSize(each)}
+          >
+            {each ? SIZE_NAME[each] : "Each map's own size"}
+          </button>
+        ))}
+      </div>
     </>
   );
 }
@@ -182,18 +218,16 @@ function rememberRoom(code: string | null) {
 
 interface Hud {
   count: number | null;
-  secs: number;
-  hutsA: number;
-  hutsB: number;
-  hutsC: number;
-  unitsA: number;
-  unitsB: number;
-  unitsC: number;
+  /** Left on the clock; null until there is a game on the board to time. */
+  secs: number | null;
+  /** Each side's huts and units on the board. */
+  counts: Partial<Record<Seat, { huts: number; units: number }>>;
+  starts: Partial<Record<Seat, Start>>;
   /** A hut is in hand, with its upgrades showing. */
   picked: boolean;
 }
 
-const HUD_IDLE: Hud = { count: null, secs: 0, hutsA: 1, hutsB: 1, hutsC: 1, unitsA: 0, unitsB: 0, unitsC: 0, picked: false };
+const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -237,7 +271,9 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   const [hud, setHud] = useState<Hud>(HUD_IDLE);
   // null leaves the map to the seed, so each game is played somewhere new.
   const [mapPick, setMapPick] = useState<MapId | null>(null);
-  const [thirdPick, setThirdPick] = useState(false);
+  // null plays the map at its own size.
+  const [sizePick, setSizePick] = useState<SizeId | null>(null);
+  const [computers, setComputers] = useState(1);
   const [full, setFull] = useState(false);
 
   const [clock] = useState(() => createServerClock(() => performance.now()));
@@ -280,18 +316,19 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       status: 'playing',
       createdAt: Date.now(),
       seed: crypto.getRandomValues(new Uint32Array(1))[0],
-      players: { a: { sessionId, name: userName }, b: { sessionId: 'computer', name: 'Computer' } },
+      players: { a: { sessionId, name: userName } },
       game: (soloRef.current?.game ?? 0) + 1,
       startAt: performance.now() + COUNTDOWN_MS,
       ...(mapPick && { map: mapPick }),
-      ...(thirdPick && { third: true }),
+      ...(sizePick && { size: sizePick }),
+      cpu: SEATS.slice(1, 1 + computers).join(''),
     };
     soloRef.current = next;
     setError('');
     setHud(HUD_IDLE);
     setMatch(next);
     setSolo(true);
-  }, [sessionId, userName, mapPick, thirdPick]);
+  }, [sessionId, userName, mapPick, sizePick, computers]);
 
   // An invite link (?swarm=CODE) joins straight away. The parameter is taken
   // off the URL first, so a reload or a second mount does not join again.
@@ -337,7 +374,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     let sentK = -1;
     let sentAt = 0;
     let recorded = 0;
-    const ear: Ear = { seq: undefined, at: performance.now(), playing: false };
+    const ears: Partial<Record<Seat, Ear>> = {};
+    let rejoining = false;
     let hudKey = '';
     let selected: number | null = null;
     /** A place on the board in world units, a finger's reach there, and how many world units a CSS pixel is. */
@@ -380,6 +418,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     let live = false;
     let tickNow = 0;
     let seatNow: Seat = 'a';
+    let starts: Partial<Record<Seat, Start>> = {};
 
     const leaveRoom = (message: string) => {
       rememberRoom(null);
@@ -431,7 +470,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       setOffline(false);
       const seat = next && seatOf(next.m, sessionId);
       if (!next || !seat) {
-        leaveRoom('That room has closed.');
+        leaveRoom(next ? 'You no longer have a seat in that room.' : 'That room has closed.');
         return;
       }
       // Anyone can write a seat. A state the game cannot be run on is dropped
@@ -447,10 +486,29 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       if (mine) clock.seen(mine.seq, mine.at);
       if (clock.now() !== null) setSynced(true);
 
-      const opp = otherSeat(seat);
-      const theirs = next.s?.[opp];
-      if (silent(ear, Boolean(next.m.players[opp]), theirs?.seq, next.m.status === 'playing', performance.now())) {
-        vacateSeat(code, opp).catch((err) => console.warn('[Swarm] Could not release the silent seat:', err));
+      // A seat the computer took over has nothing to be silent about, and one
+      // that has been taken over itself is only watching.
+      const away = next.m.out?.[seat] !== undefined;
+      const now = performance.now();
+      for (const other of SEATS) {
+        if (other === seat) continue;
+        const ear = (ears[other] ??= { seq: undefined, at: now, playing: false });
+        const theirs = next.s?.[other];
+        const seated = Boolean(next.m.players[other]) && next.m.out?.[other] === undefined && !away;
+        if (silent(ear, seated, theirs?.seq, next.m.status === 'playing', now)) {
+          const k = theirs?.game === next.m.game ? theirs.k : 0;
+          vacateSeat(code, other, k).catch((err) => console.warn('[Swarm] Could not release the silent seat:', err));
+        }
+      }
+
+      // Taken over in a game and still here at the end of it: back in for the next one.
+      if (away && next.m.status === 'finished' && !rejoining) {
+        rejoining = true;
+        joinRoom(code, sessionId, userName)
+          .catch((err: Error) => setError(err.message))
+          .finally(() => {
+            rejoining = false;
+          });
       }
     };
 
@@ -473,8 +531,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           if (stopped) return;
           console.warn('[Swarm] Room read failed:', err);
           if (++failures >= 3) setOffline(true);
-          // Silence is only counted against the other seat while this one can hear.
-          ear.at = performance.now();
+          // Silence is only counted against the other seats while this one can hear.
+          for (const ear of Object.values(ears)) ear.at = performance.now();
         }
         pollBusy = false;
       }
@@ -525,7 +583,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         });
     };
 
-    const finishSolo = (winner: Side | 'draw') => {
+    const finishSolo = (winner: Seat | 'draw') => {
       const current = soloRef.current;
       if (!current || current.status !== 'playing') return;
       soloRef.current = { ...current, status: 'finished', winner };
@@ -537,33 +595,22 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       if (!m) return;
       const seat = solo ? 'a' : seatOf(m, sessionId);
       if (!seat) return;
-      const opp = otherSeat(seat);
       const now = solo ? performance.now() : clock.now();
       const playing = m.status === 'playing' && now !== null;
+      // Taken over by the computer: the game goes on in front of this seat, but it has no say in it.
+      const away = m.out?.[seat] !== undefined;
 
       // A finished game stays on the board until the next one starts.
       if (playing && game?.game !== m.game) {
-        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), m.third === true);
-        const start = newState(map);
-        game = {
-          game: m.game,
-          map,
-          scene: newScene(map, m.seed),
-          orders: { a: [], b: [] },
-          confirmed: start,
-          shown: start,
-          theirText: '',
-          ownSeq: undefined,
-          sent: [],
-          promised: 0,
-          fxTick: 0,
-        };
+        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size));
+        game = { ...newLockstep(m.game, map), scene: newScene(map, m.seed, kindsOf(m, map.sides)), fxTick: 0 };
+        starts = startsOf(map);
         selected = null;
         drag = null;
       }
       const current = playing && game?.game === m.game;
       const tick = current ? Math.floor((now - m.startAt) / TICK_MS) : game?.shown.tick ?? 0;
-      live = Boolean(current) && tick >= 0 && game?.shown.winner === null;
+      live = Boolean(current) && tick >= 0 && game?.shown.winner === null && !away;
       tickNow = tick;
       seatNow = seat;
 
@@ -575,11 +622,11 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           addEvents(active.scene, state, state.events, performance.now(), seat);
         };
         if (solo) {
-          advance(active.confirmed, active.map, active.orders, tick, opp, harvest);
+          advance(active.confirmed, active.map, active.orders, tick, computerOf(m), harvest);
           active.shown = active.confirmed;
           if (active.confirmed.winner !== null) finishSolo(active.confirmed.winner);
         } else {
-          settle(active, seat, room?.s, tick, harvest);
+          settle(active, seat, m, room?.s, tick, harvest);
           const winner = active.confirmed.winner;
           if (winner !== null && recorded !== m.game && code) {
             recorded = m.game;
@@ -588,34 +635,27 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               recorded = 0;
             });
           }
-          const k = Math.max(active.promised, Math.min(tick, MATCH_TICKS));
-          report(seat, `${m.game}|${active.orders[seat].length}`, k, (mySeq) => sending(active, seat, mySeq, tick));
+          // The rules refuse a seat that was taken over any promise past the tick it was taken at.
+          if (!away) {
+            const k = Math.max(active.promised, Math.min(tick, active.map.ticks));
+            report(seat, `${m.game}|${active.orders[seat].length}`, k, (mySeq) => sending(active, seat, mySeq, tick));
+          }
         }
-      } else {
+      } else if (!(away && m.status === 'playing')) {
         report(seat, 'rest', 0, (mySeq) => restingReport(m, room?.s?.[seat], mySeq));
       }
 
       const next: Hud = {
         count: playing && now < m.startAt ? Math.ceil((m.startAt - now) / 1000) : null,
-        secs: Math.ceil(((MATCH_TICKS - Math.min(Math.max(tick, 0), MATCH_TICKS)) * TICK_MS) / 1000),
-        hutsA: 1,
-        hutsB: 1,
-        hutsC: 1,
-        unitsA: 0,
-        unitsB: 0,
-        unitsC: 0,
+        secs: null,
+        counts: {},
+        starts,
         picked: false,
       };
       if (game) {
-        const a = countOf(game.shown, 'a');
-        const b = countOf(game.shown, 'b');
-        const c = countOf(game.shown, 'c');
-        next.hutsA = a.huts;
-        next.hutsB = b.huts;
-        next.hutsC = c.huts;
-        next.unitsA = a.units;
-        next.unitsB = b.units;
-        next.unitsC = c.units;
+        const ticks = game.map.ticks;
+        next.secs = Math.ceil(((ticks - Math.min(Math.max(tick, 0), ticks)) * TICK_MS) / 1000);
+        for (const side of game.map.sides) next.counts[side] = countOf(game.shown, side);
         // A hut lost while it was in hand is put down.
         if (selected !== null && game.shown.huts[selected].owner !== seat) selected = null;
         if (drag) drag.sources = drag.sources.filter((hut) => game?.shown.huts[hut].owner === seat);
@@ -849,14 +889,15 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       unfollow?.();
       controlsRef.current = null;
     };
-  }, [code, solo, sessionId, clock]);
+  }, [code, solo, sessionId, userName, clock]);
 
   // Leaving is done here and not in an effect's cleanup: StrictMode runs
   // cleanups on mount, which would give the seat up the moment it was taken.
   const handleClose = useCallback(() => {
     if (code && mySeat) {
       rememberRoom(null);
-      vacateSeat(code, mySeat).catch((err) => console.warn('[Swarm] Could not leave the room:', err));
+      // 0 leaves the tick to the room: the seat's own promise there is the one the other clients have run to.
+      vacateSeat(code, mySeat, 0).catch((err) => console.warn('[Swarm] Could not leave the room:', err));
     }
     onClose();
   }, [code, mySeat, onClose]);
@@ -937,28 +978,78 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     if (solo) return startSolo();
     const now = clock.now();
     if (!code || now === null) return;
-    startMatch(code, now, mapPick, thirdPick).catch((err: Error) => setError(err.message));
+    startMatch(code, now, mapPick, sizePick).catch((err: Error) => setError(err.message));
   };
 
-  const nameOf = (side: Side) => {
-    if (side === 'c') return 'Computer';
-    const name = match?.players[side]?.name ?? 'Nobody';
-    return side === mySeat ? `${name} (you)` : name;
+  const pickMap = (id: MapId | null) => {
+    setMapPick(id);
+    // A size picked for one map is not carried to the next: each is drawn for its own.
+    setSizePick(null);
   };
 
-  const resultText = () => {
-    if (!match?.winner) return '';
-    if (match.gone) {
-      return match.gone === mySeat ? 'You left the game' : `${match.players[match.gone]?.name} left the game`;
-    }
-    if (match.winner === 'draw') return 'A draw: the same huts and the same numbers on the clock';
+  const pickKind = (value: string) => {
+    const kind = KINDS.find((each) => each === value);
+    if (code && kind) setKind(code, sessionId, kind).catch((err: Error) => setError(err.message));
+  };
+
+  const toggleComputer = (seat: Seat, on: boolean) => {
+    if (code) setComputer(code, seat, on).catch((err: Error) => setError(err.message));
+  };
+
+  const sides = match ? sidesOf(match) : [];
+  const kinds = match ? kindsOf(match, sides) : null;
+
+  // A side with no person in it is one the computer plays.
+  const nameOf = (seat: Seat) => {
+    const player = match?.players[seat];
+    if (!player) return 'Computer';
+    if (seat === mySeat) return `${player.name} (you)`;
+    return match?.out?.[seat] === undefined ? player.name : `Computer for ${player.name}`;
+  };
+
+  const resultLines = (): string[] => {
+    if (!match?.winner || !kinds) return [];
+    if (match.gone) return [match.gone === mySeat ? 'You left the game' : `${match.players[match.gone]?.name} left the game`];
     const how = hud.secs === 0 ? ' on the clock' : '';
-    if (match.winner === 'c') return `The computer's black ants won${how}`;
-    return match.winner === mySeat ? `You won${how}` : `${match.players[match.winner]?.name} won${how}`;
+    const winner = match.winner;
+    let first: string;
+    if (winner === 'draw') first = `A draw: level on huts and units${how}`;
+    else if (winner === mySeat) first = `You won${how}`;
+    else if (!match.players[winner]) first = `The computer's ${KIND_NAME[kinds[winner]].many.toLowerCase()} won${how}`;
+    else first = `${nameOf(winner)} won${how}`;
+    const left = SEATS.filter((seat) => match.out?.[seat] !== undefined).map((seat) =>
+      seat === mySeat ? 'You left; the computer took over' : `${match.players[seat]?.name} left; the computer took over`
+    );
+    return [first, ...left];
   };
 
-  const tally = (seat: Side, huts: number, units: number) =>
-    `${huts} ${huts === 1 ? 'hut' : 'huts'}, ${units} ${units === 1 ? SIDE[seat].army.toLowerCase().slice(0, -1) : SIDE[seat].army.toLowerCase()}`;
+  const tally = (seat: Seat) => {
+    const count = hud.counts[seat];
+    if (!count || !kinds) return '';
+    const { many, one } = KIND_NAME[kinds[seat]];
+    return `${count.huts} ${count.huts === 1 ? 'hut' : 'huts'}, ${count.units} ${count.units === 1 ? one : many.toLowerCase()}`;
+  };
+
+  const sideTag = (seat: Seat, end: boolean) => {
+    const parts = [
+      <span key="dot" className={styles.dot} style={{ background: BADGE[seat].fill }} />,
+      <span key="name" className={styles.sideName}>{nameOf(seat)}</span>,
+      <span key="count" className={styles.sideCount}>{tally(seat)}</span>,
+    ];
+    return (
+      <span key={seat} className={styles.side}>
+        {end ? parts.reverse() : parts}
+      </span>
+    );
+  };
+  const column = (where: 'left' | 'middle' | 'right') =>
+    sides
+      .flatMap((seat) => {
+        const start = hud.starts[seat];
+        return start && columnOf(start) === where ? [{ seat, y: start.y }] : [];
+      })
+      .sort((p, q) => p.y - q.y)
+      .map(({ seat }) => sideTag(seat, where === 'right'));
 
   // The popup fills the window either way; where the browser can also drop its
   // own bars for one element (an iPhone cannot), it is asked to.
@@ -974,8 +1065,10 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     if (popup.requestFullscreen) popup.requestFullscreen().catch(() => {}); // slop-check-ignore: a refusal changes nothing, the board already fills the window
   };
 
-  const bothSeated = Boolean(match?.players.a && match.players.b);
-  const canStart = solo || (bothSeated && synced);
+  // Whoever left the last game partway through, and has not come back, is not in the next (see startMatch).
+  const nextSides = match ? SEATS.filter((seat) => match.cpu?.includes(seat) || (match.players[seat] && match.out?.[seat] === undefined)) : [];
+  const canStart = solo || (nextSides.length >= 2 && synced);
+  const myStart = mySeat ? hud.starts[mySeat] : undefined;
   return (
     <div
       ref={popupRef}
@@ -983,7 +1076,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       style={full && wide ? undefined : { left: position.x, top: position.y }}
       // With no title bar, the popup is moved by any part of it that is not a control or the board.
       onPointerDown={(e) => {
-        if (full || (e.target as HTMLElement).closest('button, input, label, canvas')) return;
+        if (full || (e.target as HTMLElement).closest('button, input, select, label, canvas')) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         dragRef.current = { dx: e.clientX - position.x, dy: e.clientY - position.y };
       }}
@@ -1045,7 +1138,20 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               Join
             </button>
           </form>
-          <MapPicker pick={mapPick} onPick={setMapPick} third={thirdPick} onThird={setThirdPick} />
+          <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={SEATS.slice(0, 1 + computers)} />
+          <div className={styles.choiceRow} role="radiogroup" aria-label="Computer sides">
+            {[1, 2, 3].map((n) => (
+              <button
+                key={n}
+                className={`${styles.choiceBtn} ${n === computers ? styles.choiceBtnOn : ''}`}
+                role="radio"
+                aria-checked={n === computers}
+                onClick={() => setComputers(n)}
+              >
+                {n === 1 ? '1 computer' : `${n} computers`}
+              </button>
+            ))}
+          </div>
           <button className={styles.secondaryBtn} onClick={startSolo} disabled={busy}>
             Play the computer
           </button>
@@ -1060,20 +1166,39 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
             {code}
           </button>
           <div className={styles.seats}>
-            {SEATS.map((seat) => (
-              <div key={seat} className={`${styles.seat} ${match.players[seat] ? '' : styles.seatEmpty}`}>
-                <span className={styles.dot} style={{ background: SIDE[seat].colour }} />
-                {match.players[seat] ? `${nameOf(seat)}, ${SIDE[seat].army.toLowerCase()}` : 'Waiting for a second player'}
-              </div>
-            ))}
-            {thirdPick && (
-              <div className={styles.seat}>
-                <span className={styles.dot} style={{ background: SIDE.c.colour }} />
-                {`${nameOf('c')}, ${SIDE.c.army.toLowerCase()}`}
-              </div>
-            )}
+            {SEATS.map((seat) => {
+              const player = match.players[seat];
+              const computer = match.cpu?.includes(seat) ?? false;
+              const kind = kinds && (player || computer) ? kinds[seat] : null;
+              return (
+                <div key={seat} className={`${styles.seat} ${player || computer ? '' : styles.seatEmpty}`}>
+                  <span className={styles.dot} style={{ background: BADGE[seat].fill }} />
+                  <span className={styles.seatName}>{player ? nameOf(seat) : computer ? 'Computer' : 'Open'}</span>
+                  {seat === mySeat && kind ? (
+                    <select className={styles.kindPick} value={kind} onChange={(e) => pickKind(e.target.value)} aria-label="Your creature">
+                      {KINDS.map((each) => (
+                        <option
+                          key={each}
+                          value={each}
+                          disabled={SEATS.some((other) => other !== seat && match.players[other]?.kind === each)}
+                        >
+                          {KIND_NAME[each].many}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    kind && <span className={styles.seatKind}>{KIND_NAME[kind].many}</span>
+                  )}
+                  {!player && (
+                    <button className={styles.seatBtn} onClick={() => toggleComputer(seat, !computer)}>
+                      {computer ? 'Remove' : 'Add computer'}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <MapPicker pick={mapPick} onPick={setMapPick} third={thirdPick} onThird={setThirdPick} />
+          <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={sides} />
           <div className={styles.buttonRow}>
             <button className={styles.secondaryBtn} onClick={handleCopyLink}>
               {copied ? 'Link copied' : 'Copy invite link'}
@@ -1090,28 +1215,16 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       {match && match.status !== 'waiting' && (
         <>
           <div className={styles.scoreboard}>
-            <span className={styles.side}>
-              <span className={styles.dot} style={{ background: SIDE.a.colour }} />
-              <span className={styles.sideName}>{nameOf('a')}</span>
-              <span className={styles.sideCount}>{tally('a', hud.hutsA, hud.unitsA)}</span>
-            </span>
+            <span className={styles.sideCol}>{column('left')}</span>
             <span className={styles.middle}>
-              <span className={styles.clock}>
-                {Math.floor(hud.secs / 60)}:{String(hud.secs % 60).padStart(2, '0')}
-              </span>
-              {match.third && (
-                <span className={styles.side}>
-                  <span className={styles.dot} style={{ background: SIDE.c.colour }} />
-                  <span className={styles.sideName}>{nameOf('c')}</span>
-                  <span className={styles.sideCount}>{tally('c', hud.hutsC, hud.unitsC)}</span>
+              {hud.secs !== null && (
+                <span className={styles.clock}>
+                  {Math.floor(hud.secs / 60)}:{String(hud.secs % 60).padStart(2, '0')}
                 </span>
               )}
+              {column('middle')}
             </span>
-            <span className={styles.side}>
-              <span className={styles.sideCount}>{tally('b', hud.hutsB, hud.unitsB)}</span>
-              <span className={styles.sideName}>{nameOf('b')}</span>
-              <span className={styles.dot} style={{ background: SIDE.b.colour }} />
-            </span>
+            <span className={`${styles.sideCol} ${styles.sideColEnd}`}>{column('right')}</span>
           </div>
           <div className={styles.boardWrap}>
             <canvas
@@ -1126,15 +1239,21 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
             />
             {playing && hud.count !== null && (
               <div className={styles.overlay}>
-                <span className={styles.overlayText}>
-                  You are the {mySeat ? SIDE[mySeat].army.toLowerCase() : ''}, starting on the {mySeat === 'a' ? 'left' : 'right'}
-                </span>
+                {mySeat && kinds && myStart && (
+                  <span className={styles.overlayText}>
+                    You are the {KIND_NAME[kinds[mySeat]].many.toLowerCase()}, starting {whereOf(myStart)}
+                  </span>
+                )}
                 <span className={styles.countdown}>{hud.count}</span>
               </div>
             )}
             {match.status === 'finished' && (
               <div className={`${styles.overlay} ${styles.overlayEnd}`}>
-                <span className={styles.overlayText}>{resultText()}</span>
+                {resultLines().map((line, index) => (
+                  <span key={line} className={index === 0 ? styles.overlayText : styles.overlayNote}>
+                    {line}
+                  </span>
+                ))}
                 <div className={styles.buttonRow}>
                   <button className={styles.primaryBtn} onClick={handleStart} disabled={!canStart}>
                     Play again

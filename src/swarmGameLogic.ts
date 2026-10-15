@@ -1,30 +1,32 @@
-// Swarm: ants against bees over a map of huts joined by paths, and when the
-// host asks for it a third side, black ants played by the computer from the
-// middle of the board. Rules, simulation, and the scheme that keeps two
-// clients on one game over a transport with no realtime channel (see dbProxy.ts).
+// Swarm: up to four sides, ants, bees, black ants and green ants, over a map
+// of huts joined by paths. Any side can be a person or the computer. Rules,
+// simulation, and the scheme that keeps the clients on one game over a
+// transport with no realtime channel (see dbProxy.ts).
 //
-// The whole game is a pure function of the seed and the two players' orders.
-// The third side's orders are worked out inside each tick from the state, so
-// both clients give it the same ones and it has nothing to publish:
+// The whole game is a pure function of the seed and the people's orders. The
+// computer's orders are worked out inside each tick from the state, so every
+// client gives it the same ones and it has nothing to publish:
 //
 //  - Each client publishes only its own orders, each stamped with the tick it
 //    takes effect on, a few ticks ahead of when it was given.
 //  - With its orders a client publishes `k`: a promise that every order of its
 //    own for a tick up to `k` is already in the list.
-//  - Up to the other seat's `k` both order lists are complete, so the state
-//    there is the same on both clients and can never be revised. That is the
-//    confirmed state, and it is the only one a result is ever read from.
+//  - Up to the lowest `k` of the other people every order list is complete, so
+//    the state there is the same on every client and can never be revised.
+//    That is the confirmed state, and it is the only one a result is ever read from.
 //  - What is drawn is the confirmed state run on to the present on the orders
 //    known so far. An order that arrives late changes the drawing, never the
 //    confirmed state.
 //
-// Everything in the simulation is integer arithmetic, so the two clients
-// cannot drift apart on rounding.
+// Everything in the simulation is integer arithmetic, so the clients cannot
+// drift apart on rounding.
 
 export const TICK_MS = 100;
 export const COUNTDOWN_MS = 3000;
-/** Ten minutes. Past it the side holding more huts takes the match. */
+/** Ten minutes. Past a map's length the side holding the most huts takes the match. */
 export const MATCH_TICKS = 6000;
+/** Three minutes more for four sides, and again on the large ground. */
+const EXTRA_TICKS = 1800;
 export const START_UNITS = 5;
 /** One unit leaves a hut per order every this many ticks, so a big send is a column, not a blob. */
 export const RELEASE_TICKS = 2;
@@ -71,17 +73,45 @@ export const TOLL_EVERY = 4;
  */
 export const FORT_LIVES = 2;
 
-/** The two sides a person can play. */
-export type Seat = 'a' | 'b';
-/** Every side there can be on the board: the computer's third side is `c`. */
-export type Side = Seat | 'c';
-export type Owner = Side | null;
-export const SEATS: readonly Seat[] = ['a', 'b'];
-export const otherSeat = (seat: Seat): Seat => (seat === 'a' ? 'b' : 'a');
+/** The four sides there can be on the board. Each is played by a person or by the computer. */
+export type Seat = 'a' | 'b' | 'c' | 'd';
+export type Owner = Seat | null;
+export const SEATS: readonly Seat[] = ['a', 'b', 'c', 'd'];
 
 export interface SwarmPlayer {
   sessionId: string;
   name: string;
+  /** The creature this player's side is drawn as, when they picked one. */
+  kind?: Kind;
+}
+
+/** What a side's units are drawn as. Only the look: every kind plays alike. */
+export type Kind = 'ant' | 'bee' | 'beetle' | 'spider';
+export const KINDS: readonly Kind[] = ['ant', 'bee', 'beetle', 'spider'];
+
+/**
+ * The creature each side in the game is drawn as: the one its player picked,
+ * and for the rest, in seat order, the first not taken. Two players may not
+ * pick one kind (the lobby keeps them apart), but if they do the later seat
+ * gives way.
+ */
+export function kindsOf(match: Pick<SwarmMatch, 'players'>, sides: readonly Seat[]): Record<Seat, Kind> {
+  const kinds: Partial<Record<Seat, Kind>> = {};
+  const taken = new Set<Kind>();
+  for (const seat of sides) {
+    const kind = match.players[seat]?.kind;
+    if (kind && !taken.has(kind)) {
+      kinds[seat] = kind;
+      taken.add(kind);
+    }
+  }
+  for (const seat of SEATS) {
+    if (kinds[seat]) continue;
+    const kind = KINDS.find((k) => !taken.has(k))!;
+    kinds[seat] = kind;
+    taken.add(kind);
+  }
+  return kinds as Record<Seat, Kind>;
 }
 
 /** `swarm/{code}/m` — the match, changed only by transaction. */
@@ -96,11 +126,35 @@ export interface SwarmMatch {
   startAt: number;
   /** The map the host chose. Without one the seed picks. */
   map?: MapId;
-  /** The computer plays a third side, from a base in the middle of the board. */
-  third?: boolean;
-  winner?: Side | 'draw';
-  /** The seat that walked away or went silent, when that is how it ended. */
+  /** The ground chosen. Without one the map's own. */
+  size?: SizeId;
+  /** The seats the computer plays from the start, their letters in seat order. */
+  cpu?: string;
+  /**
+   * For each seat whose person left a game of three or more sides, the last
+   * tick of theirs: the computer plays the seat after it.
+   */
+  out?: Partial<Record<Seat, number>>;
+  winner?: Seat | 'draw';
+  /** The seat that walked away or went silent, when that is how a game of two ended. */
   gone?: Seat;
+}
+
+/** The seats in the game a match starts: every one a person sits in or the computer plays, in seat order. */
+export function sidesOf(match: Pick<SwarmMatch, 'players' | 'cpu'>): Seat[] {
+  return SEATS.filter((seat) => match.players[seat] || match.cpu?.includes(seat));
+}
+
+/**
+ * Who the computer plays in a match, and from when: from the start for the
+ * seats in `cpu`, and after the last tick of theirs for the seats in `out`.
+ */
+export type Computer = Partial<Record<Seat, number>>;
+
+export function computerOf(match: Pick<SwarmMatch, 'cpu' | 'out'>): Computer {
+  const plays: Computer = { ...match.out };
+  for (const seat of SEATS) if (match.cpu?.includes(seat)) plays[seat] = 0;
+  return plays;
 }
 
 /** `swarm/{code}/s/{seat}` — one player's orders, written only by its own client. */
@@ -167,8 +221,25 @@ export interface Site {
 }
 
 /** The designed places a game can be played on. Each has one rule of its own. */
-export type MapId = 'meadow' | 'thorns' | 'bridges' | 'guns' | 'hill';
-export const MAP_IDS: readonly MapId[] = ['meadow', 'thorns', 'bridges', 'guns', 'hill'];
+export type MapId = 'meadow' | 'thorns' | 'bridges' | 'guns' | 'hill' | 'crossroads';
+export const MAP_IDS: readonly MapId[] = ['meadow', 'thorns', 'bridges', 'guns', 'hill', 'crossroads'];
+
+/** How much ground a game is played over. Every one is the shape of the board. */
+export type SizeId = 'small' | 'medium' | 'large';
+export const SIZE_IDS: readonly SizeId[] = ['small', 'medium', 'large'];
+export const WORLDS: Record<SizeId, { w: number; h: number }> = {
+  small: { w: 1000, h: 660 },
+  medium: { w: 1400, h: 924 },
+  large: { w: 1800, h: 1188 },
+};
+/** The ground each map is drawn for, and played on when no other is chosen. */
+const OWN_SIZE: Record<MapId, SizeId> = { meadow: 'medium', thorns: 'small', bridges: 'small', guns: 'small', hill: 'small', crossroads: 'medium' };
+
+/** The ground a map is played on: the one chosen, or its own. Four corners need more room than the small one has. */
+export function sizeOf(id: MapId, sides: number, size?: SizeId): SizeId {
+  const chosen = size ?? OWN_SIZE[id];
+  return sides === 4 && chosen === 'small' ? 'medium' : chosen;
+}
 
 /** What the ground, the huts and the life on the map are drawn as. */
 export type SceneId = 'meadow' | 'scrub' | 'valley' | 'ice' | 'terrace';
@@ -203,21 +274,17 @@ export interface SwarmMap {
   paths: Path[];
   /** Each river as the line of its middle, for the drawing. Paths over one are bridges or fords. */
   rivers: { x: number; y: number }[][];
-  /** The sides on the board: the two seats, and the computer's when it plays. */
-  sides: readonly Side[];
-  /** The size of the world the map lies in. A function of `id`, so it is never sent. */
+  /** The seats on the board, in the order their starts were laid out. */
+  sides: readonly Seat[];
+  /** The hut each of `sides` starts from. A side can start holding more than its home: see startThree. */
+  homes: readonly number[];
+  size: SizeId;
+  /** The size of the world the map lies in. A function of `size`, so it is never sent. */
   w: number;
   h: number;
+  /** The tick the game is called on, when no side has won it before. */
+  ticks: number;
 }
-
-/** Every world is one shape, 1000 by 660, so the board is laid out the same whichever map is on it. */
-const SIZES: Record<MapId, { w: number; h: number }> = {
-  meadow: { w: 1400, h: 924 },
-  thorns: { w: 1000, h: 660 },
-  bridges: { w: 1000, h: 660 },
-  guns: { w: 1000, h: 660 },
-  hill: { w: 1000, h: 660 },
-};
 
 /**
  * A hut is drawn far taller above its site than below it, and its count stands
@@ -280,7 +347,7 @@ function scatter(rnd: () => number, columns: boolean, w: number, h: number, leas
     );
   const addPair = (x: number, y: number, owner: Seat | null, n: number, level: number) => {
     sites.push({ x, y, owner, n, level });
-    sites.push({ x: w - x, y: 2 * centre.y - y, owner: owner && otherSeat(owner), n, level });
+    sites.push({ x: w - x, y: 2 * centre.y - y, owner: owner && 'b', n, level });
   };
 
   addPair(70 + int(50), FIELD_TOP + 130 + int(field - 260), 'a', START_UNITS, 1);
@@ -500,37 +567,489 @@ function lay(layout: Layout, rnd: () => number, fort: boolean, w: number, h: num
   return { sites, paths, rivers: layout.river ? [[...near, ...far]] : [] };
 }
 
-const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', bridges: 'valley', guns: 'ice', hill: 'terrace' };
+type Drawn = { sites: Site[]; paths: Path[]; rivers: SwarmMap['rivers'] };
+
+/** The most huts a map can hold: an order names each in one base-36 character. */
+const MOST_SITES = 36;
+/** About how many huts the seed grows on each ground. */
+const GROWN: Record<SizeId, number> = { small: 20, medium: 28, large: 34 };
+/** How many of the neutral huts grown on each ground are big ones, worth going out of the way for. */
+const BIG: Record<SizeId, number> = { small: 1, medium: 2, large: 3 };
+/** Huts keep this far from the line a river follows. The water wanders up to MEANDER either side of it. */
+const BANK = 75;
+/**
+ * How near the first hut of a side another hut may stand: the buttons to grow
+ * it are laid out round it, and a home in a corner of the board has room for
+ * them only on its open sides.
+ */
+const ELBOW = 185;
+const MEANDER = 24;
+/** A path laid between two huts that are not its ends keeps this far from every other hut. */
+const PATH_CLEAR = 60;
+/** Half the gap between two towers that face each other over a border. */
+const FACING = 100;
+/** How far the ring of huts round a key hut or a fort stands from it on the small ground. Wider ground widens it. */
+const RING = 250;
 
 /**
- * The map for a seed, and for the place when one was chosen: without one the
- * seed picks. Every hut but a central one has a twin at the half-turn of the
- * board, and every path and river with it, so the two sides play the same map
- * from opposite ends.
+ * A map grown from the seed rather than drawn by hand, for four sides and for
+ * any map on a ground other than its own. Two or three sides play it as its
+ * own half-turn, like the drawn maps. Four start in the corners and play it as
+ * its own mirror both ways as well, so every corner looks out on the same
+ * board: a near neighbour across the short side, a far one across the long,
+ * and the middle diagonally ahead.
  *
- *  meadow   huts and roads thrown down by the seed, and nothing else
- *  thorns   a key hut the roads go round to and the spikes go straight at
- *  bridges  a river between the sides, with two bridges and a shorter ford
- *  guns     a column of two to four towers in front of each side
- *  hill     a fort in the middle, at the top of the climbs
+ * Every side starts with two cheap huts close behind it, so the opening is a
+ * race to build up, and the huts hold more the further they stand from the
+ * nearest start. Each map keeps its own rule at any size:
  *
- * With `third` the computer's side starts in the middle, the one place as far
- * from each seat as from the other.
+ *  meadow      a big hut in the middle, and roads
+ *  thorns      a key hut in the middle that a ring road reaches, and spikes run straight at
+ *  bridges     two rivers that cut the board in three, with bridges and a ford over each
+ *  guns        towers in facing pairs on every border, the only way over it
+ *  hill        a fort in the middle, with a climb up to it from a ring of huts
+ *  crossroads  a fort in the middle, towers on the busiest crossings, forts half
+ *              way out, fast roads round the edge and slow tracks through the middle.
+ *              No tower stands in the middle: one there is as near to both
+ *              sides' columns, and of two as near it shoots the older, which is
+ *              always seat a's.
  */
-export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length], third = false): SwarmMap {
+function grow(rnd: () => number, id: MapId, count: number, size: SizeId): Drawn {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const drawn = tryGrow(rnd, id, count, size);
+    if (drawn) return drawn;
+  }
+  throw new Error(`No ${size} ${id} map for ${count} sides grew from this seed`);
+}
+
+type Point = { x: number; y: number };
+const far = (p: Point, q: Point, gap: number) => (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y) >= gap * gap;
+const span = (p: Point, q: Point) => Math.floor(Math.sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)));
+// A hut may stand nearer a tower than another hut, but never under its fire, nor straight above or below it, where the tower is drawn.
+const apart = (p: Site, q: Site) =>
+  !p.tower === !q.tower
+    ? far(p, q, MIN_GAP)
+    : far(p, q, TOWER_RANGE) && (Math.abs(p.x - q.x) >= TOWER_SHADE_X || Math.abs(p.y - q.y) >= TOWER_SHADE_Y);
+
+function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Drawn | null {
+  const int = (n: number) => Math.floor(rnd() * n);
+  const { w, h } = WORLDS[size];
+  const centre = centreOf({ w, h });
+  const { x: cx, y: cy } = centre;
+  const four = count === 4;
+  const left = 75;
+  const top = FIELD_TOP + 75;
+  const bottom = 2 * cy - top;
+  const ring = RING + (w - 1000) / 10;
+  // The line each river follows, a little under a third of the way in from either side.
+  const river = Math.round(w * 0.31);
+  const banks = id === 'bridges' ? [river, w - river] : [];
+
+  // A point, then its half-turn, then for four sides its mirror left to right and its mirror top to bottom.
+  // The k-th side starts on the k-th. A point on a line of the symmetry is its own image there, and stands once.
+  const images = (x: number, y: number): Point[] => {
+    const all = [{ x, y }, { x: w - x, y: 2 * cy - y }];
+    if (four) all.push({ x: w - x, y }, { x, y: 2 * cy - y });
+    return all.filter((p, k) => all.findIndex((q) => q.x === p.x && q.y === p.y) === k);
+  };
+  const sites: Site[] = [];
+  /** Puts down a site and its images, the k-th held by `owners[k]` when owners are given, if they all fit. Returns the first one's index, or -1. */
+  const put = (x: number, y: number, site: Omit<Site, 'x' | 'y'>, owners: readonly Owner[] = []): number => {
+    const all = images(x, y).map((p, k): Site => ({ ...site, ...p, owner: owners.length > 0 ? owners[k] : site.owner }));
+    if (all.some((p) => p.x < left || p.x > w - left || p.y < top || p.y > bottom)) return -1;
+    if (!all.every((p, k) => all.slice(0, k).every((q) => apart(p, q)) && sites.every((q) => apart(p, q)))) return -1;
+    sites.push(...all);
+    return sites.length - all.length;
+  };
+  // Where a neutral hut may stand: out of the rivers, on a tower map behind its own side's towers, and on the
+  // crossroads far enough from the fort in the middle that its tall mast leaves the hut's buttons room.
+  const allowed = (x: number, y: number) =>
+    banks.every((bank) => Math.abs(x - bank) >= BANK) &&
+    (id !== 'guns' || (Math.abs(x - cx) >= FACING + 40 && (!four || Math.abs(y - cy) >= FACING + 40))) &&
+    (id !== 'crossroads' || far(centre, { x, y }, ELBOW));
+  const TOWER = { owner: null, n: TOWER_START, level: 1, tower: true };
+
+  const start = four
+    ? put(left + 15 + int(60), top + 10 + int(50), { owner: null, n: START_UNITS, level: 1 }, SEATS)
+    : put(left + 10 + int(50), top + 60 + int(bottom - top - 119), { owner: null, n: START_UNITS, level: 1 }, SEATS);
+  const home = sites[start];
+
+  if (count === 3) put(cx, cy, { owner: 'c', n: START_UNITS, level: 1, ...(id === 'hill' && { fort: true }) });
+  else if (id === 'meadow') put(cx, cy, { owner: null, n: 20 + int(11), level: 2 });
+  else if (id === 'thorns') put(cx, cy, { owner: null, n: 26 + int(5), level: 3 });
+  else if (id === 'hill') put(cx, cy, { owner: null, n: 14 + int(5), level: 2, fort: true });
+  else if (id === 'bridges') put(cx, cy, { owner: null, n: 16 + int(8), level: 2 });
+  else if (id === 'crossroads') put(cx, cy, { owner: null, n: 16 + int(6), level: 2, fort: true });
+  const middle = sites.findIndex((p) => p.x === cx && p.y === cy);
+
+  // The huts of the ring that the road reaches the middle from. Every other way in is the hard one.
+  let roadRing = -1;
+  if (id === 'thorns' || id === 'hill') {
+    const inner = () => ({ owner: null, n: 8 + int(4), level: 1 });
+    if (four) {
+      const r = Math.round(ring * Math.SQRT1_2);
+      if (put(cx - r, cy - r, inner()) < 0) return null;
+      roadRing = put(cx - ring, cy, inner());
+    } else {
+      if (put(cx - ring, cy + int(81) - 40, inner()) < 0) return null;
+      roadRing = put(cx + int(81) - 40, cy - ring, inner());
+    }
+    if (roadRing < 0) return null;
+  }
+
+  if (id === 'guns') {
+    if (four) {
+      for (let y = top + 15 + int(40), made = 0; y <= cy - 170 && made < 2; y += 190 + int(40)) if (put(cx - FACING, y, TOWER) >= 0) made++;
+      for (let x = left + 40 + int(60), made = 0; x <= cx - 230 && made < 3; x += 200 + int(60)) if (put(x, cy - FACING, TOWER) >= 0) made++;
+    } else {
+      // An even column keeps a tower off the middle, where the third side's base would be under its fire.
+      const most = Math.min(5, Math.floor((bottom - top) / 190) + 1);
+      const column = count === 3 ? 2 + 2 * int(Math.floor(most / 2)) : 2 + int(most - 1);
+      const gap = 2 * Math.floor((h - FIELD_SHORT) / (2 * (column + 1)));
+      for (let k = 0; k < column; k++) put(cx - FACING, cy + ((2 * k - (column - 1)) * gap) / 2, TOWER);
+    }
+    if (!sites.some((p) => p.tower)) return null;
+  }
+
+  for (let tries = 0, made = 0; made < 2 && tries < 80; tries++) {
+    const x = home.x + int(321) - 160;
+    const y = home.y + int(321) - 160;
+    if (!far(home, { x, y }, ELBOW) || far(home, { x, y }, 290) || x > cx || (four && y > cy) || !allowed(x, y)) continue;
+    if (put(x, y, { owner: null, n: 4 + int(4), level: 1 }) >= 0) made++;
+  }
+
+  const starts = sites.flatMap((p, index) => (p.owner ? [index] : []));
+  const reach = span(home, centre);
+  const target = GROWN[size] - int(3);
+  let big = BIG[size];
+  for (let tries = 0; tries < 900 && sites.length < target; tries++) {
+    let x = left + int(cx - left + 1);
+    let y = top + int((four ? cy : bottom) - top + 1);
+    // A hut this near a line of the symmetry would crowd its own image, so it is put on the line.
+    if (four && cx - x < MIN_GAP / 2) x = cx;
+    if (four && cy - y < MIN_GAP / 2) y = cy;
+    if (!allowed(x, y) || sites.length + images(x, y).length > MOST_SITES) continue;
+    const out = Math.min(reach, ...starts.map((s) => span(sites[s], { x, y })));
+    if (out < ELBOW) continue;
+    if (big > 0 && 2 * out >= reach && int(3) === 0) {
+      if (put(x, y, { owner: null, n: 14 + int(8), level: 2 }) >= 0) big--;
+    } else {
+      put(x, y, { owner: null, n: 5 + Math.floor((8 * out) / reach) + int(4), level: 1 });
+    }
+  }
+
+  const at = new Map(sites.map((p, index) => [p.x * 4096 + p.y, index]));
+  const moves: ((p: Point) => Point)[] = [(p) => p, (p) => ({ x: w - p.x, y: 2 * cy - p.y })];
+  if (four) moves.push((p) => ({ x: w - p.x, y: p.y }), (p) => ({ x: p.x, y: 2 * cy - p.y }));
+  /** For each move of the symmetry, the hut each hut is moved onto. */
+  const twins = moves.map((move) => sites.map((p) => at.get(move(p).x * 4096 + move(p).y)!));
+
+  // A path joins two huts of one region when no third of the region lies inside the circle drawn on them as a
+  // diameter. That graph is always connected and never crosses itself. A river or a tower border parts regions,
+  // and only the crossings laid below go over it.
+  const regionOf = (p: Site) => {
+    if (id === 'bridges') return p.x < river ? 0 : p.x > w - river ? 2 : 1;
+    if (id === 'guns') return p.x === cx ? 4 : (p.x < cx ? 0 : 1) + (four && p.y > cy ? 2 : 0);
+    return 0;
+  };
+  const region = sites.map(regionOf);
+  const links = new Map<number, Path>();
+  const key = (a: number, b: number) => Math.min(a, b) * MOST_SITES + Math.max(a, b);
+  const add = (a: number, b: number, kind: PathKind = 'road') => links.set(key(a, b), { a: Math.min(a, b), b: Math.max(a, b), kind });
+  const inside = (i: number, j: number, k: number) =>
+    (sites[i].x - sites[k].x) * (sites[j].x - sites[k].x) + (sites[i].y - sites[k].y) * (sites[j].y - sites[k].y) < 0;
+  for (let i = 0; i < sites.length; i++) {
+    for (let j = i + 1; j < sites.length; j++) {
+      if (region[i] !== region[j]) continue;
+      if (!sites.some((_, k) => k !== i && k !== j && region[k] === region[i] && inside(i, j, k))) add(i, j);
+    }
+  }
+
+  const orient = (p: Point, q: Point, r: Point) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  const crosses = (a: number, b: number, c: number, d: number) => {
+    if (a === c || a === d || b === c || b === d) return false;
+    const [p, q, r, s] = [sites[a], sites[b], sites[c], sites[d]];
+    return orient(p, q, r) * orient(p, q, s) < 0 && orient(r, s, p) * orient(r, s, q) < 0;
+  };
+  const clearOf = (a: number, b: number) => {
+    const [p, q] = [sites[a], sites[b]];
+    const dx = q.x - p.x;
+    const dy = q.y - p.y;
+    const length = dx * dx + dy * dy;
+    return sites.every((r, k) => {
+      if (k === a || k === b) return true;
+      const t = Math.max(0, Math.min(1, ((r.x - p.x) * dx + (r.y - p.y) * dy) / length));
+      return far(r, { x: p.x + t * dx, y: p.y + t * dy }, PATH_CLEAR);
+    });
+  };
+  /** A path and its images, when none of them crosses a path already laid or another of them. */
+  const join = (a: number, b: number, kind: PathKind): boolean => {
+    const orbit = twins.map((twin) => [twin[a], twin[b]]).filter(([p, q], k, all) => all.findIndex(([r, s]) => key(r, s) === key(p, q)) === k);
+    if (orbit.some(([p, q]) => links.has(key(p, q)))) return false;
+    for (const [p, q] of orbit) {
+      if ([...links.values()].some((path) => crosses(p, q, path.a, path.b))) return false;
+      if (orbit.some(([r, s]) => crosses(p, q, r, s))) return false;
+    }
+    for (const [p, q] of orbit) add(p, q, kind);
+    return true;
+  };
+  /** A path and its images take `kind`, and a climb its top. */
+  const mark = (a: number, b: number, kind: PathKind, up?: number) => {
+    for (const twin of twins) {
+      const path = links.get(key(twin[a], twin[b]))!;
+      path.kind = kind;
+      if (up !== undefined) path.up = twin[up];
+    }
+  };
+
+  if (id === 'guns') {
+    // The base of a third side in the middle is reached from the towers alone.
+    if (count === 3) {
+      sites.forEach((p, j) => {
+        if (p.tower && !sites.some((_, k) => k !== middle && k !== j && inside(middle, j, k))) add(middle, j);
+      });
+    }
+    sites.forEach((p, i) =>
+      sites.forEach((q, j) => {
+        if (i >= j || !p.tower || !q.tower) return;
+        if ((p.y === q.y && Math.abs(p.x - q.x) === 2 * FACING) || (four && p.x === q.x && Math.abs(p.y - q.y) === 2 * FACING)) add(i, j);
+      }),
+    );
+  }
+
+  if (id === 'bridges') {
+    // The shortest crossing of each river is the ford, and the bridges are the next shortest that stand well apart from it and each other.
+    const crossings: { river: number; y: number }[] = [];
+    const candidates: { a: number; b: number; length: number }[] = [];
+    sites.forEach((p, a) =>
+      sites.forEach((q, b) => {
+        if (a < b && Math.abs(region[a] - region[b]) === 1 && !far(p, q, 400) && clearOf(a, b)) candidates.push({ a, b, length: span(p, q) });
+      }),
+    );
+    candidates.sort((p, q) => p.length - q.length || p.a - q.a || p.b - q.b);
+    let bridges = 0;
+    for (const { a, b } of candidates) {
+      const orbit = twins.map((twin) => [twin[a], twin[b]]);
+      const spread = orbit.every(([p, q]) =>
+        crossings.every((c) => c.river !== Math.min(region[p], region[q]) || Math.abs(c.y - (sites[p].y + sites[q].y) / 2) >= 200),
+      );
+      if (!spread || !join(a, b, crossings.length === 0 ? 'ford' : 'bridge')) continue;
+      if (crossings.length > 0) bridges++;
+      for (const [p, q] of orbit) crossings.push({ river: Math.min(region[p], region[q]), y: (sites[p].y + sites[q].y) / 2 });
+      if (bridges === (four ? 1 : 2)) break;
+    }
+    if (bridges === 0) return null;
+  }
+
+  if (id === 'thorns') {
+    for (const path of links.values()) {
+      if ((path.a === middle || path.b === middle) && path.a !== roadRing && path.a !== roadRing + 1 && path.b !== roadRing && path.b !== roadRing + 1) path.kind = 'spikes';
+    }
+  }
+  if (id === 'hill') {
+    for (const path of links.values()) if (path.a === middle || path.b === middle) mark(path.a, path.b, 'climb', middle);
+  }
+
+  // The walk between every two huts, and the first hut on it.
+  const walks = () => {
+    const walk = sites.map(() => sites.map(() => Infinity));
+    const next = sites.map(() => sites.map(() => -1));
+    sites.forEach((_, i) => (walk[i][i] = 0));
+    for (const path of links.values()) {
+      walk[path.a][path.b] = walk[path.b][path.a] = span(sites[path.a], sites[path.b]);
+      next[path.a][path.b] = path.b;
+      next[path.b][path.a] = path.a;
+    }
+    for (let k = 0; k < sites.length; k++) {
+      for (let i = 0; i < sites.length; i++) {
+        for (let j = 0; j < sites.length; j++) {
+          if (walk[i][k] + walk[k][j] < walk[i][j]) {
+            walk[i][j] = walk[i][k] + walk[k][j];
+            next[i][j] = next[i][k];
+          }
+        }
+      }
+    }
+    return { walk, next };
+  };
+
+  // On the wider grounds a stretch of spikes cuts across a long way round, somewhere besides the middle.
+  if (id === 'thorns' && size !== 'small') {
+    const { walk } = walks();
+    // Only where the way round is at least 1.7 times the straight line.
+    let most = 17;
+    let cut: [number, number] | null = null;
+    for (let a = 0; a < sites.length; a++) {
+      for (let b = a + 1; b < sites.length; b++) {
+        if (a === middle || b === middle || links.has(key(a, b)) || far(sites[a], sites[b], 360) || !clearOf(a, b)) continue;
+        const saving = (walk[a][b] * 10) / span(sites[a], sites[b]);
+        if (saving > most && ![...links.values()].some((path) => crosses(a, b, path.a, path.b))) [most, cut] = [saving, [a, b]];
+      }
+    }
+    if (cut) join(cut[0], cut[1], 'spikes');
+  }
+
+  if (id === 'crossroads') {
+    const { next } = walks();
+    // How many of the ways between the starts, and from each start to the middle, go through each hut.
+    const through = sites.map(() => 0);
+    const tally = (from: number, to: number) => {
+      for (let hop = next[from][to]; hop !== to; hop = next[hop][to]) through[hop]++;
+    };
+    for (const s of starts) {
+      for (const t of starts) if (s < t) tally(s, t);
+      if (middle >= 0 && !sites[middle].owner) tally(s, middle);
+    }
+    const scoreOf = (index: number) => twins.reduce((sum, twin) => sum + through[twin[index]], 0);
+    const out = (index: number) => Math.min(...starts.map((s) => span(sites[s], sites[index])));
+    const free = (index: number) => !sites[index].owner && !sites[index].tower && !sites[index].fort && index !== middle;
+    const best = (fits: (index: number) => boolean) =>
+      sites.reduce((found, _, index) => (free(index) && fits(index) && (found < 0 || scoreOf(index) > scoreOf(found)) ? index : found), -1);
+    // A tower goes on the busiest crossing away from the starts, if no hut stands where the tower would cover it.
+    const tower = best((index) => out(index) >= 280 && sites.every((p, k) => k === index || apart({ ...sites[index], tower: true }, p)));
+    if (tower < 0) return null;
+    for (const twin of twins) Object.assign(sites[twin[tower]], { n: TOWER_START, level: 1, tower: true });
+    // A fort's count stands higher over it than a hut's, and has to be clear of the top of the board.
+    const fort = best((index) => twins.every((twin) => sites[twin[index]].y >= FIELD_TOP + 95) && 20 * out(index) >= 7 * reach && 4 * out(index) <= 3 * reach && [...links.values()].filter((path) => path.a === index || path.b === index).length >= 3);
+    if (fort >= 0) {
+      // One garrison for every side's fort, drawn once.
+      const n = 9 + int(4);
+      for (const twin of twins) Object.assign(sites[twin[fort]], { n, level: 2, fort: true });
+    }
+    // Fast roads round the edge of the board, slow tracks through the middle of it.
+    const outward = (p: Point) => Math.max(Math.abs(p.x - cx) / (cx - left), Math.abs(p.y - cy) / (cy - top));
+    for (const path of links.values()) {
+      const [p, q] = [sites[path.a], sites[path.b]];
+      if (outward({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 }) < 0.35) path.kind = 'narrow';
+      else if (outward(p) > 0.72 && outward(q) > 0.72) path.kind = 'wide';
+    }
+  }
+
+  const paths = [...links.values()].sort((p, q) => p.a - q.a || p.b - q.b);
+  // Every hut can be reached without paying a toll, and every side has two ways out of its first hut.
+  const reached = new Set([0]);
+  for (const hut of reached) {
+    for (const path of paths) {
+      if (takesToll(path.kind) || (path.a !== hut && path.b !== hut)) continue;
+      reached.add(path.a === hut ? path.b : path.a);
+    }
+  }
+  if (reached.size < sites.length || sites.length > MOST_SITES) return null;
+  if (starts.some((s) => paths.filter((path) => path.a === s || path.b === s).length < 2)) return null;
+  // A march by a path's own ends goes along it: slow tracks and climbs can make the way round quicker, or as quick, and a player sees the other way taken.
+  for (const risky of [false, true]) {
+    const open = paths.filter((path) => risky || !takesToll(path.kind));
+    const walk = sites.map(() => sites.map(() => Infinity));
+    for (const path of open) {
+      const length = span(sites[path.a], sites[path.b]);
+      walk[path.a][path.b] = Math.floor((length * 100) / percentOn(path, path.b));
+      walk[path.b][path.a] = Math.floor((length * 100) / percentOn(path, path.a));
+    }
+    const cost = walk.map((row, i) => row.map((c, j) => (i === j ? 0 : c)));
+    for (let k = 0; k < sites.length; k++) {
+      for (let i = 0; i < sites.length; i++) {
+        for (let j = 0; j < sites.length; j++) cost[i][j] = Math.min(cost[i][j], cost[i][k] + cost[k][j]);
+      }
+    }
+    const roundAbout = (from: number, to: number) => open.some((path) => {
+      const hop = path.a === from ? path.b : path.b === from ? path.a : -1;
+      return hop >= 0 && hop !== to && walk[from][hop] + cost[hop][to] <= walk[from][to];
+    });
+    if (open.some((path) => roundAbout(path.a, path.b) || roundAbout(path.b, path.a))) return null;
+  }
+
+  const rivers: Point[][] = [];
+  if (id === 'bridges') {
+    const wander = () => river + int(2 * MEANDER + 1) - MEANDER;
+    // Each river runs from above the top of the world to below the bottom, and its images do too.
+    let line: Point[];
+    if (four) {
+      const half = [0, 1, 2, 3].map((k) => ({ x: wander(), y: -10 + Math.round(((cy + 10) * k) / 4) }));
+      line = [...half, { x: wander(), y: cy }, ...half.map((p) => ({ x: p.x, y: 2 * cy - p.y })).reverse()];
+      rivers.push(line, line.map((p) => ({ x: w - p.x, y: p.y })));
+    } else {
+      line = [0, 1, 2, 3, 4, 5, 6].map((k) => ({ x: wander(), y: -10 + Math.round(((h + 90) * k) / 6) }));
+      rivers.push(line, line.map((p) => ({ x: w - p.x, y: 2 * cy - p.y })).reverse());
+    }
+  }
+  return { sites, paths, rivers };
+}
+
+const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', bridges: 'valley', guns: 'ice', hill: 'terrace', crossroads: 'valley' };
+
+/**
+ * The map for a seed, the place, the sides playing it and the ground: without
+ * a place the seed picks. Every hut but a central one has a twin at the
+ * half-turn of the board, and every path and river with it, so the sides play
+ * the same map from opposite ends; four sides play it from four corners.
+ *
+ *  meadow      huts and roads thrown down by the seed, a big hut in the middle
+ *  thorns      a key hut the roads go round to and the spikes go straight at
+ *  bridges     rivers between the sides, with bridges and a shorter ford
+ *  guns        towers on the borders, the only ways over them
+ *  hill        a fort in the middle, at the top of the climbs
+ *  crossroads  a fort in the middle, towers on the busiest crossings, and forts half way out
+ *
+ * On its own ground and for two or three sides each of the first five is the
+ * map drawn for it. With three the third side starts in the middle, the one
+ * place as far from each seat as from the other, and starts with more
+ * there (see startThree): in the middle both seats come at it at once.
+ */
+export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length], sides: readonly Seat[] = ['a', 'b'], size?: SizeId): SwarmMap {
   const rnd = mulberry32(seed);
-  const { w, h } = SIZES[id];
+  const ground = sizeOf(id, sides.length, size);
+  const { w, h } = WORLDS[ground];
+  const third = sides.length === 3;
   const drawn =
-    id === 'meadow' || id === 'guns'
-      ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id], third), rivers: [] }
-      : lay(LAYOUTS[id][Math.floor(rnd() * LAYOUTS[id].length)], rnd, id === 'hill', w, h, third);
-  const links: number[][] = drawn.sites.map(() => []);
+    sides.length === 4 || ground !== OWN_SIZE[id] || id === 'crossroads'
+      ? grow(rnd, id, sides.length, ground)
+      : id === 'meadow' || id === 'guns'
+        ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id], third), rivers: [] }
+        : lay(LAYOUTS[id][Math.floor(rnd() * LAYOUTS[id].length)], rnd, id === 'hill', w, h, third);
+  // A map is made with its starts held by the first seats in order, and the seats in the game take them in that order.
+  const sites = drawn.sites.map((site) => (site.owner ? { ...site, owner: sides[SEATS.indexOf(site.owner)] } : site));
+  const links: number[][] = sites.map(() => []);
   for (const path of drawn.paths) {
     links[path.a].push(path.b);
     links[path.b].push(path.a);
   }
-  const sides: readonly Side[] = third ? ['a', 'b', 'c'] : SEATS;
-  return { id, scene: SCENES[id], sites: drawn.sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, w, h };
+  const homes = sides.map((seat) => sites.findIndex((site) => site.owner === seat));
+  if (third) startThree(id, sides, homes, sites, links);
+  const ticks = MATCH_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
+  return { id, scene: SCENES[id], sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, homes, size: ground, w, h, ticks };
+}
+
+/**
+ * A start for the third side that can live through being come at from both
+ * ends. Its base is a hut of level 2, and it holds the two huts next to it
+ * that are each other's image, the nearest pair; each seat is given its own
+ * nearest hut too, so the middle is not three huts to one. On the guns map
+ * the middle is walled in by towers, and it holds them, at 15 each. Played
+ * out by three computers over 216 games (36 on guns), the middle won 58 of
+ * the 180 on the other maps and 14 of the 36 on guns. Started as the two
+ * seats are it won none of them, and holding the whole ring of huts next to
+ * it, 89 of 108.
+ */
+function startThree(id: MapId, sides: readonly Seat[], homes: readonly number[], sites: Site[], links: number[][]): void {
+  const base = homes[2];
+  const { x: cx, y: cy } = sites[base];
+  sites[base] = { ...sites[base], level: 2 };
+  const twinOf = (at: number) => sites.findIndex((site) => site.x === 2 * cx - sites[at].x && site.y === 2 * cy - sites[at].y);
+  const nearest = (from: number, among: number[], fits: (at: number) => boolean) =>
+    among.filter(fits).reduce((best, at) => (best < 0 || span(sites[from], sites[at]) < span(sites[from], sites[best]) ? at : best), -1);
+  if (id === 'guns') {
+    for (const at of links[base]) if (sites[at].tower) sites[at] = { ...sites[at], owner: sides[2], n: 15 };
+    return;
+  }
+  const open = (at: number) => !sites[at].owner && !sites[at].tower;
+  const pair = nearest(base, links[base], (at) => open(at) && links[base].includes(twinOf(at)));
+  if (pair < 0) throw new Error(`No pair of huts by the middle of ${id}`);
+  for (const at of [pair, twinOf(pair)]) sites[at] = { ...sites[at], owner: sides[2] };
+  // The nearest hut, not the nearest next door: on a few crossroads every hut next to a start is a tower or held.
+  const own = nearest(homes[0], sites.map((_, at) => at), (at) => open(at) && twinOf(at) >= 0);
+  if (own < 0) throw new Error(`No hut to give the first seat of ${id}`);
+  sites[own] = { ...sites[own], owner: sides[0] };
+  sites[twinOf(own)] = { ...sites[twinOf(own)], owner: sides[1] };
 }
 
 /** What a tick asks of every unit about the path it is on, worked out once for a map. */
@@ -604,7 +1123,7 @@ const isTower = (hut: Hut): boolean => hut.reload !== undefined;
 
 export interface Unit {
   id: number;
-  seat: Side;
+  seat: Seat;
   from: number;
   to: number;
   /** The hut it was sent to, which can be several paths on from `to`. */
@@ -622,28 +1141,28 @@ export interface Army {
 }
 
 export type SwarmEvent =
-  | { kind: 'capture'; hut: number; seat: Side }
+  | { kind: 'capture'; hut: number; seat: Seat }
   | { kind: 'hit'; hut: number }
   | { kind: 'upgrade'; hut: number }
   | { kind: 'clash'; from: number; to: number; d: number }
   /** A unit of `seat` died to the spikes or the water, `d` along the path from `from`. */
-  | { kind: 'toll'; from: number; to: number; d: number; seat: Side };
+  | { kind: 'toll'; from: number; to: number; d: number; seat: Seat };
 
 /** A tower killed a unit of `seat` standing at x, y. */
 export interface Shot {
   tower: number;
   x: number;
   y: number;
-  seat: Side;
+  seat: Seat;
 }
 
 export interface SwarmState {
   tick: number;
   huts: Hut[];
   units: Unit[];
-  army: Record<Side, Army>;
+  army: Record<Seat, Army>;
   nextId: number;
-  winner: Side | 'draw' | null;
+  winner: Seat | 'draw' | null;
   /** For each of the map's paths, how many units have walked past the middle of it. Only spikes and fords count. */
   tolls: number[];
   /** What happened on the last tick, for the drawing to react to. */
@@ -657,7 +1176,7 @@ export function newState(map: SwarmMap): SwarmState {
     tick: 0,
     huts: map.sites.map((s) => ({ owner: s.owner, n: s.n, level: s.level, grow: 0, out: [], ...(s.tower && { reload: 0 }), ...(s.fort && { hurt: 0 }) })),
     units: [],
-    army: { a: { speed: 0, strength: 0, luck: 0 }, b: { speed: 0, strength: 0, luck: 0 }, c: { speed: 0, strength: 0, luck: 0 } },
+    army: { a: { speed: 0, strength: 0, luck: 0 }, b: { speed: 0, strength: 0, luck: 0 }, c: { speed: 0, strength: 0, luck: 0 }, d: { speed: 0, strength: 0, luck: 0 } },
     nextId: 1,
     winner: null,
     tolls: map.paths.map(() => 0),
@@ -671,7 +1190,7 @@ export function cloneState(state: SwarmState): SwarmState {
     tick: state.tick,
     huts: state.huts.map((h) => ({ ...h, out: h.out.map((q) => ({ ...q })) })),
     units: state.units.map((u) => ({ ...u })),
-    army: { a: { ...state.army.a }, b: { ...state.army.b }, c: { ...state.army.c } },
+    army: { a: { ...state.army.a }, b: { ...state.army.b }, c: { ...state.army.c }, d: { ...state.army.d } },
     nextId: state.nextId,
     winner: state.winner,
     tolls: state.tolls.slice(),
@@ -748,7 +1267,7 @@ export function upgradeCost(state: SwarmState, hutIndex: number, kind: 'hut' | '
 }
 
 /** An order that no longer holds when its tick comes (the hut fell, the units left) does nothing. */
-function applyOrder(state: SwarmState, map: SwarmMap, seat: Side, order: Order): void {
+function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
   const hut = state.huts[order.from];
   if (!hut || hut.owner !== seat) return;
   if (order.kind === 'half' || order.kind === 'all') {
@@ -813,7 +1332,7 @@ interface Walker {
  * winner's side of the fight, so a unit that outlives a whole run goes on to
  * meet the next.
  */
-const SIDE_BIT: Record<Side, number> = { a: 1, b: 2, c: 4 };
+const SIDE_BIT: Record<Seat, number> = { a: 1, b: 2, c: 4, d: 8 };
 
 function clashOnPaths(state: SwarmState, map: SwarmMap): void {
   const { index, length: lengths } = lanesOf(map);
@@ -878,22 +1397,25 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
  * huts before their twins: a hut both sides marched on in step went to
  * whichever seat the size of its garrison happened to suit.
  *
- * The two seats fight it out first, so the third side meets whichever of them
- * is left and neither seat is put in front of it by its letter.
+ * The sides that start at opposite ends fight it out first, so a side from
+ * between them meets whichever is left and neither is put in front of it by
+ * its letter. By where the sides start in the map's order, so a seat left
+ * empty moves no one up.
  */
-const DOOR_FIGHTS: [Side, Side][] = [['a', 'b'], ['a', 'c'], ['b', 'c']];
+const DOOR_FIGHTS: [number, number][] = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2]];
 
 function clashAtDoors(state: SwarmState, map: SwarmMap, arriving: Unit[]): Set<Unit> {
   const dead = new Set<Unit>();
-  const doors = new Map<number, Record<Side, Unit[]>>();
+  const doors = new Map<number, Record<Seat, Unit[]>>();
   for (const unit of arriving) {
     let door = doors.get(unit.to);
-    if (!door) doors.set(unit.to, (door = { a: [], b: [], c: [] }));
+    if (!door) doors.set(unit.to, (door = { a: [], b: [], c: [], d: [] }));
     door[unit.seat].push(unit);
   }
   const { index, length } = lanesOf(map);
+  const pairs = DOOR_FIGHTS.filter(([, y]) => y < map.sides.length).map(([x, y]) => [map.sides[x], map.sides[y]]);
   for (const [hut, door] of doors) {
-    for (const [x, y] of DOOR_FIGHTS) {
+    for (const [x, y] of pairs) {
       const xs = door[x].filter((unit) => !dead.has(unit));
       const ys = door[y].filter((unit) => !dead.has(unit));
       for (let i = 0, j = 0; i < xs.length && j < ys.length; ) {
@@ -1017,7 +1539,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
 }
 
 /** A tower is not a hut, but the units in it are units. */
-export function countOf(state: SwarmState, seat: Side): { huts: number; units: number } {
+export function countOf(state: SwarmState, seat: Seat): { huts: number; units: number } {
   let huts = 0;
   let units = 0;
   for (const hut of state.huts) {
@@ -1029,32 +1551,58 @@ export function countOf(state: SwarmState, seat: Side): { huts: number; units: n
   return { huts, units };
 }
 
+/** No orders from anyone. */
+/**
+ * Whether the computer playing `seat` thinks on `tick`. The sides take turns
+ * across the think rather than all thinking at once: sides that think on one
+ * tick cannot see each other's choice, and two that pick the same hut together
+ * feed it in turn for as long as either has units.
+ */
+export const thinksAt = (map: SwarmMap, seat: Seat, tick: number): boolean =>
+  tick % CPU_THINK_TICKS === Math.floor((map.sides.indexOf(seat) * CPU_THINK_TICKS) / map.sides.length);
+
+export const noOrders = (): Partial<Record<Seat, Order[]>> => ({});
+
+/** Whether a person still gives the orders of `side` after this tick. */
+const played = (cpu: Computer, side: Seat, tick: number): boolean => cpu[side] === undefined || tick <= cpu[side];
+
 /**
  * The game ends when one side is left, or on the clock, when the side holding
  * the most huts, then the most units, takes it. A tie at the top is a draw.
+ * When every person in it is beaten or gone it is called the same way there
+ * and then: nobody is left to watch the computers play it out.
  */
-function judge(state: SwarmState, map: SwarmMap): void {
+function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
   // A side with no hut can still win one back with the units it has on the road.
   const counts = map.sides.map((side) => ({ side, ...countOf(state, side) })).filter((count) => count.huts > 0 || count.units > 0);
+  const people = map.sides.some((side) => cpu[side] !== 0);
   if (counts.length <= 1) {
     state.winner = counts.length === 1 ? counts[0].side : 'draw';
-  } else if (state.tick >= MATCH_TICKS) {
+  } else if (state.tick >= map.ticks || (people && !counts.some((count) => played(cpu, count.side, state.tick)))) {
     counts.sort((p, q) => q.huts - p.huts || q.units - p.units);
     const [first, second] = counts;
     state.winner = first.huts === second.huts && first.units === second.units ? 'draw' : first.side;
   }
 }
 
-/** Advance one tick. Orders are applied seat `a` first, each list in the order given, and the third side's last. */
-export function step(state: SwarmState, map: SwarmMap, orders: Record<Seat, Order[]>): void {
-  const third = map.sides.includes('c') && state.tick % CPU_THINK_TICKS === 0 ? cpuOrders(state, map, 'c') : [];
+/**
+ * Advance one tick. Each side's orders are applied in turn, in the order the
+ * map lays the sides out, each list in the order given. A side the computer
+ * plays (see Computer) is given its orders here, from the state the tick
+ * starts from, so every client works out the same ones; a person's orders for
+ * the ticks after the computer took the side over count for nothing.
+ */
+export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Seat, Order[]>>, cpu: Computer = {}): void {
+  const planned = map.sides.map((side) => (cpu[side] !== undefined && state.tick >= cpu[side] && thinksAt(map, side, state.tick) ? cpuOrders(state, map, side) : []));
   const tick = ++state.tick;
   state.events = [];
   state.shots = [];
-  for (const seat of SEATS) {
-    for (const order of orders[seat]) if (order.tick === tick) applyOrder(state, map, seat, order);
-  }
-  for (const order of third) applyOrder(state, map, 'c', order);
+  map.sides.forEach((side, k) => {
+    if (played(cpu, side, tick)) {
+      for (const order of orders[side] ?? []) if (order.tick === tick) applyOrder(state, map, side, order);
+    }
+    for (const order of planned[k]) applyOrder(state, map, side, order);
+  });
 
   for (const hut of state.huts) {
     if (!hut.owner || isTower(hut)) continue;
@@ -1104,32 +1652,26 @@ export function step(state: SwarmState, map: SwarmMap, orders: Record<Seat, Orde
     state.units = walking;
   }
   shoot(state, map);
-  judge(state, map);
+  judge(state, map, cpu);
 }
 
-/**
- * Run `state` on to tick `to`. With `cpu` set, that seat is played by the
- * computer, whose orders are added to `orders` as it goes. The third side
- * plays itself inside `step`. `onStep` sees the
- * state after each tick.
- */
+/** Run `state` on to tick `to`. `onStep` sees the state after each tick. */
 export function advance(
   state: SwarmState,
   map: SwarmMap,
-  orders: Record<Seat, Order[]>,
+  orders: Partial<Record<Seat, Order[]>>,
   to: number,
-  cpu: Seat | null,
+  cpu: Computer = {},
   onStep?: (state: SwarmState) => void
 ): void {
   while (state.tick < to && state.winner === null) {
-    if (cpu && state.tick % CPU_THINK_TICKS === 0) orders[cpu].push(...cpuOrders(state, map, cpu));
-    step(state, map, orders);
+    step(state, map, orders, cpu);
     onStep?.(state);
   }
 }
 
 /** For each hut, how many paths it is from the nearest hut `seat` does not hold, by the paths that take no toll. */
-function stepsToFront(state: SwarmState, map: SwarmMap, seat: Side): number[] {
+function stepsToFront(state: SwarmState, map: SwarmMap, seat: Seat): number[] {
   const steps = state.huts.map((hut) => (hut.owner === seat ? Infinity : 0));
   const queue = steps.flatMap((s, index) => (s === 0 ? [index] : []));
   for (let head = 0; head < queue.length; head++) {
@@ -1142,83 +1684,366 @@ function stepsToFront(state: SwarmState, map: SwarmMap, seat: Side): number[] {
   return steps;
 }
 
+const coverCache = new WeakMap<SwarmMap, number[][]>();
+
+/** For each path, the towers that can shoot a unit somewhere on it. */
+function coverOf(map: SwarmMap): number[][] {
+  let cover = coverCache.get(map);
+  if (!cover) {
+    const towers = map.sites.flatMap((site, index) => (site.tower ? [index] : []));
+    cover = map.paths.map((path) => {
+      const [p, q] = [map.sites[path.a], map.sites[path.b]];
+      const dx = q.x - p.x;
+      const dy = q.y - p.y;
+      return towers.filter((tower) => {
+        const r = map.sites[tower];
+        const t = Math.max(0, Math.min(1, ((r.x - p.x) * dx + (r.y - p.y) * dy) / (dx * dx + dy * dy)));
+        return far({ x: p.x + t * dx, y: p.y + t * dy }, r, TOWER_RANGE + 1) === false;
+      });
+    });
+    coverCache.set(map, cover);
+  }
+  return cover;
+}
+
 /**
- * The computer's orders for the coming tick. It takes the weakest hut it can
- * afford next to each of its own, grows what it holds when nothing is in
- * reach, and walks units from the rear up to the front. A hut is costed at
- * what its lives cost an army of this strength against its owner's, and what
- * the column loses on the way to it: to a tower's shots, to a toll, and to
- * what the hut breeds while the column walks, which is more up a climb. It
- * crosses a toll only to take the hut at the far end.
+ * What one computer side is like to play against. Fixed for a game, and
+ * different from side to side and from map to map, so the computers on one
+ * board do not all play alike.
  */
-export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Side): Order[] {
+interface Temper {
+  /** Eighths of the strongest garrison of another side next door that a hut keeps back. */
+  guard: number;
+  /** Eighths more a hut of the side ahead is worth to it. */
+  spite: number;
+  /** Buys strength before speed when it has as much of each. */
+  strong: boolean;
+  /** Grows the huts behind its front, rather than marching what they breed up to it. */
+  builder: boolean;
+}
+
+function temperOf(map: SwarmMap, seat: Seat): Temper {
+  let hash = SEATS.indexOf(seat) + 1;
+  for (const site of map.sites) hash = (Math.imul(hash, 31) + site.x * 7 + site.y) >>> 0;
+  const rnd = mulberry32(hash);
+  const int = (n: number) => Math.floor(rnd() * n);
+  return { guard: 2 + int(3), spite: 3 * int(3), strong: int(2) === 1, builder: int(2) === 1 };
+}
+
+/** The way a send takes from one of a side's huts: how long its first unit walks, and the paths it walks. */
+interface Way {
+  ticks: number;
+  paths: number[];
+  risky: boolean;
+}
+
+/** One hut's part in a march: `halves` is 1 for half of what it has free, 2 for three quarters, and 0 for all of it. */
+interface Send {
+  from: number;
+  n: number;
+  halves: number;
+  risky: boolean;
+}
+
+/** The most marches the computer starts on one think. */
+const MARCHES = 3;
+/** The fewest units the computer sends from a hut: a column of one or two is picked off at the door. */
+const MIN_SEND = 3;
+
+/**
+ * The computer's orders for the coming tick. Each think it:
+ *
+ *  - holds a hut that a march is coming at, from the huts near enough to get
+ *    there first, or when it cannot, lets that hut's garrison strike out
+ *    rather than wait to die;
+ *  - marches on the huts next to its own that are best worth their price,
+ *    from as many of its huts as it takes, the nearest first, all arriving
+ *    on one target;
+ *  - grows a hut or its army with what it has no use for;
+ *  - walks what its rear breeds up to the hut at the front under the most
+ *    pressure.
+ *
+ * A hut is priced at what its lives cost an army of this strength against its
+ * owner's, what it breeds while the columns walk, and what they lose on the
+ * way: to towers, to tolls, and to another side's march that gets there first
+ * and fights the garrison down, which makes a hut just fought over cheap. It
+ * is worth more for breeding faster, for being a tower or a fort, for having
+ * many paths, for belonging to the side ahead, and for being one of the last
+ * huts of a side. A hut at the front keeps back part of what the strongest of
+ * its neighbours could send. It crosses a toll only when there is no other way
+ * or the other way is far longer.
+ */
+export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[] {
   const orders: Order[] = [];
   const tick = state.tick + 1;
-  const steps = stepsToFront(state, map, seat);
-  const { speed, strength } = state.army[seat];
-  const inbound = (hutIndex: number) => state.units.filter((u) => u.seat === seat && u.to === hutIndex).length;
+  const { huts } = state;
+  const army = state.army[seat];
+  const me = SEATS.indexOf(seat);
+  const temper = temperOf(map, seat);
+  const { index, length } = lanesOf(map);
+  const mine = huts.flatMap((hut, at) => (hut.owner === seat ? [at] : []));
   const lives = (hut: Hut) => (hut.hurt === undefined ? hut.n : hut.n * FORT_LIVES - hut.hurt);
-  let bought = false;
+  // A life costs one unit between armies of one strength, fewer of a stronger army's and more of a weaker one's.
+  const toKill = (owner: Owner, n: number) => Math.ceil((n * (LUCK_DEN - army.strength)) / (LUCK_DEN - (owner ? state.army[owner].strength : 0)));
+  const bredBy = (at: number, ticks: number) => {
+    const hut = huts[at];
+    // A hut walked in over its cap breeds nothing, and loses none of what it holds either.
+    if (!hut.owner || isTower(hut) || hut.n >= HUT_CAP[hut.level - 1]) return 0;
+    return Math.min(Math.floor(ticks / GROW_TICKS[hut.level - 1]), (HUT_CAP[hut.level - 1] - hut.n) * (hut.hurt === undefined ? 1 : FORT_LIVES));
+  };
 
-  state.huts.forEach((hut, from) => {
-    if (hut.owner !== seat || hut.out.length > 0) return;
-    const tolled = (to: number) => takesToll(map.paths[pathIndex(map, from, to)].kind);
-    const targets = map.links[from].filter((to) => state.huts[to].owner !== seat);
-    // A hut every path out of which takes a toll (the third side's island in a ford) has no safe way to the front.
-    const reinforce = () => {
-      const safe = map.links[from].filter((to) => !tolled(to));
-      if (safe.length === 0) return;
-      const nearer = safe.reduce((best, to) => (steps[to] < steps[best] ? to : best));
-      orders.push({ tick, kind: 'all', from, to: nearer });
-    };
-
-    if (targets.length === 0) {
-      if (hut.n >= 8) reinforce();
-      return;
-    }
-
-    // A life costs one unit between armies of one strength, fewer of a stronger army's and more of a weaker one's.
-    const toKill = (to: number, n: number) => {
-      const owner = state.huts[to].owner;
-      return Math.ceil((n * (LUCK_DEN - strength)) / (LUCK_DEN - (owner ? state.army[owner].strength : 0)));
-    };
-    const need = (to: number) => toKill(to, lives(state.huts[to])) + 2 - inbound(to);
-    // A column of n is under the tower's fire while it leaves the hut and then while its last unit walks in.
-    const shotOf = (to: number, n: number) =>
-      isTower(state.huts[to]) ? Math.ceil((n * RELEASE_TICKS + TOWER_RANGE / paceOn(map, from, to, speed)) / TOWER_RELOAD) : 0;
-    const tollOf = (to: number, n: number) =>
-      tolled(to) ? Math.floor(((state.tolls[pathIndex(map, from, to)] % TOLL_EVERY) + n) / TOLL_EVERY) : 0;
-    // A held hut breeds until the last of the column is in. A fort breeds as many lives as a hut of its level.
-    const bredOf = (to: number, n: number) => {
-      const target = state.huts[to];
-      if (!target.owner || isTower(target)) return 0;
-      const ticks = n * RELEASE_TICKS + Math.ceil(pathLength(map, from, to) / paceOn(map, from, to, speed));
-      return toKill(to, Math.floor(ticks / GROW_TICKS[target.level - 1]));
-    };
-    const lost = (to: number, n: number) => shotOf(to, n) + tollOf(to, n) + bredOf(to, n);
-    const price = (to: number) => need(to) + lost(to, hut.n);
-    const target = targets.reduce((best, to) => (price(to) < price(best) ? to : best));
-    const half = Math.ceil(hut.n / 2);
-    const risky = tolled(target) && { risky: true };
-    if (half - lost(target, half) >= need(target)) {
-      orders.push({ tick, kind: 'half', from, to: target, ...risky });
-    } else if (hut.n - lost(target, hut.n) > need(target)) {
-      orders.push({ tick, kind: 'all', from, to: target, ...risky });
-    } else if (!bought) {
-      const army = state.army[seat];
-      const kinds: ('hut' | 'speed' | 'strength')[] = army.strength <= army.speed ? ['hut', 'strength', 'speed'] : ['hut', 'speed', 'strength'];
-      const kind = kinds.find((k) => {
-        const cost = upgradeCost(state, from, k);
-        return cost !== null && hut.n >= cost + 6;
-      });
-      if (kind) {
-        orders.push({ tick, kind, from, to: from });
-        bought = true;
-      } else if (hut.n >= HUT_CAP[hut.level - 1] && targets.every(tolled)) {
-        // Full, and across the toll is more than it can take: what it has is more use at the front.
-        reinforce();
-      }
+  // What each side has on its way to each hut, counting the columns still leaving, and how soon the first of it gets there.
+  const bound = huts.map(() => [0, 0, 0, 0]);
+  const soon = huts.map(() => [Infinity, Infinity, Infinity, Infinity]);
+  for (const unit of state.units) {
+    const k = SEATS.indexOf(unit.seat);
+    const ticks = (length[index[unit.from][unit.to]] - unit.d + span(map.sites[unit.to], map.sites[unit.dest])) / SPEED[state.army[unit.seat].speed];
+    bound[unit.dest][k]++;
+    soon[unit.dest][k] = Math.min(soon[unit.dest][k], ticks);
+  }
+  huts.forEach((hut, at) => {
+    if (!hut.owner) return;
+    const k = SEATS.indexOf(hut.owner);
+    for (const line of hut.out) {
+      bound[line.dest][k] += line.n;
+      soon[line.dest][k] = Math.min(soon[line.dest][k], span(map.sites[at], map.sites[line.dest]) / SPEED[state.army[hut.owner].speed]);
     }
   });
+
+  const standing = map.sides.filter((side) => side !== seat).map((side) => ({ side, ...countOf(state, side) }));
+  const leader = standing.reduce((best, count) => (count.huts > best.huts || (count.huts === best.huts && count.units > best.units) ? count : best), standing[0]);
+  const mineCount = countOf(state, seat);
+
+  /** The way from one of this side's huts to `to` through its own huts alone, or null when there is none. */
+  const wayTo = (from: number, to: number, risky: boolean): Way | null => {
+    const paths: number[] = [];
+    let ticks = 0;
+    for (let at = from; at !== to; ) {
+      const hop = nextHop(map, at, to, risky);
+      if (hop === -1 || (hop !== to && huts[hop].owner !== seat)) return null;
+      const path = index[at][hop];
+      paths.push(path);
+      ticks += Math.ceil(length[path] / paceOf(map.paths[path], hop, army.speed));
+      at = hop;
+    }
+    return { ticks, paths, risky: paths.some((path) => takesToll(map.paths[path].kind)) };
+  };
+  /** The safe way, or the risky one when there is no safe way or it is half as long again. */
+  const bestWay = (from: number, to: number): Way | null => {
+    const safe = wayTo(from, to, false);
+    if (!lanesOf(map).tolled) return safe;
+    const risky = wayTo(from, to, true);
+    if (!risky || !risky.risky) return safe;
+    return !safe || 3 * risky.ticks < 2 * safe.ticks ? risky : safe;
+  };
+  /** What a column of n loses on the way to `to`: to tolls, and to every tower that shoots at it. */
+  const lostOn = (way: Way, to: number, n: number) => {
+    let lost = 0;
+    const towers = new Set<number>();
+    for (const path of way.paths) {
+      if (takesToll(map.paths[path].kind)) lost += Math.floor(((state.tolls[path] % TOLL_EVERY) + n) / TOLL_EVERY);
+      for (const tower of coverOf(map)[path]) if (tower !== to && huts[tower].owner && huts[tower].owner !== seat) towers.add(tower);
+    }
+    const last = way.paths[way.paths.length - 1];
+    const pace = paceOf(map.paths[last], to, army.speed);
+    // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
+    for (const _ of towers) lost += Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
+    if (isTower(huts[to])) lost += Math.ceil((n * RELEASE_TICKS + TOWER_RANGE / pace) / TOWER_RELOAD);
+    return Math.min(n, lost);
+  };
+
+  // A hut a march is coming at that cannot be held: its garrison may as well strike out.
+  const doomed = new Set<number>();
+  const used = new Set<number>();
+  /** What a hut keeps back against the strongest garrison of another side next door, `but` aside. */
+  const keepOf = (at: number, but: number) => {
+    if (doomed.has(at)) return 0;
+    let strongest = 0;
+    for (const next of map.links[at]) {
+      const other = huts[next];
+      if (next !== but && other.owner && other.owner !== seat) strongest = Math.max(strongest, toKill(other.owner, other.n));
+    }
+    // It holds back less as the game wears on, so that a game between careful sides still comes to an end.
+    const guard = Math.max(0, temper.guard - Math.floor((4 * state.tick) / map.ticks));
+    const keep = Math.ceil((strongest * guard) / 8);
+    // A tower breeds nothing, so what it sends is gone from its door for good.
+    return isTower(huts[at]) ? Math.max(keep, TOWER_START) : keep;
+  };
+  const free = (at: number) => huts[at].n - queued(huts[at]);
+
+  /**
+   * The sends that get `need(ticks)` into `to` by the time the last of them is
+   * in, from huts that are not yet marching, the nearest first. Null when
+   * everything in reach is not enough.
+   */
+  const muster = (to: number, need: (ticks: number) => number, by = Infinity): Send[] | null => {
+    const ways = mine
+      .filter((from) => from !== to && !used.has(from) && free(from) > 0)
+      .map((from) => ({ from, way: bestWay(from, to) }))
+      .filter((source): source is { from: number; way: Way } => source.way !== null && source.way.ticks <= by)
+      .sort((p, q) => p.way.ticks - q.way.ticks || p.from - q.from);
+    if (ways.length === 0) return null;
+    const reach = 2 * ways[0].way.ticks + 40;
+    const sends: Send[] = [];
+    let got = 0;
+    let latest = 0;
+    for (const { from, way } of ways) {
+      if (way.ticks > reach) break;
+      const f = free(from);
+      const keep = keepOf(from, to);
+      const half = Math.ceil(f / 2);
+      const options = [
+        { n: half, halves: 1 },
+        { n: half + Math.ceil((f - half) / 2), halves: 2 },
+        { n: f, halves: 0 },
+      ].filter((option) => option.n >= MIN_SEND && (option.halves === 0 ? keep === 0 : f - option.n >= keep));
+      if (options.length === 0) continue;
+      // Sending all of it leaves the hut empty, which is worth one more.
+      const gain = (option: { n: number; halves: number }) => option.n - lostOn(way, to, option.n) - (option.halves === 0 ? 1 : 0);
+      const arrive = (option: { n: number }) => Math.max(latest, way.ticks + option.n * RELEASE_TICKS);
+      // Every hut more that joins in is one more column that can come in late.
+      const enough = options.find((option) => got + gain(option) >= need(arrive(option)) + sends.length);
+      const option = enough ?? options[options.length - 1];
+      if (gain(option) <= 0) continue;
+      sends.push({ from, n: option.n, halves: option.halves, risky: way.risky });
+      got += gain(option);
+      latest = arrive(option);
+      if (enough) return sends;
+    }
+    return null;
+  };
+  const march = (to: number, sends: Send[]) => {
+    for (const { from, halves, risky } of sends) {
+      const order = { tick, kind: halves === 0 ? ('all' as const) : ('half' as const), from, to, ...(risky && { risky: true }) };
+      orders.push(order);
+      if (halves === 2) orders.push({ ...order });
+      used.add(from);
+      bound[to][me] += sendSizeAfter(huts[from], halves);
+    }
+  };
+
+  // Hold what is under attack first.
+  for (const at of mine) {
+    let attackers = 0;
+    let soonest = Infinity;
+    SEATS.forEach((side, k) => {
+      if (side === seat || bound[at][k] === 0) return;
+      attackers += toKill(side, bound[at][k]);
+      soonest = Math.min(soonest, soon[at][k]);
+    });
+    if (attackers === 0) continue;
+    const hut = huts[at];
+    const short = attackers + 1 - lives(hut) - bound[at][me] - (isTower(hut) ? 0 : Math.floor(soonest / GROW_TICKS[hut.level - 1]));
+    if (short <= 0) continue;
+    const help = muster(at, () => short, soonest);
+    if (help) march(at, help);
+    else doomed.add(at);
+  }
+
+  const leading = leader && (leader.huts > mineCount.huts || (leader.huts === mineCount.huts && leader.units > mineCount.units));
+  const worth = (to: number) => {
+    const hut = huts[to];
+    let value = isTower(hut) ? 1.5 : 10 / GROW_TICKS[hut.level - 1];
+    if (map.sites[to].fort) value += 0.5;
+    value *= 1 + 0.1 * Math.max(0, map.links[to].length - 2);
+    if (hut.owner) {
+      value *= 1.5;
+      if (leading && hut.owner === leader.side) value *= 1 + temper.spite / 8;
+      if (standing.find((count) => count.side === hut.owner)!.huts <= 2) value *= 1.5;
+    }
+    return value;
+  };
+  /** What every other side but the owner has marching on `to`, in this side's units. */
+  const rivals = (to: number) =>
+    SEATS.reduce((sum, side, k) => (side === seat || side === huts[to].owner ? sum : sum + toKill(side, bound[to][k])), 0);
+  /**
+   * What this side has to beat in `to` when its last unit gets in: the
+   * garrison, what it breeds and what its owner sends it, and every other
+   * side's march on it too. Two marches on one hut fight each other at its
+   * door whichever is first, so a hut another side is after is dearer, not
+   * cheaper: counting their march as softening the garrison had two sides
+   * feed one neutral hut a few units a think each for a whole game.
+   */
+  const needAt = (to: number) => (ticks: number) => {
+    const holder = huts[to].owner;
+    const left = lives(huts[to]) + bredBy(to, ticks) + (holder ? bound[to][SEATS.indexOf(holder)] : 0);
+    return toKill(holder, left) + rivals(to) + 2 - bound[to][me];
+  };
+  const targets = [...new Set(mine.flatMap((at) => map.links[at]))].filter((to) => huts[to].owner !== seat).sort((p, q) => p - q);
+  for (let marches = 0; marches < MARCHES; marches++) {
+    let best: { to: number; sends: Send[]; score: number } | null = null;
+    for (const to of targets) {
+      const sends = muster(to, needAt(to));
+      if (!sends) continue;
+      const n = sends.reduce((sum, send) => sum + send.n, 0);
+      const ticks = Math.max(...sends.map((send) => bestWay(send.from, to)!.ticks));
+      // Priced at all it takes, the units already on their way included, or a hut it has started on outbids everything else for good.
+      const score = worth(to) / (n + bound[to][me] + rivals(to) + ticks / 20 + 3);
+      if (!best || score > best.score) best = { to, sends, score };
+    }
+    if (!best) break;
+    march(best.to, best.sends);
+  }
+
+  const front = mine.filter((at) => map.links[at].some((next) => huts[next].owner !== seat));
+  const pressure = (at: number) => {
+    let strongest = 0;
+    for (const next of map.links[at]) if (huts[next].owner && huts[next].owner !== seat) strongest = Math.max(strongest, toKill(huts[next].owner, huts[next].n));
+    return Math.max(0, strongest - huts[at].n);
+  };
+  const steps = stepsToFront(state, map, seat);
+  /** Everything a hut has free, walked by the roads to the hut at the front most in need of it, if any can be reached. */
+  const reinforce = (from: number) => {
+    let best: { to: number; score: number } | null = null;
+    for (const to of front) {
+      if (to === from || steps[to] !== 1) continue;
+      const way = wayTo(from, to, false);
+      if (!way) continue;
+      const score = way.ticks - 4 * pressure(to);
+      if (!best || score < best.score) best = { to, score };
+    }
+    if (best) orders.push({ tick, kind: 'all', from, to: best.to });
+  };
+
+  let bought = false;
+  const buy = (at: number, margin: number, hut = true) => {
+    const speedFirst = army.speed < army.strength || (army.speed === army.strength && !temper.strong);
+    const order: ('hut' | 'speed' | 'strength')[] = speedFirst ? ['hut', 'speed', 'strength'] : ['hut', 'strength', 'speed'];
+    const kinds = hut ? order : order.filter((kind) => kind !== 'hut');
+    const kind = kinds.find((k) => {
+      const cost = upgradeCost(state, at, k);
+      return cost !== null && free(at) >= cost + margin;
+    });
+    if (!kind) return false;
+    orders.push({ tick, kind, from: at, to: at });
+    bought = true;
+    return true;
+  };
+  for (const at of mine) {
+    const hut = huts[at];
+    if (used.has(at) || isTower(hut)) continue;
+    if (!front.includes(at)) {
+      // A builder grows the huts behind its front when it can pay for it, and otherwise does what the others do: a builder that sat
+      // saving up for the next level won 79 of 195 games against one that did not, and 95 of 195 once it stopped.
+      if (temper.builder && hut.level < MAX_HUT_LEVEL && free(at) >= HUT_COST[hut.level - 1] + 4) {
+        if (!bought) buy(at, 4);
+      } else {
+        const upgraded = !bought && buy(at, 4, false);
+        if (!upgraded && free(at) >= 8) reinforce(at);
+      }
+      continue;
+    }
+    if (!bought && buy(at, 6 + keepOf(at, -1))) continue;
+    // Full, and across a toll is more than it can take: what it has is more use at the front.
+    const tolledOnly = map.links[at].every((next) => huts[next].owner === seat || takesToll(map.paths[index[at][next]].kind));
+    if (hut.n >= HUT_CAP[hut.level - 1] && tolledOnly) reinforce(at);
+  }
   return orders;
+}
+
+/** How many units a send of `halves` (see Send) from this hut commits. */
+function sendSizeAfter(hut: Hut, halves: number): number {
+  const free = hut.n - queued(hut);
+  const half = Math.ceil(free / 2);
+  return halves === 0 ? free : halves === 1 ? half : half + Math.ceil((free - half) / 2);
 }

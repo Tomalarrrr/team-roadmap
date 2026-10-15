@@ -2,7 +2,7 @@
 // board, the line a path takes, the course of a river, and the colours of
 // each of the five places a map can be set in.
 
-import { centreOf, pathOf, type Path, type PathKind, type SceneId, type Side, type Site, type SwarmMap } from '../../swarmGameLogic';
+import { centreOf, pathOf, type Path, type PathKind, type SceneId, type Seat, type Site, type SwarmMap } from '../../swarmGameLogic';
 
 export type Rnd = () => number;
 export type Ctx = CanvasRenderingContext2D;
@@ -27,10 +27,12 @@ export const TOWER_BALL = 15;
 /** From a tower's foot to the top of its cannon ball. */
 const TOWER_TOP = TOWER_H + TOWER_BALL * 1.8;
 
-export const BADGE: Record<Side | 'none', { fill: string; text: string }> = {
+export const BADGE: Record<Seat | 'none', { fill: string; text: string }> = {
   a: { fill: '#8f2f1a', text: '#ffffff' },
   b: { fill: '#f0b429', text: '#2a1c00' },
   c: { fill: '#2c5b8c', text: '#ffffff' },
+  // Darker and bluer than the valley's turf, which a mid green would vanish into.
+  d: { fill: '#2f6b3f', text: '#ffffff' },
   none: { fill: '#5f5f5a', text: '#ffffff' },
 };
 
@@ -265,6 +267,8 @@ interface Palette {
   /** A tower's or a fort's stone, from its lit side to its dark one. */
   wall: [string, string, string];
   spike: { shaft: string; tip: string };
+  /** A tower's footing: the hole, the floor of it, and the bank of what was dug with its shadow under. */
+  dig: { hole: string; floor: string; under: string; bank: string };
 }
 
 const WOOD_SPIKE = { shaft: '#5a3d22', tip: '#ead9ae' };
@@ -283,6 +287,7 @@ export const PALETTE: Record<SceneId, Palette> = {
     stone: ['#a4a39b', '#8f8e86', '#b3b2a9', '#7c7b74', '#9a9990'],
     wall: ['#9a9c96', '#73766f', '#3d403c'],
     spike: WOOD_SPIKE,
+    dig: { hole: 'rgba(70, 56, 34, 0.5)', floor: '#8a7350', under: 'rgba(52, 40, 22, 0.4)', bank: '#a68d62' },
   },
   scrub: {
     base: '#b89a68',
@@ -297,6 +302,7 @@ export const PALETTE: Record<SceneId, Palette> = {
     stone: ['#d8ccb0', '#c7b995', '#e6dcc4', '#b5a684'],
     wall: ['#d6bd8e', '#a88a5c', '#5e4628'],
     spike: { shaft: '#4a3320', tip: '#dccca2' },
+    dig: { hole: 'rgba(110, 78, 42, 0.45)', floor: '#c4a776', under: 'rgba(104, 74, 40, 0.4)', bank: '#dcc79a' },
   },
   valley: {
     base: '#4f7d3a',
@@ -311,6 +317,7 @@ export const PALETTE: Record<SceneId, Palette> = {
     stone: ['#8a8c80', '#74776c', '#9c9e90', '#666a5e'],
     wall: ['#8f9488', '#666c60', '#343a32'],
     spike: WOOD_SPIKE,
+    dig: { hole: 'rgba(46, 34, 20, 0.55)', floor: '#6e5538', under: 'rgba(30, 22, 12, 0.4)', bank: '#8f7450' },
   },
   ice: {
     base: '#e4ecf2',
@@ -325,6 +332,7 @@ export const PALETTE: Record<SceneId, Palette> = {
     stone: ['#6e7780', '#5a636c', '#828b94', '#4a525a'],
     wall: ['#aab2ba', '#7a848e', '#3e4852'],
     spike: { shaft: '#9fc3d9', tip: '#f4fbff' },
+    dig: { hole: 'rgba(96, 128, 166, 0.5)', floor: '#b4c8da', under: 'rgba(96, 130, 178, 0.4)', bank: '#ffffff' },
   },
   terrace: {
     base: '#76873f',
@@ -339,6 +347,7 @@ export const PALETTE: Record<SceneId, Palette> = {
     stone: ['#c9b88f', '#b5a37a', '#d6c7a0', '#a39168', '#bfae84'],
     wall: ['#d4c49c', '#a4946c', '#58492e'],
     spike: WOOD_SPIKE,
+    dig: { hole: 'rgba(84, 68, 40, 0.5)', floor: '#a8956e', under: 'rgba(70, 54, 30, 0.4)', bank: '#cabb94' },
   },
 };
 

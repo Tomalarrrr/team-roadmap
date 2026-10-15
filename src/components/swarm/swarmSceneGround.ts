@@ -1379,7 +1379,7 @@ function scrubGround(g: Ground) {
   // Pans where water stood and the mud dried into plates.
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  for (let pan = 0; pan < 10; pan++) {
+  for (let pan = 0; pan < 10 * g.area; pan++) {
     const px = rnd() * g.map.w;
     const py = rnd() * g.map.h;
     const reach = 55 + rnd() * 70;
@@ -1414,7 +1414,7 @@ function scrubGround(g: Ground) {
     }
   }
   // And long cracks across the open ground.
-  for (let i = 0; i < 46; i++) {
+  for (let i = 0; i < 46 * g.area; i++) {
     let x = rnd() * g.map.w;
     let y = rnd() * g.map.h;
     let angle = rnd() * Math.PI * 2;
@@ -1436,7 +1436,7 @@ function scrubGround(g: Ground) {
 function iceGround(g: Ground) {
   const { ctx, rnd } = g;
   // Sheets of bare ice where the wind has scoured the snow off.
-  for (let sheet = 0; sheet < 7; sheet++) {
+  for (let sheet = 0; sheet < 7 * g.area; sheet++) {
     const x = rnd() * g.map.w;
     const y = rnd() * g.map.h;
     const reach = 34 + rnd() * 46;
@@ -1492,7 +1492,7 @@ function iceGround(g: Ground) {
   }
   // Drifts all lying the way the wind left them, each with its blue lee side.
   // They gather in a few fields with bare crust between, as snow does behind whatever broke the wind.
-  for (let field = 0; field < 9; field++) {
+  for (let field = 0; field < 9 * g.area; field++) {
     const fx = rnd() * g.map.w;
     const fy = rnd() * g.map.h;
     for (let i = 0; i < 4; i++) {
@@ -1510,7 +1510,7 @@ function iceGround(g: Ground) {
   }
   // Between the drifts the wind has cut the crust into fine ridges, all one way.
   ctx.lineCap = 'round';
-  for (let i = 0; i < 260; i++) {
+  for (let i = 0; i < 260 * g.area; i++) {
     const x = rnd() * g.map.w;
     const y = rnd() * g.map.h;
     const reach = 4 + rnd() * 10;
@@ -1523,7 +1523,7 @@ function iceGround(g: Ground) {
       ctx.stroke();
     }
   }
-  for (let i = 0; i < 1400; i++) {
+  for (let i = 0; i < 1400 * g.area; i++) {
     ctx.fillStyle = 'rgba(140, 168, 200, 0.28)';
     ellipse(ctx, rnd() * g.map.w, rnd() * g.map.h, 0.6 + rnd() * 1.2, 0.4 + rnd() * 0.5);
     ctx.fill();
@@ -1885,16 +1885,16 @@ export function paintGround(ctx: Ctx, map: SwarmMap, seed: number, rivers: River
   for (const site of map.sites) {
     if (map.scene !== 'terrace') wornGround(g, site);
     if (!site.tower) continue;
-    // A tower's footing is dug out to the ice, and what was dug lies in a bank round the far side of it.
+    // A tower's footing is dug down to what the place lies on, ice or earth, and what was dug lies in a bank round the far side of it.
     const reach = siteRadius(site, site.level);
-    ctx.fillStyle = 'rgba(96, 128, 166, 0.5)';
+    ctx.fillStyle = pal.dig.hole;
     ellipse(ctx, site.x, site.y, reach * 0.95, reach * 0.5);
     ctx.fill();
-    ctx.fillStyle = '#b4c8da';
+    ctx.fillStyle = pal.dig.floor;
     ellipse(ctx, site.x, site.y - 1, reach * 0.88, reach * 0.45);
     ctx.fill();
     ctx.lineCap = 'round';
-    for (const [drop, colour, width] of [[2.2, 'rgba(96, 130, 178, 0.4)', 6], [0, '#ffffff', 5.5]] as const) {
+    for (const [drop, colour, width] of [[2.2, pal.dig.under, 6], [0, pal.dig.bank, 5.5]] as const) {
       ctx.strokeStyle = colour;
       ctx.lineWidth = width;
       ctx.beginPath();

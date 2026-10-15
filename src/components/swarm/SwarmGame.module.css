@@ -94,13 +94,6 @@
 
 .rules { max-width: 300px; }
 
-.thirdToggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
 .errorText { color: var(--error-red-dark); }
 
 .primaryBtn,
@@ -178,6 +171,40 @@
   font-weight: 600;
 }
 
+/* The size, and how many sides the computer plays: one word or two each, so pills in a row. */
+.choiceRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+}
+
+.choiceBtn {
+  padding: 4px 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.choiceBtn:hover:not(:disabled) { background: var(--bg-tertiary); }
+
+.choiceBtnOn,
+.choiceBtnOn:hover:not(:disabled) {
+  border-color: var(--text-primary);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.choiceBtn:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
 /* Every board is the shape of 1000 by 660, and the picture keeps that shape. */
 .mapThumb {
   display: block;
@@ -237,7 +264,7 @@
 
 .seats {
   width: 100%;
-  max-width: 264px;
+  max-width: 320px;
   border-top: 1px solid var(--border-light);
 }
 
@@ -252,6 +279,38 @@
 }
 
 .seatEmpty { color: var(--text-muted); }
+
+.seatName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seatKind { color: var(--text-muted); }
+
+.kindPick {
+  padding: 2px 4px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+/* Quieter than the seat it is in: putting the computer in is a side choice. */
+.seatBtn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.seatBtn:hover { color: var(--text-primary); }
 
 .dot {
   width: 10px;
@@ -280,7 +339,15 @@
   min-width: 0;
 }
 
-.side:last-child { justify-content: flex-end; }
+/* Each side is shown on the same side of the score line as its start is of the board, two to a column in a game of four. */
+.sideCol {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sideColEnd { align-items: flex-end; }
 
 .sideName {
   overflow: hidden;
@@ -351,6 +418,15 @@
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+/* Who left a game: said under the result, smaller than it. */
+.overlayNote {
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
 }
 
 .countdown {

@@ -6,8 +6,10 @@
 //
 // The room holds, for each seat, every order that seat has given and a promise
 // `k`: nothing more will be added for a tick up to k. A client runs its
-// confirmed state only as far as the other seat's promise, so what it has run
-// is final. Everything below protects that one sentence.
+// confirmed state only as far as the lowest promise of the other people
+// playing, so what it has run is final. Everything below protects that one
+// sentence. The computer gives no orders to wait for: every client works its
+// moves out of the same state.
 //
 // A seat is usually written by one tab, but not always: a reload leaves the
 // old page's last write in flight behind the new page's first, and the same
@@ -18,11 +20,10 @@
 import {
   advance,
   cloneState,
-  MATCH_TICKS,
+  computerOf,
   decodeOrders,
   encodeOrders,
   newState,
-  otherSeat,
   type Order,
   type Seat,
   type SwarmMap,
@@ -49,7 +50,7 @@ export const BEAT_AWAY_MS = 15_000;
 export const SILENT_LIVE_MS = 90_000;
 export const SILENT_IDLE_MS = 90_000;
 
-/** What one client has heard of the other seat: its last write, and when that was first read. */
+/** What one client has heard of another seat: its last write, and when that was first read. */
 export interface Ear {
   seq: number | undefined;
   at: number;
@@ -57,8 +58,8 @@ export interface Ear {
 }
 
 /**
- * Take in a read of the room, and say whether the other seat has now been
- * silent long enough to be given up.
+ * Take in a read of the room, and say whether a seat has now been silent long
+ * enough to be given up.
  */
 export function silent(ear: Ear, seated: boolean, seq: number | undefined, playing: boolean, now: number): boolean {
   // A game's silence is counted from its start. The seat was writing at the
@@ -156,11 +157,12 @@ export interface Lockstep {
   game: number;
   map: SwarmMap;
   orders: Record<Seat, Order[]>;
-  /** Run to the other seat's promise: final, and the same on both clients. */
+  /** Run to the lowest promise of the other people playing: final, and the same on every client. */
   confirmed: SwarmState;
   /** The confirmed state run on to now on the orders known so far. */
   shown: SwarmState;
-  theirText: string;
+  /** Each other seat's orders as the room last held them, so they are decoded only when they change. */
+  texts: Partial<Record<Seat, string>>;
   /** The write of this seat that this client's orders are built on: the last it took in from the room, or its own last to land. */
   ownSeq: number | undefined;
   /** Every write of this tab's in this game, oldest first: how it tells its own from another tab's on the same seat. */
@@ -180,7 +182,7 @@ function behind(game: Lockstep, seen: number): boolean {
 
 /** What this seat writes at `tick`. Sending it is a promise, so it is made here and not when the write lands. */
 export function sending(game: Lockstep, seat: Seat, seq: number, tick: number): SeatWrite {
-  game.promised = Math.max(game.promised, Math.min(tick, MATCH_TICKS), 0);
+  game.promised = Math.max(game.promised, Math.min(tick, game.map.ticks), 0);
   game.sent.push(seq);
   return {
     seq,
@@ -191,17 +193,36 @@ export function sending(game: Lockstep, seat: Seat, seq: number, tick: number): 
   };
 }
 
+/** A new game's lockstep, before anything has been heard or sent. */
+export function newLockstep(game: number, map: SwarmMap): Lockstep {
+  const start = newState(map);
+  return { game, map, orders: { a: [], b: [], c: [], d: [] }, confirmed: start, shown: start, texts: {}, ownSeq: undefined, sent: [], promised: 0 };
+}
+
 /**
- * Bring a client's game up to `tick` on what the room holds for both seats.
+ * The last tick every order of `seat` is known through, by what the room
+ * holds for it in this game. A seat the computer plays from tick t is known
+ * for good once its promise reaches t: the computer's own moves come from the
+ * state, and the rules refuse the seat a promise past t.
+ */
+function knownTo(game: Lockstep, stored: SwarmSeatState | undefined, computerFrom: number | undefined): number {
+  const k = stored && stored.game === game.game ? stored.k : undefined;
+  if (computerFrom === undefined) return k ?? game.confirmed.tick;
+  return (k ?? 0) >= computerFrom ? Infinity : (k ?? 0);
+}
+
+/**
+ * Bring a client's game up to `tick` on what the room holds for every seat.
  *
- * The room's copy of this seat's own orders is read as well as the other
- * seat's. A tab that was reloaded starts with none and has to take them back,
- * and the same seat open in a second tab is giving orders this one has not
- * seen; either way the other client is running them.
+ * The room's copy of this seat's own orders is read as well as the others'. A
+ * tab that was reloaded starts with none and has to take them back, and the
+ * same seat open in a second tab is giving orders this one has not seen;
+ * either way the other clients are running them.
  */
 export function settle(
   game: Lockstep,
   seat: Seat,
+  match: Pick<SwarmMatch, 'cpu' | 'out'>,
   seats: Partial<Record<Seat, SwarmSeatState>> | undefined,
   tick: number,
   onStep?: (state: SwarmState) => void
@@ -220,19 +241,20 @@ export function settle(
     }
   }
 
-  const opp = otherSeat(seat);
-  const theirs = seats?.[opp];
-  let theirK = game.confirmed.tick;
-  if (theirs && theirs.game === game.game) {
-    theirK = theirs.k;
-    if (theirs.orders !== game.theirText) {
-      game.theirText = theirs.orders;
-      game.orders[opp] = decodeOrders(theirs.orders);
+  const computer = computerOf(match);
+  let to = tick;
+  for (const other of game.map.sides) {
+    if (other === seat) continue;
+    const theirs = seats?.[other];
+    to = Math.min(to, knownTo(game, theirs, computer[other]));
+    if (theirs && theirs.game === game.game && theirs.orders !== game.texts[other]) {
+      game.texts[other] = theirs.orders;
+      game.orders[other] = decodeOrders(theirs.orders);
     }
   }
-  advance(game.confirmed, game.map, game.orders, Math.min(tick, theirK), null);
+  advance(game.confirmed, game.map, game.orders, to, computer);
   if (rerun || game.shown.tick !== tick || game.shown.tick < game.confirmed.tick) {
     game.shown = cloneState(game.confirmed);
-    advance(game.shown, game.map, game.orders, tick, null, onStep);
+    advance(game.shown, game.map, game.orders, tick, computer, onStep);
   }
 }

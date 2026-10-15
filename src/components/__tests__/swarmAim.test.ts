@@ -6,7 +6,7 @@
 // it; and the paths still to be walked are the viewer's own and nobody else's.
 
 import { describe, it, expect } from 'vitest';
-import { nextHop, newState, pathLength, sendSize, step, type PathKind, type Seat, type Site, type SwarmMap, type Unit } from '../../swarmGameLogic';
+import { MATCH_TICKS, nextHop, newState, pathLength, sendSize, step, type PathKind, type Seat, type Site, type SwarmMap, type Unit } from '../../swarmGameLogic';
 import { carriedOf, flowOf, ribbonWidth, routeOf, standingOf, type Sending, type Stretch } from '../swarm/swarmAim';
 
 // A road from 0 through 1 and 2 to 3, a side road from 4 into 1, a short cut
@@ -30,6 +30,7 @@ function mapOf(): SwarmMap {
   return {
     id: 'meadow',
     sides: ['a', 'b'],
+    homes: (['a', 'b'] as const).map((seat) => sites.findIndex((site) => site.owner === seat)),
     scene: 'meadow',
     sites,
     links: sites.map((_, i) => PATHS.flatMap(([a, b]) => (a === i ? [b] : b === i ? [a] : []))),
@@ -37,6 +38,8 @@ function mapOf(): SwarmMap {
     rivers: [],
     w: 1000,
     h: 660,
+    size: 'small',
+    ticks: MATCH_TICKS,
   };
 }
 

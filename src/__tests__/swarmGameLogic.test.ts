@@ -7,10 +7,13 @@ import {
   MAP_IDS,
   MATCH_TICKS,
   SEATS,
+  SIZE_IDS,
+  START_UNITS,
   TOLL_EVERY,
   TOWER_RANGE,
   TOWER_RELOAD,
   TOWER_START,
+  WORLDS,
   advance,
   buildMap,
   centreOf,
@@ -21,7 +24,6 @@ import {
   encodeOrders,
   mulberry32,
   newState,
-  otherSeat,
   nextHop,
   paceOn,
   pathLength,
@@ -29,6 +31,7 @@ import {
   sendSize,
   step,
   takesToll,
+  thinksAt,
   upgradeCost,
   type MapId,
   type Order,
@@ -36,7 +39,7 @@ import {
   type Path,
   type PathKind,
   type Seat,
-  type Side,
+  type Computer,
   type Shot,
   type Site,
   type SwarmEvent,
@@ -55,7 +58,7 @@ function mapOf(sites: Site[], links: number[][], named: Path[] = []): SwarmMap {
   links.forEach((linked, a) => {
     for (const b of linked) if (a < b) paths.push(named.find((p) => p.a === a && p.b === b) ?? { a, b, kind: 'road' });
   });
-  return { id: 'meadow', scene: 'meadow', sites, links, paths, rivers: [], w: 1000, h: 660, sides: ['a', 'b'] };
+  return { id: 'meadow', scene: 'meadow', sites, links, paths, rivers: [], w: 1000, h: 660, sides: ['a', 'b'], homes: (['a', 'b'] as const).map((seat) => sites.findIndex((site) => site.owner === seat)), size: 'small', ticks: MATCH_TICKS };
 }
 
 // Two huts 60 apart: ten ticks' walk at the starting speed.
@@ -75,9 +78,9 @@ function duel(targetOwner: Owner, targetN: number, sourceN = 5): { map: SwarmMap
   return { map, state: newState(map) };
 }
 
-const none = (): Record<Seat, Order[]> => ({ a: [], b: [] });
-const run = (state: SwarmState, map: SwarmMap, orders: Record<Seat, Order[]>, to: number) =>
-  advance(state, map, orders, to, null);
+type Orders = Record<'a' | 'b', Order[]> & Partial<Record<Seat, Order[]>>;
+const none = (): Orders => ({ a: [], b: [] });
+const run = (state: SwarmState, map: SwarmMap, orders: Orders, to: number, cpu: Computer = {}) => advance(state, map, orders, to, cpu);
 
 const MAP_SEEDS = Array.from({ length: 40 }, (_, i) => i + 1);
 
@@ -175,10 +178,15 @@ describe.each(MAP_IDS)('the %s map', (id) => {
     }
   });
 
-  it('lies in a world of the one shape, and only the meadow in the big one', () => {
-    const { w, h } = buildMap(1, id);
-    expect({ w, h }).toEqual(id === 'meadow' ? { w: 1400, h: 924 } : { w: 1000, h: 660 });
-    expect(w * 660).toBe(h * 1000);
+  it('lies in a world of the one shape, sized as asked, and its own size when not', () => {
+    const own = id === 'meadow' || id === 'crossroads' ? 'medium' : 'small';
+    expect(buildMap(1, id).size).toBe(own);
+    for (const size of SIZE_IDS) {
+      const { w, h, size: got } = buildMap(1, id, ['a', 'b'], size);
+      expect(got).toBe(size);
+      expect({ w, h }).toEqual(WORLDS[size]);
+      expect(w * 660).toBe(h * 1000);
+    }
   });
 
   it('crosses a river only by a bridge or a ford, once', () => {
@@ -212,8 +220,8 @@ describe('the places', () => {
   it('the seed picks one when the host has not, and each has its own scene', () => {
     expect(MAP_SEEDS.map((seed) => buildMap(seed).id)).toEqual(MAP_SEEDS.map((seed) => MAP_IDS[seed % MAP_IDS.length]));
     expect(buildMap(0xdeadbeef).id).toBe(MAP_IDS[0xdeadbeef % MAP_IDS.length]);
-    expect(buildMap(8)).toEqual(buildMap(8, 'guns'));
-    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace']);
+    expect(buildMap(9)).toEqual(buildMap(9, 'guns'));
+    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace', 'valley']);
   });
 
   it.each<MapId>(['thorns', 'bridges', 'hill'])('%s is drawn three ways, each of them both ways up', (id) => {
@@ -318,7 +326,7 @@ describe('the places', () => {
     expect(byCount.slice(0, 2)).toEqual([0, 0]);
     for (const count of byCount.slice(2)) expect(count).toBeGreaterThan(100);
     for (const id of MAP_IDS) {
-      if (id !== 'guns') expect(MAP_SEEDS.flatMap((seed) => towersOf(buildMap(seed, id)))).toEqual([]);
+      if (id !== 'guns' && id !== 'crossroads') expect(MAP_SEEDS.flatMap((seed) => towersOf(buildMap(seed, id)))).toEqual([]);
     }
   });
 
@@ -433,7 +441,7 @@ describe('sending and fighting', () => {
   it('a hut falls to one more than it holds, and starts again from one', () => {
     const { map, state } = duel(null, 4);
     const captures: number[] = [];
-    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 19, null, (s) => {
+    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 19, {}, (s) => {
       if (s.events.some((e) => e.kind === 'capture')) captures.push(s.tick);
     });
     // Five leave on ticks 2 to 10, two ticks apart, and walk ten ticks each.
@@ -487,7 +495,7 @@ describe('sending and fighting', () => {
     const { map, state } = duel('b', 5);
     const orders = { a: [{ tick: 1, kind: 'all' as const, from: 0, to: 1 }], b: [{ tick: 1, kind: 'all' as const, from: 1, to: 0 }] };
     let clashes = 0;
-    advance(state, map, orders, 40, null, (s) => {
+    advance(state, map, orders, 40, {}, (s) => {
       clashes += s.events.filter((e) => e.kind === 'clash').length;
     });
     expect(clashes).toBe(5);
@@ -564,7 +572,7 @@ describe('sending and fighting', () => {
     const { map, state } = duel(null, 9);
     state.army.a.speed = 3;
     const hits: number[] = [];
-    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 12, null, (s) => {
+    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 12, {}, (s) => {
       if (s.events.some((e) => e.kind === 'hit')) hits.push(s.tick);
     });
     // Out on tick 2, then five ticks at 12 a tick to cover 60.
@@ -612,7 +620,7 @@ describe('a march of more than one path', () => {
   it('fights a hut that stands in the way, and the rest carry on once it is taken', () => {
     const { map, state } = row(['a', null, null, 'b'], [10, 3, 2, 40]);
     const taken: number[] = [];
-    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 2 }], b: [] }, 60, null, (s) => {
+    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 2 }], b: [] }, 60, {}, (s) => {
       for (const e of s.events) if (e.kind === 'capture') taken.push(e.hut);
     });
     expect(taken).toEqual([1, 2]);
@@ -641,7 +649,7 @@ function storm(columns: number, strength: number, length: number, relief = 0): {
   };
   let fell: number | null = null;
   let least = 80;
-  advance(state, map, orders, 300, null, (s) => {
+  advance(state, map, orders, 300, {}, (s) => {
     if (fell === null && s.huts[0].owner === 'a') fell = s.tick;
     least = Math.min(least, s.huts[0].n);
   });
@@ -732,9 +740,9 @@ function bypass(towerOwner: Owner, off = 60): { map: SwarmMap; state: SwarmState
 function shotsOver(
   state: SwarmState,
   map: SwarmMap,
-  orders: Record<Seat, Order[]>,
+  orders: Orders,
   to: number,
-  cpu: Seat | null = null
+  cpu: Computer = {}
 ): (Shot & { tick: number })[] {
   const shots: (Shot & { tick: number })[] = [];
   advance(state, map, orders, to, cpu, (s) => {
@@ -848,7 +856,7 @@ describe('towers', () => {
     const { map, state } = siege(null, TOWER_START, 21);
     const captures: number[] = [];
     let shots = 0;
-    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 120, null, (s) => {
+    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 120, {}, (s) => {
       for (const e of s.events) if (e.kind === 'capture') captures.push(e.hut);
       shots += s.shots.length;
     });
@@ -882,7 +890,7 @@ describe('towers', () => {
     const { map, state } = siege('b', 0, 6);
     const captures: number[] = [];
     const shots: number[] = [];
-    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 60, null, (s) => {
+    advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 60, {}, (s) => {
       if (s.events.some((e) => e.kind === 'capture')) captures.push(s.tick);
       if (s.shots.length > 0) shots.push(s.tick);
     });
@@ -967,21 +975,22 @@ describe('two clients, one game', () => {
     expect(towersOf(map).length).toBe(8);
     const orders = none();
     const straight = newState(map);
-    expect(shotsOver(straight, map, orders, 900, 'b').length).toBeGreaterThan(TOWER_START);
+    expect(shotsOver(straight, map, orders, 900, { b: 0 }).length).toBeGreaterThan(TOWER_START);
     const a = orders.a;
     const neighbour = map.links[0][0];
     a.push({ tick: 30, kind: 'all', from: 0, to: neighbour }, { tick: 400, kind: 'half', from: 0, to: neighbour });
+    // The computer plays b, and what it does has to come out the same however the run is cut up.
     const whole = newState(map);
-    run(whole, map, orders, 900);
+    run(whole, map, orders, 900, { b: 0 });
 
     const pieces = newState(map);
     for (let to = 37; to < 900; to += 37) {
-      run(pieces, map, orders, to);
+      run(pieces, map, orders, to, { b: 0 });
       const predicted = cloneState(pieces);
-      run(predicted, map, orders, to + 50);
+      run(predicted, map, orders, to + 50, { b: 0 });
       expect(pieces.tick).toBe(to);
     }
-    run(pieces, map, orders, 900);
+    run(pieces, map, orders, 900, { b: 0 });
     expect(JSON.stringify(pieces)).toBe(JSON.stringify(whole));
   });
 
@@ -1000,7 +1009,7 @@ describe('the computer', () => {
     for (const seed of SEEDS) {
       const map = buildMap(seed, id);
       const state = newState(map);
-      advance(state, map, none(), MATCH_TICKS, 'b');
+      advance(state, map, none(), MATCH_TICKS, { b: 0 });
       expect(state.winner).toBe('b');
       expect(state.tick).toBeLessThan(MATCH_TICKS);
     }
@@ -1009,15 +1018,20 @@ describe('the computer', () => {
   it('only ever orders from its own huts along real paths', () => {
     const map = buildMap(7, 'guns');
     const state = newState(map);
-    const orders = none();
-    advance(state, map, orders, 1500, 'b', (s) => {
-      for (const order of orders.b) {
-        if (order.tick !== s.tick + 1) continue;
-        if (order.kind === 'half' || order.kind === 'all') expect(map.links[order.from]).toContain(order.to);
+    let given = 0;
+    while (state.tick < 1500 && state.winner === null) {
+      if (thinksAt(map, 'b', state.tick)) {
+        for (const order of cpuOrders(state, map, 'b')) {
+          given++;
+          expect(state.huts[order.from].owner).toBe('b');
+          // A march goes by the paths, so it needs only a way there through b's own huts.
+          if (order.kind === 'half' || order.kind === 'all') expect(nextHop(map, order.from, order.to, order.risky)).not.toBe(-1);
+          else expect(order.to).toBe(order.from);
+        }
       }
-    });
-    expect(orders.b.length).toBeGreaterThan(10);
-    expect(orders.a).toEqual([]);
+      step(state, map, none(), { b: 0 });
+    }
+    expect(given).toBeGreaterThan(10);
   });
 
   it('does not march on a tower that would shoot the column down to less than its garrison', () => {
@@ -1042,7 +1056,7 @@ describe('the computer', () => {
   it('takes every tower of a tower map on the way to winning it', () => {
     const map = buildMap(1, 'guns');
     const state = newState(map);
-    advance(state, map, none(), MATCH_TICKS, 'b');
+    advance(state, map, none(), MATCH_TICKS, { b: 0 });
     expect(towersOf(map).map((index) => state.huts[index].owner)).toEqual(['b', 'b', 'b', 'b', 'b', 'b']);
   });
 });
@@ -1061,9 +1075,9 @@ function lane(kind: PathKind, up?: number, sourceN = 12): { map: SwarmMap; state
   return { map, state: newState(map) };
 }
 
-const tollsOver = (state: SwarmState, map: SwarmMap, orders: Record<Seat, Order[]>, to: number) => {
+const tollsOver = (state: SwarmState, map: SwarmMap, orders: Orders, to: number) => {
   const tolls: (SwarmEvent & { tick: number })[] = [];
-  advance(state, map, orders, to, null, (s) => {
+  advance(state, map, orders, to, {}, (s) => {
     for (const event of s.events) if (event.kind === 'toll') tolls.push({ ...event, tick: s.tick });
   });
   return tolls;
@@ -1101,7 +1115,7 @@ describe('the pace of a path', () => {
     const arrival = (kind: PathKind, up?: number) => {
       const { map, state } = lane(kind, up, 1);
       let tick = 0;
-      advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 200, null, (s) => {
+      advance(state, map, { a: [{ tick: 1, kind: 'all', from: 0, to: 1 }], b: [] }, 200, {}, (s) => {
         if (tick === 0 && s.tick > 2 && s.units.length === 0) tick = s.tick;
       });
       return tick;
@@ -1342,7 +1356,7 @@ describe('the safe way and the risky way', () => {
     ]);
     const round = new Set<number>();
     const over = new Set<number>();
-    advance(state, map, orders, 60, null, (s) => {
+    advance(state, map, orders, 60, {}, (s) => {
       for (const unit of s.units) {
         if (unit.from !== 1) continue;
         expect(unit.to).toBe(unit.risky ? 2 : 3);
@@ -1461,7 +1475,7 @@ describe('the computer and the new ground', () => {
       return { orders: orders.a, owner: state.huts[1].owner };
     };
     // Each of five at strength 3 costs an army of none two units, and so does each one bred on the way.
-    expect(facing(22, 5, 0, 3)).toEqual({ orders: [{ tick: 1, kind: 'hut', from: 0, to: 0 }], owner: 'b' });
+    expect(facing(22, 5, 0, 3)).toEqual({ orders: [], owner: 'b' });
     expect(facing(23, 5, 0, 3)).toEqual({ orders: [{ tick: 1, kind: 'all', from: 0, to: 1 }], owner: 'a' });
     // And twenty of none cost an army at strength 3 ten.
     expect(facing(14, 20, 3, 0)).toEqual({ orders: [], owner: 'b' });
@@ -1475,9 +1489,11 @@ describe('the computer and the new ground', () => {
       return cpuOrders(newState(map), map, 'a');
     };
     // Eighteen take 76 ticks to be in along a road, 116 up the climb and 66 down it: seven bred, eleven and six.
-    expect(ordersOn('road')).toEqual([{ tick: 1, kind: 'all', from: 0, to: 1 }]);
+    // Three quarters of them, fourteen, are enough along the road and down, and all eighteen are not enough up.
+    const threeQuarters = [{ tick: 1, kind: 'half', from: 0, to: 1 }, { tick: 1, kind: 'half', from: 0, to: 1 }];
+    expect(ordersOn('road')).toEqual(threeQuarters);
     expect(ordersOn('climb', 1)).toEqual([]);
-    expect(ordersOn('climb', 0)).toEqual([{ tick: 1, kind: 'all', from: 0, to: 1 }]);
+    expect(ordersOn('climb', 0)).toEqual(threeQuarters);
   });
 
   it('crosses a ford for a hut it can still take with what the ford leaves, and says the send is risky', () => {
@@ -1498,11 +1514,11 @@ describe('the computer and the new ground', () => {
   });
 
   it('walks its rear up by the roads, not over the spikes that are nearer the front', () => {
-    // The rear hut 0, and two ways on to b's hut 2: straight by hut 3, or round by huts 1 and 4.
-    const rear = (a: number, b: number) => {
+    // The rear hut 0, grown as far as it goes, and two ways on to b's hut 2: straight by hut 3, or round by huts 1 and 4.
+    const rear = (a: number, b: number, n = 10) => {
       const map = mapOf(
         [
-          { x: 100, y: 300, owner: 'a', n: 10, level: 1 },
+          { x: 100, y: 300, owner: 'a', n, level: 3 },
           { x: 250, y: 100, owner: 'a', n: 0, level: 1 },
           { x: 700, y: 300, owner: 'b', n: 40, level: 1 },
           { x: 400, y: 300, owner: 'a', n: 0, level: 1 },
@@ -1513,13 +1529,17 @@ describe('the computer and the new ground', () => {
       );
       return cpuOrders(newState(map), map, 'a');
     };
-    expect(rear(0, 3)).toStrictEqual([{ tick: 1, kind: 'all', from: 0, to: 1 }]);
+    expect(rear(0, 3)).toStrictEqual([{ tick: 1, kind: 'all', from: 0, to: 4 }]);
     // Nor by a road to a hut that has only spikes between it and the front.
-    expect(rear(2, 3)).toStrictEqual([{ tick: 1, kind: 'all', from: 0, to: 1 }]);
+    expect(rear(2, 3)).toStrictEqual([{ tick: 1, kind: 'all', from: 0, to: 4 }]);
+    // Fewer than eight are not worth the walk, and twenty and four to spare buy the army strength first.
+    expect(rear(0, 3, 7)).toEqual([]);
+    expect(rear(0, 3, 24)).toStrictEqual([{ tick: 1, kind: 'strength', from: 0, to: 0 }]);
   });
 
   it('a full hut with nothing to buy and only a ford it cannot afford before it sends what it has to the front', () => {
-    const idle = (n: number) => {
+    // b's hut was walked in over its cap of thirty: it breeds nothing, and still holds all ninety-nine.
+    const idle = (n: number, theirs = 3) => {
       const map = mapOf(
         [
           { x: 100, y: 300, owner: 'a', n, level: 3 },
@@ -1532,16 +1552,19 @@ describe('the computer and the new ground', () => {
       );
       const state = newState(map);
       state.army.a = { speed: 3, strength: 3, luck: 0 };
+      state.army.b = { speed: 0, strength: theirs, luck: 0 };
       return cpuOrders(state, map, 'a');
     };
     expect(idle(80)).toStrictEqual([{ tick: 1, kind: 'all', from: 0, to: 2 }]);
     expect(idle(79)).toEqual([]);
+    // Against an army of no strength the ninety-nine cost fifty, and three quarters of seventy go for them.
+    expect(idle(70, 0)).toEqual([{ tick: 1, kind: 'half', from: 0, to: 3 }, { tick: 1, kind: 'half', from: 0, to: 3 }]);
   });
 });
 
 // Both seats played by the computer. Seat b thinks half a think after seat a: a map is the same from both ends and
 // a fight favours neither side, so two computers thinking on one tick would mirror each other all the way to the clock.
-function playOut(state: SwarmState, map: SwarmMap, orders: Record<Seat, Order[]>, to: number, onStep?: (state: SwarmState) => void): void {
+function playOut(state: SwarmState, map: SwarmMap, orders: Orders, to: number, onStep?: (state: SwarmState) => void): void {
   while (state.tick < to && state.winner === null) {
     if (state.tick % CPU_THINK_TICKS === 0) orders.a.push(...cpuOrders(state, map, 'a'));
     if (state.tick % CPU_THINK_TICKS === CPU_THINK_TICKS / 2) orders.b.push(...cpuOrders(state, map, 'b'));
@@ -1656,7 +1679,7 @@ function faults(state: SwarmState, map: SwarmMap, lastNextId: number): string[] 
   return found;
 }
 
-type Stand = { lane: number; at: number; seat: Side };
+type Stand = { lane: number; at: number; seat: Seat };
 // Where each unit stands, measured from the lower-numbered hut of its path.
 const standing = (state: SwarmState, map: SwarmMap) =>
   new Map<number, Stand>(
@@ -1668,11 +1691,11 @@ const standing = (state: SwarmState, map: SwarmMap) =>
 // The pairs of enemies that were on one path before and after a tick and are level now or have changed places.
 function passed(before: Map<number, Stand>, after: Map<number, Stand>): string[] {
   const found: string[] = [];
-  const lanes = new Map<number, Record<Side, [was: number, now: number][]>>();
+  const lanes = new Map<number, Record<Seat, [was: number, now: number][]>>();
   for (const [id, now] of after) {
     const was = before.get(id);
     if (was?.lane !== now.lane) continue;
-    const lane = lanes.get(now.lane) ?? { a: [], b: [], c: [] };
+    const lane = lanes.get(now.lane) ?? { a: [], b: [], c: [], d: [] };
     lanes.set(now.lane, lane);
     lane[now.seat].push([was.at, now.at]);
   }
@@ -1763,7 +1786,8 @@ describe.each(MAP_IDS)('a scrambled game on the %s map', (id) => {
       nextId = state.nextId;
     }
     expect(orders.b.length).toBeGreaterThan(3000);
-    expect(state.nextId).toBeGreaterThan(200);
+    // Enough marched to be checked: the crossroads, with its slow middle and full garrisons, sends the fewest, 176 by tick 500.
+    expect(state.nextId).toBeGreaterThan(150);
   });
 });
 
@@ -1878,7 +1902,7 @@ describe('neither seat has the better end', () => {
         taken += state.events.filter((event) => event.kind === 'capture').length;
         if (state.tick % 20 > 0) continue;
         const plain = seen(state, twin.map((_, index) => index), (owner) => owner);
-        expect(seen(state, twin, (owner) => (owner === 'a' || owner === 'b' ? otherSeat(owner) : owner))).toEqual(plain);
+        expect(seen(state, twin, (owner) => (owner === 'a' ? 'b' : owner === 'b' ? 'a' : owner))).toEqual(plain);
       }
       expect(state.winner).toBeNull();
       expect(countOf(state, 'a')).toEqual(countOf(state, 'b'));
@@ -1904,7 +1928,7 @@ describe('neither seat has the better end', () => {
   it('two columns that reach one hut in step fight at its door, and the hut is left alone', () => {
     const { map, state } = between(4, 5, 5);
     let clashes = 0;
-    advance(state, map, bothSend, 40, null, (s) => {
+    advance(state, map, bothSend, 40, {}, (s) => {
       clashes += s.events.filter((event) => event.kind === 'clash').length;
       expect(s.events.filter((event) => event.kind === 'hit' || event.kind === 'capture')).toEqual([]);
     });
@@ -1964,38 +1988,70 @@ describe('neither seat has the better end', () => {
 });
 
 describe('the computer as a third side', () => {
-  const IDLE: Record<Seat, Order[]> = { a: [], b: [] };
+  const IDLE: Orders = { a: [], b: [] };
   const reach = (map: SwarmMap, from: number) => {
     const seen = new Set([from]);
     for (const at of seen) for (const next of map.links[at]) seen.add(next);
     return seen.size;
   };
 
-  it('gets one base of its own, linked into the board, only when asked for', () => {
+  it('gets a base of its own in the middle, linked into the board, only when asked for', () => {
     for (const id of MAP_IDS) {
       for (const seed of SEEDS) {
         const plain = buildMap(seed, id);
         expect(plain.sides).toEqual(['a', 'b']);
         expect(plain.sites.some((site) => site.owner === 'c')).toBe(false);
 
-        const map = buildMap(seed, id, true);
+        const map = buildMap(seed, id, ['a', 'b', 'c']);
         expect(map.sides).toEqual(['a', 'b', 'c']);
-        const bases = map.sites.flatMap((site, index) => (site.owner === 'c' ? [index] : []));
-        expect(bases, `${id} ${seed}`).toHaveLength(1);
-        expect(map.sites[bases[0]].n).toBe(map.sites.find((site) => site.owner === 'a')!.n);
-        expect(map.links[bases[0]].length, `${id} ${seed}`).toBeGreaterThan(0);
-        expect(reach(map, bases[0]), `${id} ${seed}`).toBe(map.sites.length);
+        const base = map.homes[2];
+        expect(map.sites[base], `${id} ${seed}`).toMatchObject({ n: START_UNITS, level: 2 });
+        expect(map.sites[base]).toMatchObject(centreOf(map));
+        expect(map.links[base].length, `${id} ${seed}`).toBeGreaterThan(0);
+        expect(reach(map, base), `${id} ${seed}`).toBe(map.sites.length);
+      }
+    }
+  });
+
+  it('starts with more in the middle, where both seats come at it, and gives each seat a hut more too', () => {
+    // Any three seats, on every map and ground.
+    const sides = ['b', 'c', 'd'] as const;
+    for (const id of MAP_IDS) {
+      for (const size of SIZE_IDS) {
+        for (const seed of SEEDS) {
+          const map = buildMap(seed, id, sides, size);
+          const held = (seat: Seat) => map.sites.flatMap((site, index) => (site.owner === seat ? [index] : []));
+          const base = map.homes[2];
+          const twin = (at: number) => map.sites.findIndex((site) => site.x === 2 * map.sites[base].x - map.sites[at].x && site.y === 2 * map.sites[base].y - map.sites[at].y);
+          const label = `${id} ${size} ${seed}`;
+          if (id === 'guns') {
+            // Walled in by towers, it holds them.
+            const towers = map.links[base].filter((at) => map.sites[at].tower);
+            expect(towers.length, label).toBeGreaterThan(0);
+            expect(held('d'), label).toEqual([base, ...towers].sort((p, q) => p - q));
+            expect(towers.map((at) => map.sites[at].n), label).toEqual(towers.map(() => 15));
+            expect([held('b').length, held('c').length], label).toEqual([1, 1]);
+          } else {
+            const [pair, other] = held('d').filter((at) => at !== base);
+            expect(held('d'), label).toHaveLength(3);
+            expect(map.links[base], label).toEqual(expect.arrayContaining([pair, other]));
+            expect(twin(pair), label).toBe(other);
+            const [first, second] = [held('b'), held('c')];
+            expect([first.length, second.length], label).toEqual([2, 2]);
+            expect(second.slice().sort((p, q) => p - q), label).toEqual(first.map(twin).sort((p, q) => p - q));
+          }
+        }
       }
     }
   });
 
   it('plays without orders from either seat, and takes huts', () => {
     for (const id of MAP_IDS) {
-      const map = buildMap(SEEDS[4], id, true);
+      const map = buildMap(SEEDS[4], id, ['a', 'b', 'c']);
       const state = newState(map);
       let taken = 0;
       while (state.winner === null && state.tick < 600) {
-        step(state, map, IDLE);
+        step(state, map, IDLE, { c: 0 });
         taken += state.events.filter((event) => event.kind === 'capture' && event.seat === 'c').length;
       }
       expect(taken, id).toBeGreaterThan(0);
@@ -2003,10 +2059,10 @@ describe('the computer as a third side', () => {
   });
 
   it('plays the same game on both screens', () => {
-    const map = buildMap(SEEDS[2], 'bridges', true);
+    const map = buildMap(SEEDS[2], 'bridges', ['a', 'b', 'c']);
     const run = () => {
       const state = newState(map);
-      while (state.winner === null && state.tick < MATCH_TICKS) step(state, map, IDLE);
+      while (state.winner === null && state.tick < MATCH_TICKS) step(state, map, IDLE, { c: 0 });
       return state;
     };
     const first = run();
@@ -2021,7 +2077,7 @@ describe('the computer as a third side', () => {
     ];
     const three = { ...mapOf(sites, [[1], [0]]), sides: ['a', 'b', 'c'] as const };
     const withC = newState(three);
-    step(withC, three, IDLE);
+    step(withC, three, IDLE, { c: 0 });
     expect(withC.winner).toBe('c');
 
     const two = mapOf(sites.map((site) => ({ ...site, owner: null })), [[1], [0]]);

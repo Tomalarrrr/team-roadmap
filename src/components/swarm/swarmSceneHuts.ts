@@ -1,13 +1,14 @@
 // What stands on a site, painted once into a sprite: the ants' earth mounds,
-// the bees' straw skeps, the house the people of each place left behind, the
-// cannon tower and the fort.
+// the bees' straw skeps, the beetles' bored stumps, the spiders' silk tents,
+// the house the people of each place left behind, the cannon tower and the
+// fort.
 //
 // Every painter draws with the foot of the building at 0, 0 and up as minus y.
 // A hut nobody holds is built of what its place has: stone in the meadow,
 // mud brick in the scrub, timber on stilts by the river, snow on the ice and
 // honey-coloured dry stone on the terraces.
 
-import type { Owner, SceneId, Site } from '../../swarmGameLogic';
+import type { Kind, Owner, SceneId, Site } from '../../swarmGameLogic';
 import {
   BADGE,
   FORT_RISE,
@@ -284,7 +285,7 @@ function ladder(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, width:
   ctx.stroke();
 }
 
-// The ants and the bees.
+// The ants, the bees, the beetles and the spiders.
 
 /** One cone of an ant mound: packed soil in layers, a crater on top. */
 function paintCone(ctx: Ctx, rnd: Rnd, scene: SceneId, x: number, w: number, h: number) {
@@ -574,6 +575,344 @@ function paintBeeHive(ctx: Ctx, rnd: Rnd, scene: SceneId, r: number, level: numb
   ctx.restore();
   if (level >= 2) kerb(ctx, rnd, scene, r, r * 0.1, level - 1, PALETTE[scene].stone);
   if (stand === 0) footDress(ctx, rnd, scene, r);
+}
+
+const BARK = ['#5a4430', '#4a3826', '#66503a', '#3f3020'];
+const BILLET = ['#7a5e40', '#8c6e4a', '#6a5036', '#94764e'];
+
+/** The face of a saw cut: pale wood in rings, gone dark and soft at the heart where the grubs began. */
+function endGrain(ctx: Ctx, x: number, y: number, rx: number, ry: number) {
+  const least = Math.min(rx, ry);
+  ctx.fillStyle = '#c29a64';
+  ellipse(ctx, x, y, rx, ry);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(104, 70, 34, 0.45)';
+  ctx.lineWidth = Math.max(0.6, least * 0.07);
+  for (const f of [0.8, 0.58]) {
+    ellipse(ctx, x, y, rx * f, ry * f);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#3a2716';
+  ellipse(ctx, x + rx * 0.05, y, rx * 0.32, ry * 0.32);
+  ctx.fill();
+  ctx.strokeStyle = BARK[1];
+  ctx.lineWidth = Math.max(0.8, least * 0.16);
+  ellipse(ctx, x, y, rx, ry);
+  ctx.stroke();
+}
+
+/** The holes the grown beetles chewed their way out by, each with a spill of pale dust under it. */
+function boreHoles(ctx: Ctx, rnd: Rnd, x: number, top: number, bottom: number, w: number, count: number) {
+  for (let i = 0; i < count; i++) {
+    const hx = x + (rnd() - 0.5) * w * 1.3;
+    const hy = top + rnd() * (bottom - top);
+    const size = Math.max(0.7, w * (0.06 + rnd() * 0.05));
+    ctx.fillStyle = 'rgba(214, 184, 136, 0.5)';
+    ellipse(ctx, hx, hy + size * 0.7, size * 1.3, size);
+    ctx.fill();
+    ctx.fillStyle = '#1b120a';
+    ellipse(ctx, hx, hy, size, size * 0.8);
+    ctx.fill();
+  }
+}
+
+/** One stump of a tree felled long ago: ridged bark, roots spread at the foot, and the cut on top, where the mast is stepped. */
+function paintStump(ctx: Ctx, rnd: Rnd, scene: SceneId, x: number, w: number, h: number) {
+  ctx.save();
+  ctx.translate(x, 0);
+  ctx.beginPath();
+  ctx.moveTo(-w * 1.4, w * 0.1);
+  ctx.quadraticCurveTo(-w, 0, -w, -h * 0.3);
+  ctx.lineTo(-w, -h);
+  ctx.lineTo(w, -h);
+  ctx.lineTo(w, -h * 0.3);
+  ctx.quadraticCurveTo(w, 0, w * 1.4, w * 0.1);
+  ctx.bezierCurveTo(w * 1.2, w * 0.5, -w * 1.2, w * 0.5, -w * 1.4, w * 0.1);
+  ctx.closePath();
+  ctx.fillStyle = BARK[0];
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  // The bark splits in long ridges, crowded together at the edges where the trunk turns away.
+  ctx.lineCap = 'round';
+  for (let i = 1; i < 10; i++) {
+    const across = Math.sin((i / 10 - 0.5) * Math.PI) * w;
+    const wander = (rnd() - 0.5) * w * 0.14;
+    for (const [colour, width, step] of [['rgba(22, 14, 8, 0.5)', 0.07, 0], ['rgba(176, 146, 104, 0.3)', 0.03, 0.07]] as const) {
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = Math.max(0.6, w * width);
+      ctx.beginPath();
+      ctx.moveTo(across * 1.3 + w * step, w * 0.3);
+      ctx.quadraticCurveTo(across + wander + w * step, -h * 0.5, across + w * step, -h);
+      ctx.stroke();
+    }
+  }
+  boreHoles(ctx, rnd, 0, -h * 0.85, -h * 0.3, w, Math.round(2 + h / 14));
+  shade(ctx, scene, w * 1.4, h);
+  ctx.restore();
+  endGrain(ctx, 0, -h, w, w * 0.32);
+  if (scene === 'ice') {
+    ctx.fillStyle = 'rgba(126, 160, 200, 0.55)';
+    ellipse(ctx, w * 0.06, -h + w * 0.02, w * 0.9, w * 0.28);
+    ctx.fill();
+    ctx.fillStyle = '#f6fafc';
+    ellipse(ctx, -w * 0.04, -h - w * 0.02, w * 0.86, w * 0.26);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** A length of trunk lying on its side, from its cut end at `x0` to its broken end at `x1`, on the ground at `y`. */
+function paintLog(ctx: Ctx, rnd: Rnd, scene: SceneId, x0: number, x1: number, y: number, rad: number) {
+  const end = rad * 0.42;
+  ctx.beginPath();
+  ctx.moveTo(x0, y - rad * 2);
+  ctx.lineTo(x1, y - rad * 2);
+  ctx.ellipse(x1, y - rad, end, rad, 0, -Math.PI / 2, Math.PI / 2, x1 < x0);
+  ctx.lineTo(x0, y);
+  ctx.closePath();
+  ctx.fillStyle = BARK[1];
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.lineCap = 'round';
+  for (let i = 1; i < 7; i++) {
+    const along = y - rad - Math.cos((i / 7) * Math.PI) * rad;
+    ctx.strokeStyle = 'rgba(22, 14, 8, 0.45)';
+    ctx.lineWidth = Math.max(0.6, rad * 0.1);
+    ctx.beginPath();
+    ctx.moveTo(x0, along);
+    ctx.quadraticCurveTo((x0 + x1) / 2, along + (rnd() - 0.5) * rad * 0.3, x1, along);
+    ctx.stroke();
+  }
+  boreHoles(ctx, rnd, (x0 + x1) / 2, y - rad * 1.6, y - rad * 0.6, Math.abs(x1 - x0) * 0.5, 3);
+  ctx.translate((x0 + x1) / 2, y);
+  shade(ctx, scene, Math.abs(x1 - x0) / 2, rad * 2);
+  ctx.restore();
+  endGrain(ctx, x0, y - rad, end, rad);
+}
+
+/** Shelves of bracket fungus, which come on wood the beetles have softened. */
+function brackets(ctx: Ctx, x: number, y: number, size: number) {
+  for (const [dx, dy, f] of [[0, 0, 1], [size * 0.3, size * 0.55, 0.75], [-size * 0.2, -size * 0.6, 0.6]]) {
+    ctx.fillStyle = '#7e6848';
+    ellipse(ctx, x + dx, y + dy + size * f * 0.12, size * f, size * f * 0.36);
+    ctx.fill();
+    ctx.fillStyle = '#d8c496';
+    ellipse(ctx, x + dx, y + dy, size * f, size * f * 0.3);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(96, 74, 42, 0.6)';
+    ctx.lineWidth = Math.max(0.6, size * 0.06);
+    ctx.beginPath();
+    ctx.ellipse(x + dx, y + dy, size * f * 0.6, size * f * 0.16, 0, 0, Math.PI);
+    ctx.stroke();
+  }
+}
+
+function paintBeetleStump(ctx: Ctx, rnd: Rnd, scene: SceneId, r: number, level: number) {
+  const h = r * HUT_RISE[level - 1];
+  footing(ctx, scene, r);
+
+  // Dust and chips of wood the beetles threw out as they bored.
+  for (let i = 0; i < 70 + level * 30; i++) {
+    const angle = rnd() * Math.PI * 2;
+    const reach = r * (0.6 + rnd() * 0.36);
+    ctx.fillStyle = pickTone(rnd, ['#d6b886', '#bf9a66', '#a57d4e', '#8a6a44']);
+    const size = r * (0.015 + rnd() * 0.03);
+    ellipse(ctx, Math.cos(angle) * reach, Math.sin(angle) * reach * 0.34, size, size * 0.6, rnd());
+    ctx.fill();
+  }
+
+  // A grown colony takes in the wood felled round it: a log lying behind, another stacked on it, and a second stump.
+  if (level >= 2) paintLog(ctx, rnd, scene, -r * 0.98, -r * 0.18, -r * 0.04, r * 0.17);
+  if (level >= 3) paintLog(ctx, rnd, scene, -r * 0.86, -r * 0.24, -r * 0.34, r * 0.14);
+  if (level >= 2) paintStump(ctx, rnd, scene, r * 0.6, r * 0.22, h * (level === 2 ? 0.42 : 0.52));
+  const w = r * [0.56, 0.48, 0.46][level - 1];
+  paintStump(ctx, rnd, scene, 0, w, h);
+  if (level >= 3) brackets(ctx, -w * 1.02, -h * 0.5, r * 0.15);
+
+  doorway(ctx, 0, r * 0.2, r * 0.18, r * 0.22, 'rgba(194, 154, 100, 0.6)');
+  if (level >= 2) kerb(ctx, rnd, scene, r, r * 0.1, level - 1, BILLET);
+  footDress(ctx, rnd, scene, r);
+}
+
+const SILK = 'rgba(246, 243, 232, 0.9)';
+
+/** A dry stem the silk is strung from, bowed `bow` to the side halfway up. */
+function stalk(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, bow: number, width: number) {
+  ctx.lineCap = 'round';
+  for (const [colour, w] of [['#3d2913', width], ['rgba(210, 170, 110, 0.55)', width * 0.32]] as const) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.quadraticCurveTo((x0 + x1) / 2 + bow, (y0 + y1) / 2, x1, y1);
+    ctx.stroke();
+  }
+}
+
+/**
+ * A wheel of silk round a hub: spokes out to a frame, the spiral laid round them, and from the frame the
+ * mooring lines out to whatever `moor` names, each from the point of the frame nearest it.
+ */
+function paintWeb(ctx: Ctx, rnd: Rnd, hub: Point, rx: number, ry: number, moor: Point[]) {
+  const spokes = 14;
+  const rim: Point[] = [];
+  for (let i = 0; i < spokes; i++) {
+    const angle = (i / spokes) * Math.PI * 2 + rnd() * 0.12;
+    const reach = 0.88 + rnd() * 0.18;
+    rim.push({ x: hub.x + Math.cos(angle) * rx * reach, y: hub.y + Math.sin(angle) * ry * reach });
+  }
+  const ends = moor.map((to) => ({
+    to,
+    from: rim.reduce((best, point) => (Math.hypot(point.x - to.x, point.y - to.y) < Math.hypot(best.x - to.x, best.y - to.y) ? point : best)),
+  }));
+  // Each thread is laid twice: once as the faint shadow it throws, which is what shows it against snow, and once in silk.
+  for (const [colour, dx, dy] of [['rgba(30, 26, 20, 0.3)', 0.5, 0.7], [SILK, 0, 0]] as const) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = Math.max(0.55, rx * 0.022);
+    ctx.beginPath();
+    for (const point of rim) {
+      ctx.moveTo(hub.x + dx, hub.y + dy);
+      ctx.lineTo(point.x + dx, point.y + dy);
+    }
+    for (const { from, to } of ends) {
+      ctx.moveTo(from.x + dx, from.y + dy);
+      ctx.lineTo(to.x + dx, to.y + dy);
+    }
+    rim.forEach((point, i) => (i === 0 ? ctx.moveTo(point.x + dx, point.y + dy) : ctx.lineTo(point.x + dx, point.y + dy)));
+    ctx.closePath();
+    ctx.stroke();
+    // The sticky turns are finer than the spokes, and sag a little between them.
+    ctx.lineWidth = Math.max(0.45, rx * 0.014);
+    ctx.beginPath();
+    for (let t = 0.22; t < 0.92; t += 0.1) {
+      ctx.moveTo(hub.x + (rim[0].x - hub.x) * t + dx, hub.y + (rim[0].y - hub.y) * t + dy);
+      rim.forEach((a, i) => {
+        const b = rim[(i + 1) % spokes];
+        ctx.quadraticCurveTo(
+          hub.x + ((a.x + b.x) / 2 - hub.x) * t * 0.96 + dx,
+          hub.y + ((a.y + b.y) / 2 - hub.y) * t * 0.96 + dy,
+          hub.x + (b.x - hub.x) * t + dx,
+          hub.y + (b.y - hub.y) * t + dy,
+        );
+      });
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = SILK;
+  ellipse(ctx, hub.x, hub.y, rx * 0.07, ry * 0.07);
+  ctx.fill();
+}
+
+/** A sac of eggs, or something caught and wrapped, hung on a thread under `from`. */
+function bundle(ctx: Ctx, from: Point, drop: number, size: number) {
+  ctx.strokeStyle = SILK;
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(from.x, from.y + drop);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(120, 112, 96, 0.5)';
+  ellipse(ctx, from.x + size * 0.15, from.y + drop + size * 1.05, size * 0.75, size);
+  ctx.fill();
+  ctx.fillStyle = '#ece6d6';
+  ellipse(ctx, from.x, from.y + drop + size, size * 0.75, size);
+  ctx.fill();
+}
+
+/**
+ * The sheet a colony of spiders lives under: pulled up to a point at each of `peaks`, where it is hung from a stem,
+ * and pegged out to the ground `w` to either side. It is woven thick enough to catch the litter that falls on it.
+ */
+function silkTent(ctx: Ctx, rnd: Rnd, scene: SceneId, w: number, peaks: Point[]) {
+  const trace = () => {
+    ctx.beginPath();
+    ctx.moveTo(-w, 0);
+    const first = peaks[0];
+    ctx.quadraticCurveTo(first.x - (first.x + w) * 0.25, first.y * 0.3, first.x, first.y);
+    peaks.forEach((peak, i) => {
+      const next = peaks[i + 1];
+      if (next) ctx.quadraticCurveTo((peak.x + next.x) / 2, Math.max(peak.y, next.y) * 0.3, next.x, next.y);
+    });
+    const last = peaks[peaks.length - 1];
+    ctx.quadraticCurveTo(last.x + (w - last.x) * 0.25, last.y * 0.3, w, 0);
+    ctx.bezierCurveTo(w, w * 0.34, -w, w * 0.34, -w, 0);
+    ctx.closePath();
+  };
+  const top = Math.min(...peaks.map((peak) => peak.y));
+  trace();
+  ctx.fillStyle = 'rgba(222, 216, 200, 0.94)';
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  // The threads it hangs by run down from each peak, and the sheet is laid thicker along them.
+  ctx.strokeStyle = 'rgba(255, 252, 242, 0.55)';
+  ctx.lineWidth = Math.max(0.5, w * 0.014);
+  ctx.beginPath();
+  for (const peak of peaks) {
+    for (let k = 0; k <= 8; k++) {
+      ctx.moveTo(peak.x, peak.y);
+      ctx.lineTo(peak.x + (k / 8 - 0.5) * w * 1.8, w * 0.3);
+    }
+  }
+  ctx.stroke();
+  for (let i = 0; i < w * 1.4; i++) {
+    ctx.fillStyle = rnd() < 0.6 ? 'rgba(70, 52, 30, 0.45)' : 'rgba(132, 108, 66, 0.4)';
+    const size = Math.max(0.5, w * (0.01 + rnd() * 0.022));
+    ellipse(ctx, (rnd() - 0.5) * 2 * w, top * rnd() * 0.9, size, size * 0.6, rnd() * Math.PI);
+    ctx.fill();
+  }
+  shade(ctx, scene, w, -top);
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(110, 102, 86, 0.45)';
+  ctx.lineWidth = Math.max(0.6, w * 0.016);
+  trace();
+  ctx.stroke();
+}
+
+function paintSpiderTent(ctx: Ctx, rnd: Rnd, scene: SceneId, r: number, level: number) {
+  const h = r * HUT_RISE[level - 1];
+  footing(ctx, scene, r);
+
+  // Lines laid out over the ground from the door, so whatever walks across them is felt inside.
+  ctx.strokeStyle = 'rgba(246, 243, 232, 0.55)';
+  ctx.lineWidth = Math.max(0.5, r * 0.012);
+  ctx.beginPath();
+  for (let i = 0; i < 7 + level * 2; i++) {
+    const angle = Math.PI * (-0.1 + rnd() * 1.2);
+    const reach = r * (0.6 + rnd() * 0.32);
+    ctx.moveTo(0, r * 0.12);
+    ctx.lineTo(Math.cos(angle) * reach, r * 0.04 + Math.sin(angle) * reach * 0.34);
+  }
+  ctx.stroke();
+
+  // The middle stem holds up the highest point of the sheet and goes on above it to where the mast is stepped.
+  const stem = r * 0.05;
+  const left = { x: -r * 0.7, y: -h * 0.84 };
+  const right = { x: r * 0.68, y: -h * 0.74 };
+  stalk(ctx, -r * 0.54, -r * 0.02, left.x, left.y, -r * 0.08, stem);
+  if (level >= 2) stalk(ctx, r * 0.5, -r * 0.02, right.x, right.y, r * 0.06, stem);
+  stalk(ctx, r * 0.04, -r * 0.06, 0, -h, r * 0.04, stem * 1.2);
+
+  const peak = { x: 0, y: -h * [0.64, 0.66, 0.68][level - 1] };
+  const shoulders = [
+    [peak],
+    [peak, { x: r * 0.6, y: -h * 0.38 }],
+    [{ x: -r * 0.62, y: -h * 0.42 }, peak, { x: r * 0.6, y: -h * 0.4 }],
+  ][level - 1];
+  silkTent(ctx, rnd, scene, r * [0.8, 0.86, 0.9][level - 1], shoulders);
+
+  paintWeb(ctx, rnd, { x: -r * 0.4, y: -h * 0.76 }, r * 0.24, r * 0.26, [left, { x: 0, y: -h * 0.94 }, { x: -r * 0.3, y: peak.y * 0.4 }]);
+  if (level >= 2) paintWeb(ctx, rnd, { x: r * 0.38, y: -h * 0.8 }, r * 0.21, r * 0.23, [right, { x: 0, y: -h * 0.9 }, { x: r * 0.3, y: -h * 0.5 }]);
+  if (level >= 3) {
+    bundle(ctx, { x: -r * 0.4, y: -h * 0.76 + r * 0.26 }, r * 0.05, r * 0.065);
+    bundle(ctx, { x: r * 0.44, y: -h * 0.8 + r * 0.2 }, r * 0.08, r * 0.05);
+  }
+
+  doorway(ctx, 0, r * 0.2, r * 0.17, r * 0.2, SILK);
+  if (level >= 2) kerb(ctx, rnd, scene, r, r * 0.1, level - 1, PALETTE[scene].stone);
+  footDress(ctx, rnd, scene, r);
 }
 
 // Masonry, which the stone hut, the snow house, the round house and the fort are all made of.
@@ -1667,22 +2006,28 @@ const NEUTRAL: Record<SceneId, (ctx: Ctx, rnd: Rnd, r: number, level: number) =>
   terrace: paintRoundHouses,
 };
 
-/** Paints what stands on a site, with its foot at 0, 0. */
-export function paintSite(ctx: Ctx, rnd: Rnd, scene: SceneId, site: Site, owner: Owner, level: number) {
+const HOME: Record<Kind, (ctx: Ctx, rnd: Rnd, scene: SceneId, r: number, level: number) => void> = {
+  ant: paintAntHill,
+  bee: paintBeeHive,
+  beetle: paintBeetleStump,
+  spider: paintSpiderTent,
+};
+
+/** Paints what stands on a site, with its foot at 0, 0. `kind` is the creature of whoever holds it: the colours are the holder's, the building the creature's. */
+export function paintSite(ctx: Ctx, rnd: Rnd, scene: SceneId, site: Site, owner: Owner, kind: Kind | null, level: number) {
   const r = siteRadius(site, level);
   if (site.tower) paintTower(ctx, rnd, scene, owner);
   else if (site.fort) paintFort(ctx, rnd, scene, r, level, owner);
-  else if (owner === 'a' || owner === 'c') paintAntHill(ctx, rnd, scene, r, level);
-  else if (owner === 'b') paintBeeHive(ctx, rnd, scene, r, level);
+  else if (kind) HOME[kind](ctx, rnd, scene, r, level);
   else NEUTRAL[scene](ctx, rnd, r, level);
 }
 
 /** Where a site's mast is stepped, from its foot: on the highest part of whatever stands there, by the numbers its painter builds to. */
-function mastFoot(scene: SceneId, site: Site, owner: Owner, level: number): Point {
+function mastFoot(scene: SceneId, site: Site, kind: Kind | null, level: number): Point {
   const r = siteRadius(site, level);
   // A fort of one level has no keep, so its mast goes up from the wall over the gate.
   if (site.fort) return { x: FORT_PEAK[level - 1] * r, y: -r * (level === 1 ? FORT_WALL : FORT_RISE[level - 1]) };
-  const off = owner === 'a' || owner === 'c' ? 0 : owner === 'b' ? SKEP_X[level - 1] : PEAK_X[scene][level - 1];
+  const off = kind === 'bee' ? SKEP_X[level - 1] : kind ? 0 : PEAK_X[scene][level - 1];
   return { x: off * r, y: -r * HUT_RISE[level - 1] };
 }
 
@@ -1693,9 +2038,9 @@ const PENNANT = { length: 17, hoist: 9, pitch: 11 };
  * It is drawn every frame and not into the sprite because the cloth moves: it is the one thing on a building that
  * does, and so the place the eye goes to read whose it is and how far it has been built up. A tower flies nothing.
  */
-export function drawFlags(ctx: Ctx, scene: SceneId, site: Site, owner: Owner, level: number, now: number) {
+export function drawFlags(ctx: Ctx, scene: SceneId, site: Site, owner: Owner, kind: Kind | null, level: number, now: number) {
   if (site.tower) return;
-  const foot = mastFoot(scene, site, owner, level);
+  const foot = mastFoot(scene, site, kind, level);
   const top = -siteTop(site, level);
   ctx.save();
   ctx.translate(site.x + foot.x, site.y);

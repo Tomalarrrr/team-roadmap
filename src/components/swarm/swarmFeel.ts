@@ -14,8 +14,8 @@ import {
   mulberry32,
   pathLength,
   type Hut,
+  type Kind,
   type Seat,
-  type Side,
   type SwarmMap,
   type SwarmState,
   type Unit,
@@ -25,8 +25,8 @@ import { WIND } from './swarmSceneGround';
 
 const TAU = Math.PI * 2;
 
-/** What a dead unit leaves on the ground: ants a dark red-brown, bees a darker amber than they fly in, black ants near black. */
-const STAIN: Record<Side, string> = { a: '#4d1c12', b: '#75501a', c: '#1e1d1c' };
+/** What a dead unit leaves on the ground: ants a dark red-brown, bees a darker amber than they fly in, beetles near black, spiders a dark grey-brown. */
+const STAIN: Record<Kind, string> = { ant: '#4d1c12', bee: '#75501a', beetle: '#1e211a', spider: '#3a3229' };
 const DUST = '#d2c3a2';
 
 const laneKey = (a: number, b: number): number => Math.min(a, b) * 64 + Math.max(a, b);
@@ -85,7 +85,7 @@ export const GATE_COLUMN = 8;
 
 /** The hut a seat starts the match in. */
 export function homeOf(map: SwarmMap, seat: Seat): number {
-  return map.sites.findIndex((site) => site.owner === seat);
+  return map.homes[map.sides.indexOf(seat)];
 }
 
 function marchingOn(state: SwarmState, hut: number, seat: Seat): number {
@@ -208,7 +208,7 @@ export interface Mark {
   at: number;
   /** How many died here within a moment. */
   weight: number;
-  seat: Side;
+  seat: Seat;
   /** What gives this pool its own outline. */
   grain: number;
 }
@@ -232,7 +232,7 @@ export function markLife(mark: Mark): number {
   return POOL_MS + POOL_MS_PER_WEIGHT * (mark.weight - 1);
 }
 
-function addMark(feel: Feel, kind: MarkKind, x: number, y: number, seat: Side, at: number): void {
+function addMark(feel: Feel, kind: MarkKind, x: number, y: number, seat: Seat, at: number): void {
   for (const mark of feel.marks) {
     if (mark.kind !== kind || mark.seat !== seat || at - mark.at > MERGE_MS) continue;
     if ((mark.x - x) * (mark.x - x) + (mark.y - y) * (mark.y - y) > MERGE_R * MERGE_R) continue;
@@ -283,19 +283,19 @@ export const WEAR_FULL = 6000;
 export interface March {
   from: number;
   to: number;
-  seat: Side;
+  seat: Seat;
   count: number;
   /** How far along the path its last unit and its first are. */
   rear: number;
   head: number;
 }
 
-const MARCH_SIDE: Record<Side, number> = { a: 0, b: 1, c: 2 };
+const MARCH_SIDE: Record<Seat, number> = { a: 0, b: 1, c: 2, d: 3 };
 
 export function marchesOf(state: SwarmState): March[] {
   const marches = new Map<number, March>();
   for (const unit of state.units) {
-    const key = (unit.from * 64 + unit.to) * 3 + MARCH_SIDE[unit.seat];
+    const key = (unit.from * 64 + unit.to) * 4 + MARCH_SIDE[unit.seat];
     const march = marches.get(key);
     if (!march) {
       marches.set(key, { from: unit.from, to: unit.to, seat: unit.seat, count: 1, rear: unit.d, head: unit.d });
@@ -362,7 +362,7 @@ function raiseDust(feel: Feel, map: SwarmMap, state: SwarmState, now: number): v
     const path = map.paths[lane];
     const wet = feel.wet[lane];
     const length = pathLength(map, march.from, march.to);
-    const flying = march.seat === 'b';
+    const flying = feel.kinds[march.seat] === 'bee';
     const puffs = Math.floor(weight * (flying ? DUST_RATE / 2 : DUST_RATE) + hash01(feel.puffed++));
     for (let puff = 0; puff < puffs; puff++) {
       const pick = hash01(feel.puffed++);
@@ -629,11 +629,14 @@ function newAmbient(map: SwarmMap, seed: number): Ambient {
 
   if (map.scene === 'valley') {
     const reeds: number[] = [];
-    for (let tries = 0; rivers.length > 0 && reeds.length < REEDS * 4 && tries < REEDS * 4; tries++) {
+    // A bigger valley has more river in it, and as many reeds and dragonflies along each length of bank.
+    const area = areaOf(map);
+    const count = Math.round(REEDS * area);
+    for (let tries = 0; rivers.length > 0 && reeds.length < count * 4 && tries < count * 4; tries++) {
       const river = rivers[Math.floor(rnd() * rivers.length)];
       const first = Math.floor(rnd() * river.pts.length);
       const side = rnd() < 0.5 ? -1 : 1;
-      for (let stalk = 0; stalk < REED_CLUMP && reeds.length < REEDS * 4; stalk++) {
+      for (let stalk = 0; stalk < REED_CLUMP && reeds.length < count * 4; stalk++) {
         const i = Math.min(river.pts.length - 1, first + stalk);
         const dir = riverDir(river, i);
         // Rooted in the wet margin the ground paints along the water, clear of the water itself.
@@ -644,7 +647,7 @@ function newAmbient(map: SwarmMap, seed: number): Ambient {
       }
     }
     ambient.reeds = new Float32Array(reeds);
-    for (const spot of riverSpots(map, 4, rnd)) {
+    for (const spot of riverSpots(map, Math.round(4 * area), rnd)) {
       ambient.critters.push(critter('dragonfly', spot.x, spot.y, 34 + rnd() * 16, 0.0006 + rnd() * 0.0003));
     }
     const mist = riverSpots(map, 6, rnd);
@@ -659,6 +662,8 @@ function newAmbient(map: SwarmMap, seed: number): Ambient {
 
 export interface Feel {
   seed: number;
+  /** The creature each side is drawn as. */
+  kinds: Record<Seat, Kind>;
   /** The last tick stepped. */
   tick: number;
   /** The state after that tick, to read the next one against. */
@@ -688,13 +693,14 @@ export interface Feel {
   sprites: Map<string, HTMLCanvasElement>;
 }
 
-export function newFeel(map: SwarmMap, seed: number): Feel {
+export function newFeel(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>): Feel {
   const lanes = new Map<number, number>();
   map.paths.forEach((path, index) => lanes.set(laneKey(path.a, path.b), index));
   const ambient = newAmbient(map, seed);
   const crossings = crossingsOf(map, map.rivers.map(riverOf));
   return {
     seed,
+    kinds,
     tick: -1,
     before: null,
     marks: [],
@@ -770,7 +776,7 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
       // The event does not say which side lost a unit, so that is read from who is missing on this path.
       const key = laneKey(event.from, event.to);
       const p = pathPoint(map, event.from, event.to, event.d / pathLength(map, event.from, event.to));
-      const lost = new Set<Side>();
+      const lost = new Set<Seat>();
       for (const item of gone) if (laneKey(item.unit.from, item.unit.to) === key && fell(item)) lost.add(item.unit.seat);
       for (const loser of lost) addMark(feel, 'pool', p.x, p.y, loser, now);
     } else if (event.kind === 'toll') {
@@ -893,7 +899,7 @@ function paintMarks(ctx: CanvasRenderingContext2D, feel: Feel, now: number) {
       const r = (4.2 + 1.3 * (mark.weight - 1)) * (t < 0.12 ? 0.6 + (0.4 * t) / 0.12 : 1);
       const depth = 0.34 + 0.07 * (mark.weight - 1);
       const fade = t < 0.2 ? 1 : 1 - (t - 0.2) / 0.8;
-      ctx.fillStyle = STAIN[mark.seat];
+      ctx.fillStyle = STAIN[feel.kinds[mark.seat]];
       // The spread goes first and the middle last, which is what soaking in looks like.
       ctx.globalAlpha = depth * fade * fade;
       ctx.beginPath();
@@ -908,7 +914,7 @@ function paintMarks(ctx: CanvasRenderingContext2D, feel: Feel, now: number) {
       blob(ctx, mark.x, mark.y, r * 0.6, r * 0.34);
       ctx.fill();
     } else if (mark.kind === 'ripple') {
-      ctx.fillStyle = STAIN[mark.seat];
+      ctx.fillStyle = STAIN[feel.kinds[mark.seat]];
       ctx.globalAlpha = 0.3 * (1 - t);
       ctx.beginPath();
       blob(ctx, mark.x, mark.y, 7 + t * 4, (7 + t * 4) * 0.45);
@@ -924,7 +930,7 @@ function paintMarks(ctx: CanvasRenderingContext2D, feel: Feel, now: number) {
         ctx.stroke();
       }
     } else {
-      ctx.fillStyle = STAIN[mark.seat];
+      ctx.fillStyle = STAIN[feel.kinds[mark.seat]];
       ctx.globalAlpha = 0.7 * (1 - t);
       ctx.beginPath();
       for (let speck = 0; speck < 6; speck++) {
@@ -1363,18 +1369,13 @@ function paintCritters(ctx: CanvasRenderingContext2D, critters: Critter[], now: 
   }
 }
 
-/** The ants about a mound, in the colours of the ants that built it. */
-const MILLER: Record<'a' | 'c', { leg: string; body: string; head: string }> = {
-  a: { leg: '#2a120b', body: '#4a1d10', head: '#3a160c' },
-  c: { leg: '#121212', body: '#2a2927', head: '#1c1b1a' },
-};
-
-function tinyAnt(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, stride: number, tone: (typeof MILLER)['a']) {
+/** An ant about its mound, in the colours of the ones on the march. */
+function tinyAnt(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, stride: number) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
   ctx.scale(MILL_SCALE, MILL_SCALE);
-  ctx.strokeStyle = tone.leg;
+  ctx.strokeStyle = '#2a120b';
   ctx.lineWidth = 0.55;
   ctx.beginPath();
   for (let leg = -1; leg <= 1; leg++) {
@@ -1384,14 +1385,73 @@ function tinyAnt(ctx: CanvasRenderingContext2D, x: number, y: number, angle: num
     ctx.lineTo(leg * 1.7 - swing, 3.3);
   }
   ctx.stroke();
-  ctx.fillStyle = tone.body;
+  ctx.fillStyle = '#4a1d10';
   ctx.beginPath();
   blob(ctx, -3.3, 0, 2.6, 1.9);
   ctx.fill();
-  ctx.fillStyle = tone.head;
+  ctx.fillStyle = '#3a160c';
   ctx.beginPath();
   blob(ctx, 0, 0, 1.6, 1.25);
   blob(ctx, 2.7, 0, 1.5, 1.4);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** A beetle about its mound: the round shell and stub legs of the ones on the march, in their green-black. */
+function tinyBeetle(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, stride: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(MILL_SCALE, MILL_SCALE);
+  ctx.strokeStyle = '#141710';
+  ctx.lineWidth = 0.6;
+  ctx.beginPath();
+  for (let leg = -1; leg <= 1; leg++) {
+    const swing = Math.sin(stride + leg * 2.1) * 0.8;
+    ctx.moveTo(leg * 1.9 + 0.4 + swing, -3.4);
+    ctx.lineTo(leg * 1.4 + 0.4, 0);
+    ctx.lineTo(leg * 1.9 + 0.4 - swing, 3.4);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#10140c';
+  ctx.beginPath();
+  blob(ctx, 2.6, 0, 1.4, 1.6);
+  ctx.fill();
+  ctx.fillStyle = '#1f2a1a';
+  ctx.beginPath();
+  blob(ctx, -0.9, 0, 3.6, 2.8);
+  ctx.fill();
+  ctx.fillStyle = '#5c6a3a';
+  ctx.beginPath();
+  blob(ctx, -0.6, -1.3, 2.2, 0.6);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** A spider about its mound: eight legs round a big body, in the grey-brown of the ones on the march. */
+function tinySpider(ctx: CanvasRenderingContext2D, x: number, y: number, angle: number, stride: number) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(MILL_SCALE, MILL_SCALE);
+  ctx.strokeStyle = '#3a3128';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath();
+  for (let leg = 0; leg < 4; leg++) {
+    const swing = Math.sin(stride + leg * Math.PI) * 0.9;
+    const foot = 4.6 - leg * 2.5;
+    ctx.moveTo(foot + swing, -4.2);
+    ctx.lineTo(1.9 - leg * 0.4, 0);
+    ctx.lineTo(foot - swing, 4.2);
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#75664f';
+  ctx.beginPath();
+  blob(ctx, -2.5, 0, 2.5, 2.2);
+  ctx.fill();
+  ctx.fillStyle = '#4a3f33';
+  ctx.beginPath();
+  blob(ctx, 1.3, 0, 1.6, 1.3);
   ctx.fill();
   ctx.restore();
 }
@@ -1443,13 +1503,18 @@ function paintMillers(ctx: CanvasRenderingContext2D, feel: Feel, map: SwarmMap, 
       const out = smooth(Math.min(1, shown - k));
       const id = index * 16 + k;
       const phase = hash01(id) * TAU;
-      if (hut.owner !== 'b') {
+      const kind = feel.kinds[hut.owner];
+      if (kind !== 'bee') {
         const pace = 0.0009 + hash01(id + 5) * 0.0006;
         const a = now * pace + phase;
         const b = now * pace * 0.7 + phase * 2;
         const x = site.x + ((hash01(id + 1) * 2 - 1) * r * 0.85 + Math.sin(a) * 8) * out;
         const y = site.y + 4 + (3 + hash01(id + 2) * r * 0.3 + Math.sin(b) * 3) * out;
-        tinyAnt(ctx, x, y, Math.atan2(Math.cos(b) * 3 * 0.7, Math.cos(a) * 8), now * 0.012 + phase, MILLER[hut.owner]);
+        const angle = Math.atan2(Math.cos(b) * 3 * 0.7, Math.cos(a) * 8);
+        const stride = now * 0.012 + phase;
+        if (kind === 'ant') tinyAnt(ctx, x, y, angle, stride);
+        else if (kind === 'beetle') tinyBeetle(ctx, x, y, angle, stride);
+        else tinySpider(ctx, x, y, angle, stride);
       } else {
         const round = hash01(id + 1) * TAU;
         const a = now * (0.0022 + hash01(id + 5) * 0.001) + phase;
