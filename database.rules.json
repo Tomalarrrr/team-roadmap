@@ -384,7 +384,7 @@
           "game": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0 && (!data.exists() || newData.val() == data.val() || newData.val() == data.val() + 1)" },
           "startAt": { ".validate": "newData.isNumber()" },
           "map": { ".validate": "newData.isString() && newData.val().matches(/^[a-z]{1,12}$/)" },
-          "size": { ".validate": "newData.isString() && (newData.val() == 'small' || newData.val() == 'medium' || newData.val() == 'large')" },
+          "size": { ".validate": "newData.isString() && (newData.val() == 'small' || newData.val() == 'medium' || newData.val() == 'large' || newData.val() == 'huge')" },
           "cpu": { ".validate": "newData.isString() && newData.val().matches(/^a?b?c?d?$/)" },
           "mode": { ".validate": "newData.isString() && (newData.val() == 'classic' || newData.val() == 'blitz' || newData.val() == 'hill' || newData.val() == 'regicide' || newData.val() == 'bounty' || newData.val() == 'egg' || newData.val() == 'teams' || newData.val() == 'survival')" },
           "start": { ".validate": "newData.isString() && (newData.val() == 'home' || newData.val() == 'close' || newData.val() == 'scattered' || newData.val() == 'draft' || newData.val() == 'nests')" },

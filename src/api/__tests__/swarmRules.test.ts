@@ -207,9 +207,10 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), `${M}/cpu`, 2)).toBe(false);
   });
 
-  it('takes one of three sizes and no third flag', () => {
+  it('takes one of four sizes and no third flag', () => {
     expect(allowed(db(waitingRoom()), `${M}/size`, 'large')).toBe(true);
-    expect(allowed(db(waitingRoom()), `${M}/size`, 'huge')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/size`, 'huge')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/size`, 'giant')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/third`, true)).toBe(false);
   });
 
