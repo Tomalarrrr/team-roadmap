@@ -1983,7 +1983,7 @@ export interface Hut {
   armour?: number;
   /** What a tower was refitted into. Without one it is the cannon it started as. */
   type?: TowerType;
-  /** A mortar's shell in the air. Replaced, never changed, so the shallow copy of a hut can share it. */
+  /** A mortar's shell in the air. */
   shell?: Shell;
 }
 
@@ -2163,7 +2163,7 @@ export function newState(map: SwarmMap): SwarmState {
 export function cloneState(state: SwarmState): SwarmState {
   return {
     tick: state.tick,
-    huts: state.huts.map((h) => ({ ...h, out: h.out.map((q) => ({ ...q })) })),
+    huts: state.huts.map((h) => ({ ...h, out: h.out.map((q) => ({ ...q })), ...(h.shell && { shell: { ...h.shell } }) })),
     units: state.units.map((u) => ({ ...u })),
     army: { a: { ...state.army.a }, b: { ...state.army.b }, c: { ...state.army.c }, d: { ...state.army.d } },
     nextId: state.nextId,
@@ -2181,7 +2181,7 @@ export function cloneState(state: SwarmState): SwarmState {
     claimed: { ...state.claimed },
     egg: state.egg,
     fallen: { ...state.fallen },
-    fuses: state.fuses.slice(),
+    fuses: state.fuses.map((fuse) => ({ ...fuse })),
     powers: { a: state.powers.a.slice(), b: state.powers.b.slice(), c: state.powers.c.slice(), d: state.powers.d.slice() },
     rain: state.rain,
     decoys: state.decoys.map((decoy) => ({ ...decoy })),
