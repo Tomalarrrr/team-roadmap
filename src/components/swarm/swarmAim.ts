@@ -6,7 +6,7 @@
 // two ways share a path they are one ribbon, as wide as what will walk it. The
 // working out of that is here without a canvas, and the drawing is below it.
 
-import { TOLL_EVERY, nextHop, pathLength, pathOf, sendSize, takesToll, type SceneId, type Seat, type SwarmMap, type SwarmState } from '../../swarmGameLogic';
+import { TOLL_EVERY, allied, nextHop, pathLength, pathOf, sendSize, takesToll, type SceneId, type Seat, type SwarmMap, type SwarmState } from '../../swarmGameLogic';
 import { BADGE, controlOf, fontOf, pathPoint, siteRadius, siteTop, type Ctx } from './swarmSceneKit';
 import type { View } from './swarmRender';
 
@@ -419,10 +419,10 @@ export function drawAimUnder(ctx: Ctx, map: SwarmMap, state: SwarmState, view: V
     ctx.stroke();
     ctx.strokeStyle = mark.line;
     ctx.globalAlpha = aim.fade * 0.7;
-    // A hut in the way that is not the player's is fought for like the one aimed at.
+    // A hut in the way that is not the player's or an ally's is fought for like the one aimed at.
     for (const ribbon of ribbons) {
       const { to } = ribbon.stretch;
-      if (to !== aim.order.to && state.huts[to].owner !== view.seat) ring(to, 4);
+      if (to !== aim.order.to && !allied(map, state.huts[to].owner, view.seat)) ring(to, 4);
     }
     if (!drag) {
       for (const hut of aim.order.from) ring(hut, 1);
@@ -438,7 +438,7 @@ export function drawAimUnder(ctx: Ctx, map: SwarmMap, state: SwarmState, view: V
     ring(view.selected, 1);
   }
   if (target !== null) {
-    ring(target, state.huts[target].owner === view.seat ? 1 : 4);
+    ring(target, allied(map, state.huts[target].owner, view.seat) ? 1 : 4);
     if (view.hold > HOLD_SHOWN) {
       // The one line in the player's colour: it closes round the target as the rest turns half into all.
       const site = map.sites[target];
@@ -570,7 +570,8 @@ export function drawAimOver(ctx: Ctx, map: SwarmMap, state: SwarmState, view: Vi
       x += (site.x < map.w / 2 ? 1 : -1) * (drag.finger ? READOUT_CLEAR_PX * px + size * 2 : siteRadius(site, hut.level) + 34);
     }
     ctx.font = fontOf(700, size);
-    const own = hut.owner === view.seat;
+    // What is sent to an ally's hut joins its garrison as it would one of the player's own.
+    const own = allied(map, hut.owner, view.seat);
     const sent = own ? `+${total}` : String(total);
     const sentWidth = pillWidth(ctx, sent, size);
     // Against a hut that is not the player's, the two numbers and no verdict: what is held breeds on, a fort's defenders die twice, and towers and tolls thin a column on its way.

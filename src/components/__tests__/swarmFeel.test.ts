@@ -8,7 +8,7 @@
 // without limit; and the life on the map is the same for the same seed.
 
 import { describe, it, expect } from 'vitest';
-import { CLASSIC, MATCH_TICKS, SEATS, cloneState, kindsOf, newState, pathLength, type Kind, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
+import { CLASSIC, MATCH_TICKS, SEATS, WAVE_TICKS, cloneState, kindsOf, newState, pathLength, type Kind, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
 import { pathPoint, riverGap, riverOf } from '../swarm/swarmSceneKit';
 import {
   BANNER_GAP_MS,
@@ -30,6 +30,7 @@ import {
   POOL_MS_PER_WEIGHT,
   RIPPLE_MS,
   SHOT_LAND_MS,
+  WAVE_WARN_TICKS,
   WEAR_FULL,
   calloutsFor,
   critterPoint,
@@ -105,6 +106,22 @@ describe('calloutsFor', () => {
     expect(calloutsFor(taken, lost, map, 'a', false)).toEqual(['towerLost']);
     expect(calloutsFor(taken, lost, map, 'b', false)).toEqual(['towerTaken']);
     expect(calloutsFor(lost, after(lost, () => {}), map, 'a', false)).toEqual([]);
+  });
+
+  it('tells the side whose ally went out that its huts rallied, and nobody else', () => {
+    const rallied = after(start, (s) => (s.events = [{ kind: 'rally', seat: 'a', huts: [0] }]));
+    expect(calloutsFor(start, rallied, map, 'a', false)).toEqual(['allyOut']);
+    expect(calloutsFor(start, rallied, map, 'b', false)).toEqual([]);
+  });
+
+  it('warns of a wave in survival on the one tick the warning is due, and never in classic', () => {
+    const survival = { ...map, rules: { ...CLASSIC, mode: 'survival' as const, computer: ['b' as const] } };
+    const due = WAVE_TICKS - WAVE_WARN_TICKS;
+    const soon = { ...start, tick: due - 1 };
+    expect(calloutsFor(soon, after(soon, () => {}), survival, 'a', false)).toEqual(['waveSoon']);
+    const early = { ...start, tick: due - 2 };
+    expect(calloutsFor(early, after(early, () => {}), survival, 'a', false)).toEqual([]);
+    expect(calloutsFor(soon, after(soon, () => {}), map, 'a', false)).toEqual([]);
   });
 
   it('does the same for a fort, and takes a plain hut in silence', () => {

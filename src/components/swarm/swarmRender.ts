@@ -13,6 +13,7 @@
 
 import {
   TOWER_RANGE,
+  allied,
   mulberry32,
   paceOn,
   pathLength,
@@ -32,6 +33,7 @@ import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
 import { paintGround } from './swarmSceneGround';
 import { drawFlags, paintSite } from './swarmSceneHuts';
+import { drawAllies } from './swarmTeamsArt';
 import {
   BADGE,
   LANE,
@@ -327,6 +329,9 @@ export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[],
     } else if (event.kind === 'upgrade') {
       const site = scene.map.sites[event.hut];
       scene.fx.push({ kind: event.kind, x: site.x, y: site.y, at: now, seat: state.huts[event.hut].owner });
+    } else if (event.kind === 'wave' || event.kind === 'rally') {
+      // Every count a wave or a rally lands on jumps at once, and jolts as a hit's does so the eye is drawn to them.
+      for (const hut of event.huts) scene.hitAt[hut] = now;
     }
     // A capture, and a unit lost to the spikes or the water, are drawn by swarmFeel.
   }
@@ -1070,7 +1075,7 @@ function drawRanges(ctx: CanvasRenderingContext2D, map: SwarmMap, state: SwarmSt
   ctx.lineWidth = 1.6;
   ctx.strokeStyle = map.scene === 'ice' ? 'rgba(30, 54, 92, 0.6)' : 'rgba(255, 255, 255, 0.6)';
   state.huts.forEach((hut, index) => {
-    if (!map.sites[index].tower || hut.owner === view.seat) return;
+    if (!map.sites[index].tower || allied(map, hut.owner, view.seat)) return;
     ellipse(ctx, map.sites[index].x, map.sites[index].y, TOWER_RANGE, TOWER_RANGE);
     ctx.stroke();
   });
@@ -1286,6 +1291,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   drawShimmer(ctx, scene, view.now);
   drawUnder(ctx, scene.feel, map, state, view.now);
+  drawAllies(ctx, map, state, view.seat);
 
   if (scene.standing.tick !== state.tick) scene.standing = { tick: state.tick, legs: standingOf(map, state, view.seat) };
   // World units to a CSS pixel: a finger is the same size on every board.

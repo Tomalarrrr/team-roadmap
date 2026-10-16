@@ -9,6 +9,8 @@
 
 import {
   SPEED,
+  WAVE_TICKS,
+  allied,
   cloneState,
   countOf,
   mulberry32,
@@ -47,6 +49,9 @@ function blob(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, r
 
 // The callouts.
 
+/** In survival, how long before a wave lands it is called. */
+export const WAVE_WARN_TICKS = 50;
+
 export type CalloutKey =
   | 'lastHut'
   | 'enemyAtGate'
@@ -55,12 +60,16 @@ export type CalloutKey =
   | 'towerTaken'
   | 'fortTaken'
   | 'bridgeHeld'
-  | 'backFromOne';
+  | 'backFromOne'
+  | 'allyOut'
+  | 'waveSoon';
 
 /** Most pressing first: when several are due at once, bad news is read before good. */
 export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'lastHut',
+  'waveSoon',
   'enemyAtGate',
+  'allyOut',
   'towerLost',
   'fortLost',
   'towerTaken',
@@ -77,6 +86,8 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   towerTaken: 'Tower taken',
   fortTaken: 'Fort taken',
   bridgeHeld: 'Bridge held',
+  allyOut: 'Ally out so your huts rally',
+  waveSoon: 'Wave coming',
   backFromOne: 'Back from one hut',
 };
 
@@ -88,9 +99,9 @@ export function homeOf(map: SwarmMap, seat: Seat): number {
   return map.homes[map.sides.indexOf(seat)];
 }
 
-function marchingOn(state: SwarmState, hut: number, seat: Seat): number {
+function marchingOn(state: SwarmState, map: SwarmMap, hut: number, seat: Seat): number {
   let count = 0;
-  for (const unit of state.units) if (unit.dest === hut && unit.seat !== seat) count++;
+  for (const unit of state.units) if (unit.dest === hut && !allied(map, unit.seat, seat)) count++;
   return count;
 }
 
@@ -125,13 +136,15 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   if (reduced && hutsWas === 1 && huts > 1) due.add('backFromOne');
 
   if (!holdsBridge(before, map, seat) && holdsBridge(after, map, seat)) due.add('bridgeHeld');
+  if (after.events.some((event) => event.kind === 'rally' && event.seat === seat)) due.add('allyOut');
+  if (map.rules.mode === 'survival' && after.tick + WAVE_WARN_TICKS < map.ticks && Math.floor((after.tick + WAVE_WARN_TICKS) / WAVE_TICKS) > Math.floor((before.tick + WAVE_WARN_TICKS) / WAVE_TICKS)) due.add('waveSoon');
 
   const home = homeOf(map, seat);
   if (
     home !== -1 &&
     after.huts[home].owner === seat &&
-    marchingOn(before, home, seat) < GATE_COLUMN &&
-    marchingOn(after, home, seat) >= GATE_COLUMN
+    marchingOn(before, map, home, seat) < GATE_COLUMN &&
+    marchingOn(after, map, home, seat) >= GATE_COLUMN
   ) {
     due.add('enemyAtGate');
   }
@@ -160,6 +173,8 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   fortTaken: 6000,
   bridgeHeld: 20000,
   backFromOne: 20000,
+  allyOut: 20000,
+  waveSoon: 20000,
 };
 
 export interface Callouts {
@@ -765,8 +780,8 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
       gone.push({ unit, reached: unit.d + SPEED[state.army[unit.seat].speed] >= pathLength(map, unit.from, unit.to) });
     }
   }
-  // One that walked into a hut its side now holds is inside it, not dead.
-  const fell = ({ unit, reached }: { unit: Unit; reached: boolean }) => !(reached && state.huts[unit.to].owner === unit.seat);
+  // One that walked into a hut its side or an ally now holds is inside it, not dead.
+  const fell = ({ unit, reached }: { unit: Unit; reached: boolean }) => !(reached && allied(map, state.huts[unit.to].owner, unit.seat));
 
   for (const shot of state.shots) addMark(feel, 'pool', shot.x, shot.y, shot.seat, now + SHOT_LAND_MS);
 
@@ -806,7 +821,7 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
       const held = state.huts[hut];
       let step: { x: number; y: number } | null = null;
       for (const item of gone) {
-        if (item.unit.to !== hut || !item.reached || item.unit.seat === was.owner) continue;
+        if (item.unit.to !== hut || !item.reached || allied(map, item.unit.seat, was.owner)) continue;
         step = doorstep(map, item.unit.from, hut, held.level);
         if (fell(item)) addMark(feel, 'pool', step.x, step.y, item.unit.seat, now);
       }

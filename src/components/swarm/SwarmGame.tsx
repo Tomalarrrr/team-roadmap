@@ -20,12 +20,16 @@ import {
   SEATS,
   SIZE_IDS,
   TICK_MS,
+  WAVE_TICKS,
+  WAVE_UNITS,
   advance,
+  allied,
   buildMap,
   computerOf,
   MAP_IDS,
   countOf,
   kindsOf,
+  rulesOf,
   sendSize,
   sidesOf,
   sizeOf,
@@ -225,9 +229,11 @@ interface Hud {
   starts: Partial<Record<Seat, Start>>;
   /** A hut is in hand, with its upgrades showing. */
   picked: boolean;
+  /** In survival: the waves landed, seconds to the next (null when no other comes before the clock), and seconds played. */
+  survival: { waves: number; next: number | null; lasted: number } | null;
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false };
+const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false, survival: null };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -651,10 +657,17 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         counts: {},
         starts,
         picked: false,
+        survival: null,
       };
       if (game) {
         const ticks = game.map.ticks;
         next.secs = Math.ceil(((ticks - Math.min(Math.max(tick, 0), ticks)) * TICK_MS) / 1000);
+        if (game.map.rules.mode === 'survival') {
+          const at = Math.min(Math.max(tick, 0), ticks);
+          const waves = Math.floor(at / WAVE_TICKS);
+          const due = (waves + 1) * WAVE_TICKS;
+          next.survival = { waves, next: due < ticks ? Math.ceil(((due - at) * TICK_MS) / 1000) : null, lasted: Math.floor((at * TICK_MS) / 1000) };
+        }
         for (const side of game.map.sides) next.counts[side] = countOf(game.shown, side);
         // A hut lost while it was in hand is put down.
         if (selected !== null && game.shown.huts[selected].owner !== seat) selected = null;
@@ -998,6 +1011,9 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
   const sides = match ? sidesOf(match) : [];
   const kinds = match ? kindsOf(match, sides) : null;
+  // Who plays with whom, read from the match the way the game reads it from its map.
+  const teams = match ? { sides, rules: rulesOf(match) } : null;
+  const isAlly = (seat: Seat) => Boolean(teams && mySeat && seat !== mySeat && allied(teams, seat, mySeat));
 
   // A side with no person in it is one the computer plays.
   const nameOf = (seat: Seat) => {
@@ -1012,8 +1028,13 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     if (match.gone) return [match.gone === mySeat ? 'You left the game' : `${match.players[match.gone]?.name} left the game`];
     const how = hud.secs === 0 ? ' on the clock' : '';
     const winner = match.winner;
+    const team = winner === 'draw' || !teams ? [] : sides.filter((side) => allied(teams, side, winner)).sort((p, q) => Number(q === mySeat) - Number(p === mySeat));
+    const called = (seat: Seat, k: number) =>
+      seat === mySeat ? 'You' : match.players[seat] ? nameOf(seat) : `${k === 0 ? 'The' : 'the'} computer's ${KIND_NAME[kinds[seat]].many.toLowerCase()}`;
     let first: string;
     if (winner === 'draw') first = `A draw: level on huts and units${how}`;
+    else if (hud.survival && teams?.rules.computer?.includes(winner)) first = `You lasted ${Math.floor(hud.survival.lasted / 60)}:${String(hud.survival.lasted % 60).padStart(2, '0')}, ${hud.survival.waves === 1 ? 'one wave' : `${hud.survival.waves} waves`}`;
+    else if (team.length > 1) first = `${team.slice(0, -1).map(called).join(', ')} and ${called(team[team.length - 1], team.length - 1)} won${how}`;
     else if (winner === mySeat) first = `You won${how}`;
     else if (!match.players[winner]) first = `The computer's ${KIND_NAME[kinds[winner]].many.toLowerCase()} won${how}`;
     else first = `${nameOf(winner)} won${how}`;
@@ -1033,7 +1054,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   const sideTag = (seat: Seat, end: boolean) => {
     const parts = [
       <span key="dot" className={styles.dot} style={{ background: BADGE[seat].fill }} />,
-      <span key="name" className={styles.sideName}>{nameOf(seat)}</span>,
+      <span key="name" className={styles.sideName}>{isAlly(seat) ? `${nameOf(seat)} (ally)` : nameOf(seat)}</span>,
       <span key="count" className={styles.sideCount}>{tally(seat)}</span>,
     ];
     return (
@@ -1220,6 +1241,13 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               {hud.secs !== null && (
                 <span className={styles.clock}>
                   {Math.floor(hud.secs / 60)}:{String(hud.secs % 60).padStart(2, '0')}
+                </span>
+              )}
+              {hud.survival && (
+                <span className={styles.wave}>
+                  {hud.survival.next === null
+                    ? `Wave ${hud.survival.waves}`
+                    : `${hud.survival.waves === 0 ? 'Next wave' : `Wave ${hud.survival.waves}. Next`} in ${hud.survival.next}s, ${WAVE_UNITS * (hud.survival.waves + 1)} a hut`}
                 </span>
               )}
               {column('middle')}
