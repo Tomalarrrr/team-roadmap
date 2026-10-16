@@ -6,10 +6,6 @@ import { CLASSIC, KNOBS, MODE_IDS, START_IDS, TWISTS, mulberry32, type ModeId, t
 
 export type RulesChoice = Pick<Rules, 'mode' | 'start' | 'twists'>;
 
-/** The modes and twists the lobby offers: the ones whose rules are in the game. Every start is. */
-export const READY_MODES: readonly ModeId[] = ['classic'];
-export const READY_TWISTS: readonly Twist[] = [];
-
 /** What a mode needs of the sides, and what Start says when they fall short. */
 const NEEDS: Partial<Record<ModeId, (people: number, computers: number) => string | null>> = {
   teams: (people, computers) => (people + computers === 4 ? null : `Teams needs 4 sides; there are ${people + computers}.`),

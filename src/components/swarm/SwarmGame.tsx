@@ -29,6 +29,7 @@ import {
   STANDARD_TUNE,
   START_IDS,
   TICK_MS,
+  TWISTS as TWIST_IDS,
   WAVE_TICKS,
   WAVE_UNITS,
   advance,
@@ -75,7 +76,7 @@ import { carriedOf } from './swarmAim';
 import { notesOf } from './swarmArmoury';
 import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
-import { READY_MODES, READY_TWISTS, clashOf, leaveWarning, surpriseOf, tuneSummary, unfit, type RulesChoice } from './swarmLobby';
+import { clashOf, leaveWarning, surpriseOf, tuneSummary, unfit, type RulesChoice } from './swarmLobby';
 import { floodIn, pillsOf, type PowerPill } from './swarmPowerHud';
 import { SwarmPowerPills } from './SwarmPowerPills';
 import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
@@ -211,13 +212,13 @@ const STARTS: Record<StartId, { name: string; about: string }> = {
 
 /** What each twist adds, said when it is pointed at or focused. */
 const TWISTS: Record<Twist, { name: string; about: string }> = {
-  flood: { name: 'Flood', about: 'After 40% of the clock the outer ring of huts floods every 30 seconds, until the inner 40% are left.' },
-  fog: { name: 'Fog', about: 'You see only near your own huts and units. Elsewhere enemy units are hidden and hut counts show ?.' },
+  flood: { name: 'Flood', about: 'After 40% of the clock the outer ring of huts floods every 30 seconds, until 40% of the huts are left. The next ring is marked 30 seconds before it goes.' },
+  fog: { name: 'Fog', about: 'You see only near your own huts and units. Elsewhere enemy units are hidden, and a hut shows the last count you saw and how long ago, or ? if you never saw it.' },
   powers: { name: 'Powers', about: 'One use each of rain (every path slow for 15 seconds), a call (every hut of yours sends half to one) and a decoy column.' },
   golden: { name: 'Golden hut', about: '3 minutes in (30% of the clock in blitz) the middle hut turns gold: it breeds 3 times as fast and holds half as much again.' },
   frenzy: { name: 'Frenzy', about: 'In the last minute every hut breeds twice as fast and towers fire every 0.3 seconds.' },
   comeback: { name: 'Comeback', about: 'A side 2 or more huts behind the leader breeds 25% faster.' },
-  buildings: { name: 'Buildings', about: 'A trap kills half its first takers, barracks send units that survive one death, beacons send faster ones and a granary gives the huts next to it half as much room again.' },
+  buildings: { name: 'Buildings', about: 'A few neutral huts are built as a trap, a barracks, a granary or a beacon, and a bridge can be burnt for 10 units.' },
   queens: { name: 'Queens', about: 'Lose your home hut and your other huts stop breeding until you take it back.' },
   armoury: { name: 'Armoury', about: 'Kit out towers, refit them, build them.' },
 };
@@ -267,7 +268,6 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
   return (
     <div className={styles.ruleSet}>
       <div className={styles.pickRow}>
-        {READY_MODES.length > 1 && (
         <label className={styles.pickLabel}>
           Mode
           <select
@@ -280,12 +280,11 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
               if (mode) onChoice?.({ ...choice, mode, twists: choice.twists.filter((twist) => !clashOf(twist, mode)) });
             }}
           >
-            {READY_MODES.map((id) => (
+            {MODE_IDS.map((id) => (
               <option key={id} value={id}>{MODES[id].name}</option>
             ))}
           </select>
         </label>
-        )}
         <label className={styles.pickLabel}>
           Start
           <select
@@ -319,7 +318,7 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
             </select>
           </label>
         )}
-        {onChoice && READY_TWISTS.length > 0 && (
+        {onChoice && (
           <button
             className={styles.choiceBtn}
             onClick={() => {
@@ -334,9 +333,8 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
         )}
       </div>
       <span className={styles.rules}>{MODES[choice.mode].about} {STARTS[choice.start].about}</span>
-      {READY_TWISTS.length > 0 && (
       <div className={`${styles.choiceRow} ${styles.twistRow}`} role="group" aria-label="Twists">
-        {READY_TWISTS.map((twist) => {
+        {TWIST_IDS.map((twist) => {
           const on = choice.twists.includes(twist);
           return (
             <button
@@ -353,8 +351,7 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
           );
         })}
       </div>
-      )}
-      {READY_TWISTS.length > 0 && <span className={styles.rules} aria-live="polite">{about}</span>}
+      <span className={styles.rules} aria-live="polite">{about}</span>
     </div>
   );
 }
