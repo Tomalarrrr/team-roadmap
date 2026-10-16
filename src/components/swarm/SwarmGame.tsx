@@ -25,6 +25,7 @@ import {
   computerOf,
   MAP_IDS,
   countOf,
+  isUpgrade,
   kindsOf,
   sendSize,
   sidesOf,
@@ -41,6 +42,7 @@ import {
 import { BADGE } from './swarmSceneKit';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
+import { notesOf } from './swarmArmoury';
 import { columnOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
 import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
@@ -225,9 +227,11 @@ interface Hud {
   starts: Partial<Record<Seat, Start>>;
   /** A hut is in hand, with its upgrades showing. */
   picked: boolean;
+  /** What the armoury's tokens for it do. */
+  notes: string[];
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false };
+const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false, notes: [] };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -651,6 +655,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         counts: {},
         starts,
         picked: false,
+        notes: [],
       };
       if (game) {
         const ticks = game.map.ticks;
@@ -661,6 +666,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         if (drag) drag.sources = drag.sources.filter((hut) => game?.shown.huts[hut].owner === seat);
         if (drag?.sources.length === 0) drag = null;
         next.picked = selected !== null;
+        if (selected !== null) next.notes = notesOf(game.scene.map, game.shown, selected);
       }
       const nextKey = JSON.stringify(next);
       if (nextKey !== hudKey) {
@@ -693,7 +699,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       const hut = selected;
       if (hut === null) return null;
       const disc = TOKEN_R * tokenGrow(p.px) + 4;
-      const spots = upgradeSpots(g.map, g.shown, hut, p.px).flatMap((spot) => {
+      // The drawing's map, which knows the towers built since the game began, so the tokens are pressed where they are drawn.
+      const spots = upgradeSpots(g.scene.map, g.shown, hut, p.px).flatMap((spot) => {
         const cost = upgradeCost(g.shown, hut, spot.kind);
         return cost === null ? [] : [{ ...spot, cost }];
       });
@@ -758,7 +765,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           let owed = 0;
           for (const order of game.orders[seatNow]) {
             if (order.tick <= game.shown.tick || order.from !== token.hut) continue;
-            if (order.kind === 'hut' || order.kind === 'speed' || order.kind === 'strength') owed += upgradeCost(game.shown, token.hut, order.kind) ?? 0;
+            if (isUpgrade(order.kind)) owed += upgradeCost(game.shown, token.hut, order.kind) ?? 0;
           }
           if (sendSize(game.shown.huts[token.hut], 'all') - owed < token.cost) return refuse(token.hut);
           issue(token.kind, token.hut, token.hut);
@@ -1265,6 +1272,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               </div>
             )}
           </div>
+          {hud.notes.length > 0 && <div className={styles.footer}>{hud.notes.join('. ')}</div>}
           {error ? (
             <div className={styles.footer} role="alert">{error}</div>
           ) : (

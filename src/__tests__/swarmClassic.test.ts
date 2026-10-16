@@ -57,7 +57,7 @@ describe('the rules of a match', () => {
 
   it('store the twists as letters in one order, whatever order they were picked in', () => {
     expect(twistLetters(['queens', 'flood', 'fog'])).toBe('foq');
-    expect(twistLetters([...TWISTS].reverse())).toBe('fopgzcbq');
+    expect(twistLetters([...TWISTS].reverse())).toBe('fopgzcbqa');
     expect(twistLetters([])).toBe('');
     expect(rulesOf({ ...match, twists: twistLetters([...TWISTS]) }).twists).toEqual(TWISTS);
   });

@@ -123,9 +123,9 @@ export const MODE_IDS: readonly ModeId[] = ['classic', 'blitz', 'hill', 'regicid
 export type StartId = 'home' | 'close' | 'scattered' | 'draft' | 'nests';
 export const START_IDS: readonly StartId[] = ['home', 'close', 'scattered', 'draft', 'nests'];
 /** Rules laid over any mode, any number of them at once. */
-export type Twist = 'flood' | 'fog' | 'powers' | 'golden' | 'frenzy' | 'comeback' | 'buildings' | 'queens';
+export type Twist = 'flood' | 'fog' | 'powers' | 'golden' | 'frenzy' | 'comeback' | 'buildings' | 'queens' | 'armoury';
 /** A match stores its twists as one letter each, in this order, which is the order the lobby lists them in. */
-export const TWIST_CHAR: Record<Twist, string> = { flood: 'f', fog: 'o', powers: 'p', golden: 'g', frenzy: 'z', comeback: 'c', buildings: 'b', queens: 'q' };
+export const TWIST_CHAR: Record<Twist, string> = { flood: 'f', fog: 'o', powers: 'p', golden: 'g', frenzy: 'z', comeback: 'c', buildings: 'b', queens: 'q', armoury: 'a' };
 export const TWISTS = Object.keys(TWIST_CHAR) as Twist[];
 /** With the nests start: one big hut, or several small ones. */
 export type Nest = 'big' | 'many';
@@ -224,8 +224,14 @@ export interface SwarmSeatState {
  * rain   rain over the board, from any hut of the side's
  * call   every hut of the side's sends half to `to`
  * decoy  a column that costs nothing, from `from` to `to`
+ *
+ * The armoury, each paid from the garrison of `from` (see armouryCost):
+ * range, rate, armour  a level of the tower's kit
+ * mortar, ballista, web  the one refit of a plain tower
+ * tower  a level-3 hut built up into a tower
+ * carapace  every unit of the side shrugs off its first tower hit
  */
-export type OrderKind = 'half' | 'all' | 'hut' | 'speed' | 'strength' | 'flag' | 'nest' | 'burn' | 'rain' | 'call' | 'decoy';
+export type OrderKind = 'half' | 'all' | 'hut' | 'speed' | 'strength' | 'flag' | 'nest' | 'burn' | 'rain' | 'call' | 'decoy' | ArmouryKind;
 
 export interface Order {
   tick: number;
@@ -238,7 +244,7 @@ export interface Order {
   risky?: boolean;
 }
 
-const KIND_CHAR: Record<OrderKind, string> = { half: 'h', all: 'a', hut: 'u', speed: 'v', strength: 'p', flag: 'w', nest: 'n', burn: 'x', rain: 'r', call: 'c', decoy: 'y' };
+const KIND_CHAR: Record<OrderKind, string> = { half: 'h', all: 'a', hut: 'u', speed: 'v', strength: 'p', flag: 'w', nest: 'n', burn: 'x', rain: 'r', call: 'c', decoy: 'y', range: 'l', rate: 'f', armour: 'd', mortar: 'm', ballista: 'b', web: 'e', tower: 't', carapace: 'k' };
 const CHAR_KIND = Object.fromEntries(Object.entries(KIND_CHAR).map(([kind, char]) => [char, kind])) as Record<string, OrderKind>;
 
 /** Tick in base 36, a kind letter, then one base-36 character per hut. The letter is a capital for a risky order. */
@@ -1175,11 +1181,19 @@ export interface Hut {
   out: { to: number; dest: number; n: number; risky?: boolean }[];
   /** Ticks until a tower can shoot again. Only a tower has one. */
   reload?: number;
-  /** Times the defender at the door of a fort has been killed already. Only a fort has one. */
+  /** Times the defender at the door of a fort, or of an armoured tower, has been killed already. */
   hurt?: number;
+  /** A tower's kit, each a level from 1 to KIT_LEVELS. Without one, none. */
+  range?: number;
+  rate?: number;
+  armour?: number;
+  /** What a tower was refitted into. Without one it is the cannon it started as. */
+  type?: TowerType;
+  /** A mortar's shell in the air. Replaced, never changed, so the shallow copy of a hut can share it. */
+  shell?: Shell;
 }
 
-const isTower = (hut: Hut): boolean => hut.reload !== undefined;
+export const isTower = (hut: Hut): boolean => hut.reload !== undefined;
 
 export interface Unit {
   id: number;
@@ -1192,12 +1206,18 @@ export interface Unit {
   d: number;
   /** Sent by a risky order: it routes over the paths that cost lives. */
   risky?: boolean;
+  /** Ticks it is still caught in a web's silk. */
+  held?: number;
+  /** Its carapace took a tower's hit already. */
+  cracked?: boolean;
 }
 
 export interface Army {
   speed: number;
   strength: number;
   luck: number;
+  /** Bought once: each unit lives through its first tower hit. */
+  carapace?: boolean;
 }
 
 export type SwarmEvent =
@@ -1208,7 +1228,11 @@ export type SwarmEvent =
   /** A unit of `seat` died to the spikes or the water, `d` along the path from `from`. */
   | { kind: 'toll'; from: number; to: number; d: number; seat: Seat }
   /** `seat` raised the white flag, and `huts` went neutral. */
-  | { kind: 'flag'; seat: Seat; huts: number[] };
+  | { kind: 'flag'; seat: Seat; huts: number[] }
+  /** A mortar's shell came down at x, y, whatever it killed. */
+  | { kind: 'blast'; hut: number; x: number; y: number }
+  /** A ballista's bolt flew from the tower out to x, y. */
+  | { kind: 'bolt'; hut: number; x: number; y: number };
 
 /** A tower killed a unit of `seat` standing at x, y. */
 export interface Shot {
@@ -1216,6 +1240,10 @@ export interface Shot {
   x: number;
   y: number;
   seat: Seat;
+  /** The tower was a mortar or a ballista. */
+  type?: 'mortar' | 'ballista';
+  /** The unit's carapace took the hit, and it walks on. */
+  spared?: boolean;
 }
 
 export interface SwarmState {
@@ -1362,8 +1390,9 @@ export function sendSize(hut: Hut, kind: 'half' | 'all'): number {
   return kind === 'all' ? free : Math.ceil(free / 2);
 }
 
-/** What the upgrade costs from this hut, or null when it is already at the top. A tower sells none. */
-export function upgradeCost(state: SwarmState, hutIndex: number, kind: 'hut' | 'speed' | 'strength'): number | null {
+/** What the upgrade costs from this hut, or null when it is already at the top. A tower sells none of these, only its own kit. */
+export function upgradeCost(state: SwarmState, hutIndex: number, kind: Upgrade): number | null {
+  if (kind !== 'hut' && kind !== 'speed' && kind !== 'strength') return armouryCost(state, hutIndex, kind);
   const hut = state.huts[hutIndex];
   if (!hut.owner || isTower(hut)) return null;
   if (kind === 'hut') return hut.level < MAX_HUT_LEVEL ? HUT_COST[hut.level - 1] : null;
@@ -1376,7 +1405,7 @@ function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, 
   if (order.kind === 'flag') return raiseFlag(state, seat);
   if (order.kind === 'nest' || order.kind === 'burn' || order.kind === 'rain' || order.kind === 'call' || order.kind === 'decoy') return;
   const hut = state.huts[order.from];
-  if (!hut || hut.owner !== seat) return;
+  if (!hut || hut.owner !== seat || (isArmoury(order.kind) && !armed(map))) return;
   if (order.kind === 'half' || order.kind === 'all') {
     if (!state.huts[order.to]) return;
     // No hop also covers a send to the hut itself.
@@ -1394,7 +1423,8 @@ function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, 
   if (cost === null || hut.n - queued(hut) < cost) return;
   hut.n -= cost;
   if (order.kind === 'hut') hut.level++;
-  else state.army[seat][order.kind]++;
+  else if (order.kind === 'speed' || order.kind === 'strength') state.army[seat][order.kind]++;
+  else fit(state, hut, seat, order.kind);
   state.events.push({ kind: 'upgrade', hut: order.from });
 }
 
@@ -1482,7 +1512,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     if (!mixed(sides[at])) continue;
     const path = map.paths[at];
-    const pace = paceOf(path, unit.to, state.army[unit.seat].speed);
+    const pace = walked.get(unit)!;
     let lane = lanes.get(at);
     if (!lane) lanes.set(at, (lane = []));
     lane.push(unit.from === path.a ? { unit, at: unit.d, was: unit.d - pace } : { unit, at: lengths[at] - unit.d, was: lengths[at] - unit.d + pace });
@@ -1568,13 +1598,18 @@ function clashAtDoors(state: SwarmState, map: SwarmMap, arriving: Unit[]): Set<U
 /** A kill at a fort that is not the defender's last. Returns false when the defender is dead. */
 function wounds(hut: Hut): boolean {
   if (hut.hurt === undefined) return false;
-  hut.hurt = (hut.hurt + 1) % FORT_LIVES;
+  hut.hurt = (hut.hurt + 1) % livesOf(hut);
   return hut.hurt !== 0;
 }
 
+/** How far each unit walked on this tick, for the fights and tolls after it: a unit in silk walks less than its pace, or not at all. */
+const walked = new WeakMap<Unit, number>();
+
 function walk(state: SwarmState, map: SwarmMap): void {
   const { index } = lanesOf(map);
-  for (const unit of state.units) unit.d += paceOf(map.paths[index[unit.from][unit.to]], unit.to, state.army[unit.seat].speed);
+  for (const unit of state.units) walked.set(unit, paceOf(map.paths[index[unit.from][unit.to]], unit.to, state.army[unit.seat].speed));
+  slow(state, map);
+  for (const unit of state.units) unit.d += walked.get(unit)!;
 }
 
 /**
@@ -1593,7 +1628,7 @@ function takeTolls(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     const path = map.paths[at];
     if (takesToll(path.kind)) {
-      const before = unit.d - paceOf(path, unit.to, state.army[unit.seat].speed);
+      const before = unit.d - walked.get(unit)!;
       // Twice the walk against the whole length: on a path of odd length, half of it rounded down
       // is a middle that two units walking at each other are both over a step before they meet.
       if (2 * before < length[at] && 2 * unit.d >= length[at] && ++state.tolls[at] % TOLL_EVERY === 0) {
@@ -1646,21 +1681,18 @@ function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): 
  * other side's once it is held, and until then whoever is marching on it.
  */
 function shoot(state: SwarmState, map: SwarmMap): void {
-  const lanes = lanesOf(map);
   state.huts.forEach((tower, index) => {
     if (tower.reload === undefined) return;
+    if (tower.shell?.at === state.tick) land(state, map, index);
     if (tower.reload > 0) tower.reload--;
     if (tower.reload > 0) return;
+    if (tower.type) return fire(state, map, index);
     const site = map.sites[index];
     let target: { unit: Unit; x: number; y: number } | null = null;
-    let nearest = TOWER_RANGE * TOWER_RANGE;
+    let nearest = reachOf(tower) * reachOf(tower);
     for (const unit of state.units) {
       if (tower.owner ? unit.seat === tower.owner : unit.to !== index) continue;
-      const from = map.sites[unit.from];
-      const to = map.sites[unit.to];
-      const length = lanes.length[lanes.index[unit.from][unit.to]];
-      const x = from.x + Math.trunc(((to.x - from.x) * unit.d) / length);
-      const y = from.y + Math.trunc(((to.y - from.y) * unit.d) / length);
+      const { x, y } = spotOf(map, unit);
       const gap = (x - site.x) * (x - site.x) + (y - site.y) * (y - site.y);
       // Units are kept in the order they were made, so of two as near it is the lower id that stays.
       if (gap > nearest || (target && gap === nearest)) continue;
@@ -1669,10 +1701,241 @@ function shoot(state: SwarmState, map: SwarmMap): void {
     }
     if (!target) return;
     const { unit, x, y } = target;
-    state.units = state.units.filter((u) => u !== unit);
-    state.shots.push({ tower: index, x, y, seat: unit.seat });
-    tower.reload = TOWER_RELOAD;
+    const killed = struck(state, unit);
+    if (killed) state.units = state.units.filter((u) => u !== unit);
+    state.shots.push({ tower: index, x, y, seat: unit.seat, ...(!killed && { spared: true }) });
+    tower.reload = reloadOf(tower);
   });
+}
+
+// The armoury. A side kits out a tower it holds from the tower's own
+// garrison, a level of range, rate or armour at a time, and refits a plain one
+// once. Each type has an answer:
+//
+//  cannon    the nearest unit, every TOWER_RELOAD ticks. Mass gets past it, and carapace halves it.
+//  mortar    reaches far, and lands its shell where it aimed MORTAR_FLIGHT ticks later, killing all
+//            round. A fast column, spaced out, walks out from under it; one packed by the silk does not.
+//            Blind close in, so a column that gets under it is safe.
+//  ballista  reaches furthest, and its bolt goes through up to BOLT_PIERCE units in line, but loads
+//            slowly. A column coming at it head on dies in rows; one crossing its line loses one a bolt.
+//  web       kills nothing. Slows all in reach, and holds one unit fast at a time while what follows
+//            it on its path piles up behind. Taken like any hut, since it stops no one getting in.
+
+export type TowerType = 'mortar' | 'ballista' | 'web';
+export const TOWER_TYPES: readonly TowerType[] = ['mortar', 'ballista', 'web'];
+export type KitKind = 'range' | 'rate' | 'armour';
+export const KIT_KINDS: readonly KitKind[] = ['range', 'rate', 'armour'];
+/** What a side can buy from the armoury: a tower's kit, its refit, a tower built, the carapace. */
+export type ArmouryKind = KitKind | TowerType | 'tower' | 'carapace';
+export type Upgrade = 'hut' | 'speed' | 'strength' | ArmouryKind;
+const ARMOURY = new Set<OrderKind>([...KIT_KINDS, ...TOWER_TYPES, 'tower', 'carapace']);
+const isArmoury = (kind: OrderKind): kind is ArmouryKind => ARMOURY.has(kind);
+export const isUpgrade = (kind: OrderKind): kind is Upgrade => kind === 'hut' || kind === 'speed' || kind === 'strength' || isArmoury(kind);
+
+// Benched with the computer on every side (October 2026, 162 games each way: the six maps, two to four
+// sides, nine seeds). Without the armoury 3 games went to the clock, average 1399 ticks; with it 9,
+// average 1551. Seat wins with it, 2 sides a/b 23/31, 3 sides 8/24/22, 4 sides 9/19/14/11 and a draw; without it
+// 24/30, 8/22/24 and 8/18/15/12 and a draw, so the skew to the later seats is the maps', not the armoury's.
+// Tower kills with it: cannon 8128, mortar 711, ballista 1088; without it, cannon 11112.
+// Each refit forced on one side of guns against each other (16 games a pair, seats swapped): no pairing
+// went further than 11 to 5. A side that never refits beat each that does 9-10 to 6-7; a mortar or a ballista with
+// a web beat the same killer alone 11-5; mirrors of the killers ran to the clock in half their games.
+export const KIT_LEVELS = 2;
+/** Units of the tower's garrison a kit level costs, by the level it goes to. */
+export const KIT_COST = [10, 20];
+export const REFIT_COST = 20;
+/** Spent from a level-3 hut to make it a tower: what it bred is kept, but it never breeds again. */
+export const BUILD_COST = 30;
+export const CARAPACE_COST = 35;
+/** World units of reach a level of range adds. */
+export const REACH_STEP = 20;
+/** Reach a type has over a cannon's. */
+export const EXTRA_REACH: Record<TowerType, number> = { mortar: 30, ballista: 40, web: 20 };
+/** Ticks between two shots, by type, then by rate level. */
+export const RELOADS: Record<TowerType | 'cannon', readonly number[]> = { cannon: [TOWER_RELOAD, 5, 4], mortar: [24, 19, 15], ballista: [16, 13, 10], web: [9, 7, 5] };
+/** A mortar fires at nothing nearer than this. */
+export const MORTAR_BLIND = 60;
+/** A mortar's shell kills everything at war with it within this of where it lands. */
+export const MORTAR_SPLASH = 16;
+/** Ticks a shell is in the air. A unit walks 18 to 96 world units in that time, by speed and ground. */
+export const MORTAR_FLIGHT = 8;
+/** A ballista's bolt kills what is at war with it within this of its line, the nearest first, up to BOLT_PIERCE of them. */
+export const BOLT_WIDTH = 8;
+export const BOLT_PIERCE = 3;
+/** Ticks a web holds the unit it catches. */
+export const HOLD_TICKS = 10;
+
+/** Where a mortar's shell comes down, on which tick, and the side that fired it, or null for a tower nobody held. */
+export interface Shell {
+  x: number;
+  y: number;
+  at: number;
+  seat: Owner;
+}
+
+/** Whether the armoury is in this game. */
+export const armed = (map: SwarmMap): boolean => map.rules.twists.includes('armoury');
+
+/** What the armoury sells from this hut, or null when it sells it none of that. */
+function armouryCost(state: SwarmState, at: number, kind: ArmouryKind): number | null {
+  const hut = state.huts[at];
+  if (!hut.owner) return null;
+  if (kind === 'carapace') return isTower(hut) || state.army[hut.owner].carapace ? null : CARAPACE_COST;
+  if (kind === 'tower') return !isTower(hut) && hut.hurt === undefined && hut.level === MAX_HUT_LEVEL ? BUILD_COST : null;
+  if (!isTower(hut)) return null;
+  if (kind === 'range' || kind === 'rate' || kind === 'armour') {
+    const level = hut[kind] ?? 0;
+    return level < KIT_LEVELS ? KIT_COST[level] : null;
+  }
+  return hut.type ? null : REFIT_COST;
+}
+
+function fit(state: SwarmState, hut: Hut, seat: Seat, kind: ArmouryKind): void {
+  if (kind === 'carapace') state.army[seat].carapace = true;
+  else if (kind === 'tower') hut.reload = 0;
+  else if (kind === 'range' || kind === 'rate' || kind === 'armour') {
+    hut[kind] = (hut[kind] ?? 0) + 1;
+    // An armoured tower's defenders are wounded like a fort's, and need one more kill a level.
+    if (kind === 'armour') hut.hurt ??= 0;
+  } else hut.type = kind;
+}
+
+export const reachOf = (tower: Hut): number => TOWER_RANGE + REACH_STEP * (tower.range ?? 0) + (tower.type ? EXTRA_REACH[tower.type] : 0);
+export const reloadOf = (tower: Hut): number => RELOADS[tower.type ?? 'cannon'][tower.rate ?? 0];
+/** Times each defender has to be killed. Only a fort and an armoured tower ask more than once. */
+export const livesOf = (hut: Hut): number => (hut.armour ? 1 + hut.armour : hut.hurt === undefined ? 1 : FORT_LIVES);
+
+/** Where a unit stands, in whole world units. */
+export function spotOf(map: SwarmMap, unit: Unit): { x: number; y: number } {
+  const { index, length } = lanesOf(map);
+  const from = map.sites[unit.from];
+  const to = map.sites[unit.to];
+  const d = length[index[unit.from][unit.to]];
+  return { x: from.x + Math.trunc(((to.x - from.x) * unit.d) / d), y: from.y + Math.trunc(((to.y - from.y) * unit.d) / d) };
+}
+
+const gapOf = (p: { x: number; y: number }, q: { x: number; y: number }) => (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y);
+
+/** Whether a tower fired by `seat` kills this unit: another side's, or when nobody holds the tower, one marching on it. */
+const atWar = (seat: Owner, tower: number, unit: Unit): boolean => (seat ? unit.seat !== seat : unit.to === tower);
+
+/** A tower's hit. A unit with its carapace whole loses it and walks on. Returns whether the unit died. */
+function struck(state: SwarmState, unit: Unit): boolean {
+  if (!state.army[unit.seat].carapace || unit.cracked) return true;
+  unit.cracked = true;
+  return false;
+}
+
+interface Mark {
+  unit: Unit;
+  x: number;
+  y: number;
+  gap: number;
+}
+
+/** A refitted tower that is loaded fires, when it has something to fire at. */
+function fire(state: SwarmState, map: SwarmMap, index: number): void {
+  const tower = state.huts[index];
+  const site = map.sites[index];
+  const reach = reachOf(tower);
+  // Kept in the order the units were made, so of two as good it is the lower id that is picked.
+  const near: Mark[] = [];
+  for (const unit of state.units) {
+    if (!atWar(tower.owner, index, unit)) continue;
+    const spot = spotOf(map, unit);
+    const gap = gapOf(spot, site);
+    if (gap <= reach * reach) near.push({ unit, ...spot, gap });
+  }
+  if (tower.type === 'mortar') {
+    // At the most it can catch in one shell, nearer first, but never close in.
+    let aim: Mark | null = null;
+    let most = 0;
+    for (const p of near) {
+      if (p.gap < MORTAR_BLIND * MORTAR_BLIND) continue;
+      const caught = near.filter((q) => gapOf(p, q) <= MORTAR_SPLASH * MORTAR_SPLASH).length;
+      if (caught < most || (caught === most && aim && p.gap >= aim.gap)) continue;
+      aim = p;
+      most = caught;
+    }
+    if (!aim) return;
+    tower.shell = { x: aim.x, y: aim.y, at: state.tick + MORTAR_FLIGHT, seat: tower.owner };
+  } else if (tower.type === 'ballista') {
+    const aim = nearestOf(near, () => true);
+    if (!aim) return;
+    const dx = aim.x - site.x;
+    const dy = aim.y - site.y;
+    const line = dx * dx + dy * dy;
+    const dead = new Set<Unit>();
+    const inLine = near.filter((p) => {
+      const along = (p.x - site.x) * dx + (p.y - site.y) * dy;
+      const across = (p.x - site.x) * dy - (p.y - site.y) * dx;
+      return p === aim || (along > 0 && across * across <= BOLT_WIDTH * BOLT_WIDTH * line);
+    });
+    // Sorted by distance alone keeps the order the units were made between two as near.
+    for (const p of inLine.sort((p, q) => p.gap - q.gap).slice(0, BOLT_PIERCE)) {
+      const killed = struck(state, p.unit);
+      if (killed) dead.add(p.unit);
+      state.shots.push({ tower: index, x: p.x, y: p.y, seat: p.unit.seat, type: 'ballista', ...(!killed && { spared: true }) });
+    }
+    // Only the drawing reads where the bolt ends, so the root it takes cannot set two clients apart.
+    const out = Math.max(1, Math.floor(Math.sqrt(line)));
+    state.events.push({ kind: 'bolt', hut: index, x: site.x + Math.trunc((dx * reach) / out), y: site.y + Math.trunc((dy * reach) / out) });
+    if (dead.size > 0) state.units = state.units.filter((unit) => !dead.has(unit));
+  } else {
+    const aim = nearestOf(near, (p) => p.unit.held === undefined);
+    if (!aim) return;
+    aim.unit.held = HOLD_TICKS;
+  }
+  tower.reload = reloadOf(tower);
+}
+
+const nearestOf = (marks: Mark[], fits: (p: Mark) => boolean): Mark | null => marks.reduce<Mark | null>((best, p) => (fits(p) && (!best || p.gap < best.gap) ? p : best), null);
+
+/** A mortar's shell comes down. */
+function land(state: SwarmState, map: SwarmMap, index: number): void {
+  const shell = state.huts[index].shell!;
+  delete state.huts[index].shell;
+  const dead = new Set<Unit>();
+  for (const unit of state.units) {
+    if (!atWar(shell.seat, index, unit)) continue;
+    const spot = spotOf(map, unit);
+    if (gapOf(spot, shell) > MORTAR_SPLASH * MORTAR_SPLASH) continue;
+    const killed = struck(state, unit);
+    if (killed) dead.add(unit);
+    state.shots.push({ tower: index, ...spot, seat: unit.seat, type: 'mortar', ...(!killed && { spared: true }) });
+  }
+  state.events.push({ kind: 'blast', hut: index, x: shell.x, y: shell.y });
+  if (dead.size > 0) state.units = state.units.filter((unit) => !dead.has(unit));
+}
+
+/**
+ * The webs' part in a walk. A unit in silk does not move, and wears free of it
+ * a tick at a time; what follows it on its path, of its side, gets no further
+ * than where it stands. Any other unit in a web's reach that it is at war with
+ * walks as on a narrow track.
+ */
+function slow(state: SwarmState, map: SwarmMap): void {
+  const webs = state.huts.flatMap((hut, at) => (hut.type === 'web' ? [at] : []));
+  const stuck: Unit[] = [];
+  for (const unit of state.units) {
+    if (unit.held !== undefined) {
+      walked.set(unit, 0);
+      stuck.push(unit);
+      if (--unit.held === 0) delete unit.held;
+      continue;
+    }
+    if (webs.length === 0) continue;
+    const spot = spotOf(map, unit);
+    const caught = webs.some((at) => atWar(state.huts[at].owner, at, unit) && gapOf(spot, map.sites[at]) <= reachOf(state.huts[at]) * reachOf(state.huts[at]));
+    if (caught) walked.set(unit, Math.max(1, Math.floor((walked.get(unit)! * NARROW_PERCENT) / 100)));
+  }
+  // Of two level, the one made first is in front, so a pile wears free a unit at a time.
+  for (const held of stuck) {
+    for (const unit of state.units) {
+      if (unit === held || unit.seat !== held.seat || unit.from !== held.from || unit.to !== held.to || unit.d > held.d || (unit.d === held.d && unit.id < held.id)) continue;
+      walked.set(unit, Math.min(walked.get(unit)!, held.d - unit.d));
+    }
+  }
 }
 
 /** A tower is not a hut, but the units in it are units. */
@@ -1830,19 +2093,19 @@ function coverOf(map: SwarmMap): number[][] {
   let cover = coverCache.get(map);
   if (!cover) {
     const towers = map.sites.flatMap((site, index) => (site.tower ? [index] : []));
-    cover = map.paths.map((path) => {
-      const [p, q] = [map.sites[path.a], map.sites[path.b]];
-      const dx = q.x - p.x;
-      const dy = q.y - p.y;
-      return towers.filter((tower) => {
-        const r = map.sites[tower];
-        const t = Math.max(0, Math.min(1, ((r.x - p.x) * dx + (r.y - p.y) * dy) / (dx * dx + dy * dy)));
-        return far({ x: p.x + t * dx, y: p.y + t * dy }, r, TOWER_RANGE + 1) === false;
-      });
-    });
+    cover = map.paths.map((path) => towers.filter((tower) => reaches(map, path, map.sites[tower], TOWER_RANGE)));
     coverCache.set(map, cover);
   }
   return cover;
+}
+
+/** Whether a tower standing at `site` can shoot a unit somewhere on the path. */
+function reaches(map: SwarmMap, path: Path, site: Point, reach: number): boolean {
+  const [p, q] = [map.sites[path.a], map.sites[path.b]];
+  const dx = q.x - p.x;
+  const dy = q.y - p.y;
+  const t = Math.max(0, Math.min(1, ((site.x - p.x) * dx + (site.y - p.y) * dy) / (dx * dx + dy * dy)));
+  return far({ x: p.x + t * dx, y: p.y + t * dy }, site, reach + 1) === false;
 }
 
 /**
@@ -1922,7 +2185,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const temper = temperOf(map, seat);
   const { index, length } = lanesOf(map);
   const mine = huts.flatMap((hut, at) => (hut.owner === seat ? [at] : []));
-  const lives = (hut: Hut) => (hut.hurt === undefined ? hut.n : hut.n * FORT_LIVES - hut.hurt);
+  const lives = (hut: Hut) => hut.n * livesOf(hut) - (hut.hurt ?? 0);
   // A life costs one unit between armies of one strength, fewer of a stronger army's and more of a weaker one's.
   const toKill = (owner: Owner, n: number) => Math.ceil((n * (LUCK_DEN - army.strength)) / (LUCK_DEN - (owner ? state.army[owner].strength : 0)));
   const bredBy = (at: number, ticks: number) => {
@@ -1953,6 +2216,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const standing = map.sides.filter((side) => side !== seat).map((side) => ({ side, ...countOf(state, side) }));
   const leader = standing.reduce((best, count) => (count.huts > best.huts || (count.huts === best.huts && count.units > best.units) ? count : best), standing[0]);
   const mineCount = countOf(state, seat);
+  const cover = armed(map) ? armouryCover(state, map) : coverOf(map);
 
   /** The way from one of this side's huts to `to` through its own huts alone, or null when there is none. */
   const wayTo = (from: number, to: number, risky: boolean): Way | null => {
@@ -1982,13 +2246,13 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const towers = new Set<number>();
     for (const path of way.paths) {
       if (takesToll(map.paths[path].kind)) lost += Math.floor(((state.tolls[path] % TOLL_EVERY) + n) / TOLL_EVERY);
-      for (const tower of coverOf(map)[path]) if (tower !== to && huts[tower].owner && huts[tower].owner !== seat) towers.add(tower);
+      for (const tower of cover[path]) if (tower !== to && huts[tower].owner && huts[tower].owner !== seat) towers.add(tower);
     }
     const last = way.paths[way.paths.length - 1];
     const pace = paceOf(map.paths[last], to, army.speed);
     // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
-    for (const _ of towers) lost += Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
-    if (isTower(huts[to])) lost += Math.ceil((n * RELEASE_TICKS + TOWER_RANGE / pace) / TOWER_RELOAD);
+    for (const tower of towers) lost += fireOn(state, seat, huts[tower], n, pace, 2);
+    if (isTower(huts[to])) lost += fireOn(state, seat, huts[to], n, pace, 1);
     return Math.min(n, lost);
   };
 
@@ -2148,7 +2412,8 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   let bought = false;
   const buy = (at: number, margin: number, hut = true) => {
     const speedFirst = army.speed < army.strength || (army.speed === army.strength && !temper.strong);
-    const order: ('hut' | 'speed' | 'strength')[] = speedFirst ? ['hut', 'speed', 'strength'] : ['hut', 'strength', 'speed'];
+    const order: Upgrade[] = speedFirst ? ['hut', 'speed', 'strength'] : ['hut', 'strength', 'speed'];
+    if (armed(map) && shellUp(state, seat)) order.splice(1, 0, 'carapace');
     const kinds = hut ? order : order.filter((kind) => kind !== 'hut');
     const kind = kinds.find((k) => {
       const cost = upgradeCost(state, at, k);
@@ -2161,6 +2426,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   };
   for (const at of mine) {
     const hut = huts[at];
+    if (isTower(hut) && !used.has(at) && armed(map)) orders.push(...kitUp(state, map, seat, at, keepOf(at, -1), tick));
     if (used.has(at) || isTower(hut)) continue;
     if (!front.includes(at)) {
       // A builder grows the huts behind its front when it can pay for it, and otherwise does what the others do: a builder that sat
@@ -2173,12 +2439,95 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
       }
       continue;
     }
+    if (armed(map) && buildsUp(state, map, seat, at, keepOf(at, -1))) {
+      orders.push({ tick, kind: 'tower', from: at, to: at });
+      continue;
+    }
     if (!bought && buy(at, 6 + keepOf(at, -1))) continue;
     // Full, and across a toll is more than it can take: what it has is more use at the front.
     const tolledOnly = map.links[at].every((next) => huts[next].owner === seat || takesToll(map.paths[index[at][next]].kind));
     if (hut.n >= HUT_CAP[hut.level - 1] && tolledOnly) reinforce(at);
   }
   return orders;
+}
+
+/** For each path, the towers on the board as it stands now that can shoot a unit somewhere on it, each at its own reach. */
+function armouryCover(state: SwarmState, map: SwarmMap): number[][] {
+  const towers = state.huts.flatMap((hut, at) => (isTower(hut) ? [at] : []));
+  return map.paths.map((path) => towers.filter((at) => reaches(map, path, map.sites[at], reachOf(state.huts[at]))));
+}
+
+/**
+ * What a column of n of `seat` walking at `pace` loses to a tower whose reach
+ * it walks `passes` times across: a shot each reload, a kill a shot, but a
+ * shell lands on as many of the column as fit under it, a bolt goes through
+ * as many as it can, and a web kills none.
+ * Carapace makes each kill take two hits.
+ */
+function fireOn(state: SwarmState, seat: Seat, tower: Hut, n: number, pace: number, passes: number): number {
+  if (tower.type === 'web') return 0;
+  const shots = Math.ceil((n * RELEASE_TICKS + (passes * reachOf(tower)) / pace) / reloadOf(tower));
+  const kills =
+    tower.type === 'mortar'
+      ? shots * Math.min(n, Math.ceil((2 * MORTAR_SPLASH) / (pace * RELEASE_TICKS)))
+      : tower.type === 'ballista'
+        ? Math.min(n, BOLT_PIERCE) * shots
+        : shots;
+  return state.army[seat].carapace ? Math.ceil(kills / 2) : kills;
+}
+
+/** A carapace is worth its price to a side with two towers or more not its own on the board. */
+const shellUp = (state: SwarmState, seat: Seat): boolean => !state.army[seat].carapace && state.huts.filter((hut) => isTower(hut) && hut.owner !== seat).length >= 2;
+
+/**
+ * What the computer buys for a tower it holds, from what the tower has over
+ * `keep`. A plain tower is refitted before it is kitted: into a web when a
+ * mortar or ballista of the side covers ground this one would and no web
+ * stands by it yet, so the silk holds what the other fires at; otherwise into
+ * a ballista where more of the paths in its reach run straight at it than
+ * past it, and a mortar where they cross or the side has its ballista.
+ * Then a level of kit at a time, the lowest first, armour before rate before range.
+ */
+function kitUp(state: SwarmState, map: SwarmMap, seat: Seat, at: number, keep: number, tick: number): Order[] {
+  const tower = state.huts[at];
+  const site = map.sites[at];
+  const affords = (kind: ArmouryKind) => {
+    const cost = armouryCost(state, at, kind);
+    // A tower spent down to what it keeps was taken with its kit on it, so it keeps a garrison's worth more.
+    return cost !== null && tower.n - queued(tower) - cost >= keep + TOWER_START;
+  };
+  const order = (kind: ArmouryKind): Order[] => (affords(kind) ? [{ tick, kind, from: at, to: at }] : []);
+  if (!tower.type) {
+    // Near enough that the reach of one tower overlaps a cannon's about the other.
+    const near = (k: number, to: number) => state.huts[k].owner === seat && !far(map.sites[k], map.sites[to], reachOf(state.huts[k]) + TOWER_RANGE);
+    const killer = state.huts.findIndex((hut, k) => (hut.type === 'mortar' || hut.type === 'ballista') && near(k, at));
+    if (killer >= 0 && !state.huts.some((hut, k) => hut.type === 'web' && near(killer, k))) return order('web');
+    let head = 0;
+    let across = 0;
+    for (const path of map.paths) {
+      if (!reaches(map, path, site, TOWER_RANGE + EXTRA_REACH.ballista)) continue;
+      const [p, q] = [map.sites[path.a], map.sites[path.b]];
+      // How far the line of the path passes from the tower, against how long the path is.
+      const off = Math.abs((q.x - p.x) * (site.y - p.y) - (q.y - p.y) * (site.x - p.x));
+      if (off * off <= 4 * BOLT_WIDTH * BOLT_WIDTH * ((q.x - p.x) * (q.x - p.x) + (q.y - p.y) * (q.y - p.y))) head++;
+      else across++;
+    }
+    // A side with a ballista already makes the next a mortar: what crosses the bolt's line walks under the shell.
+    const held = (type: TowerType) => state.huts.filter((hut) => hut.owner === seat && hut.type === type).length;
+    return order(head > across && held('ballista') <= held('mortar') ? 'ballista' : 'mortar');
+  }
+  const kit = (['armour', 'rate', 'range'] as const).reduce((low, kind) => ((tower[kind] ?? 0) < (tower[low] ?? 0) ? kind : low));
+  return order(kit);
+}
+
+/**
+ * Whether the computer builds a tower of a level-3 hut at its front: once the
+ * hut is full and breeds no more, and when no tower of the side stands near.
+ */
+function buildsUp(state: SwarmState, map: SwarmMap, seat: Seat, at: number, keep: number): boolean {
+  const hut = state.huts[at];
+  if (armouryCost(state, at, 'tower') === null || hut.n < HUT_CAP[MAX_HUT_LEVEL - 1] || hut.n - queued(hut) - BUILD_COST < keep) return false;
+  return !state.huts.some((other, k) => other.owner === seat && isTower(other) && !far(map.sites[k], map.sites[at], 2 * TOWER_RANGE));
 }
 
 /** How many units a send of `halves` (see Send) from this hut commits. */
