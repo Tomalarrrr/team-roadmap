@@ -688,7 +688,7 @@ describe('breeding and upgrades', () => {
 
   it('growing a hut is paid from it and makes it breed faster', () => {
     const { map, state } = duel(null, 9, 15);
-    expect(upgradeCost(state, 0, 'hut')).toBe(15);
+    expect(upgradeCost(map, state, 0, 'hut')).toBe(15);
     run(state, map, { a: [{ tick: 1, kind: 'hut', from: 0, to: 0 }], b: [] }, 70);
     expect(state.huts[0].level).toBe(2);
     // Seventy ticks at one every seven.
@@ -707,9 +707,9 @@ describe('breeding and upgrades', () => {
     step(state, map, { a: [{ tick: 1, kind: 'speed', from: 0, to: 0 }], b: [] });
     expect(state.army).toMatchObject({ a: { speed: 1 }, b: { speed: 0 } });
     expect(state.huts[0].n).toBe(0);
-    expect(upgradeCost(state, 0, 'speed')).toBe(35);
+    expect(upgradeCost(map, state, 0, 'speed')).toBe(35);
     state.army.a.speed = 3;
-    expect(upgradeCost(state, 0, 'speed')).toBeNull();
+    expect(upgradeCost(map, state, 0, 'speed')).toBeNull();
   });
 });
 
@@ -849,8 +849,8 @@ describe('towers', () => {
 
   it('sells no upgrade, of itself or of the army', () => {
     const { map, state } = siege('a', 60, 60);
-    expect(upgradeCost(state, 0, 'speed')).toBe(20);
-    expect((['hut', 'speed', 'strength'] as const).map((kind) => upgradeCost(state, 1, kind))).toEqual([null, null, null]);
+    expect(upgradeCost(map, state, 0, 'speed')).toBe(20);
+    expect((['hut', 'speed', 'strength'] as const).map((kind) => upgradeCost(map, state, 1, kind))).toEqual([null, null, null]);
     step(state, map, { a: [{ tick: 1, kind: 'hut', from: 1, to: 1 }, { tick: 1, kind: 'speed', from: 1, to: 1 }], b: [] });
     expect(state.huts[1]).toMatchObject({ n: 60, level: 1 });
     expect(state.army.a.speed).toBe(0);

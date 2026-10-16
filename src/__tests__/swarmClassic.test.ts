@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CLASSIC, SEATS, TWISTS, advance, buildMap, newState, rulesOf, twistLetters, type Computer, type MapId, type SwarmMatch, type SwarmState } from '../swarmGameLogic';
+import { CLASSIC, SEATS, STANDARD_TUNE, TWISTS, advance, buildMap, newState, rulesOf, twistLetters, type Computer, type MapId, type SwarmMatch, type SwarmState } from '../swarmGameLogic';
 
 // Classic games played by the computer on every side, hashed at the end. The
 // hashes were taken from the code before modes, starts and twists came in, so
@@ -51,7 +51,7 @@ describe('the rules of a match', () => {
   it('are what the match chose, the twists in their fixed order and a nest for each seat that picked one', () => {
     const chosen = { ...match, mode: 'teams' as const, start: 'nests' as const, twists: 'fzq', players: { ...match.players, b: { sessionId: 's2', name: 'B', nest: 'many' as const } } };
     const rules = rulesOf(chosen);
-    expect(rules).toEqual({ mode: 'teams', start: 'nests', twists: ['flood', 'frenzy', 'queens'], nests: { b: 'many' } });
+    expect(rules).toEqual({ mode: 'teams', start: 'nests', twists: ['flood', 'frenzy', 'queens'], nests: { b: 'many' }, tune: STANDARD_TUNE });
     expect(buildMap(1, 'meadow', ['a', 'b'], undefined, rules).rules).toBe(rules);
   });
 

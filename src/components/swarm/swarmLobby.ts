@@ -2,7 +2,7 @@
 // needs, the twists a mode leaves with nothing to do, and the Surprise draw,
 // which keeps to both. The database takes any mix, so nothing else does.
 
-import { CLASSIC, MODE_IDS, START_IDS, TWISTS, mulberry32, type ModeId, type Rules, type Twist } from '../../swarmGameLogic';
+import { CLASSIC, KNOBS, MODE_IDS, START_IDS, TWISTS, mulberry32, type ModeId, type Rules, type Tune, type Twist } from '../../swarmGameLogic';
 
 export type RulesChoice = Pick<Rules, 'mode' | 'start' | 'twists'>;
 
@@ -49,4 +49,22 @@ export function surpriseOf(seed: number, roll: number, fits: (mode: ModeId) => b
   const first = pick(open);
   const second = pick(open.filter((twist) => twist !== first));
   return { mode, start, twists: TWISTS.filter((twist) => twist === first || twist === second) };
+}
+
+/** The settings off standard, as the waiting room and the game say them: "Match length 4 min, Breeding 200%". */
+export function tuneSummary(tune: Tune): string {
+  return KNOBS.filter((knob) => tune[knob.id] !== knob.standard)
+    .map((knob) => `${knob.label} ${tune[knob.id]}${knob.unit}`)
+    .join(', ');
+}
+
+/**
+ * What going back to the menu costs, asked before it is done, or null when it
+ * costs nothing: outside a game the seat is only given up. In a game of two
+ * sides the other wins (see vacateSeat); in one of more the computer plays on.
+ */
+export function leaveWarning(playing: boolean, solo: boolean, sides: number): string | null {
+  if (!playing) return null;
+  if (solo) return 'Leave this game? It ends here and is not kept.';
+  return sides === 2 ? 'Leave this game? The other side wins it.' : 'Leave this game? The computer plays your side to the end.';
 }

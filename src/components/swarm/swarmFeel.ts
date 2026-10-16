@@ -8,11 +8,11 @@
 // seed and the clock, so the two players see the same wind and the same snow.
 
 import {
-  SPEED,
   cloneState,
   countOf,
   mulberry32,
   pathLength,
+  speedOf,
   type Hut,
   type Kind,
   type Seat,
@@ -820,7 +820,7 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
     for (const unit of state.units) alive.add(unit.id);
     for (const unit of before.units) {
       if (alive.has(unit.id)) continue;
-      gone.push({ unit, reached: unit.d + SPEED[state.army[unit.seat].speed] >= pathLength(map, unit.from, unit.to) });
+      gone.push({ unit, reached: unit.d + speedOf(map, state.army[unit.seat].speed) >= pathLength(map, unit.from, unit.to) });
     }
   }
   // One that walked into a hut its side now holds is inside it, not dead.
