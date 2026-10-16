@@ -25,6 +25,7 @@ import {
 import { BADGE, LANE, PATH_W, areaOf, crossingsOf, fontOf, growOf, pathPoint, riverDir, riverOf, siteRadius, summitOf, type Crossing } from './swarmSceneKit';
 import { WIND } from './swarmSceneGround';
 import { momentumStep, newMomentum, type Momentum, type MomentumKey } from './swarmMomentum';
+import { modeCallouts } from './swarmModes';
 
 const TAU = Math.PI * 2;
 
@@ -73,20 +74,34 @@ export type CalloutKey =
   | 'overtime'
   | 'allyOut'
   | 'waveSoon'
+  | 'queenLost'
+  | 'hillLost'
+  | 'eggLost'
+  | 'hillTaken'
+  | 'eggTaken'
+  | 'goldenHut'
+  | 'frenzy'
   | MomentumKey;
 
 /** Most pressing first: when several are due at once, bad news is read before good. */
 export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'overtime',
+  'queenLost',
   'lastHut',
   'waveSoon',
   'enemyAtGate',
   'allyOut',
   'towerLost',
   'fortLost',
+  'hillLost',
+  'eggLost',
   'flagRaised',
+  'frenzy',
+  'goldenHut',
   'towerTaken',
   'fortTaken',
+  'hillTaken',
+  'eggTaken',
   'held',
   'rout',
   'bridgeHeld',
@@ -111,6 +126,13 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   run: 'Run',
   rout: 'Rout',
   held: 'Held',
+  queenLost: 'Queen lost',
+  hillLost: 'Hill lost',
+  eggLost: 'Egg lost',
+  hillTaken: 'Hill taken',
+  eggTaken: 'Egg taken',
+  goldenHut: 'Golden hut',
+  frenzy: 'Frenzy',
 };
 
 /** Enemy units on the road to the viewer's home before it is called a column. */
@@ -175,6 +197,7 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   ) {
     due.add('enemyAtGate');
   }
+  for (const key of modeCallouts(before, after, map, seat)) due.add(key);
   return CALLOUT_ORDER.filter((key) => due.has(key));
 }
 
@@ -214,6 +237,13 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   held: 4000,
   allyOut: 20000,
   waveSoon: 20000,
+  queenLost: 6000,
+  hillLost: 6000,
+  eggLost: 6000,
+  hillTaken: 6000,
+  eggTaken: 6000,
+  goldenHut: 20000,
+  frenzy: 20000,
 };
 
 /** A callout waiting or up, with the words it is said in when they carry a number. */

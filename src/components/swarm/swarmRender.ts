@@ -33,6 +33,7 @@ import { drawPicks } from './swarmDraft';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
 import { drawThreats, type ThreatView } from './swarmThreat';
 import { paintGround } from './swarmSceneGround';
+import { drawModes } from './swarmSceneModes';
 import { drawFlags, paintSite } from './swarmSceneHuts';
 import { drawAllies } from './swarmTeamsArt';
 import {
@@ -1326,6 +1327,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   drawPicks(ctx, map, state, view);
   drawStanding(ctx, scene, state, view, scale);
   drawFx(ctx, scene, view.now);
+  drawModes(ctx, map, state, view.alpha, px);
   drawCounts(ctx, scene, state, view, scale, px);
 
   if (view.selected !== null && !view.drag) {

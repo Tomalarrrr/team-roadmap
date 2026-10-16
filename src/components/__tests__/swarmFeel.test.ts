@@ -8,7 +8,7 @@
 // without limit; and the life on the map is the same for the same seed.
 
 import { describe, it, expect } from 'vitest';
-import { CLASSIC, MATCH_TICKS, SEATS, WAVE_TICKS, cloneState, kindsOf, newState, pathLength, type Kind, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
+import { CLASSIC, MATCH_TICKS, SEATS, WAVE_TICKS, centreOf, cloneState, kindsOf, newState, pathLength, type Kind, type Rules, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
 import { pathPoint, riverGap, riverOf } from '../swarm/swarmSceneKit';
 import {
   BANNER_GAP_MS,
@@ -232,6 +232,80 @@ describe('calloutsFor', () => {
   it('is worded plainly', () => {
     expect(CALLOUT_TEXT.backFromOne).toBe('Back from one hut');
     for (const text of Object.values(CALLOUT_TEXT)) expect(text).toMatch(/^[A-Z][a-z ]+$/);
+  });
+});
+
+describe('calloutsFor under a mode or twist', () => {
+  // a's home, the hut in the very middle, b's home, and a spare hut each so that no loss here is a last hut.
+  const ruled = (rules: Rules, ticks = MATCH_TICKS): SwarmMap => {
+    const { x, y } = centreOf({ w: 1000, h: 660 });
+    const sites: Site[] = [
+      { x: 100, y, owner: 'a', n: 10, level: 1 },
+      { x, y, owner: null, n: 20, level: 2 },
+      { x: 900, y, owner: 'b', n: 10, level: 1 },
+      { x: 100, y: y + 200, owner: 'a', n: 10, level: 1 },
+      { x: 900, y: y + 200, owner: 'b', n: 10, level: 1 },
+    ];
+    const paths = [[0, 1], [1, 2], [0, 3], [2, 4]].map(([a, b]) => ({ a, b, kind: 'road' as const }));
+    return { ...mapOf(), sites, homes: [0, 2], links: [[1, 3], [0, 2], [1, 4], [0], [2]], paths, rivers: [], ticks, rules };
+  };
+  const RULES = (mode: Rules['mode'], twists: Rules['twists'] = []): Rules => ({ ...CLASSIC, mode, twists });
+
+  it('tells the side that takes the hill, and the side it was taken from', () => {
+    const map = ruled(RULES('hill'));
+    const start = newState(map);
+    const taken = after(start, (s) => (s.huts[1].owner = 'a'));
+    expect(calloutsFor(start, taken, map, 'a', false)).toEqual(['hillTaken']);
+    expect(calloutsFor(start, taken, map, 'b', false)).toEqual([]);
+    const lost = after(taken, (s) => (s.huts[1].owner = 'b'));
+    expect(calloutsFor(taken, lost, map, 'a', false)).toEqual(['hillLost']);
+    expect(calloutsFor(taken, lost, map, 'b', false)).toEqual(['hillTaken']);
+    // The same hut in classic is a plain hut.
+    const plain = ruled(CLASSIC);
+    expect(calloutsFor(newState(plain), after(newState(plain), (s) => (s.huts[1].owner = 'a')), plain, 'a', false)).toEqual([]);
+  });
+
+  it('calls the egg taken when a unit picks it up or a hut with it is taken, and lost only to another side', () => {
+    const map = ruled(RULES('egg'));
+    const start = newState(map);
+    const held = after(start, (s) => (s.huts[1].owner = 'a'));
+    expect(calloutsFor(start, held, map, 'a', false)).toEqual(['eggTaken']);
+    const carried = after(held, (s) => {
+      s.egg = -1;
+      s.units = [{ ...unit(1, 'a', 1, 0, 0), egg: true }];
+    });
+    expect(calloutsFor(held, carried, map, 'a', false)).toEqual([]);
+    const dropped = after(carried, (s) => {
+      s.units = [];
+      s.egg = 1;
+      s.huts[1].owner = 'b';
+    });
+    expect(calloutsFor(carried, dropped, map, 'a', false)).toEqual(['eggLost']);
+    expect(calloutsFor(carried, dropped, map, 'b', false)).toEqual(['eggTaken']);
+    const neutral = after(held, (s) => (s.huts[1].owner = null));
+    expect(calloutsFor(held, neutral, map, 'a', false)).toEqual([]);
+  });
+
+  it('calls a queen lost to her side in regicide and under the queens twist, and not in classic', () => {
+    for (const [rules, said] of [[RULES('regicide'), ['queenLost']], [RULES('classic', ['queens']), ['queenLost']], [CLASSIC, []]] as const) {
+      const map = ruled(rules);
+      const start = after(newState(map), (s) => (s.huts[1].owner = 'a'));
+      const lost = after(start, (s) => (s.huts[0].owner = 'b'));
+      expect(calloutsFor(start, lost, map, 'a', false), rules.mode + rules.twists).toEqual(said);
+      expect(calloutsFor(start, lost, map, 'b', false)).toEqual([]);
+    }
+  });
+
+  it('calls the golden hut and the frenzy once each, on the tick they come in', () => {
+    const map = ruled(RULES('classic', ['golden', 'frenzy']), 1000);
+    const start = newState(map);
+    const gilded = after(start, (s) => (s.huts[1].gold = true));
+    expect(calloutsFor(start, gilded, map, 'a', false)).toEqual(['goldenHut']);
+    expect(calloutsFor(gilded, after(gilded, () => {}), map, 'a', false)).toEqual([]);
+    const before = { ...start, tick: 400 };
+    expect(calloutsFor(before, after(before, () => {}), map, 'b', false)).toEqual(['frenzy']);
+    const on = { ...start, tick: 401 };
+    expect(calloutsFor(on, after(on, () => {}), map, 'b', false)).toEqual([]);
   });
 });
 

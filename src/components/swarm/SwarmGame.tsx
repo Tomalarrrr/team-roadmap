@@ -64,6 +64,7 @@ import {
 } from '../../swarmGameLogic';
 import { KIND_NAME } from './swarmFeel';
 import { BADGE } from './swarmSceneKit';
+import { modeNotes, modeStory, type ModeNote } from './swarmModes';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
 import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
@@ -572,9 +573,13 @@ interface Hud {
   holding: string | null;
   /** In survival: the waves landed, seconds to the next (null when no other comes before the clock), and seconds played. */
   survival: { waves: number; next: number | null; lasted: number } | null;
+  /** What the mode and twists are counting, under the clock. */
+  notes: ModeNote[];
+  /** What the mode adds to the result once there is one. */
+  story: string[];
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [], draft: null, holding: null, survival: null };
+const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [], draft: null, holding: null, survival: null, notes: [], story: [] };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -1036,6 +1041,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         draft: null,
         holding: null,
         survival: null,
+        notes: [],
+        story: [],
       };
       if (game) {
         const { shown, map } = game;
@@ -1063,6 +1070,12 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         next.flag = live && own !== undefined && own.huts + own.units > 0 && !game.orders[seat].some((order) => order.kind === 'flag');
         // A copy: the state is stepped in place, and the HUD is compared with the last one by value.
         next.yielded = game.shown.yielded.slice();
+        next.notes = modeNotes(game.map, game.shown);
+        if (game.shown.winner !== null) {
+          const { kinds } = game.scene;
+          const them = (other: Seat) => `The ${KIND_NAME[kinds[other]].many.toLowerCase()}`;
+          next.story = modeStory(game.map, game.shown, (other) => (other === seat ? { name: 'You', whose: 'Your' } : { name: them(other), whose: `${them(other)}'` }));
+        }
       }
       const nextKey = JSON.stringify(next);
       if (nextKey !== hudKey) {
@@ -1501,7 +1514,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     const left = SEATS.filter((seat) => match.out?.[seat] !== undefined).map((seat) =>
       seat === mySeat ? 'You left; the computer took over' : `${match.players[seat]?.name} left; the computer took over`
     );
-    return [first, ...yielded, ...left];
+    return [first, ...yielded, ...hud.story, ...left];
   };
 
   const tally = (seat: Seat) => {
@@ -1771,6 +1784,17 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                     : `${hud.survival.waves === 0 ? 'Next wave' : `Wave ${hud.survival.waves}. Next`} in ${hud.survival.next}s, ${WAVE_UNITS * (hud.survival.waves + 1)} a hut`}
                 </span>
               )}
+              {hud.notes.map((note) => (
+                <span key={note.label} className={styles.modeNote}>
+                  {note.label}
+                  {note.sides.map(({ seat, text }) => (
+                    <span key={seat} className={styles.modeSide}>
+                      <span className={styles.dot} style={{ background: BADGE[seat].fill }} />
+                      {text}
+                    </span>
+                  ))}
+                </span>
+              ))}
               {column('middle')}
             </span>
             <span className={`${styles.sideCol} ${styles.sideColEnd}`}>{column('right')}</span>

@@ -489,6 +489,22 @@
   white-space: nowrap;
 }
 
+.modeNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.modeSide {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
 .boardWrap {
   position: relative;
   overflow: hidden;
