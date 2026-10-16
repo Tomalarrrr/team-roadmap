@@ -72,6 +72,26 @@ export const TOLL_EVERY = 4;
  * a tick is what the hut would, and what it can send out is half.
  */
 export const FORT_LIVES = 2;
+/** Units a side pays, from the hut at its end, to burn a bridge. */
+export const BURN_COST = 10;
+/** Ticks a burnt bridge stays down, and once it is rebuilt, ticks before it can be burnt again. */
+export const BURN_TICKS = 300;
+/**
+ * Ticks from lighting a bridge to its going down. Everyone sees the count, so
+ * a column already on it can make the far bank, and the side marching on the
+ * hut that lit it has that long to take the hut and put the fire out. In 60
+ * four-sided computer games on the bridges map 42 were lit: 19 went down,
+ * with 437 units on them, and 22 were put out.
+ */
+export const BURN_FUSE = 50;
+/** The fewest units of other sides, less its own, the computer expects to be on a bridge when it goes down, for it to set fire to it. */
+export const BURN_AT = 8;
+/** A trap kills one in this many of the column that takes it. */
+export const TRAP_EVERY = 2;
+/** How much more, in hundredths of its cap, a hut next to its owner's granary breeds up to. */
+export const GRANARY_EXTRA = 50;
+/** Speed levels a unit out of or through a beacon marches above its army, up to the top level. */
+export const BEACON_STEP = 1;
 
 /** The four sides there can be on the board. Each is played by a person or by the computer. */
 export type Seat = 'a' | 'b' | 'c' | 'd';
@@ -276,11 +296,26 @@ export interface Site {
   tower?: boolean;
   /** A fort: each of its defenders has to be killed twice. */
   fort?: boolean;
+  /** What the hut was built as, with the buildings twist. */
+  building?: Building;
 }
 
+/**
+ * With the buildings twist a few neutral huts are built as something other
+ * than a hut. A trap kills every second unit of the column that takes it and
+ * is then a hut like any other. The others never breed: a unit that leaves
+ * or walks on through a barracks lives through the first fight it would die
+ * in, one that leaves or walks on through a beacon marches a speed level
+ * faster than its army,
+ * and the huts next to a granary its owner holds breed up to half as many
+ * again.
+ */
+export type Building = 'trap' | 'barracks' | 'granary' | 'beacon';
+export const BUILDINGS: readonly Building[] = ['trap', 'barracks', 'granary', 'beacon'];
+
 /** The designed places a game can be played on. Each has one rule of its own. */
-export type MapId = 'meadow' | 'thorns' | 'bridges' | 'guns' | 'hill' | 'crossroads';
-export const MAP_IDS: readonly MapId[] = ['meadow', 'thorns', 'bridges', 'guns', 'hill', 'crossroads'];
+export type MapId = 'meadow' | 'thorns' | 'bridges' | 'guns' | 'hill' | 'crossroads' | 'warren';
+export const MAP_IDS: readonly MapId[] = ['meadow', 'thorns', 'bridges', 'guns', 'hill', 'crossroads', 'warren'];
 
 /** How much ground a game is played over. Every one is the shape of the board. */
 export type SizeId = 'small' | 'medium' | 'large';
@@ -291,7 +326,7 @@ export const WORLDS: Record<SizeId, { w: number; h: number }> = {
   large: { w: 1800, h: 1188 },
 };
 /** The ground each map is drawn for, and played on when no other is chosen. */
-const OWN_SIZE: Record<MapId, SizeId> = { meadow: 'medium', thorns: 'small', bridges: 'small', guns: 'small', hill: 'small', crossroads: 'medium' };
+const OWN_SIZE: Record<MapId, SizeId> = { meadow: 'medium', thorns: 'small', bridges: 'small', guns: 'small', hill: 'small', crossroads: 'medium', warren: 'medium' };
 
 /** The ground a map is played on: the one chosen, or its own. Four corners need more room than the small one has. */
 export function sizeOf(id: MapId, sides: number, size?: SizeId): SizeId {
@@ -310,8 +345,9 @@ export type SceneId = 'meadow' | 'scrub' | 'valley' | 'ice' | 'terrace';
  * bridge  the dry way over a river
  * ford    the wet way over a river, which drowns a share
  * climb   slow towards `up`, fast away from it
+ * tunnel  under the ground at road pace: sides pass each other in it, and no tower reaches it
  */
-export type PathKind = 'road' | 'wide' | 'narrow' | 'spikes' | 'bridge' | 'ford' | 'climb';
+export type PathKind = 'road' | 'wide' | 'narrow' | 'spikes' | 'bridge' | 'ford' | 'climb' | 'tunnel';
 
 export interface Path {
   /** The two huts joined, lower index first. */
@@ -650,6 +686,8 @@ const PATH_CLEAR = 60;
 const FACING = 100;
 /** How far the ring of huts round a key hut or a fort stands from it on the small ground. Wider ground widens it. */
 const RING = 250;
+/** The shortest tunnel on each ground: a little over a third of its width. */
+const TUNNEL_SPAN: Record<SizeId, number> = { small: 360, medium: 500, large: 640 };
 
 /**
  * A map grown from the seed rather than drawn by hand, for four sides and for
@@ -673,6 +711,8 @@ const RING = 250;
  *              No tower stands in the middle: one there is as near to both
  *              sides' columns, and of two as near it shoots the older, which is
  *              always seat a's.
+ *  warren      a big hut in the middle, and four tunnels between huts far apart
+ *              where the roads go furthest round
  */
 function grow(rnd: () => number, id: MapId, count: number, size: SizeId): Drawn {
   for (let attempt = 0; attempt < 60; attempt++) {
@@ -740,6 +780,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Dra
   else if (id === 'hill') put(cx, cy, { owner: null, n: 14 + int(5), level: 2, fort: true });
   else if (id === 'bridges') put(cx, cy, { owner: null, n: 16 + int(8), level: 2 });
   else if (id === 'crossroads') put(cx, cy, { owner: null, n: 16 + int(6), level: 2, fort: true });
+  else if (id === 'warren') put(cx, cy, { owner: null, n: 16 + int(8), level: 2 });
   const middle = sites.findIndex((p) => p.x === cx && p.y === cy);
 
   // The huts of the ring that the road reaches the middle from. Every other way in is the hard one.
@@ -985,6 +1026,35 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Dra
     }
   }
 
+  if (id === 'warren') {
+    // Tunnels run under the roads but never under a hut or another tunnel, one from a hut, and none from a start.
+    // Of the pairs of huts far enough apart, each is dug where the roads between them go furthest round.
+    // Over 300 computer games for each count, seat a won 52% of two-sided ones; three sides won 95, 138 and 67
+    // (91, 125 and 84 on the crossroads, with the same middle start), and four won 81, 80, 78 and 61. About one
+    // unit in twenty on the march, counted every 50 ticks, was in a tunnel.
+    const dug: number[][] = [];
+    while (dug.length < 3) {
+      const { walk } = walks();
+      let most = 0;
+      let orbit: number[][] = [];
+      for (let a = 0; a < sites.length; a++) {
+        for (let b = a + 1; b < sites.length; b++) {
+          if (sites[a].owner || sites[b].owner || links.has(key(a, b)) || !far(sites[a], sites[b], TUNNEL_SPAN[size]) || !clearOf(a, b)) continue;
+          const pairs = twins.map((twin) => [twin[a], twin[b]]).filter(([p, q], k, all) => all.findIndex(([r, s]) => key(r, s) === key(p, q)) === k);
+          if (dug.length + pairs.length > 4) continue;
+          const ends = [...dug, ...pairs].flat();
+          if (ends.some((end, k) => ends.indexOf(end) !== k)) continue;
+          if (pairs.some(([p, q]) => [...dug, ...pairs].some(([r, s]) => crosses(p, q, r, s)))) continue;
+          const roundness = walk[a][b] - span(sites[a], sites[b]);
+          if (roundness > most) [most, orbit] = [roundness, pairs];
+        }
+      }
+      if (orbit.length === 0) return null;
+      for (const [p, q] of orbit) add(p, q, 'tunnel');
+      dug.push(...orbit);
+    }
+  }
+
   const paths = [...links.values()].sort((p, q) => p.a - q.a || p.b - q.b);
   // Every hut can be reached without paying a toll, and every side has two ways out of its first hut.
   const reached = new Set([0]);
@@ -1035,7 +1105,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Dra
   return { sites, paths, rivers };
 }
 
-const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', bridges: 'valley', guns: 'ice', hill: 'terrace', crossroads: 'valley' };
+const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', bridges: 'valley', guns: 'ice', hill: 'terrace', crossroads: 'valley', warren: 'meadow' };
 
 /**
  * The map for a seed, the place, the sides playing it and the ground: without
@@ -1049,6 +1119,10 @@ const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', brid
  *  guns        towers on the borders, the only ways over them
  *  hill        a fort in the middle, at the top of the climbs
  *  crossroads  a fort in the middle, towers on the busiest crossings, and forts half way out
+ *  warren      a big hut in the middle, and tunnels between huts far apart
+ *
+ * With the buildings twist a few neutral huts are built as something else
+ * (see Building and placeBuildings).
  *
  * On its own ground and for two or three sides each of the first five is the
  * map drawn for it. With three the third side starts in the middle, the one
@@ -1061,7 +1135,7 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   const { w, h } = WORLDS[ground];
   const third = sides.length === 3;
   const drawn =
-    sides.length === 4 || ground !== OWN_SIZE[id] || id === 'crossroads'
+    sides.length === 4 || ground !== OWN_SIZE[id] || id === 'crossroads' || id === 'warren'
       ? grow(rnd, id, sides.length, ground)
       : id === 'meadow' || id === 'guns'
         ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id], third), rivers: [] }
@@ -1075,6 +1149,7 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   }
   const homes = sides.map((seat) => sites.findIndex((site) => site.owner === seat));
   if (third) startThree(id, sides, homes, sites, links);
+  if (rules.twists.includes('buildings')) placeBuildings(rnd, centreOf({ w, h }), sides.length === 4, homes, sites, links);
   const ticks = MATCH_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
   return { id, scene: SCENES[id], sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, homes, size: ground, w, h, ticks, rules };
 }
@@ -1112,6 +1187,40 @@ function startThree(id: MapId, sides: readonly Seat[], homes: readonly number[],
   sites[twinOf(own)] = { ...sites[twinOf(own)], owner: sides[1] };
 }
 
+/**
+ * The buildings twist. A neutral hut and its image at the half-turn, or for
+ * four sides its three images, are built as one of a kind: a trap, a
+ * barracks, a granary or a beacon, one kind to a group, for up to four groups.
+ * Each is a group of huts no side starts in or next to, and that are not
+ * towers, forts or the middle; the seed picks the groups and the kinds.
+ * Over 140 two-sided computer games across the maps seat a won 42% with the
+ * twist and 41% without, and four sides won 33, 24, 26 and 27 of 112.
+ */
+function placeBuildings(rnd: () => number, centre: Point, four: boolean, homes: readonly number[], sites: Site[], links: number[][]): void {
+  const at = (x: number, y: number) => sites.findIndex((site) => site.x === x && site.y === y);
+  const open = (k: number) => !sites[k].owner && !sites[k].tower && !sites[k].fort && homes.every((home) => home !== k && !links[home].includes(k));
+  const groups: number[][] = [];
+  sites.forEach(({ x, y }, k) => {
+    const images = four ? [at(2 * centre.x - x, 2 * centre.y - y), at(2 * centre.x - x, y), at(x, 2 * centre.y - y)] : [at(2 * centre.x - x, 2 * centre.y - y)];
+    const group = [k, ...images];
+    // A hut on a line of the symmetry is its own image and makes no group. Every other group is counted once, from its first hut.
+    if (group.every((image, j) => image > k || j === 0) && group.every(open)) groups.push(group);
+  });
+  for (let k = groups.length - 1; k > 0; k--) {
+    const j = Math.floor(rnd() * (k + 1));
+    [groups[k], groups[j]] = [groups[j], groups[k]];
+  }
+  // A small board or four sides often has room for only one or two groups, so which kinds they are is drawn too.
+  const kinds = BUILDINGS.slice();
+  for (let k = kinds.length - 1; k > 0; k--) {
+    const j = Math.floor(rnd() * (k + 1));
+    [kinds[k], kinds[j]] = [kinds[j], kinds[k]];
+  }
+  groups.slice(0, kinds.length).forEach((group, k) => {
+    for (const image of group) sites[image] = { ...sites[image], building: kinds[k] };
+  });
+}
+
 /** What a tick asks of every unit about the path it is on, worked out once for a map. */
 interface Lanes {
   /** By two huts, where the path between them stands in `map.paths`, or -1 when none joins them. */
@@ -1120,6 +1229,8 @@ interface Lanes {
   length: number[];
   /** Whether any path takes a toll. */
   tolled: boolean;
+  /** The paths that are tunnels. */
+  tunnels: number[];
 }
 
 const laneCache = new WeakMap<SwarmMap, Lanes>();
@@ -1132,7 +1243,12 @@ function lanesOf(map: SwarmMap): Lanes {
       index[path.a][path.b] = at;
       index[path.b][path.a] = at;
     });
-    lanes = { index, length: map.paths.map((path) => pathLength(map, path.a, path.b)), tolled: map.paths.some((path) => takesToll(path.kind)) };
+    lanes = {
+      index,
+      length: map.paths.map((path) => pathLength(map, path.a, path.b)),
+      tolled: map.paths.some((path) => takesToll(path.kind)),
+      tunnels: map.paths.flatMap((path, at) => (path.kind === 'tunnel' ? [at] : [])),
+    };
     laneCache.set(map, lanes);
   }
   return lanes;
@@ -1177,9 +1293,13 @@ export interface Hut {
   reload?: number;
   /** Times the defender at the door of a fort has been killed already. Only a fort has one. */
   hurt?: number;
+  /** What it was built as. A trap is built as one until it is taken. */
+  building?: Building;
 }
 
 const isTower = (hut: Hut): boolean => hut.reload !== undefined;
+/** Every building but a trap. */
+const barren = (hut: Hut): boolean => hut.building !== undefined && hut.building !== 'trap';
 
 export interface Unit {
   id: number;
@@ -1192,6 +1312,10 @@ export interface Unit {
   d: number;
   /** Sent by a risky order: it routes over the paths that cost lives. */
   risky?: boolean;
+  /** Out of a barracks or walked on through one, and not yet in a fight it would have died in. */
+  tough?: boolean;
+  /** Out of a beacon, or walked on through one: it marches a speed level above its army. */
+  fast?: boolean;
 }
 
 export interface Army {
@@ -1208,7 +1332,23 @@ export type SwarmEvent =
   /** A unit of `seat` died to the spikes or the water, `d` along the path from `from`. */
   | { kind: 'toll'; from: number; to: number; d: number; seat: Seat }
   /** `seat` raised the white flag, and `huts` went neutral. */
-  | { kind: 'flag'; seat: Seat; huts: number[] };
+  | { kind: 'flag'; seat: Seat; huts: number[] }
+  /** `seat` took the trap at `hut`, and one in TRAP_EVERY of its column there died: `dead` of them. */
+  | { kind: 'trap'; hut: number; seat: Seat; dead: number }
+  /** `seat` set fire to the bridge that is the map's path `path`, from its hut `from`. */
+  | { kind: 'light'; path: number; from: number; seat: Seat }
+  /** The fire `seat` set on the bridge `path` went out, because the hut it was lit from was taken. */
+  | { kind: 'doused'; path: number; seat: Seat }
+  /** The bridge `path` that `seat` set fire to went down, and the `dead` units on it with it. */
+  | { kind: 'burn'; path: number; seat: Seat; dead: number };
+
+/** A bridge on fire: `seat` lit it from its hut `from`, and it goes down on tick `burns` unless that hut is lost first. */
+export interface Fuse {
+  path: number;
+  from: number;
+  seat: Seat;
+  burns: number;
+}
 
 /** A tower killed a unit of `seat` standing at x, y. */
 export interface Shot {
@@ -1239,6 +1379,8 @@ export interface SwarmState {
   closed: number[];
   /** The sides that raised the white flag, in the order they did. */
   yielded: Seat[];
+  /** The bridges on fire, in the order they were lit. */
+  fuses: Fuse[];
 }
 
 /** The largest tick a path can be closed to: a 32-bit int, so it survives the copy to every client. */
@@ -1247,7 +1389,7 @@ export const CLOSED_FOREVER = 2147483647;
 export function newState(map: SwarmMap): SwarmState {
   return {
     tick: 0,
-    huts: map.sites.map((s) => ({ owner: s.owner, n: s.n, level: s.level, grow: 0, out: [], ...(s.tower && { reload: 0 }), ...(s.fort && { hurt: 0 }) })),
+    huts: map.sites.map((s) => ({ owner: s.owner, n: s.n, level: s.level, grow: 0, out: [], ...(s.tower && { reload: 0 }), ...(s.fort && { hurt: 0 }), ...(s.building && { building: s.building }) })),
     units: [],
     army: { a: { speed: 0, strength: 0, luck: 0 }, b: { speed: 0, strength: 0, luck: 0 }, c: { speed: 0, strength: 0, luck: 0 }, d: { speed: 0, strength: 0, luck: 0 } },
     nextId: 1,
@@ -1257,6 +1399,7 @@ export function newState(map: SwarmMap): SwarmState {
     shots: [],
     closed: map.paths.map(() => 0),
     yielded: [],
+    fuses: [],
   };
 }
 
@@ -1273,6 +1416,7 @@ export function cloneState(state: SwarmState): SwarmState {
     shots: [],
     closed: state.closed.slice(),
     yielded: state.yielded.slice(),
+    fuses: state.fuses.slice(),
   };
 }
 
@@ -1366,6 +1510,7 @@ export function sendSize(hut: Hut, kind: 'half' | 'all'): number {
 export function upgradeCost(state: SwarmState, hutIndex: number, kind: 'hut' | 'speed' | 'strength'): number | null {
   const hut = state.huts[hutIndex];
   if (!hut.owner || isTower(hut)) return null;
+  if (kind === 'hut' && barren(hut)) return null;
   if (kind === 'hut') return hut.level < MAX_HUT_LEVEL ? HUT_COST[hut.level - 1] : null;
   const level = state.army[hut.owner][kind];
   return level < MAX_ARMY_LEVEL ? ARMY_COST[level] : null;
@@ -1374,9 +1519,10 @@ export function upgradeCost(state: SwarmState, hutIndex: number, kind: 'hut' | '
 /** An order that no longer holds when its tick comes (the hut fell, the units left) does nothing. */
 function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, closed?: Closed): void {
   if (order.kind === 'flag') return raiseFlag(state, seat);
-  if (order.kind === 'nest' || order.kind === 'burn' || order.kind === 'rain' || order.kind === 'call' || order.kind === 'decoy') return;
+  if (order.kind === 'nest' || order.kind === 'rain' || order.kind === 'call' || order.kind === 'decoy') return;
   const hut = state.huts[order.from];
   if (!hut || hut.owner !== seat) return;
+  if (order.kind === 'burn') return burnBridge(state, map, seat, order);
   if (order.kind === 'half' || order.kind === 'all') {
     if (!state.huts[order.to]) return;
     // No hop also covers a send to the hut itself.
@@ -1418,6 +1564,58 @@ function raiseFlag(state: SwarmState, seat: Seat): void {
   state.events.push({ kind: 'flag', seat, huts });
 }
 
+/**
+ * What setting fire to the bridge between `from` and `to` costs, or null when
+ * bridges do not burn in this match, no bridge joins them, nobody holds
+ * `from`, or the bridge is on fire, down, or rebuilt less than BURN_TICKS ago.
+ * A bridge closed for good is never rebuilt. Bridges burn only with the
+ * buildings twist: a classic match plays as it always has, the computer's
+ * part in it included.
+ */
+export function burnCost(state: SwarmState, map: SwarmMap, from: number, to: number): number | null {
+  const at = pathIndex(map, from, to);
+  if (!map.rules.twists.includes('buildings') || at < 0 || map.paths[at].kind !== 'bridge' || !state.huts[from].owner) return null;
+  if (state.fuses.some((fuse) => fuse.path === at)) return null;
+  const until = state.closed[at];
+  return until === 0 || state.tick > until + BURN_TICKS ? BURN_COST : null;
+}
+
+function burnBridge(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
+  if (!state.huts[order.to]) return;
+  const hut = state.huts[order.from];
+  const cost = burnCost(state, map, order.from, order.to);
+  if (cost === null || hut.n - queued(hut) < cost) return;
+  hut.n -= cost;
+  const path = pathIndex(map, order.from, order.to);
+  state.fuses.push({ path, from: order.from, seat, burns: state.tick + BURN_FUSE });
+  state.events.push({ kind: 'light', path, from: order.from, seat });
+}
+
+/**
+ * A fire whose hut has been taken goes out. One that has burnt its count
+ * takes the bridge down for BURN_TICKS from this tick on, and everything on
+ * it dies, whoever's it is. Says whether a bridge went down.
+ */
+function burnFuses(state: SwarmState, map: SwarmMap): boolean {
+  if (state.fuses.length === 0) return false;
+  const { index } = lanesOf(map);
+  let burnt = false;
+  state.fuses = state.fuses.filter((fuse) => {
+    if (state.huts[fuse.from].owner !== fuse.seat) {
+      state.events.push({ kind: 'doused', path: fuse.path, seat: fuse.seat });
+      return false;
+    }
+    if (state.tick < fuse.burns) return true;
+    state.closed[fuse.path] = state.tick + BURN_TICKS - 1;
+    const before = state.units.length;
+    state.units = state.units.filter((unit) => index[unit.from][unit.to] !== fuse.path);
+    state.events.push({ kind: 'burn', path: fuse.path, seat: fuse.seat, dead: before - state.units.length });
+    burnt = true;
+    return false;
+  });
+  return burnt;
+}
+
 /** Columns queued to leave over a path that has closed since go another way, or stay home when there is none. */
 function reroute(map: SwarmMap, hut: Hut, at: number, closed: Closed): void {
   for (const line of hut.out) {
@@ -1432,6 +1630,13 @@ function survives(state: SwarmState, owner: Owner): boolean {
   army.luck += army.strength;
   if (army.luck < LUCK_DEN) return false;
   army.luck -= LUCK_DEN;
+  return true;
+}
+
+/** A unit out of or through a barracks lives through the first fight it would have died in, and only that one. */
+function spared(unit: Unit): boolean {
+  if (!unit.tough) return false;
+  delete unit.tough;
   return true;
 }
 
@@ -1474,6 +1679,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
   // Most paths carry one side's column and nothing else, and are done with here.
   const sides = map.paths.map(() => 0);
   for (const unit of state.units) sides[index[unit.from][unit.to]] |= SIDE_BIT[unit.seat];
+  for (const at of lanesOf(map).tunnels) sides[at] = 0;
   const mixed = (bits: number) => (bits & (bits - 1)) !== 0;
   if (!sides.some(mixed)) return;
   // Kept in the order their first unit was made: the fights of a tick draw on each army's luck in turn.
@@ -1482,7 +1688,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     if (!mixed(sides[at])) continue;
     const path = map.paths[at];
-    const pace = paceOf(path, unit.to, state.army[unit.seat].speed);
+    const pace = paceOf(path, unit.to, speedOf(state, unit));
     let lane = lanes.get(at);
     if (!lane) lanes.set(at, (lane = []));
     lane.push(unit.from === path.a ? { unit, at: unit.d, was: unit.d - pace } : { unit, at: lengths[at] - unit.d, was: lengths[at] - unit.d + pace });
@@ -1510,8 +1716,8 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
           const result = fight(state, below[i].unit.seat, above[j].unit.seat);
           const d = Math.max(0, Math.min(length, Math.floor((below[i].at + above[j].at) / 2)));
           state.events.push({ kind: 'clash', from: low, to: high, d });
-          if (result.xDies) dead.add(below[i++].unit.id);
-          if (result.yDies) dead.add(above[j++].unit.id);
+          if (result.xDies && !spared(below[i].unit)) dead.add(below[i++].unit.id);
+          if (result.yDies && !spared(above[j].unit)) dead.add(above[j++].unit.id);
         }
         below.splice(0, i);
         above = above.slice(j);
@@ -1557,8 +1763,8 @@ function clashAtDoors(state: SwarmState, map: SwarmMap, arriving: Unit[]): Set<U
         const at = index[xs[i].from][hut];
         const result = fight(state, x, y);
         state.events.push({ kind: 'clash', from: map.paths[at].a, to: map.paths[at].b, d: map.paths[at].b === hut ? length[at] : 0 });
-        if (result.xDies) dead.add(xs[i++]);
-        if (result.yDies) dead.add(ys[j++]);
+        if (result.xDies && !spared(xs[i])) dead.add(xs[i++]);
+        if (result.yDies && !spared(ys[j])) dead.add(ys[j++]);
       }
     }
   }
@@ -1574,7 +1780,13 @@ function wounds(hut: Hut): boolean {
 
 function walk(state: SwarmState, map: SwarmMap): void {
   const { index } = lanesOf(map);
-  for (const unit of state.units) unit.d += paceOf(map.paths[index[unit.from][unit.to]], unit.to, state.army[unit.seat].speed);
+  for (const unit of state.units) unit.d += paceOf(map.paths[index[unit.from][unit.to]], unit.to, speedOf(state, unit));
+}
+
+/** The speed level a unit marches at: its army's, or one above it out of a beacon. */
+export function speedOf(state: SwarmState, unit: Unit): number {
+  const speed = state.army[unit.seat].speed;
+  return unit.fast ? Math.min(MAX_ARMY_LEVEL, speed + BEACON_STEP) : speed;
 }
 
 /**
@@ -1593,7 +1805,7 @@ function takeTolls(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     const path = map.paths[at];
     if (takesToll(path.kind)) {
-      const before = unit.d - paceOf(path, unit.to, state.army[unit.seat].speed);
+      const before = unit.d - paceOf(path, unit.to, speedOf(state, unit));
       // Twice the walk against the whole length: on a path of odd length, half of it rounded down
       // is a middle that two units walking at each other are both over a step before they meet.
       if (2 * before < length[at] && 2 * unit.d >= length[at] && ++state.tolls[at] % TOLL_EVERY === 0) {
@@ -1619,13 +1831,15 @@ function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): 
     unit.from = unit.to;
     unit.to = hop;
     unit.d = 0;
+    if (hut.building === 'beacon') unit.fast = true;
+    if (hut.building === 'barracks') unit.tough = true;
     return true;
   }
   let alive = true;
   while (alive && hut.n > 0) {
     const result = fight(state, unit.seat, hut.owner);
     if (result.yDies && !wounds(hut)) hut.n--;
-    alive = !result.xDies;
+    alive = !result.xDies || spared(unit);
   }
   state.events.push({ kind: 'hit', hut: unit.to });
   if (!alive) return false;
@@ -1656,6 +1870,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
     let nearest = TOWER_RANGE * TOWER_RANGE;
     for (const unit of state.units) {
       if (tower.owner ? unit.seat === tower.owner : unit.to !== index) continue;
+      if (map.paths[lanes.index[unit.from][unit.to]].kind === 'tunnel') continue;
       const from = map.sites[unit.from];
       const to = map.sites[unit.to];
       const length = lanes.length[lanes.index[unit.from][unit.to]];
@@ -1732,7 +1947,7 @@ function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
 export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Seat, Order[]>>, cpu: Computer = {}): void {
   const planned = map.sides.map((side) => (cpu[side] !== undefined && state.tick >= cpu[side] && thinksAt(map, side, state.tick) ? cpuOrders(state, map, side) : []));
   const tick = ++state.tick;
-  const closed = closedOn(state, tick);
+  let closed = closedOn(state, tick);
   state.events = [];
   state.shots = [];
   map.sides.forEach((side, k) => {
@@ -1741,12 +1956,14 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     }
     for (const order of planned[k]) applyOrder(state, map, side, order, closed);
   });
+  if (burnFuses(state, map)) closed = closedOn(state, tick);
 
+  const fed = fedOf(state, map);
   for (const hut of state.huts) {
-    if (!hut.owner || isTower(hut)) continue;
+    if (!hut.owner || isTower(hut) || barren(hut)) continue;
     if (++hut.grow < GROW_TICKS[hut.level - 1] * (hut.hurt === undefined ? 1 : FORT_LIVES)) continue;
     hut.grow = 0;
-    if (hut.n < HUT_CAP[hut.level - 1]) hut.n++;
+    if (hut.n < capOf(hut, fed)) hut.n++;
   }
 
   if (tick % RELEASE_TICKS === 0) {
@@ -1769,6 +1986,8 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
           dest: line.dest,
           d: 0,
           ...(line.risky && { risky: true }),
+          ...(hut.building === 'barracks' && { tough: true }),
+          ...(hut.building === 'beacon' && { fast: true }),
         });
       }
       hut.out = hut.out.filter((line) => line.n > 0);
@@ -1790,8 +2009,39 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     }
     state.units = walking;
   }
+  springTraps(state);
   shoot(state, map);
   judge(state, map, cpu);
+}
+
+/** The huts that breed up to GRANARY_EXTRA in a hundred more: those next to a granary their owner holds. */
+function fedOf(state: SwarmState, map: SwarmMap): Set<Hut> {
+  const fed = new Set<Hut>();
+  state.huts.forEach((hut, at) => {
+    if (hut.building !== 'granary' || !hut.owner) return;
+    for (const next of map.links[at]) if (state.huts[next].owner === hut.owner) fed.add(state.huts[next]);
+  });
+  return fed;
+}
+
+/** The most a hut breeds up to. */
+const capOf = (hut: Hut, fed: Set<Hut>): number => HUT_CAP[hut.level - 1] + (fed.has(hut) ? Math.floor((HUT_CAP[hut.level - 1] * GRANARY_EXTRA) / 100) : 0);
+
+/**
+ * A trap that has just been taken kills one in TRAP_EVERY, in the order they
+ * were made, of the taker's that are still walking in to it, and is a hut
+ * like any other from then on.
+ */
+function springTraps(state: SwarmState): void {
+  state.huts.forEach((hut, at) => {
+    if (hut.building !== 'trap' || !hut.owner) return;
+    const taker = hut.owner;
+    delete hut.building;
+    let k = 0;
+    const before = state.units.length;
+    state.units = state.units.filter((unit) => unit.seat !== taker || unit.to !== at || ++k % TRAP_EVERY !== 0);
+    state.events.push({ kind: 'trap', hut: at, seat: taker, dead: before - state.units.length });
+  });
 }
 
 /** Run `state` on to tick `to`. `onStep` sees the state after each tick. */
@@ -1831,6 +2081,7 @@ function coverOf(map: SwarmMap): number[][] {
   if (!cover) {
     const towers = map.sites.flatMap((site, index) => (site.tower ? [index] : []));
     cover = map.paths.map((path) => {
+      if (path.kind === 'tunnel') return [];
       const [p, q] = [map.sites[path.a], map.sites[path.b]];
       const dx = q.x - p.x;
       const dy = q.y - p.y;
@@ -1925,11 +2176,12 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const lives = (hut: Hut) => (hut.hurt === undefined ? hut.n : hut.n * FORT_LIVES - hut.hurt);
   // A life costs one unit between armies of one strength, fewer of a stronger army's and more of a weaker one's.
   const toKill = (owner: Owner, n: number) => Math.ceil((n * (LUCK_DEN - army.strength)) / (LUCK_DEN - (owner ? state.army[owner].strength : 0)));
+  const fed = fedOf(state, map);
   const bredBy = (at: number, ticks: number) => {
     const hut = huts[at];
     // A hut walked in over its cap breeds nothing, and loses none of what it holds either.
-    if (!hut.owner || isTower(hut) || hut.n >= HUT_CAP[hut.level - 1]) return 0;
-    return Math.min(Math.floor(ticks / GROW_TICKS[hut.level - 1]), (HUT_CAP[hut.level - 1] - hut.n) * (hut.hurt === undefined ? 1 : FORT_LIVES));
+    if (!hut.owner || isTower(hut) || barren(hut) || hut.n >= capOf(hut, fed)) return 0;
+    return Math.min(Math.floor(ticks / GROW_TICKS[hut.level - 1]), (capOf(hut, fed) - hut.n) * (hut.hurt === undefined ? 1 : FORT_LIVES));
   };
 
   // What each side has on its way to each hut, counting the columns still leaving, and how soon the first of it gets there.
@@ -1937,8 +2189,9 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const soon = huts.map(() => [Infinity, Infinity, Infinity, Infinity]);
   for (const unit of state.units) {
     const k = SEATS.indexOf(unit.seat);
-    const ticks = (length[index[unit.from][unit.to]] - unit.d + span(map.sites[unit.to], map.sites[unit.dest])) / SPEED[state.army[unit.seat].speed];
-    bound[unit.dest][k]++;
+    const ticks = (length[index[unit.from][unit.to]] - unit.d + span(map.sites[unit.to], map.sites[unit.dest])) / SPEED[speedOf(state, unit)];
+    // A unit out of a barracks takes two to kill.
+    bound[unit.dest][k] += unit.tough ? 2 : 1;
     soon[unit.dest][k] = Math.min(soon[unit.dest][k], ticks);
   }
   huts.forEach((hut, at) => {
@@ -1987,7 +2240,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const last = way.paths[way.paths.length - 1];
     const pace = paceOf(map.paths[last], to, army.speed);
     // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
-    for (const _ of towers) lost += Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
+    lost += towers.size * Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
     if (isTower(huts[to])) lost += Math.ceil((n * RELEASE_TICKS + TOWER_RANGE / pace) / TOWER_RELOAD);
     return Math.min(n, lost);
   };
@@ -2038,8 +2291,8 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
         { n: f, halves: 0 },
       ].filter((option) => option.n >= MIN_SEND && (option.halves === 0 ? keep === 0 : f - option.n >= keep));
       if (options.length === 0) continue;
-      // Sending all of it leaves the hut empty, which is worth one more.
-      const gain = (option: { n: number; halves: number }) => option.n - lostOn(way, to, option.n) - (option.halves === 0 ? 1 : 0);
+      // Sending all of it leaves the hut empty, which is worth one more. What goes out of a barracks takes two to kill.
+      const gain = (option: { n: number; halves: number }) => option.n * (huts[from].building === 'barracks' ? 2 : 1) - lostOn(way, to, option.n) - (option.halves === 0 ? 1 : 0);
       const arrive = (option: { n: number }) => Math.max(latest, way.ticks + option.n * RELEASE_TICKS);
       // Every hut more that joins in is one more column that can come in late.
       const enough = options.find((option) => got + gain(option) >= need(arrive(option)) + sends.length);
@@ -2062,6 +2315,8 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     }
   };
 
+  orders.push(...burnsOf(state, map, seat, tick));
+
   // Hold what is under attack first.
   for (const at of mine) {
     let attackers = 0;
@@ -2083,11 +2338,13 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const leading = leader && (leader.huts > mineCount.huts || (leader.huts === mineCount.huts && leader.units > mineCount.units));
   const worth = (to: number) => {
     const hut = huts[to];
-    let value = isTower(hut) ? 1.5 : 10 / GROW_TICKS[hut.level - 1];
+    let value = isTower(hut) ? 1.5 : barren(hut) ? builtWorth(state, map, to, seat) : 10 / GROW_TICKS[hut.level - 1];
     if (map.sites[to].fort) value += 0.5;
     value *= 1 + 0.1 * Math.max(0, map.links[to].length - 2);
     if (hut.owner) {
       value *= 1.5;
+      // Taking the hut a bridge was set on fire from puts the fire out.
+      if (state.fuses.some((fuse) => fuse.from === to)) value *= 2;
       if (leading && hut.owner === leader.side) value *= 1 + temper.spite / 8;
       if (standing.find((count) => count.side === hut.owner)!.huts <= 2) value *= 1.5;
     }
@@ -2178,6 +2435,70 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const tolledOnly = map.links[at].every((next) => huts[next].owner === seat || takesToll(map.paths[index[at][next]].kind));
     if (hut.n >= HUT_CAP[hut.level - 1] && tolledOnly) reinforce(at);
   }
+  return orders;
+}
+
+/**
+ * What a building is worth to the computer next to what a hut breeding one
+ * unit every 10 ticks is (1). None of them breeds. A barracks doubles what
+ * goes out of it, a granary is worth a third more for each hut of the
+ * computer's it would feed, and a beacon is a quicker way to the front.
+ *
+ * None of them is worth as much as the plain hut it stands in for. Over 700
+ * two-sided computer games on medium ground with the pair's far half made a
+ * plain hut, the side the building was near won 40% with a barracks, 36% with
+ * a granary and 32% with a beacon (46% with a trap over 2100). Chasing them
+ * less (0.3 each) or more (4 each) moved that by three points at most, and a
+ * granary feeding twice the extra did not move it at all: huts in play seldom
+ * reach their cap. So they are a choice to make, never a hut to take first.
+ */
+function builtWorth(state: SwarmState, map: SwarmMap, at: number, seat: Seat): number {
+  const building = state.huts[at].building;
+  if (building === 'barracks') return 2;
+  if (building === 'granary') return map.links[at].filter((next) => state.huts[next].owner === seat).length / 3;
+  return 1;
+}
+
+/**
+ * The bridges the computer sets fire to. It reckons where everything will be
+ * when the count has run: who is still on the bridge then, of the columns on
+ * it and of those still to leave the far end, and who has reached the door of
+ * the hut it lit from. It lights when BURN_AT more of other sides than of its
+ * own will go down with the bridge and the hut can pay and still outlast what
+ * gets there first, so the fire is not put out.
+ */
+function burnsOf(state: SwarmState, map: SwarmMap, seat: Seat, tick: number): Order[] {
+  const { index, length } = lanesOf(map);
+  const orders: Order[] = [];
+  map.paths.forEach((path, at) => {
+    if (path.kind !== 'bridge') return;
+    for (const [from, to] of [[path.a, path.b], [path.b, path.a]]) {
+      const hut = state.huts[from];
+      const spare = hut.n - queued(hut) - BURN_COST;
+      if (hut.owner !== seat || spare < 0 || burnCost(state, map, from, to) === null) continue;
+      let caught = 0;
+      let first = 0;
+      for (const unit of state.units) {
+        if (index[unit.from][unit.to] !== at) continue;
+        const on = unit.d + paceOn(map, unit.from, unit.to, speedOf(state, unit)) * BURN_FUSE < length[at];
+        if (unit.seat === seat) caught -= on ? 1 : 0;
+        else if (unit.to === from && on) caught++;
+        else if (unit.to === from) first += unit.tough ? 2 : 1;
+      }
+      for (const end of [to, from]) {
+        const owner = state.huts[end].owner;
+        if (!owner) continue;
+        // One leaves every RELEASE_TICKS: those let out within a crossing of the fire's end are still on the bridge.
+        const crossing = Math.ceil(length[at] / paceOn(map, end, end === to ? from : to, state.army[owner].speed));
+        const late = (n: number) => Math.max(0, Math.min(n, Math.floor(BURN_FUSE / RELEASE_TICKS)) - Math.max(0, Math.floor((BURN_FUSE - crossing) / RELEASE_TICKS)));
+        for (const line of state.huts[end].out) {
+          if (line.to !== (end === to ? from : to)) continue;
+          caught += owner === seat ? -late(line.n) : late(line.n);
+        }
+      }
+      if (caught >= BURN_AT && first < spare) orders.push({ tick, kind: 'burn', from, to });
+    }
+  });
   return orders;
 }
 

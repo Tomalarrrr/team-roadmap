@@ -78,9 +78,9 @@ export function pickTone(rnd: Rnd, tones: readonly string[]): string {
 }
 
 /** The width of the trodden surface, in world units. */
-export const PATH_W: Record<PathKind, number> = { road: 25, wide: 38, narrow: 13, spikes: 19, bridge: 22, ford: 22, climb: 26 };
+export const PATH_W: Record<PathKind, number> = { road: 25, wide: 38, narrow: 13, spikes: 19, bridge: 22, ford: 22, climb: 26, tunnel: 16 };
 /** A seventh of how far to either side of the middle of its path a column walks. */
-export const LANE: Record<PathKind, number> = { road: 1.4, wide: 2.3, narrow: 0.7, spikes: 0.9, bridge: 0.9, ford: 1, climb: 1.3 };
+export const LANE: Record<PathKind, number> = { road: 1.4, wide: 2.3, narrow: 0.7, spikes: 0.9, bridge: 0.9, ford: 1, climb: 1.3, tunnel: 0.5 };
 
 /**
  * Where across its column a unit walks, -1 to 1, from its place in the order the
@@ -128,8 +128,8 @@ export function controlOf(map: SwarmMap, a: number, b: number): Point {
   const high = map.sites[Math.max(a, b)];
   // Any two huts can be asked about, as they could before paths had kinds: a pair no path joins bends as a road would.
   const kind = pathOf(map, a, b)?.kind;
-  // A short cut through the stakes is cut straight, and a bridge is built straight.
-  const bend = kind === 'spikes' || kind === 'bridge' ? 0 : bendOf(a, b);
+  // A short cut through the stakes is cut straight, a bridge is built straight, and a tunnel is dug straight under the huts it clears.
+  const bend = kind === 'spikes' || kind === 'bridge' || kind === 'tunnel' ? 0 : bendOf(a, b);
   return {
     x: (low.x + high.x) / 2 - (high.y - low.y) * bend,
     y: (low.y + high.y) / 2 + (high.x - low.x) * bend,

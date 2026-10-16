@@ -55,12 +55,14 @@ export type CalloutKey =
   | 'towerTaken'
   | 'fortTaken'
   | 'bridgeHeld'
+  | 'bridgeAlight'
   | 'backFromOne';
 
 /** Most pressing first: when several are due at once, bad news is read before good. */
 export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'lastHut',
   'enemyAtGate',
+  'bridgeAlight',
   'towerLost',
   'fortLost',
   'towerTaken',
@@ -77,6 +79,7 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   towerTaken: 'Tower taken',
   fortTaken: 'Fort taken',
   bridgeHeld: 'Bridge held',
+  bridgeAlight: 'Bridge alight',
   backFromOne: 'Back from one hut',
 };
 
@@ -125,6 +128,8 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   if (reduced && hutsWas === 1 && huts > 1) due.add('backFromOne');
 
   if (!holdsBridge(before, map, seat) && holdsBridge(after, map, seat)) due.add('bridgeHeld');
+  // Lit by another side: there are seconds to get across it, or to take the hut it was lit from.
+  if (after.fuses.some((fuse) => fuse.seat !== seat && !before.fuses.some((was) => was.path === fuse.path))) due.add('bridgeAlight');
 
   const home = homeOf(map, seat);
   if (
@@ -159,6 +164,7 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   towerTaken: 6000,
   fortTaken: 6000,
   bridgeHeld: 20000,
+  bridgeAlight: 6000,
   backFromOne: 20000,
 };
 
@@ -360,6 +366,8 @@ function raiseDust(feel: Feel, map: SwarmMap, state: SwarmState, now: number): v
     const lane = feel.lanes.get(laneKey(march.from, march.to));
     if (weight === 0 || lane === undefined) continue;
     const path = map.paths[lane];
+    // Underground nothing is kicked up, and dust would tell the other sides what the tunnel hides.
+    if (path.kind === 'tunnel') continue;
     const wet = feel.wet[lane];
     const length = pathLength(map, march.from, march.to);
     const flying = feel.kinds[march.seat] === 'bee';
@@ -747,6 +755,8 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
   feel.column.length = 0;
   for (const unit of state.units) {
     const lane = feel.lanes.get(laneKey(unit.from, unit.to));
+    // A column underground wears no path and stirs nothing on top.
+    if (lane !== undefined && map.paths[lane].kind === 'tunnel') continue;
     if (lane !== undefined) feel.wear[lane] = Math.min(WEAR_FULL, feel.wear[lane] + 1);
     const p = pathPoint(map, unit.from, unit.to, Math.min(1, unit.d / pathLength(map, unit.from, unit.to)));
     feel.column.push(p.x, p.y);

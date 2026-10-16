@@ -117,6 +117,7 @@ export function drawThumb(canvas: HTMLCanvasElement, map: SwarmMap, seed: number
   for (const [colour, extra] of [[pal.path.edge, 8], [pal.path.body, 0]] as const) {
     ctx.strokeStyle = colour;
     for (const path of map.paths) {
+      if (path.kind === 'tunnel') continue;
       ctx.lineWidth = atLeast(PATH_W[path.kind] + extra, extra > 0 ? 3 : 1.6);
       tracePath(ctx, map, path.a, path.b);
       ctx.stroke();
@@ -133,6 +134,15 @@ export function drawThumb(canvas: HTMLCanvasElement, map: SwarmMap, seed: number
       ctx.strokeStyle = INK;
       ctx.lineWidth = atLeast(4, 1);
       crossMarks(ctx, map, path, atLeast(26, 5), 15, 0, path.b);
+    }
+    if (path.kind === 'tunnel') {
+      // Underground: a broken line of earth, the way the ground over a tunnel shows.
+      ctx.strokeStyle = pal.dig.bank;
+      ctx.lineWidth = atLeast(8, 1.5);
+      ctx.setLineDash([atLeast(10, 2), atLeast(16, 3)]);
+      tracePath(ctx, map, path.a, path.b);
+      ctx.stroke();
+      ctx.setLineDash([]);
     }
     if (path.kind === 'climb') {
       ctx.strokeStyle = pal.wall[2];

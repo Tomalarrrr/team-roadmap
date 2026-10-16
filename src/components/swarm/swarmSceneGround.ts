@@ -962,6 +962,7 @@ function paintPaths(g: Ground) {
   });
   const lay = (to: Ctx, index: number, grow: number) => {
     const path = map.paths[index];
+    if (path.kind === 'tunnel') return;
     to.lineWidth = Math.max(3, PATH_W[path.kind] + grow);
     tracePath(to, map, path.a, path.b);
     to.stroke();
@@ -1002,7 +1003,68 @@ function paintPaths(g: Ground) {
     ctx.strokeStyle = ctx.fillStyle = colour;
     map.paths.forEach((_, index) => lay(ctx, index, grow));
   }
-  for (const path of map.paths) dressPath(g, path);
+  for (const path of map.paths) if (path.kind !== 'tunnel') dressPath(g, path);
+}
+
+/** How far out from a hut's middle a tunnel is dug in, clear of the hut and of the roads at its door. */
+export const TUNNEL_MOUTH = 44;
+
+/**
+ * A tunnel is not a way on the ground: what shows of it is the seam of earth
+ * thrown up over it, a line of molehills, and the two holes it was dug from.
+ */
+function paintTunnels(g: Ground) {
+  const { ctx, rnd, map } = g;
+  const dig = PALETTE[map.scene].dig;
+  for (const path of map.paths) {
+    if (path.kind !== 'tunnel') continue;
+    const length = pathLength(map, path.a, path.b);
+    const mouth = TUNNEL_MOUTH / length;
+    // The ground over it has settled a little and is darker for being turned.
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = dig.under;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = PATH_W.tunnel;
+    traceAlong(ctx, map, path, 0, mouth, 1 - mouth);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    for (let d = TUNNEL_MOUTH + 18; d < length - TUNNEL_MOUTH - 12; d += 20 + rnd() * 18) {
+      const p = offsetPoint(map, path, d / length, (rnd() - 0.5) * 6);
+      const r = 2.4 + rnd() * 1.8;
+      ctx.fillStyle = dig.under;
+      ellipse(ctx, p.x + 0.8, p.y + 1, r * 1.15, r * 0.7);
+      ctx.fill();
+      ctx.fillStyle = dig.bank;
+      ellipse(ctx, p.x, p.y, r, r * 0.62);
+      ctx.fill();
+      ctx.fillStyle = dig.floor;
+      ellipse(ctx, p.x - r * 0.25, p.y - r * 0.2, r * 0.45, r * 0.25);
+      ctx.fill();
+    }
+    for (const end of [mouth, 1 - mouth]) {
+      // The hole faces the hut it serves, and the spoil lies in a crescent behind it, down the tunnel.
+      const p = offsetPoint(map, path, end, 0);
+      const back = end < 0.5 ? p.angle : p.angle + Math.PI;
+      const bx = Math.cos(back);
+      const by = Math.sin(back);
+      ctx.strokeStyle = dig.under;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.ellipse(p.x + bx * 3, p.y + by * 3 + 1.5, 9, 6, 0, back - 1.3, back + 1.3);
+      ctx.stroke();
+      ctx.strokeStyle = dig.bank;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.ellipse(p.x + bx * 3, p.y + by * 3, 9, 6, 0, back - 1.3, back + 1.3);
+      ctx.stroke();
+      ctx.fillStyle = dig.hole;
+      ellipse(ctx, p.x, p.y, 7.5, 4.6);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(20, 14, 6, 0.75)';
+      ellipse(ctx, p.x, p.y + 0.6, 5.4, 3.2);
+      ctx.fill();
+    }
+  }
 }
 
 // The river.
@@ -1903,6 +1965,7 @@ export function paintGround(ctx: Ctx, map: SwarmMap, seed: number, rivers: River
     }
   }
 
+  paintTunnels(g);
   paintPaths(g);
   if (map.scene === 'terrace') paintRamps(g);
   // The river goes over the paths, so a path that meets it ends at the bank and is carried over by what is built there.

@@ -18,6 +18,7 @@ import {
   pathLength,
   pathOf,
   sendSize,
+  speedOf,
   upgradeCost,
   type Army,
   type Kind,
@@ -30,6 +31,7 @@ import {
 } from '../../swarmGameLogic';
 import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type Leg, type Sending } from './swarmAim';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
+import { builtEvents, burnSpots, drawBuiltOver, drawBuiltUnder, flameIcon, newBuilt, tunnelSight, type Built } from './swarmSceneBuilt';
 import { paintGround } from './swarmSceneGround';
 import { drawFlags, paintSite } from './swarmSceneHuts';
 import {
@@ -141,6 +143,7 @@ export interface Scene {
   rivers: River[];
   glints: Glint[];
   feel: Feel;
+  built: Built;
 }
 
 /** How far from the middle of a bridge or a ford the water is left unlit, so no glint shows through the planks. */
@@ -190,6 +193,7 @@ export function newScene(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>)
     rivers,
     glints: glintsOf(map, seed, rivers),
     feel: newFeel(map, seed, kinds),
+    built: newBuilt(map, rivers),
   };
 }
 
@@ -312,6 +316,7 @@ export function upgradeSpots(map: SwarmMap, state: SwarmState, hut: number, px: 
 /** `seat` is whose screen this is: the callouts are worded for them. */
 export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[], now: number, seat: Seat): void {
   feelStep(scene.feel, scene.map, state, seat, now);
+  builtEvents(scene.built, state, events, now, seat);
   for (const shot of state.shots) {
     scene.fx.push({ kind: 'shot', x: shot.x, y: shot.y, at: now, seat: shot.seat, tower: shot.tower });
     scene.firedAt[shot.tower] = now;
@@ -847,9 +852,9 @@ function strengthIcon(ctx: CanvasRenderingContext2D) {
   ctx.fill();
 }
 
-const TOKEN_ICON: Record<UpgradeKind, (ctx: CanvasRenderingContext2D) => void> = { hut: hutIcon, speed: speedIcon, strength: strengthIcon };
+const TOKEN_ICON: Record<UpgradeKind | 'burn', (ctx: CanvasRenderingContext2D) => void> = { hut: hutIcon, speed: speedIcon, strength: strengthIcon, burn: flameIcon };
 
-function drawToken(ctx: CanvasRenderingContext2D, kind: UpgradeKind, x: number, y: number, grow: number, cost: number, affordable: boolean) {
+function drawToken(ctx: CanvasRenderingContext2D, kind: UpgradeKind | 'burn', x: number, y: number, grow: number, cost: number, affordable: boolean) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(grow, grow);
@@ -1115,7 +1120,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     // Everything that tells one unit from the next is read off its id, so it is the same unit in every frame.
     const own = Math.imul(unit.id, 0x9e3779b1) >>> 0;
     // The engine lets them out on the beat. Each is drawn a little ahead of its place or behind, so the column does not tick past like a ruler.
-    const d = Math.min(length, Math.max(0, unit.d + paceOn(map, unit.from, unit.to, state.army[unit.seat].speed) * view.alpha + ((own >>> 16) % 7 - 3) * 0.5));
+    const d = Math.min(length, Math.max(0, unit.d + paceOn(map, unit.from, unit.to, speedOf(state, unit)) * view.alpha + ((own >>> 16) % 7 - 3) * 0.5));
     const column = unit.from * 64 + unit.to;
     const key = unit.id * 4096 + column;
     let slot = scene.slots.get(key);
@@ -1123,7 +1128,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       slot = scene.sent[column]++;
       scene.slots.set(key, slot);
     }
-    const out = outOfDoors(d, length, siteRadius(map.sites[unit.from], state.huts[unit.from].level), siteRadius(map.sites[unit.to], state.huts[unit.to].level));
+    const out = outOfDoors(d, length, siteRadius(map.sites[unit.from], state.huts[unit.from].level), siteRadius(map.sites[unit.to], state.huts[unit.to].level)) * tunnelSight(map, unit, d, length, view.seat);
     if (out === 0) continue;
     const p = pathPoint(map, unit.from, unit.to, d / length);
     // A column fills the path it is on, so it thins on a track and spreads on a highway.
@@ -1290,12 +1295,14 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   if (scene.standing.tick !== state.tick) scene.standing = { tick: state.tick, legs: standingOf(map, state, view.seat) };
   // World units to a CSS pixel: a finger is the same size on every board.
   const px = window.devicePixelRatio / scale;
+  drawBuiltUnder(ctx, map, state, scene.built, view.seat, view.now, view.alpha, px);
   const aim = aimOf(map, state, view, px);
   if (view.drag) drawRanges(ctx, map, state, view);
   drawAimUnder(ctx, map, state, view, scene.standing.legs, aim);
   drawStanding(ctx, scene, state, view, scale);
   drawFx(ctx, scene, view.now);
   drawCounts(ctx, scene, state, view, scale, px);
+  drawBuiltOver(ctx, map, state, scene.built, view.drag ? null : view.selected, view.now, px);
 
   if (view.selected !== null && !view.drag) {
     const hut = state.huts[view.selected];
@@ -1304,6 +1311,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
       const cost = upgradeCost(state, view.selected, spot.kind);
       if (cost !== null) drawToken(ctx, spot.kind, spot.x, spot.y, grow, cost, sendSize(hut, 'all') >= cost);
     }
+    for (const spot of burnSpots(map, state, view.selected)) drawToken(ctx, 'burn', spot.x, spot.y, grow, spot.cost, sendSize(hut, 'all') >= spot.cost);
   }
   drawOver(ctx, scene.feel, map, state, view.now, px);
   if (aim) drawAimOver(ctx, map, state, view, aim, px);
