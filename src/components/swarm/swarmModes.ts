@@ -3,7 +3,6 @@
 // read off the state the game keeps; nothing here keeps a record of its own.
 
 import {
-  HILL_TICKS,
   TICK_MS,
   eggHome,
   frenzied,
@@ -42,7 +41,7 @@ export function modeNotes(map: SwarmMap, state: SwarmState): ModeNote[] {
   const { mode, twists } = map.rules;
   const notes: ModeNote[] = [];
   if (mode === 'hill') {
-    notes.push({ label: `Hill, ${seconds(HILL_TICKS)}s wins`, sides: map.sides.map((seat) => ({ seat, text: `${seconds(state.held[seat])}s` })) });
+    notes.push({ label: `Hill, ${seconds(map.rules.tune.hillTicks)}s wins`, sides: map.sides.map((seat) => ({ seat, text: `${seconds(state.held[seat])}s` })) });
   }
   if (mode === 'egg') {
     const holder = eggHolder(state);

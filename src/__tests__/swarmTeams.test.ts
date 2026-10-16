@@ -251,6 +251,13 @@ describe('the rally', () => {
     expect(state.huts[1].n).toBe(10);
   });
 
+  it('puts the tuned rally in, and none when it is tuned to 0', () => {
+    expect(falling({ ...TEAMS, tune: { ...CLASSIC.tune, rallyUnits: 7 } }).state.huts[0].n).toBe(37);
+    const none = falling({ ...TEAMS, tune: { ...CLASSIC.tune, rallyUnits: 0 } });
+    expect(none.events.filter((event) => event.kind === 'rally')).toEqual([{ kind: 'rally', seat: 'a', huts: [0] }]);
+    expect(none.state.huts[0].n).toBe(30);
+  });
+
   it('is not given for a side that raised the white flag', () => {
     const { state, events } = falling(TEAMS, { d: [{ tick: 1, kind: 'flag', from: 0, to: 0 }] });
     expect(state.yielded).toEqual(['d']);
@@ -290,6 +297,15 @@ describe('survival', () => {
     advance(state, map, {}, 2 * WAVE_TICKS);
     expect(state.events).toEqual([{ kind: 'wave', k: 2, huts: [1, 2] }]);
     expect(state.huts.map((hut) => hut.n)).toEqual([30, 30 + 3 * WAVE_UNITS, 30 + 3 * WAVE_UNITS, 10]);
+  });
+
+  it('lands the tuned wave on the tuned beat', () => {
+    const { map, state } = board({ ...survival(['b', 'c']), tune: { ...CLASSIC.tune, waveTicks: 300, waveUnits: 2 } });
+    advance(state, map, {}, 299);
+    expect(state.huts[1].n).toBe(30);
+    step(state, map, {});
+    expect(state.events).toEqual([{ kind: 'wave', k: 1, huts: [1, 2] }]);
+    expect(state.huts.map((hut) => hut.n)).toEqual([30, 32, 32, 10]);
   });
 
   it('control: no wave in classic', () => {

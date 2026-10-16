@@ -23,6 +23,7 @@ import {
   computerOf,
   decodeOrders,
   encodeOrders,
+  ORDERS_MAX,
   lastTick,
   newState,
   type Order,
@@ -180,6 +181,13 @@ export interface Lockstep {
 function behind(game: Lockstep, seen: number): boolean {
   return game.ownSeq !== undefined && seen < game.ownSeq && game.sent.includes(seen) && game.sent.includes(game.ownSeq);
 }
+
+/**
+ * Whether `orders` with `order` added still fit what a seat may store. Past it
+ * every write would be refused and the seat's promise would stop moving, so
+ * the order is turned down instead.
+ */
+export const fitsOrders = (orders: Order[], order: Order): boolean => encodeOrders([...orders, order]).length <= ORDERS_MAX;
 
 /** What this seat writes at `tick`. Sending it is a promise, so it is made here and not when the write lands. */
 export function sending(game: Lockstep, seat: Seat, seq: number, tick: number): SeatWrite {

@@ -736,6 +736,12 @@ describe('swarm fuzz: orders on the wire', () => {
     for (const kind of KIND_LIST) expect(decodeOrders(encodeOrders([{ tick: 1, kind, from: 0, to: 0 }]))[0].kind).toBe(kind);
   });
 
+  it('gives every kind a letter of its own', () => {
+    // Two kinds on one letter decode as whichever was written last, so the other drops out of the list.
+    expect(KIND_LIST).toHaveLength(19);
+    expect(new Set(KIND_LIST).size).toBe(KIND_LIST.length);
+  });
+
   it('reads back every kind, risky or not, at the edges of a tick and a hut, in the shape the rules take', () => {
     const orders: Order[] = KIND_LIST.flatMap((kind) =>
       [0, 1, 35, 36, 9600, LAST_TICK].flatMap((tick) =>

@@ -255,6 +255,11 @@ describe('a burning bridge', () => {
     expect(state.huts[1].n).toBe(30);
   });
 
+  it('costs the tuned price', () => {
+    const map = { ...ground(), rules: { ...BUILT, tune: { ...CLASSIC.tune, burnCost: 15 } } };
+    expect(burnCost(newState(map), map, 1, 2)).toBe(15);
+  });
+
   it('costs BURN_COST of the hut, and is not lit by a hut that cannot pay', () => {
     const map = ground();
     const poor = newState(map);

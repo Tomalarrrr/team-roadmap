@@ -68,12 +68,12 @@ describe('the armoury', () => {
     expect(off.state.huts[2].type).toBeUndefined();
     const on = field('a', { x: 300, y: 300, n: 40 });
     step(on.state, on.map, { a: [buy('rate', 2), buy('mortar', 2)] });
-    expect(on.state.huts[2]).toMatchObject({ n: 40 - KIT_COST[0] - REFIT_COST, rate: 1, type: 'mortar' });
+    expect(on.state.huts[2]).toMatchObject({ n: 40 - KIT_COST - REFIT_COST, rate: 1, type: 'mortar' });
   });
 
   it('kits a tower a level at a time from its garrison, up to two, and only a tower held by the side', () => {
     const { map, state } = field('a', { x: 300, y: 300, n: 40 });
-    expect(KIT_COST).toEqual([10, 20]);
+    expect(KIT_COST).toBe(10);
     expect(upgradeCost(map, state, 2, 'range')).toBe(10);
     expect(upgradeCost(map, state, 0, 'range')).toBeNull();
     advance(state, map, { a: [buy('range', 2, 1), buy('range', 2, 2), buy('range', 2, 3)] }, 3);
@@ -119,9 +119,18 @@ describe('the armoury', () => {
     expect(shotTicks(2)).toEqual([1, 5, 9, 13, 17]);
   });
 
+  it('prices kit and refits by the tune', () => {
+    const { map, state } = field('a', { x: 300, y: 300, n: 40 });
+    map.rules = { ...map.rules, tune: { ...map.rules.tune, kitCost: 5, refitCost: 30 } };
+    expect(upgradeCost(map, state, 2, 'range')).toBe(5);
+    expect(upgradeCost(map, state, 2, 'mortar')).toBe(30);
+    state.huts[2].range = 1;
+    expect(upgradeCost(map, state, 2, 'range')).toBe(10);
+  });
+
   it('armour makes each defender of a tower die once more a level', () => {
     const fall = (armour: number, sent: number) => {
-      const { map, state } = field('b', { x: 340, y: 100, n: 2 + armour * KIT_COST[0] });
+      const { map, state } = field('b', { x: 340, y: 100, n: 2 + armour * KIT_COST });
       map.links[0] = [1, 2];
       map.links[2] = [0];
       map.paths.push({ a: 0, b: 2, kind: 'road' });
@@ -148,7 +157,7 @@ describe('the armoury', () => {
     expect(isTower(state.huts[0])).toBe(true);
     expect(state.huts[0].n).toBe(40 - BUILD_COST);
     expect(upgradeCost(map, state, 0, 'tower')).toBeNull();
-    expect(upgradeCost(map, state, 0, 'rate')).toBe(KIT_COST[0]);
+    expect(upgradeCost(map, state, 0, 'rate')).toBe(KIT_COST);
     state.units = [{ id: 1, seat: 'b', from: 1, to: 0, dest: 0, d: 300 }];
     advance(state, map, {}, 60);
     expect(state.units).toEqual([]);

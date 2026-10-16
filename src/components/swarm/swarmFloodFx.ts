@@ -5,7 +5,7 @@
 // ground at each hut and runs in along its paths, reaching the doors as the
 // ring goes under.
 
-import { FLOOD_EVERY, FLOOD_WARN, floodDue, floodsOf, type SwarmMap, type SwarmState } from '../../swarmGameLogic';
+import { FLOOD_WARN, floodDue, floodsOf, type SwarmMap, type SwarmState } from '../../swarmGameLogic';
 import { PALETTE, ellipse, pathPoint, siteRadius } from './swarmSceneKit';
 
 /** World units across the water over a drowned path, and its darker middle. */
@@ -51,7 +51,7 @@ export function drawFlood(ctx: CanvasRenderingContext2D, map: SwarmMap, state: S
   }
 
   const due = floodDue(map, state.tick + 1);
-  if (!due || due.tick - tick > FLOOD_EVERY) return;
+  if (!due || due.tick - tick > map.rules.tune.floodEvery) return;
   const ring = new Set(due.huts);
   // 0 until the last FLOOD_WARN ticks, then rising to 1 as the ring goes under.
   const rise = Math.min(1, Math.max(0, 1 - (due.tick - tick) / FLOOD_WARN));

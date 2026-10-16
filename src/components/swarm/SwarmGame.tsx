@@ -20,9 +20,9 @@ import {
 import {
   CLASSIC,
   COUNTDOWN_MS,
-  DRAFT_TICKS,
   KINDS,
   KNOBS,
+  knobsIn,
   MODE_IDS,
   SEATS,
   SIZE_IDS,
@@ -30,15 +30,12 @@ import {
   START_IDS,
   TICK_MS,
   TWISTS as TWIST_IDS,
-  WAVE_TICKS,
-  WAVE_UNITS,
   advance,
   allied,
   buildMap,
   clampKnob,
   computerOf,
   MAP_IDS,
-  BURN_COST,
   countAsSeen,
   countOf,
   drafting,
@@ -79,7 +76,7 @@ import { latch, nearest, reachOf } from './swarmPick';
 import { clashOf, leaveWarning, surpriseOf, tuneSummary, unfit, type RulesChoice } from './swarmLobby';
 import { floodIn, pillsOf, type PowerPill } from './swarmPowerHud';
 import { SwarmPowerPills } from './SwarmPowerPills';
-import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
+import { fitsOrders, newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
 import { siegeBeat, siegeOf, threatsOf, type ThreatView } from './swarmThreat';
 import { clockOf, newTally, tallyStep, type Tally } from './swarmTally';
 import { SwarmSummary } from './SwarmSummary';
@@ -358,6 +355,8 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
 
 interface TunePanelProps {
   tune: Tune;
+  /** Only the knobs these rules use are shown, so the panel fits a phone. */
+  rules: RulesChoice;
   /** Without it the settings are only shown: a guest sees the host's. */
   onTune?: (tune: Tune) => void;
   /** What the shared line says when no setting is being read. */
@@ -372,7 +371,7 @@ interface TunePanelProps {
  * standard game. A value is held to its range when its field is left, not on
  * each keystroke, so a room is never written one half typed.
  */
-export function TunePanel({ tune, onTune, idle, open, onOpen }: TunePanelProps) {
+export function TunePanel({ tune, rules, onTune, idle, open, onOpen }: TunePanelProps) {
   const [shown, setShown] = useState<KnobId | null>(null);
   const [drafts, setDrafts] = useState<Partial<Record<KnobId, string>>>({});
   const changed = tuneSummary(tune);
@@ -402,7 +401,7 @@ export function TunePanel({ tune, onTune, idle, open, onOpen }: TunePanelProps) 
       {open && (
         <>
           <div className={styles.knobGrid} role="group" aria-label="Settings">
-            {KNOBS.map((each) => (
+            {knobsIn(rules).map((each) => (
               <label key={each.id} className={styles.knobLabel}>
                 {each.label}
                 <input
@@ -581,8 +580,8 @@ interface Hud {
   draft: number | null;
   /** What this seat holds besides one hut of level 1, in words (see holdingOf). */
   holding: string | null;
-  /** In survival: the waves landed, seconds to the next (null when no other comes before the clock), and seconds played. */
-  survival: { waves: number; next: number | null; lasted: number } | null;
+  /** In survival: the waves landed, seconds to the next (null when no other comes before the clock), units the next puts in a hut, and seconds played. */
+  survival: { waves: number; next: number | null; units: number; lasted: number } | null;
   /** What the mode and twists are counting, under the clock. */
   notes: ModeNote[];
   /** What the mode adds to the result once there is one. */
@@ -1079,15 +1078,16 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         next.overtime = shown.tick > map.ticks || (shown.tick === map.ticks && shown.winner === null);
         const ticks = next.overtime ? lastTick(map) : map.ticks;
         next.secs = Math.ceil(((ticks - Math.min(Math.max(tick, 0), ticks)) * TICK_MS) / 1000);
-        if (drafting(game.map, tick + 1)) next.draft = Math.ceil(((DRAFT_TICKS - Math.max(tick, 0)) * TICK_MS) / 1000);
+        if (drafting(game.map, tick + 1)) next.draft = Math.ceil(((game.map.rules.tune.draftTicks - Math.max(tick, 0)) * TICK_MS) / 1000);
         // A draft moves the starts at its end, and the score line moves with them.
         next.starts = startsOf(game.map, game.shown.homes);
         next.holding = holdingOf(game.map, game.shown, seat);
         if (game.map.rules.mode === 'survival') {
           const at = Math.min(Math.max(tick, 0), ticks);
-          const waves = Math.floor(at / WAVE_TICKS);
-          const due = (waves + 1) * WAVE_TICKS;
-          next.survival = { waves, next: due < ticks ? Math.ceil(((due - at) * TICK_MS) / 1000) : null, lasted: Math.floor((at * TICK_MS) / 1000) };
+          const { waveTicks, waveUnits } = game.map.rules.tune;
+          const waves = Math.floor(at / waveTicks);
+          const due = (waves + 1) * waveTicks;
+          next.survival = { waves, next: due < ticks ? Math.ceil(((due - at) * TICK_MS) / 1000) : null, units: waveUnits * (waves + 1), lasted: Math.floor((at * TICK_MS) / 1000) };
         }
         const fogged = game.scene.fog !== null && game.shown.winner === null;
         for (const side of game.map.sides) {
@@ -1126,7 +1126,13 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       const mine = game.orders[seatNow];
       const last = mine.length > 0 ? mine[mine.length - 1].tick : 0;
       const tick = orderTick(tickNow + (solo ? ORDER_DELAY_SOLO : ORDER_DELAY), game.promised, game.confirmed.tick, last);
-      mine.push({ tick, kind, from, to, ...(risky && { risky }) });
+      const order = { tick, kind, from, to, ...(risky && { risky }) };
+      if (!fitsOrders(mine, order)) {
+        refuse(from);
+        setError('This game has stored all the orders a seat can send, so no more can be given in it.');
+        return;
+      }
+      mine.push(order);
     };
 
     const worldOf = (g: Game, e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -1236,7 +1242,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           for (const order of game.orders[seatNow]) {
             if (order.tick <= game.shown.tick || order.from !== token.hut) continue;
             if (isUpgrade(order.kind)) owed += upgradeCost(game.map, game.shown, token.hut, order.kind) ?? 0;
-            if (order.kind === 'burn') owed += BURN_COST;
+            if (order.kind === 'burn') owed += game.map.rules.tune.burnCost;
           }
           if (sendSize(game.shown.huts[token.hut], 'all') - owed < token.cost) return refuse(token.hut);
           issue(token.kind, token.hut, token.to);
@@ -1745,7 +1751,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               <RulesPicker choice={rulesPick} onChoice={setRulesPick} idle={TWISTS_ABOUT} nest={{ pick: nestPick, onPick: setNestPick }} surprise={surprise} />
             </>
           )}
-          <TunePanel tune={tunePick} onTune={setTunePick} idle={TUNE_ABOUT} open={tuning} onOpen={setTuning} />
+          <TunePanel tune={tunePick} rules={rulesPick} onTune={setTunePick} idle={TUNE_ABOUT} open={tuning} onOpen={setTuning} />
           {unfitReason && <span className={styles.rules}>{unfitReason}</span>}
           <button className={styles.secondaryBtn} onClick={startSolo} disabled={busy || unfitReason !== null}>
             Play the computer
@@ -1818,6 +1824,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           )}
           <TunePanel
             tune={tune}
+            rules={rules}
             onTune={host === mySeat ? (next) => pickRules(rules, next) : undefined}
             idle={host && host !== mySeat ? `${nameOf(host)} sets these.` : TUNE_ABOUT}
             open={tuning}
@@ -1855,7 +1862,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                 <span className={styles.wave}>
                   {hud.survival.next === null
                     ? `Wave ${hud.survival.waves}`
-                    : `${hud.survival.waves === 0 ? 'Next wave' : `Wave ${hud.survival.waves}. Next`} in ${hud.survival.next}s, ${WAVE_UNITS * (hud.survival.waves + 1)} a hut`}
+                    : `${hud.survival.waves === 0 ? 'Next wave' : `Wave ${hud.survival.waves}. Next`} in ${hud.survival.next}s, ${hud.survival.units} a hut`}
                 </span>
               )}
               {hud.notes.map((note) => (
@@ -1900,7 +1907,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                 {hud.holding && <span className={styles.overlayNote}>{hud.holding}</span>}
                 {hud.draft !== null && (
                   <span className={styles.overlayNote}>
-                    In the first {(DRAFT_TICKS * TICK_MS) / 1000} seconds, press any hut but a tower to start there instead. A hut goes to whoever picks it first
+                    In the first {hud.draft} seconds, press any hut but a tower to start there instead. A hut goes to whoever picks it first
                   </span>
                 )}
                 <span className={styles.countdown}>{hud.count}</span>

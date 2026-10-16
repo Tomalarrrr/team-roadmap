@@ -9,6 +9,8 @@ import {
   advance,
   buildMap,
   clampKnob,
+  cpuPickTick,
+  drafting,
   encodeTune,
   lastTick,
   newState,
@@ -100,6 +102,33 @@ describe('a tuned match', () => {
     expect(state.winner).toBe(null);
     step(state, short, {});
     expect(state.winner).toBe('draw');
+  });
+
+  it('plays the tuned overtime, and none at 0', () => {
+    const short = buildMap(1, 'meadow', ['a', 'b'], undefined, tuned({ len: 3, overtime: 0 }));
+    expect(lastTick(short)).toBe(1800);
+    const state = newState(short);
+    advance(state, short, {}, 1799);
+    expect(state.winner).toBe(null);
+    step(state, short, {});
+    expect(state.winner).toBe('draw');
+    expect(lastTick(buildMap(1, 'meadow', ['a', 'b'], undefined, tuned({ len: 3, overtime: 100 })))).toBe(1900);
+  });
+
+  it('gives a big nest its tuned units', () => {
+    const nests = (bigNest: number) => {
+      const map = buildMap(7, 'thorns', ['a', 'b'], undefined, { ...tuned({ bigNest }), start: 'nests', nests: { b: 'many' } });
+      return map.homes.map((home) => map.sites[home].n);
+    };
+    expect(nests(37)).toEqual([37, 5]);
+    expect(nests(20)).toEqual([20, 5]);
+  });
+
+  it('drafts for the tuned time, the computer picking half way', () => {
+    const map = buildMap(7, 'thorns', ['a', 'b'], undefined, { ...tuned({ draftTicks: 41 }), start: 'draft' });
+    expect(cpuPickTick(map)).toBe(20);
+    expect(drafting(map, 41)).toBe(true);
+    expect(drafting(map, 42)).toBe(false);
   });
 
   it('gives each side its tuned starting units in its first hut, and leaves the rest', () => {

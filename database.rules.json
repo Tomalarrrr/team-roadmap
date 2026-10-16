@@ -388,8 +388,8 @@
           "cpu": { ".validate": "newData.isString() && newData.val().matches(/^a?b?c?d?$/)" },
           "mode": { ".validate": "newData.isString() && (newData.val() == 'classic' || newData.val() == 'blitz' || newData.val() == 'hill' || newData.val() == 'regicide' || newData.val() == 'bounty' || newData.val() == 'egg' || newData.val() == 'teams' || newData.val() == 'survival')" },
           "start": { ".validate": "newData.isString() && (newData.val() == 'home' || newData.val() == 'close' || newData.val() == 'scattered' || newData.val() == 'draft' || newData.val() == 'nests')" },
-          "twists": { ".validate": "newData.isString() && newData.val().matches(/^f?o?p?g?z?c?b?q?$/)" },
-          "tune": { ".validate": "newData.isString() && newData.val().length <= 160 && newData.val().matches(/^[a-z]{2,8}=[0-9]{1,4}(;[a-z]{2,8}=[0-9]{1,4})*$/)" },
+          "twists": { ".validate": "newData.isString() && newData.val().matches(/^f?o?p?g?z?c?b?q?a?$/)" },
+          "tune": { ".validate": "newData.isString() && newData.val().length <= 400 && newData.val().matches(/^[a-z][a-zA-Z]{1,11}=[0-9]{1,4}(;[a-z][a-zA-Z]{1,11}=[0-9]{1,4})*$/)" },
           "out": {
             "$seat": { ".validate": "($seat == 'a' || $seat == 'b' || $seat == 'c' || $seat == 'd') && newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0 && newData.parent().parent().hasChild('players/' + $seat) && ((data.exists() && newData.val() == data.val()) || (!data.exists() && data.parent().parent().child('status').val() == 'playing' && (root.child('swarm').child($code).child('s').child($seat).child('game').val() != newData.parent().parent().child('game').val() || newData.val() >= root.child('swarm').child($code).child('s').child($seat).child('k').val())))" }
           },
@@ -416,7 +416,7 @@
             "game": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0" },
             "k": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() % 1 == 0" },
             "base": { ".validate": "newData.isNumber()" },
-            "orders": { ".validate": "newData.isString() && newData.val().length <= 30000 && newData.val().matches(/^([0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z](,[0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z])*)?$/)" },
+            "orders": { ".validate": "newData.isString() && newData.val().length <= 200000 && newData.val().matches(/^([0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z](,[0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z])*)?$/)" },
             "$other": { ".validate": false }
           }
         },

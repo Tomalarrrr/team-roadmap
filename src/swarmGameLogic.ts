@@ -135,9 +135,12 @@ export const MINUTE_TICKS = 60000 / TICK_MS;
  * is untuned, so a match that stores none plays unit for unit as before.
  * A knob's id is what the match stores, so it is short and never renamed.
  * `unit` is written straight after the number, so it carries its own space.
+ * `on` names the mode, start or twist a knob belongs to, when it has no say
+ * in a game without it. The knobs defined after this table take their standard
+ * from it, since the table cannot read a constant declared below it.
  */
 export const KNOBS = [
-  { id: 'len', label: 'Match length', unit: ' min', min: 2, max: 30, standard: MATCH_TICKS / MINUTE_TICKS, about: 'Minutes on the clock. Four sides and the large ground still add 3 minutes each.' },
+  { id: 'len', label: 'Match length', unit: ' min', min: 2, max: 30, standard: MATCH_TICKS / MINUTE_TICKS, about: 'Minutes on the clock. Four sides and the large ground still add 3 minutes each, and the huge ground 5.' },
   { id: 'grow', label: 'Breeding', unit: '%', min: 25, max: 400, standard: 100, about: 'How fast huts breed. At 200 a hut breeds twice as fast.' },
   { id: 'cap', label: 'Hut room', unit: '%', min: 50, max: 300, standard: 100, about: 'What a hut holds before it stops breeding: 30, 50 and 80 by level at 100%.' },
   { id: 'speed', label: 'Marching', unit: '%', min: 50, max: 200, standard: 100, about: 'How fast units walk. At 50% a column takes twice as long to arrive.' },
@@ -145,9 +148,38 @@ export const KNOBS = [
   { id: 'start', label: 'Starting units', unit: '', min: 1, max: 60, standard: START_UNITS, about: 'Units in each side\'s first hut when the game starts.' },
   { id: 'range', label: 'Tower range', unit: '', min: 50, max: 250, standard: TOWER_RANGE, about: 'How far a tower shoots, on a board 1000 across. Towers stand where they always do.' },
   { id: 'reload', label: 'Tower reload', unit: ' tenths', min: 2, max: 30, standard: TOWER_RELOAD, about: 'Tenths of a second between two shots of a tower.' },
+  { id: 'overtime', label: 'Overtime', unit: ' tenths', min: 0, max: 1200, standard: 600, about: 'Tenths of a second play goes on past the clock while the leaders are level on huts.' },
+  { id: 'waveTicks', on: 'survival', label: 'Wave every', unit: ' tenths', min: 300, max: 1200, standard: WAVE_TICKS, about: 'Tenths of a second between two waves.' },
+  { id: 'waveUnits', on: 'survival', label: 'Wave size', unit: '', min: 1, max: 6, standard: WAVE_UNITS, about: 'Units a wave puts in every computer hut, times the number of the wave.' },
+  { id: 'rallyUnits', on: 'teams', label: 'Rally', unit: '', min: 0, max: 40, standard: RALLY_UNITS, about: 'Units put in each hut of a side whose ally has gone out.' },
+  { id: 'hillTicks', on: 'hill', label: 'Hill to win', unit: ' tenths', min: 300, max: 1200, standard: 600, about: 'Tenths of a second of holding the hill, all told, that win.' },
+  /**
+   * The bounty's cap. Played by computers over 120 games for two sides, the side with the most huts at 1:30 went on to lose 20
+   * with a bounty that never grew, 31 with one that grew to 20, and 28 and 30 with ones that grew to 30 and 50.
+   * In classic it lost 11.
+   */
+  { id: 'bountyMost', on: 'bounty', label: 'Bounty cap', unit: '', min: 10, max: 50, standard: 20, about: 'The most the bounty on the leader grows to.' },
+  { id: 'goldenAt', on: 'golden', label: 'Gold at', unit: ' tenths', min: 600, max: 4800, standard: 1800, about: 'Tenths of a second in when the middle huts turn golden. A blitz still turns them 30% of the way through.' },
+  { id: 'floodEvery', on: 'flood', label: 'Flood every', unit: ' tenths', min: 150, max: 600, standard: 300, about: 'Tenths of a second between two rings going under.' },
+  { id: 'floodKeep', on: 'flood', label: 'Flood leaves', unit: '%', min: 20, max: 70, standard: 40, about: 'The share of huts the flood leaves standing.' },
+  { id: 'rainTicks', on: 'powers', label: 'Rain', unit: ' tenths', min: 50, max: 300, standard: 150, about: 'Tenths of a second the rain falls for.' },
+  { id: 'burnCost', on: 'buildings', label: 'Burn cost', unit: '', min: 5, max: 20, standard: BURN_COST, about: 'Units it costs to set a bridge alight.' },
+  /**
+   * What a big nest's home starts with, at level 3. Against a nest of many, in
+   * cpu games over every map and size, seeds 1 to 8 (2026-10-16), big won 20%
+   * of 2-side games with 15, 41% with 35, 48% with 36, 50% with 37, 55% with 38
+   * and 72% with 60; with 37 a big seat of 4 sides won 27% and of 3 sides 41%.
+   */
+  { id: 'bigNest', on: 'nests', label: 'Big nest', unit: '', min: 15, max: 60, standard: 37, about: 'Units in a big nest.' },
+  { id: 'draftTicks', on: 'draft', label: 'Draft', unit: ' tenths', min: 30, max: 150, standard: 60, about: 'Tenths of a second to pick a hut to start from. The computer picks half way.' },
+  { id: 'kitCost', on: 'armoury', label: 'Kit cost', unit: '', min: 5, max: 30, standard: 10, about: 'Units a tower\'s first level of range, rate or armour costs. The second costs twice that.' },
+  { id: 'refitCost', on: 'armoury', label: 'Refit cost', unit: '', min: 10, max: 40, standard: 20, about: 'Units it costs to refit a tower as a mortar, a ballista or a web.' },
 ] as const;
 
 export type KnobId = (typeof KNOBS)[number]['id'];
+/** The knobs that have a say in a game played to `rules`. */
+export const knobsIn = ({ mode, start, twists }: Pick<Rules, 'mode' | 'start' | 'twists'>) =>
+  KNOBS.filter((knob) => !('on' in knob) || knob.on === mode || knob.on === start || twists.includes(knob.on as Twist));
 export type Tune = Record<KnobId, number>;
 export const STANDARD_TUNE = Object.fromEntries(KNOBS.map((knob) => [knob.id, knob.standard])) as Tune;
 
@@ -199,8 +231,6 @@ export const BLITZ_UNITS = 10;
 export const BLITZ_GROW_PERCENT = 70;
 /** What the hut in the middle holds when the match is played for it. It is a hut of level 2. */
 export const CROWN_UNITS = 20;
-/** A minute holding the hill, all told, wins. */
-export const HILL_TICKS = 600;
 /**
  * How often the side with the most huts is looked for. Taking a hut from it brings in the bounty: BOUNTY on
  * top of the one unit that took it, and a unit more for every BOUNTY_GROWS ticks nobody has, up to BOUNTY_MOST.
@@ -208,14 +238,8 @@ export const HILL_TICKS = 600;
 export const BOUNTY_EVERY = 50;
 export const BOUNTY = 10;
 export const BOUNTY_GROWS = 10;
-/**
- * Played by computers over 120 games for two sides, the side with the most huts at 1:30 went on to lose 20
- * with a bounty that never grew, 31 with one that grew to 20, and 28 and 30 with ones that grew to 30 and 50.
- * In classic it lost 11.
- */
-export const BOUNTY_MOST = 20;
 /** Three minutes in, or three tenths of the way through a blitz, the huts nearest the middle turn golden. */
-export const GOLDEN_TICK = 1800;
+export const GOLDEN_TICK = STANDARD_TUNE.goldenAt;
 export const GOLDEN_BLITZ_PERCENT = 30;
 /** A golden hut breeds in this fraction of its usual time, rounded up, and holds this percentage of its usual cap. */
 export const GOLD_GROW_DIVISOR = 3;
@@ -446,6 +470,12 @@ export interface Order {
 
 const KIND_CHAR: Record<OrderKind, string> = { half: 'h', all: 'a', hut: 'u', speed: 'v', strength: 'p', flag: 'w', nest: 'n', burn: 'x', rain: 'r', call: 'c', decoy: 'y', range: 'l', rate: 'f', armour: 'd', mortar: 'm', ballista: 'b', web: 'e', tower: 't', carapace: 'k' };
 const CHAR_KIND = Object.fromEntries(Object.entries(KIND_CHAR).map(([kind, char]) => [char, kind])) as Record<string, OrderKind>;
+
+/**
+ * The longest orders string the database rules let a seat store; the two are
+ * held equal by swarmRules.test.ts. About 22,000 orders at 9 characters each.
+ */
+export const ORDERS_MAX = 200_000;
 
 /** Tick in base 36, a kind letter, then one base-36 character per hut. The letter is a capital for a risky order. */
 export function encodeOrders(orders: Order[]): string {
@@ -1617,7 +1647,7 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   if (rules.start === 'close') closeIn(sides, homes, sites, links, w, h);
   if (third) startThree(id, sides, homes, sites, links);
   if (rules.start === 'scattered') scatterStarts(sides, homes, sites, w, h);
-  if (rules.start === 'nests') nestStarts(rules.nests, sides, homes, sites, w, h);
+  if (rules.start === 'nests') nestStarts(rules, sides, homes, sites, w, h);
   if (rules.twists.includes('buildings')) placeBuildings(rnd, centreOf({ w, h }), sides.length === 4, homes, sites, links);
   if (rules.mode === 'blitz') for (const home of homes) sites[home] = { ...sites[home], n: BLITZ_UNITS };
   const extra = rules.tune.start - START_UNITS;
@@ -1680,13 +1710,6 @@ function startThree(id: MapId, sides: readonly Seat[], homes: readonly number[],
 export const CLOSE_PATHS = 2;
 /** The huts the scattered start gives each side besides its home: 1 or 2, as its spread weighs one hut or a pair. */
 export const SCATTERED_HUTS = 2;
-/**
- * What a big nest's home starts with, at level 3. Against a nest of many, in
- * cpu games over every map and size, seeds 1 to 8 (2026-10-16), big won 20%
- * of 2-side games with 15, 41% with 35, 48% with 36, 50% with 37, 55% with 38
- * and 72% with 60; with 37 a big seat of 4 sides won 27% and of 3 sides 41%.
- */
-export const BIG_NEST = 37;
 /** The huts a nest of many starts with besides its home. */
 export const MANY_NEST = 3;
 /**
@@ -1825,7 +1848,7 @@ function scatterStarts(sides: readonly Seat[], homes: readonly number[], sites: 
 
 /**
  * The nests start, each side's own pick. A big nest is a home of level 3 with
- * BIG_NEST units. A nest of many is the home and the nearest open huts of the
+ * the tuned bigNest units. A nest of many is the home and the nearest open huts of the
  * side's own part, of level 1 with 5 units each, until it holds MANY_NEST
  * besides the home or its part has no more; the huts a third side's start
  * gives it count. The seats take the images of the first side's nearest; the
@@ -1834,15 +1857,16 @@ function scatterStarts(sides: readonly Seat[], homes: readonly number[], sites: 
  * and images, as the seats it sits between both come at it.
  * Measured on 2026-10-16 over every map, size and seeds 1 to 20: two and four
  * sides hold 3 besides the home on all but a few small Guns and Crossroads
- * boards, where the towers and forts leave room for 2.
+ * boards, where the towers and forts leave room for 2, and four sides on the
+ * Archipelago, whose corner islands are as small.
  */
-function nestStarts(nests: Rules['nests'], sides: readonly Seat[], homes: readonly number[], sites: Site[], w: number, h: number): void {
+function nestStarts({ nests, tune }: Rules, sides: readonly Seat[], homes: readonly number[], sites: Site[], w: number, h: number): void {
   const { seats, middle } = startChoices(sides, homes, sites, w, h);
   const held = heldBy(sides, homes, sites);
   const wanted = Math.max(0, MANY_NEST - held[0].length);
   sides.forEach((side, k) => {
     const isMiddle = sides.length === 3 && k === 2;
-    if (nests[side] !== 'many') sites[homes[k]] = { ...sites[homes[k]], level: 3, n: BIG_NEST };
+    if (nests[side] !== 'many') sites[homes[k]] = { ...sites[homes[k]], level: 3, n: tune.bigNest };
     if (isMiddle) settleOn(sites, side, middle.slice(0, nests[side] === 'many' ? wanted : BIG_MIDDLE_PAIRS).flat());
     else if (nests[side] === 'many') settleOn(sites, side, seats.slice(0, wanted).map((group) => group[k]));
   });
@@ -2276,7 +2300,7 @@ export function sendSize(hut: Hut, kind: 'half' | 'all'): number {
 
 /** What the upgrade costs from this hut, or null when it is already at the top. A tower sells none of these, only its own kit. */
 export function upgradeCost(map: SwarmMap, state: SwarmState, hutIndex: number, kind: Upgrade): number | null {
-  if (kind !== 'hut' && kind !== 'speed' && kind !== 'strength') return armouryCost(state, hutIndex, kind);
+  if (kind !== 'hut' && kind !== 'speed' && kind !== 'strength') return armouryCost(map, state, hutIndex, kind);
   const hut = state.huts[hutIndex];
   if (!hut.owner || isTower(hut)) return null;
   if (kind === 'hut' && barren(hut)) return null;
@@ -2342,7 +2366,7 @@ export function burnCost(state: SwarmState, map: SwarmMap, from: number, to: num
   if (!map.rules.twists.includes('buildings') || at < 0 || map.paths[at].kind !== 'bridge' || !state.huts[from].owner) return null;
   if (state.fuses.some((fuse) => fuse.path === at)) return null;
   const until = state.closed[at];
-  return until === 0 || state.tick > until + BURN_TICKS ? BURN_COST : null;
+  return until === 0 || state.tick > until + BURN_TICKS ? map.rules.tune.burnCost : null;
 }
 
 function burnBridge(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
@@ -2703,9 +2727,9 @@ export const isUpgrade = (kind: OrderKind): kind is Upgrade => kind === 'hut' ||
 // went further than 11 to 5. A side that never refits beat each that does 9-10 to 6-7; a mortar or a ballista with
 // a web beat the same killer alone 11-5; mirrors of the killers ran to the clock in half their games.
 export const KIT_LEVELS = 2;
-/** Units of the tower's garrison a kit level costs, by the level it goes to. */
-export const KIT_COST = [10, 20];
-export const REFIT_COST = 20;
+/** Units of the tower's garrison the first kit level costs untuned; each level after costs that many more. */
+export const KIT_COST = STANDARD_TUNE.kitCost;
+export const REFIT_COST = STANDARD_TUNE.refitCost;
 /** Spent from a level-3 hut to make it a tower: what it bred is kept, but it never breeds again. */
 export const BUILD_COST = 30;
 export const CARAPACE_COST = 35;
@@ -2739,7 +2763,7 @@ export interface Shell {
 export const armed = (map: SwarmMap): boolean => map.rules.twists.includes('armoury');
 
 /** What the armoury sells from this hut, or null when it sells it none of that. */
-function armouryCost(state: SwarmState, at: number, kind: ArmouryKind): number | null {
+function armouryCost(map: SwarmMap, state: SwarmState, at: number, kind: ArmouryKind): number | null {
   const hut = state.huts[at];
   if (!hut.owner) return null;
   if (kind === 'carapace') return isTower(hut) || state.army[hut.owner].carapace ? null : CARAPACE_COST;
@@ -2747,9 +2771,9 @@ function armouryCost(state: SwarmState, at: number, kind: ArmouryKind): number |
   if (!isTower(hut)) return null;
   if (kind === 'range' || kind === 'rate' || kind === 'armour') {
     const level = hut[kind] ?? 0;
-    return level < KIT_LEVELS ? KIT_COST[level] : null;
+    return level < KIT_LEVELS ? (level + 1) * map.rules.tune.kitCost : null;
   }
-  return hut.type ? null : REFIT_COST;
+  return hut.type ? null : map.rules.tune.refitCost;
 }
 
 function fit(state: SwarmState, hut: Hut, seat: Seat, kind: ArmouryKind): void {
@@ -2949,9 +2973,9 @@ export function countAsSeen(state: SwarmState, side: Seat, viewer: Seat): { huts
  * rings a game, a160 b198 against a156 b203 classic.
  */
 export const FLOOD_BAND = 60;
-export const FLOOD_EVERY = 300;
+export const FLOOD_EVERY = STANDARD_TUNE.floodEvery;
 export const FLOOD_START_PERCENT = 40;
-export const FLOOD_KEEP_PERCENT = 40;
+export const FLOOD_KEEP_PERCENT = STANDARD_TUNE.floodKeep;
 /** Ticks a ring is marked on the board before it goes under. */
 export const FLOOD_WARN = 100;
 
@@ -2980,7 +3004,7 @@ export function floodsOf(map: SwarmMap): Flood[] {
     });
     // Towers are left out of the count: a board left with nothing but towers on it would breed nothing.
     const breeders = map.sites.filter((site) => !site.tower).length;
-    const keep = Math.ceil((breeders * FLOOD_KEEP_PERCENT) / 100);
+    const keep = Math.ceil((breeders * map.rules.tune.floodKeep) / 100);
     let left = breeders;
     floods = [];
     for (const ring of [...new Set(rings)].sort((p, q) => q - p)) {
@@ -2989,7 +3013,7 @@ export function floodsOf(map: SwarmMap): Flood[] {
       if (left - lost < keep) break;
       left -= lost;
       const paths = map.paths.flatMap((path, at) => (rings[path.a] === ring || rings[path.b] === ring ? [at] : []));
-      floods.push({ tick: Math.floor((map.ticks * FLOOD_START_PERCENT) / 100) + floods.length * FLOOD_EVERY, huts, paths });
+      floods.push({ tick: Math.floor((map.ticks * FLOOD_START_PERCENT) / 100) + floods.length * map.rules.tune.floodEvery, huts, paths });
     }
     floodCache.set(map, floods);
   }
@@ -3030,7 +3054,7 @@ function flood(state: SwarmState, map: SwarmMap): void {
 }
 
 /** Ticks the rain falls for, from the tick it is called on. */
-export const RAIN_TICKS = 150;
+export const RAIN_TICKS = STANDARD_TUNE.rainTicks;
 
 /**
  * Use a power, once a game for each side. An order that would do nothing
@@ -3043,7 +3067,7 @@ function spendPower(state: SwarmState, map: SwarmMap, seat: Seat, power: Power, 
   if (power === 'rain') {
     const hut = state.huts[order.from];
     if (!hut || hut.owner !== seat) return;
-    state.rain = Math.max(state.rain, state.tick + RAIN_TICKS - 1);
+    state.rain = Math.max(state.rain, state.tick + map.rules.tune.rainTicks - 1);
   } else if (power === 'call') {
     if (!state.huts[order.to]) return;
     from = [];
@@ -3121,12 +3145,12 @@ export const noOrders = (): Partial<Record<Seat, Order[]>> => ({});
 const played = (cpu: Computer, side: Seat, tick: number): boolean => cpu[side] === undefined || tick <= cpu[side];
 
 /** The last tick a match can run to: its clock, and all the overtime it can have. */
-export const lastTick = (map: SwarmMap): number => map.ticks + OVERTIME_TICKS;
+export const lastTick = (map: SwarmMap): number => map.ticks + map.rules.tune.overtime;
 
 /** On the clock with the top two level on huts: play goes on until a hut changes hands. */
 export const inOvertime = (state: SwarmState, map: SwarmMap): boolean => state.winner === null && state.tick >= map.ticks;
 /** Golden: when the huts nearest the middle turn golden, three tenths of the way through a blitz. */
-export const goldenAt = (map: SwarmMap): number => (map.rules.mode === 'blitz' ? Math.floor((map.ticks * GOLDEN_BLITZ_PERCENT) / 100) : GOLDEN_TICK);
+export const goldenAt = (map: SwarmMap): number => (map.rules.mode === 'blitz' ? Math.floor((map.ticks * GOLDEN_BLITZ_PERCENT) / 100) : map.rules.tune.goldenAt);
 
 /** Frenzy: whether `tick` is in the last minute of the match. */
 export const frenzied = (map: SwarmMap, tick: number): boolean => map.rules.twists.includes('frenzy') && tick > map.ticks - FRENZY_TICKS;
@@ -3261,11 +3285,11 @@ function score(map: SwarmMap, state: SwarmState, egg: EggWatch | null): void {
     const crown = middleOf(map);
     const holder = state.huts[crown].owner;
     const home = holder !== null && state.homes[map.sides.indexOf(holder)] === crown;
-    if (holder && (!home || state.tick % 2 === 0) && ++state.held[holder] >= HILL_TICKS) state.winner = holder;
+    if (holder && (!home || state.tick % 2 === 0) && ++state.held[holder] >= map.rules.tune.hillTicks) state.winner = holder;
   }
   if (mode === 'bounty') {
     if (state.tick % BOUNTY_EVERY === 0) state.leader = leaderOf(map, state);
-    if (state.leader && state.tick % BOUNTY_GROWS === 0 && state.bounty < BOUNTY_MOST) state.bounty++;
+    if (state.leader && state.tick % BOUNTY_GROWS === 0 && state.bounty < map.rules.tune.bountyMost) state.bounty++;
   }
   if (egg) settleEgg(map, state, egg);
 }
@@ -3299,13 +3323,13 @@ function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
 }
 
 /** With the draft start, ticks 1 to 60 are the draft: the sides pick the huts they start from, and nothing breeds, walks or is sent. */
-export const DRAFT_TICKS = 60;
+export const DRAFT_TICKS = STANDARD_TUNE.draftTicks;
 
 /** Whether `tick` is one of the draft's on this map. */
-export const drafting = (map: SwarmMap, tick: number): boolean => map.rules.start === 'draft' && tick <= DRAFT_TICKS;
+export const drafting = (map: SwarmMap, tick: number): boolean => map.rules.start === 'draft' && tick <= map.rules.tune.draftTicks;
 
 /** The draft's tick the computer picks on: half way, so a quick person can beat it to a hut and a slower one sees what it took. */
-export const CPU_PICK_TICK = DRAFT_TICKS / 2;
+export const cpuPickTick = (map: SwarmMap): number => Math.floor(map.rules.tune.draftTicks / 2);
 
 /** Whether side k can pick hut `at` in the draft: the first hut it picks that is no tower and no other side's pick. */
 const canPick = (state: SwarmState, map: SwarmMap, k: number, at: number) =>
@@ -3327,7 +3351,7 @@ function draftStep(state: SwarmState, map: SwarmMap, orders: Partial<Record<Seat
     const k = (tick + turn) % map.sides.length;
     const side = map.sides[k];
     if (!played(cpu, side, tick)) {
-      if (tick >= CPU_PICK_TICK && state.picks[k] === -1 && !state.yielded.includes(side)) state.picks[k] = cpuPick(state, map, k);
+      if (tick >= cpuPickTick(map) && state.picks[k] === -1 && !state.yielded.includes(side)) state.picks[k] = cpuPick(state, map, k);
       continue;
     }
     for (const order of orders[side] ?? []) {
@@ -3339,7 +3363,7 @@ function draftStep(state: SwarmState, map: SwarmMap, orders: Partial<Record<Seat
       if (order.kind === 'nest' && canPick(state, map, k, order.from)) state.picks[k] = order.from;
     }
   }
-  if (tick === DRAFT_TICKS) settleDraft(state, map);
+  if (tick === map.rules.tune.draftTicks) settleDraft(state, map);
   judge(state, map, cpu);
 }
 
@@ -3430,12 +3454,12 @@ function judgeTeams(state: SwarmState, map: SwarmMap, cpu: Computer): void {
 }
 
 
-/** Survival's wave `k`: WAVE_UNITS * k into every hut of the computer's but its towers, which never breed, past the cap if it comes to that. */
+/** Survival's wave `k`: the tuned waveUnits * k into every hut of the computer's but its towers, which never breed, past the cap if it comes to that. */
 function wave(state: SwarmState, map: SwarmMap, k: number): void {
   const huts: number[] = [];
   state.huts.forEach((hut, at) => {
     if (!hut.owner || isTower(hut) || !map.rules.computer?.includes(hut.owner)) return;
-    hut.n += WAVE_UNITS * k;
+    hut.n += map.rules.tune.waveUnits * k;
     huts.push(at);
   });
   state.events.push({ kind: 'wave', k, huts });
@@ -3475,7 +3499,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     hut.grow = 0;
     if (hut.n < capOf(map, hut, fed)) hut.n++;
   }
-  if (map.rules.mode === 'survival' && tick % WAVE_TICKS === 0) wave(state, map, tick / WAVE_TICKS);
+  if (map.rules.mode === 'survival' && tick % map.rules.tune.waveTicks === 0) wave(state, map, tick / map.rules.tune.waveTicks);
 
   releaseDecoys(state, map, closed);
   if (tick % RELEASE_TICKS === 0) {
@@ -3538,7 +3562,7 @@ const isOut = (state: SwarmState, side: Seat): boolean => {
 
 /**
  * In teams, a side whose ally has just gone out, by the fight and not by the
- * white flag, has RALLY_UNITS put into every hut it holds but its towers, past
+ * white flag, has the tuned rallyUnits put into every hut it holds but its towers, past
  * the cap if it comes to that. `standing` is who was in at the start of the tick.
  */
 function rally(state: SwarmState, map: SwarmMap, standing: Seat[]): void {
@@ -3549,7 +3573,7 @@ function rally(state: SwarmState, map: SwarmMap, standing: Seat[]): void {
     const huts: number[] = [];
     state.huts.forEach((hut, at) => {
       if (hut.owner !== ally || isTower(hut)) return;
-      hut.n += RALLY_UNITS;
+      hut.n += map.rules.tune.rallyUnits;
       huts.push(at);
     });
     state.events.push({ kind: 'rally', seat: ally, huts });
@@ -3703,7 +3727,7 @@ function stakesOf(map: SwarmMap, state: SwarmState, seat: Seat, closed?: Closed)
     const crown = middleOf(map);
     const holder = huts[crown].owner;
     // The nearer the holder is to a win, the more the hill is worth taking off it.
-    if (holder !== seat) worth[crown] *= CROWN_WORTH + (holder ? (8 * state.held[holder]) / HILL_TICKS : 0);
+    if (holder !== seat) worth[crown] *= CROWN_WORTH + (holder ? (8 * state.held[holder]) / map.rules.tune.hillTicks : 0);
     else keep[crown] = capOf(map, huts[crown], fedOf(state, map));
   }
   if (mode === 'bounty' && state.leader !== null && state.leader !== seat) {
@@ -4222,7 +4246,7 @@ function burnsOf(state: SwarmState, map: SwarmMap, seat: Seat, tick: number): Or
     if (path.kind !== 'bridge') return;
     for (const [from, to] of [[path.a, path.b], [path.b, path.a]]) {
       const hut = state.huts[from];
-      const spare = hut.n - queued(hut) - BURN_COST;
+      const spare = hut.n - queued(hut) - map.rules.tune.burnCost;
       if (hut.owner !== seat || spare < 0 || burnCost(state, map, from, to) === null) continue;
       let caught = 0;
       let first = 0;
@@ -4291,7 +4315,7 @@ function kitUp(state: SwarmState, map: SwarmMap, seat: Seat, at: number, keep: n
   const tower = state.huts[at];
   const site = map.sites[at];
   const affords = (kind: ArmouryKind) => {
-    const cost = armouryCost(state, at, kind);
+    const cost = armouryCost(map, state, at, kind);
     // A tower spent down to what it keeps was taken with its kit on it, so it keeps a garrison's worth more.
     return cost !== null && tower.n - queued(tower) - cost >= keep + TOWER_START;
   };
@@ -4325,7 +4349,7 @@ function kitUp(state: SwarmState, map: SwarmMap, seat: Seat, at: number, keep: n
  */
 function buildsUp(state: SwarmState, map: SwarmMap, seat: Seat, at: number, keep: number): boolean {
   const hut = state.huts[at];
-  if (armouryCost(state, at, 'tower') === null || hut.n < hutCap(map, MAX_HUT_LEVEL) || hut.n - queued(hut) - BUILD_COST < keep) return false;
+  if (armouryCost(map, state, at, 'tower') === null || hut.n < hutCap(map, MAX_HUT_LEVEL) || hut.n - queued(hut) - BUILD_COST < keep) return false;
   return !state.huts.some((other, k) => other.owner === seat && isTower(other) && !far(map.sites[k], map.sites[at], 2 * map.rules.tune.range));
 }
 

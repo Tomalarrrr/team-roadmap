@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   CLASSIC,
-  CPU_PICK_TICK,
+  cpuPickTick,
   DRAFT_TICKS,
   MATCH_TICKS,
   START_UNITS,
@@ -143,10 +143,10 @@ describe('the draft', () => {
   it('has the computer pick the best hut of its own part half way through', () => {
     const map = board();
     const cpu: Computer = { b: 0 };
-    expect(playTo(map, {}, CPU_PICK_TICK - 1, cpu).picks).toEqual([-1, -1]);
-    expect(playTo(map, {}, CPU_PICK_TICK, cpu).picks).toEqual([-1, 3]);
+    expect(playTo(map, {}, cpuPickTick(map) - 1, cpu).picks).toEqual([-1, -1]);
+    expect(playTo(map, {}, cpuPickTick(map), cpu).picks).toEqual([-1, 3]);
     // Hut 3 stands nearer b's home than a's, so a computer at a stays home rather than reach for it.
-    expect(playTo(map, {}, CPU_PICK_TICK, { a: 0 }).picks).toEqual([0, -1]);
+    expect(playTo(map, {}, cpuPickTick(map), { a: 0 }).picks).toEqual([0, -1]);
     const settled = playTo(map, {}, DRAFT_TICKS, cpu);
     expect(settled.homes).toEqual([0, 3]);
     expect(settled.huts[3]).toMatchObject({ owner: 'b', n: START_UNITS, level: 2 });

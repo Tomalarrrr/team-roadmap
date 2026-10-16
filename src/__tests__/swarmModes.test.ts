@@ -170,6 +170,13 @@ describe('king of the hill', () => {
     expect([state.winner, state.tick, state.held.a]).toEqual(['a', 600, 600]);
   });
 
+  it('is won after the tuned hold', () => {
+    const board = hill({ ...HILL, tune: { ...CLASSIC.tune, hillTicks: 300 } });
+    const state = newState(board);
+    advance(state, board, {}, 400);
+    expect([state.winner, state.tick]).toEqual(['a', 300]);
+  });
+
   it('on the clock goes to the side that held it longest, even with fewer huts', () => {
     const board = { ...hill(HILL), ticks: 100 };
     const state = newState(board);
@@ -250,6 +257,13 @@ describe('bounty', () => {
     expect(state.bounty).toBe(16);
     advance(state, board, {}, 300);
     expect(state.bounty).toBe(20);
+  });
+
+  it('grows the bounty up to the tuned cap', () => {
+    const board = { ...field(), rules: { ...rulesFor('bounty'), tune: { ...CLASSIC.tune, bountyMost: 13 } } };
+    const state = newState(board);
+    advance(state, board, {}, 300);
+    expect(state.bounty).toBe(13);
   });
 
   it('marks nobody when two sides hold as many huts', () => {
@@ -338,6 +352,15 @@ describe('the golden twist', () => {
     advance(state, board, {}, GOLDEN_TICK - 1);
     expect(state.huts.some((h) => h.gold)).toBe(false);
     advance(state, board, {}, GOLDEN_TICK);
+    expect(state.huts.map((h) => h.gold === true)).toEqual([false, false, true, true, false, false]);
+  });
+
+  it('turns them golden at the tuned tick', () => {
+    const board = { ...field(null), rules: { ...GOLDEN, tune: { ...CLASSIC.tune, goldenAt: 600 } } };
+    const state = newState(board);
+    advance(state, board, {}, 599);
+    expect(state.huts.some((h) => h.gold)).toBe(false);
+    advance(state, board, {}, 600);
     expect(state.huts.map((h) => h.gold === true)).toEqual([false, false, true, true, false, false]);
   });
 

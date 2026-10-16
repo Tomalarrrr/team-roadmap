@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { act, useState, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { STANDARD_TUNE, type SwarmMatch, type Tune } from '../../swarmGameLogic';
+import { CLASSIC, STANDARD_TUNE, type SwarmMatch, type Tune } from '../../swarmGameLogic';
 import type { SwarmRoom } from '../../api/swarmApi';
-import { leaveWarning, tuneSummary } from '../swarm/swarmLobby';
+import { leaveWarning, tuneSummary, type RulesChoice } from '../swarm/swarmLobby';
 import { SwarmGame, TunePanel } from '../swarm/SwarmGame';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -55,9 +55,9 @@ describe('what leaving costs', () => {
 });
 
 // The lobby holds whether the settings are open; here a stand-in for it does.
-function Panel(props: Omit<ComponentProps<typeof TunePanel>, 'open' | 'onOpen'>) {
+function Panel({ rules = CLASSIC, ...props }: Omit<ComponentProps<typeof TunePanel>, 'open' | 'onOpen' | 'rules'> & { rules?: RulesChoice }) {
   const [open, setOpen] = useState(false);
-  return <TunePanel {...props} open={open} onOpen={setOpen} />;
+  return <TunePanel {...props} rules={rules} open={open} onOpen={setOpen} />;
 }
 
 let root: Root | null = null;
@@ -95,10 +95,20 @@ describe('the settings panel', () => {
     expect(field('Match length')).toBe(null);
     expect(container!.textContent).toBe('Settings');
     act(() => button('Settings')!.click());
-    expect(container!.querySelectorAll('input')).toHaveLength(8);
+    expect(container!.querySelectorAll('input')).toHaveLength(9);
+    expect(field('Wave every')).toBe(null);
     expect(field('Match length')!.value).toBe('10');
     expect(button('Reset to standard')!.disabled).toBe(true);
     expect(container!.textContent).toContain('Idle words');
+  });
+
+  it('shows the knobs of the chosen mode, start and twists, and no others', () => {
+    mount(<Panel tune={STANDARD_TUNE} rules={{ mode: 'survival', start: 'draft', twists: ['armoury'] }} idle="" />);
+    act(() => button('Settings')!.click());
+    const labels = [...container!.querySelectorAll('label')].map((l) => l.textContent);
+    expect(labels).toHaveLength(14);
+    for (const label of ['Wave every', 'Wave size', 'Draft', 'Kit cost', 'Refit cost', 'Overtime']) expect(field(label)).not.toBe(null);
+    for (const label of ['Rally', 'Hill to win', 'Big nest', 'Flood every', 'Burn cost']) expect(field(label)).toBe(null);
   });
 
   it('lets the host set a value, held to its range when the field is left', () => {

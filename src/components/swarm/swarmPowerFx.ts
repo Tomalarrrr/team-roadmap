@@ -3,7 +3,7 @@
 // it is on, and one ring out from each hut that answered. A decoy is drawn by
 // the units: faint to its own side, and like any other column to everyone else.
 
-import { RAIN_TICKS, type Seat, type SwarmEvent, type SwarmMap, type SwarmState } from '../../swarmGameLogic';
+import { type Seat, type SwarmEvent, type SwarmMap, type SwarmState } from '../../swarmGameLogic';
 import { BADGE, ellipse } from './swarmSceneKit';
 
 export interface CallFx {
@@ -59,7 +59,7 @@ const RAIN_EASE = 8;
 /** The rain, with `ctx` in world units. `tick` is the frame's tick with its fraction. */
 export function drawRain(ctx: CanvasRenderingContext2D, map: SwarmMap, state: SwarmState, tick: number, now: number): void {
   if (state.rain === 0) return;
-  const start = state.rain - RAIN_TICKS + 1;
+  const start = state.rain - map.rules.tune.rainTicks + 1;
   const fall = Math.min(1, (tick - start + 1) / RAIN_EASE, (state.rain + 1 - tick) / RAIN_EASE);
   if (fall <= 0) return;
   ctx.globalAlpha = 0.12 * fall;

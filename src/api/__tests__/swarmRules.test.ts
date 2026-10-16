@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { KNOBS, ORDERS_MAX, encodeTune, type Tune } from '../../swarmGameLogic';
 
 // The swarm rules run here against a small stand-in for the database's own
 // evaluator, because the fake proxy the API tests use does not read them and
@@ -223,7 +224,9 @@ describe('the swarm rules: who sits where', () => {
   });
 
   it('holds the twists to one letter each in their order', () => {
-    expect(allowed(db(waitingRoom()), `${M}/twists`, 'fopgzcbq')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'fopgzcbqa')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'a')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'af')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/twists`, 'fq')).toBe(true);
     expect(allowed(db(waitingRoom()), `${M}/twists`, 'qf')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/twists`, 'ff')).toBe(false);
@@ -249,7 +252,11 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), `${M}/tune`, 'LEN=15')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/tune`, 'len=1.5')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/tune`, 15)).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/tune`, Array.from({ length: 20 }, () => 'speed=100').join(';'))).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'waveTicks=300;refitCost=40')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'Wave=300')).toBe(false);
+    const most = encodeTune(Object.fromEntries(KNOBS.map((knob) => [knob.id, knob.max])) as Tune);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, most)).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, Array.from({ length: 41 }, () => 'speed=100').join(';'))).toBe(false);
   });
 
   it('takes a nest of big or many on a player', () => {
@@ -368,6 +375,13 @@ describe('the swarm rules: what a seat writes', () => {
     expect(allowed(before, `${S}/a`, write({ orders: '2b:M02' }))).toBe(false);
     expect(allowed(before, `${S}/a`, write({ base: 2 }))).toBe(false);
     expect(allowed(before, `${S}/a`, write({ at: NOW - 1 }))).toBe(false);
+  });
+
+  it('stores orders up to the cap the client keeps to, and none longer', () => {
+    const atCap = `1a:M01${',1b:M01'.repeat(28568)}${',zzzz:M01'.repeat(2)}`;
+    expect(atCap.length).toBe(ORDERS_MAX);
+    expect(allowed(before, `${S}/a`, write({ orders: atCap }))).toBe(true);
+    expect(allowed(before, `${S}/a`, write({ orders: `${atCap},1:h01` }))).toBe(false);
   });
 });
 

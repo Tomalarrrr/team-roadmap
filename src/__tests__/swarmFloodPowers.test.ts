@@ -72,6 +72,15 @@ describe('the flood', () => {
     expect(floodsOf({ ...map, rules: rulesWith() })).toEqual([]);
   });
 
+  it('floods on the tuned beat, and stops at the tuned share', () => {
+    const { map } = floodMap();
+    const start = (map.ticks * FLOOD_START_PERCENT) / 100;
+    const tuned = (tune: Partial<typeof map.rules.tune>) => floodsOf({ ...map, rules: { ...map.rules, tune: { ...map.rules.tune, ...tune } } });
+    expect(tuned({ floodEvery: 150 }).map((flood) => flood.tick)).toEqual([start, start + 150]);
+    // Four huts breed: keeping 70% keeps 3, and the outer ring alone would leave 2.
+    expect(tuned({ floodKeep: 70 })).toEqual([]);
+  });
+
   it('takes its huts, every path to them and every unit on those paths', () => {
     const { map, state } = floodMap();
     const start = floodsOf(map)[0].tick;
@@ -147,6 +156,13 @@ function lineMap(twists: Twist[] = ['powers']) {
 }
 
 describe('rain', () => {
+  it('falls for the tuned time', () => {
+    const { map, state } = lineMap();
+    map.rules = { ...map.rules, tune: { ...map.rules.tune, rainTicks: 60 } };
+    step(state, map, { a: [order(1, 'rain', 0, 0)], b: [] });
+    expect(state.rain).toBe(60);
+  });
+
   it('falls for RAIN_TICKS from the tick it is called, once a side', () => {
     const { map, state } = lineMap();
     step(state, map, { a: [order(1, 'rain', 0, 0)], b: [] });

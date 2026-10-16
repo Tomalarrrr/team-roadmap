@@ -8,7 +8,6 @@
 // seed and the clock, so the two players see the same wind and the same snow.
 
 import {
-  WAVE_TICKS,
   allied,
   cloneState,
   countOf,
@@ -189,7 +188,7 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   if (!holdsBridge(before, map, seat) && holdsBridge(after, map, seat)) due.add('bridgeHeld');
   if (before.tick < map.ticks && after.tick >= map.ticks && after.winner === null) due.add('overtime');
   if (after.events.some((event) => event.kind === 'rally' && event.seat === seat)) due.add('allyOut');
-  if (map.rules.mode === 'survival' && after.tick + WAVE_WARN_TICKS < map.ticks && Math.floor((after.tick + WAVE_WARN_TICKS) / WAVE_TICKS) > Math.floor((before.tick + WAVE_WARN_TICKS) / WAVE_TICKS)) due.add('waveSoon');
+  if (map.rules.mode === 'survival' && after.tick + WAVE_WARN_TICKS < map.ticks && Math.floor((after.tick + WAVE_WARN_TICKS) / map.rules.tune.waveTicks) > Math.floor((before.tick + WAVE_WARN_TICKS) / map.rules.tune.waveTicks)) due.add('waveSoon');
   // Lit by another side: there are seconds to get across it, or to take the hut it was lit from.
   if (after.fuses.some((fuse) => fuse.seat !== seat && !before.fuses.some((was) => was.path === fuse.path))) due.add('bridgeAlight');
 

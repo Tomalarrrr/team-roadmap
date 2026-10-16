@@ -13,6 +13,7 @@ import {
   decodeOrders,
   encodeOrders,
   lastTick,
+  ORDERS_MAX,
   newState,
   sidesOf,
   type Order,
@@ -23,6 +24,7 @@ import {
 } from '../../swarmGameLogic';
 import {
   BEAT_AWAY_MS,
+  fitsOrders,
   BEAT_IDLE_MS,
   POLL_AWAY_MS,
   SILENT_IDLE_MS,
@@ -383,6 +385,19 @@ describe('more than two sides', () => {
     });
     expect((tabs[0].lock as Lockstep).confirmed.tick).toBeLessThanOrEqual(200);
     expect((tabs[0].lock as Lockstep).confirmed.tick).toBeGreaterThanOrEqual(stopped);
+  });
+});
+
+describe('the orders a seat may store', () => {
+  it('takes an order up to the cap, to the character, and none past it', () => {
+    const order = (tick: number): Order => ({ tick, kind: 'half', from: 0, to: 1 });
+    // '1:h01' is 5 characters and a comma joins each to the next.
+    const list = Array.from({ length: 33332 }, () => order(1));
+    expect(encodeOrders(list).length).toBe(ORDERS_MAX - 9);
+    // A comma and 'zzzz:h01' end exactly at the cap; a tick one longer goes past it.
+    expect(fitsOrders(list, order(36 ** 4 - 1))).toBe(true);
+    expect(fitsOrders(list, order(36 ** 4))).toBe(false);
+    expect(fitsOrders([], order(1))).toBe(true);
   });
 });
 
