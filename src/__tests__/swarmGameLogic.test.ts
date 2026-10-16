@@ -7,6 +7,7 @@ import {
   LUCK_DEN,
   MAP_IDS,
   MATCH_TICKS,
+  OVERTIME_TICKS,
   SEATS,
   SIZE_IDS,
   START_UNITS,
@@ -23,6 +24,8 @@ import {
   cpuOrders,
   decodeOrders,
   encodeOrders,
+  inOvertime,
+  lastTick,
   mulberry32,
   newState,
   nextHop,
@@ -948,16 +951,56 @@ describe('how a match ends', () => {
     expect(state.winner).toBe('a');
   });
 
-  it('goes to the side with more units when the clock runs out level on huts', () => {
+  it('plays on in overtime when the clock runs out level on huts', () => {
     const { map, state } = duel('b', 9);
     state.tick = MATCH_TICKS - 1;
     step(state, map, none());
-    expect(state.winner).toBe('b');
+    expect(state.winner).toBeNull();
+    expect(inOvertime(state, map)).toBe(true);
   });
 
-  it('is a draw on the clock when huts and units are level', () => {
+  it('ends overtime the moment a hut changes hands, on huts, whoever has more units', () => {
+    const { map, state } = duel(null, 1, 20);
+    state.huts[2].n = 30;
+    state.tick = MATCH_TICKS - 1;
+    step(state, map, none());
+    expect(state.winner).toBeNull();
+    const orders = none();
+    orders.a.push({ tick: MATCH_TICKS + 1, kind: 'all', from: 0, to: 1 });
+    let took = -1;
+    advance(state, map, orders, lastTick(map), {}, (s) => {
+      if (s.events.some((event) => event.kind === 'capture')) took = s.tick;
+    });
+    expect(took).toBeGreaterThan(MATCH_TICKS);
+    expect(state.tick).toBe(took);
+    expect(state.winner).toBe('a');
+  });
+
+  it('runs out of overtime with nothing changing hands, and units decide', () => {
+    const { map, state } = duel('b', 9);
+    // A hut of the second level holds 50 and not 30: b is ahead on units once both have filled.
+    state.huts[1].level = 2;
+    state.tick = MATCH_TICKS - 1;
+    advance(state, map, none(), lastTick(map) + 50);
+    expect(state.tick).toBe(lastTick(map));
+    expect(state.tick).toBe(MATCH_TICKS + OVERTIME_TICKS);
+    expect(state.winner).toBe('b');
+    expect(inOvertime(state, map)).toBe(false);
+  });
+
+  it('is a draw at the end of overtime when huts and units are level', () => {
     const { map, state } = duel('b', 5);
     state.tick = MATCH_TICKS - 1;
+    advance(state, map, none(), lastTick(map) + 50);
+    expect(state.tick).toBe(lastTick(map));
+    expect(state.winner).toBe('draw');
+  });
+
+  it('is still open one tick before overtime runs out', () => {
+    const { map, state } = duel('b', 5);
+    state.tick = lastTick(map) - 2;
+    step(state, map, none());
+    expect(state.winner).toBeNull();
     step(state, map, none());
     expect(state.winner).toBe('draw');
   });
@@ -1583,7 +1626,7 @@ describe.each(MAP_IDS)('two computers on the %s map', (id) => {
     const theirs = newState(theirMap);
     let predicted: SwarmState | null = null;
     const astray = new Set<number>();
-    playOut(state, map, orders, MATCH_TICKS, (s) => {
+    playOut(state, map, orders, lastTick(map), (s) => {
       for (const unit of s.units) {
         const kind = pathOf(map, unit.from, unit.to)?.kind;
         if (!kind || (takesToll(kind) && !unit.risky)) astray.add(unit.id);
@@ -1596,7 +1639,7 @@ describe.each(MAP_IDS)('two computers on the %s map', (id) => {
     expect([...astray]).toEqual([]);
     expect(['a', 'b', 'draw']).toContain(state.winner);
     expect(state.tick).toBeGreaterThan(500);
-    expect(state.tick).toBeLessThanOrEqual(MATCH_TICKS);
+    expect(state.tick).toBeLessThanOrEqual(lastTick(map));
     expect(orders.a.length).toBeGreaterThan(10);
     expect(orders.b.length).toBeGreaterThan(10);
     // The orders went over the wire between the two.
@@ -1604,7 +1647,7 @@ describe.each(MAP_IDS)('two computers on the %s map', (id) => {
 
     expect(predicted).not.toBeNull();
     if (predicted) {
-      run(predicted, theirMap, orders, MATCH_TICKS);
+      run(predicted, theirMap, orders, lastTick(map));
       expect(JSON.stringify({ ...(predicted as SwarmState), events: [], shots: [] })).toBe(JSON.stringify({ ...state, events: [], shots: [] }));
     }
   });

@@ -23,6 +23,7 @@ import {
   computerOf,
   decodeOrders,
   encodeOrders,
+  lastTick,
   newState,
   type Order,
   type Seat,
@@ -182,7 +183,7 @@ function behind(game: Lockstep, seen: number): boolean {
 
 /** What this seat writes at `tick`. Sending it is a promise, so it is made here and not when the write lands. */
 export function sending(game: Lockstep, seat: Seat, seq: number, tick: number): SeatWrite {
-  game.promised = Math.max(game.promised, Math.min(tick, game.map.ticks), 0);
+  game.promised = Math.max(game.promised, Math.min(tick, lastTick(game.map)), 0);
   game.sent.push(seq);
   return {
     seq,
@@ -218,6 +219,9 @@ function knownTo(game: Lockstep, stored: SwarmSeatState | undefined, computerFro
  * tab that was reloaded starts with none and has to take them back, and the
  * same seat open in a second tab is giving orders this one has not seen;
  * either way the other clients are running them.
+ *
+ * `onStep` sees each tick of the shown state, which can be run again on orders
+ * heard late; `onConfirmed` sees each tick of the confirmed one, which is final.
  */
 export function settle(
   game: Lockstep,
@@ -225,7 +229,8 @@ export function settle(
   match: Pick<SwarmMatch, 'cpu' | 'out'>,
   seats: Partial<Record<Seat, SwarmSeatState>> | undefined,
   tick: number,
-  onStep?: (state: SwarmState) => void
+  onStep?: (state: SwarmState) => void,
+  onConfirmed?: (state: SwarmState) => void
 ): void {
   let rerun = false;
   const own = seats?.[seat];
@@ -252,7 +257,7 @@ export function settle(
       game.orders[other] = decodeOrders(theirs.orders);
     }
   }
-  advance(game.confirmed, game.map, game.orders, to, computer);
+  advance(game.confirmed, game.map, game.orders, to, computer, onConfirmed);
   if (rerun || game.shown.tick !== tick || game.shown.tick < game.confirmed.tick) {
     game.shown = cloneState(game.confirmed);
     advance(game.shown, game.map, game.orders, tick, computer, onStep);

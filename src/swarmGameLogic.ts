@@ -27,6 +27,8 @@ export const COUNTDOWN_MS = 3000;
 export const MATCH_TICKS = 6000;
 /** Three minutes more for four sides, and again on the large ground. */
 const EXTRA_TICKS = 1800;
+/** The most a match level on huts at the clock plays on for one to change hands: a minute. */
+export const OVERTIME_TICKS = 600;
 export const START_UNITS = 5;
 /** One unit leaves a hut per order every this many ticks, so a big send is a column, not a blob. */
 export const RELEASE_TICKS = 2;
@@ -1703,21 +1705,32 @@ export const noOrders = (): Partial<Record<Seat, Order[]>> => ({});
 /** Whether a person still gives the orders of `side` after this tick. */
 const played = (cpu: Computer, side: Seat, tick: number): boolean => cpu[side] === undefined || tick <= cpu[side];
 
+/** The last tick a match can run to: its clock, and all the overtime it can have. */
+export const lastTick = (map: SwarmMap): number => map.ticks + OVERTIME_TICKS;
+
+/** On the clock with the top two level on huts: play goes on until a hut changes hands. */
+export const inOvertime = (state: SwarmState, map: SwarmMap): boolean => state.winner === null && state.tick >= map.ticks;
+
 /**
  * The game ends when one side is left, or on the clock, when the side holding
  * the most huts, then the most units, takes it. A tie at the top is a draw.
- * When every person in it is beaten or gone it is called the same way there
- * and then: nobody is left to watch the computers play it out.
+ * The top two level on huts at the clock play on in overtime, until a hut
+ * changes hands and one of them is ahead, for at most OVERTIME_TICKS; units
+ * decide only after that. When every person in it is beaten or gone it is
+ * called the same way there and then: nobody is left to watch the computers
+ * play it out.
  */
 function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
   // A side with no hut can still win one back with the units it has on the road.
   const counts = map.sides.map((side) => ({ side, ...countOf(state, side) })).filter((count) => count.huts > 0 || count.units > 0);
   const people = map.sides.some((side) => cpu[side] !== 0);
+  const nobody = people && !counts.some((count) => played(cpu, count.side, state.tick));
   if (counts.length <= 1) {
     state.winner = counts.length === 1 ? counts[0].side : 'draw';
-  } else if (state.tick >= map.ticks || (people && !counts.some((count) => played(cpu, count.side, state.tick)))) {
+  } else if (state.tick >= map.ticks || nobody) {
     counts.sort((p, q) => q.huts - p.huts || q.units - p.units);
     const [first, second] = counts;
+    if (first.huts === second.huts && !nobody && state.tick < lastTick(map)) return;
     state.winner = first.huts === second.huts && first.units === second.units ? 'draw' : first.side;
   }
 }
