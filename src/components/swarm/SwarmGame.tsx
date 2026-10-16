@@ -26,6 +26,7 @@ import {
   MAP_IDS,
   countOf,
   kindsOf,
+  rulesOf,
   sendSize,
   sidesOf,
   sizeOf,
@@ -39,6 +40,7 @@ import {
   type SwarmState,
 } from '../../swarmGameLogic';
 import { BADGE } from './swarmSceneKit';
+import { modeNotes, modeStory, type ModeNote } from './swarmModes';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
 import { columnOf, startsOf, whereOf, type Start } from './swarmStarts';
@@ -225,9 +227,13 @@ interface Hud {
   starts: Partial<Record<Seat, Start>>;
   /** A hut is in hand, with its upgrades showing. */
   picked: boolean;
+  /** What the mode and twists are counting, under the clock. */
+  notes: ModeNote[];
+  /** What the mode adds to the result once there is one. */
+  story: string[];
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false };
+const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false, notes: [], story: [] };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -602,7 +608,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
       // A finished game stays on the board until the next one starts.
       if (playing && game?.game !== m.game) {
-        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size));
+        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size), rulesOf(m));
         game = { ...newLockstep(m.game, map), scene: newScene(map, m.seed, kindsOf(m, map.sides)), fxTick: 0 };
         starts = startsOf(map);
         selected = null;
@@ -651,6 +657,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         counts: {},
         starts,
         picked: false,
+        notes: [],
+        story: [],
       };
       if (game) {
         const ticks = game.map.ticks;
@@ -661,6 +669,12 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         if (drag) drag.sources = drag.sources.filter((hut) => game?.shown.huts[hut].owner === seat);
         if (drag?.sources.length === 0) drag = null;
         next.picked = selected !== null;
+        next.notes = modeNotes(game.map, game.shown);
+        if (game.shown.winner !== null) {
+          const { kinds } = game.scene;
+          const them = (other: Seat) => `The ${KIND_NAME[kinds[other]].many.toLowerCase()}`;
+          next.story = modeStory(game.map, game.shown, (other) => (other === seat ? { name: 'You', whose: 'Your' } : { name: them(other), whose: `${them(other)}'` }));
+        }
       }
       const nextKey = JSON.stringify(next);
       if (nextKey !== hudKey) {
@@ -1020,7 +1034,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     const left = SEATS.filter((seat) => match.out?.[seat] !== undefined).map((seat) =>
       seat === mySeat ? 'You left; the computer took over' : `${match.players[seat]?.name} left; the computer took over`
     );
-    return [first, ...left];
+    return [first, ...hud.story, ...left];
   };
 
   const tally = (seat: Seat) => {
@@ -1222,6 +1236,17 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                   {Math.floor(hud.secs / 60)}:{String(hud.secs % 60).padStart(2, '0')}
                 </span>
               )}
+              {hud.notes.map((note) => (
+                <span key={note.label} className={styles.modeNote}>
+                  {note.label}
+                  {note.sides.map(({ seat, text }) => (
+                    <span key={seat} className={styles.modeSide}>
+                      <span className={styles.dot} style={{ background: BADGE[seat].fill }} />
+                      {text}
+                    </span>
+                  ))}
+                </span>
+              ))}
               {column('middle')}
             </span>
             <span className={`${styles.sideCol} ${styles.sideColEnd}`}>{column('right')}</span>

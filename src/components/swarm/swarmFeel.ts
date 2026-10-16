@@ -22,6 +22,7 @@ import {
 } from '../../swarmGameLogic';
 import { BADGE, LANE, PATH_W, areaOf, crossingsOf, fontOf, growOf, pathPoint, riverDir, riverOf, siteRadius, summitOf, type Crossing } from './swarmSceneKit';
 import { WIND } from './swarmSceneGround';
+import { modeCallouts } from './swarmModes';
 
 const TAU = Math.PI * 2;
 
@@ -55,16 +56,30 @@ export type CalloutKey =
   | 'towerTaken'
   | 'fortTaken'
   | 'bridgeHeld'
-  | 'backFromOne';
+  | 'backFromOne'
+  | 'queenLost'
+  | 'hillLost'
+  | 'eggLost'
+  | 'hillTaken'
+  | 'eggTaken'
+  | 'goldenHut'
+  | 'frenzy';
 
 /** Most pressing first: when several are due at once, bad news is read before good. */
 export const CALLOUT_ORDER: readonly CalloutKey[] = [
+  'queenLost',
   'lastHut',
   'enemyAtGate',
   'towerLost',
   'fortLost',
+  'hillLost',
+  'eggLost',
+  'frenzy',
+  'goldenHut',
   'towerTaken',
   'fortTaken',
+  'hillTaken',
+  'eggTaken',
   'bridgeHeld',
   'backFromOne',
 ];
@@ -78,6 +93,13 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   fortTaken: 'Fort taken',
   bridgeHeld: 'Bridge held',
   backFromOne: 'Back from one hut',
+  queenLost: 'Queen lost',
+  hillLost: 'Hill lost',
+  eggLost: 'Egg lost',
+  hillTaken: 'Hill taken',
+  eggTaken: 'Egg taken',
+  goldenHut: 'Golden hut',
+  frenzy: 'Frenzy',
 };
 
 /** Enemy units on the road to the viewer's home before it is called a column. */
@@ -135,6 +157,7 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   ) {
     due.add('enemyAtGate');
   }
+  for (const key of modeCallouts(before, after, map, seat)) due.add(key);
   return CALLOUT_ORDER.filter((key) => due.has(key));
 }
 
@@ -160,6 +183,13 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   fortTaken: 6000,
   bridgeHeld: 20000,
   backFromOne: 20000,
+  queenLost: 6000,
+  hillLost: 6000,
+  eggLost: 6000,
+  hillTaken: 6000,
+  eggTaken: 6000,
+  goldenHut: 20000,
+  frenzy: 20000,
 };
 
 export interface Callouts {

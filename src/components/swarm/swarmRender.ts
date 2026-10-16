@@ -31,6 +31,7 @@ import {
 import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type Leg, type Sending } from './swarmAim';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
 import { paintGround } from './swarmSceneGround';
+import { drawModes } from './swarmSceneModes';
 import { drawFlags, paintSite } from './swarmSceneHuts';
 import {
   BADGE,
@@ -1295,6 +1296,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   drawAimUnder(ctx, map, state, view, scene.standing.legs, aim);
   drawStanding(ctx, scene, state, view, scale);
   drawFx(ctx, scene, view.now);
+  drawModes(ctx, map, state, view.alpha, px);
   drawCounts(ctx, scene, state, view, scale, px);
 
   if (view.selected !== null && !view.drag) {

@@ -73,6 +73,44 @@ export const TOLL_EVERY = 4;
  */
 export const FORT_LIVES = 2;
 
+/** A blitz is three minutes, and one more for four sides. */
+export const BLITZ_TICKS = 1800;
+export const BLITZ_EXTRA = 600;
+/** In a blitz every start holds this many, and the armies start a speed level up. */
+export const BLITZ_UNITS = 10;
+/** In a blitz a hut takes this percentage of its usual time to breed a unit, rounded down. */
+export const BLITZ_GROW_PERCENT = 70;
+/** What the hut in the middle holds when the match is played for it. It is a hut of level 2. */
+export const CROWN_UNITS = 20;
+/** A minute holding the hill, all told, wins. */
+export const HILL_TICKS = 600;
+/**
+ * How often the side with the most huts is looked for. Taking a hut from it brings in the bounty: BOUNTY on
+ * top of the one unit that took it, and a unit more for every BOUNTY_GROWS ticks nobody has, up to BOUNTY_MOST.
+ */
+export const BOUNTY_EVERY = 50;
+export const BOUNTY = 10;
+export const BOUNTY_GROWS = 10;
+/**
+ * Played by computers over 120 games for two sides, the side with the most huts at 1:30 went on to lose 20
+ * with a bounty that never grew, 31 with one that grew to 20, and 28 and 30 with ones that grew to 30 and 50.
+ * In classic it lost 11.
+ */
+export const BOUNTY_MOST = 20;
+/** Three minutes in, or three tenths of the way through a blitz, the huts nearest the middle turn golden. */
+export const GOLDEN_TICK = 1800;
+export const GOLDEN_BLITZ_PERCENT = 30;
+/** A golden hut breeds in this fraction of its usual time, rounded up, and holds this percentage of its usual cap. */
+export const GOLD_GROW_DIVISOR = 3;
+export const GOLD_CAP_PERCENT = 150;
+/** The last minute of a match with the frenzy twist, how much faster everything breeds, and how fast its towers shoot. */
+export const FRENZY_TICKS = 600;
+export const FRENZY_GROW_DIVISOR = 2;
+export const FRENZY_RELOAD = 3;
+/** Comeback: a side this many huts or more behind the leader breeds in this percentage of the time, rounded down. */
+export const COMEBACK_GAP = 2;
+export const COMEBACK_GROW_PERCENT = 80;
+
 /** The four sides there can be on the board. Each is played by a person or by the computer. */
 export type Seat = 'a' | 'b' | 'c' | 'd';
 export type Owner = Seat | null;
@@ -674,9 +712,9 @@ const RING = 250;
  *              sides' columns, and of two as near it shoots the older, which is
  *              always seat a's.
  */
-function grow(rnd: () => number, id: MapId, count: number, size: SizeId): Drawn {
+function grow(rnd: () => number, id: MapId, count: number, size: SizeId, crowned: boolean): Drawn {
   for (let attempt = 0; attempt < 60; attempt++) {
-    const drawn = tryGrow(rnd, id, count, size);
+    const drawn = tryGrow(rnd, id, count, size, crowned);
     if (drawn) return drawn;
   }
   throw new Error(`No ${size} ${id} map for ${count} sides grew from this seed`);
@@ -691,7 +729,7 @@ const apart = (p: Site, q: Site) =>
     ? far(p, q, MIN_GAP)
     : far(p, q, TOWER_RANGE) && (Math.abs(p.x - q.x) >= TOWER_SHADE_X || Math.abs(p.y - q.y) >= TOWER_SHADE_Y);
 
-function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Drawn | null {
+function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crowned: boolean): Drawn | null {
   const int = (n: number) => Math.floor(rnd() * n);
   const { w, h } = WORLDS[size];
   const centre = centreOf({ w, h });
@@ -740,6 +778,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Dra
   else if (id === 'hill') put(cx, cy, { owner: null, n: 14 + int(5), level: 2, fort: true });
   else if (id === 'bridges') put(cx, cy, { owner: null, n: 16 + int(8), level: 2 });
   else if (id === 'crossroads') put(cx, cy, { owner: null, n: 16 + int(6), level: 2, fort: true });
+  else if (crowned) put(cx, cy, { owner: null, n: CROWN_UNITS, level: 2 });
   const middle = sites.findIndex((p) => p.x === cx && p.y === cy);
 
   // The huts of the ring that the road reaches the middle from. Every other way in is the hard one.
@@ -762,9 +801,9 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Dra
       for (let y = top + 15 + int(40), made = 0; y <= cy - 170 && made < 2; y += 190 + int(40)) if (put(cx - FACING, y, TOWER) >= 0) made++;
       for (let x = left + 40 + int(60), made = 0; x <= cx - 230 && made < 3; x += 200 + int(60)) if (put(x, cy - FACING, TOWER) >= 0) made++;
     } else {
-      // An even column keeps a tower off the middle, where the third side's base would be under its fire.
+      // An even column keeps a tower off the middle, where the third side's base or the crown would be under its fire.
       const most = Math.min(5, Math.floor((bottom - top) / 190) + 1);
-      const column = count === 3 ? 2 + 2 * int(Math.floor(most / 2)) : 2 + int(most - 1);
+      const column = count === 3 || crowned ? 2 + 2 * int(Math.floor(most / 2)) : 2 + int(most - 1);
       const gap = 2 * Math.floor((h - FIELD_SHORT) / (2 * (column + 1)));
       for (let k = 0; k < column; k++) put(cx - FACING, cy + ((2 * k - (column - 1)) * gap) / 2, TOWER);
     }
@@ -863,8 +902,8 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId): Dra
   };
 
   if (id === 'guns') {
-    // The base of a third side in the middle is reached from the towers alone.
-    if (count === 3) {
+    // The base of a third side in the middle, or the crown, is reached from the towers alone.
+    if (count === 3 || crowned) {
       sites.forEach((p, j) => {
         if (p.tower && !sites.some((_, k) => k !== middle && k !== j && inside(middle, j, k))) add(middle, j);
       });
@@ -1060,12 +1099,19 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   const ground = sizeOf(id, sides.length, size);
   const { w, h } = WORLDS[ground];
   const third = sides.length === 3;
+  // Hill and egg are played for a hut in the middle. Scattered maps get one where the third side's base would
+  // stand, joined in as it would be, and with three sides the base is the crown. Of the drawn layouts only those
+  // with a hut in the middle are played: the others have huts a short step either side of it, or the river
+  // through it, so a bridges map played for the middle is grown.
+  const crowned = !third && (rules.mode === 'hill' || rules.mode === 'egg');
+  const drawable = id === 'thorns' || id === 'bridges' || id === 'hill' ? LAYOUTS[id].filter((layout) => !crowned || layout.centre) : [];
   const drawn =
-    sides.length === 4 || ground !== OWN_SIZE[id] || id === 'crossroads'
-      ? grow(rnd, id, sides.length, ground)
+    sides.length === 4 || ground !== OWN_SIZE[id] || id === 'crossroads' || (crowned && id === 'bridges')
+      ? grow(rnd, id, sides.length, ground, crowned)
       : id === 'meadow' || id === 'guns'
-        ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id], third), rivers: [] }
-        : lay(LAYOUTS[id][Math.floor(rnd() * LAYOUTS[id].length)], rnd, id === 'hill', w, h, third);
+        ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id], third || crowned), rivers: [] }
+        : lay(drawable[Math.floor(rnd() * drawable.length)], rnd, id === 'hill', w, h, third);
+  if (crowned) crown(drawn.sites, w, h);
   // A map is made with its starts held by the first seats in order, and the seats in the game take them in that order.
   const sites = drawn.sites.map((site) => (site.owner ? { ...site, owner: sides[SEATS.indexOf(site.owner)] } : site));
   const links: number[][] = sites.map(() => []);
@@ -1075,8 +1121,23 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   }
   const homes = sides.map((seat) => sites.findIndex((site) => site.owner === seat));
   if (third) startThree(id, sides, homes, sites, links);
-  const ticks = MATCH_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
+  if (rules.mode === 'blitz') for (const home of homes) sites[home] = { ...sites[home], n: BLITZ_UNITS };
+  const ticks = rules.mode === 'blitz' ? BLITZ_TICKS + (sides.length === 4 ? BLITZ_EXTRA : 0) : MATCH_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
   return { id, scene: SCENES[id], sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, homes, size: ground, w, h, ticks, rules };
+}
+
+/** The hut in the middle is made the crown: neutral, and worth fighting over from the start. A fort stays a fort. */
+function crown(sites: Site[], w: number, h: number): void {
+  const { x, y } = centreOf({ w, h });
+  const at = sites.findIndex((site) => site.x === x && site.y === y);
+  if (at < 0) throw new Error('No hut in the middle to crown');
+  sites[at] = { ...sites[at], owner: null, n: CROWN_UNITS, level: 2 };
+}
+
+/** The hut at the very middle of the board, the hill and the egg's nest, or -1 when there is none. */
+export function middleOf(map: SwarmMap): number {
+  const { x, y } = centreOf(map);
+  return map.sites.findIndex((site) => site.x === x && site.y === y);
 }
 
 /**
@@ -1165,6 +1226,16 @@ function paceOf(path: Path, to: number, speed: number): number {
   return Math.floor((SPEED[speed] * percentOn(path, to)) / 100);
 }
 
+/**
+ * How far a unit walks in a tick. The egg is heavy, and its carrier walks at
+ * half pace behind the column it set off with, which gives the other sides
+ * time to cut it off. Played by two computers over 120 games, at full pace 16
+ * games saw the egg carried more than once and seat a won 70 to b's 50; at
+ * half pace 39 did and a won 61 to 59, and at a third 50 did but only 53 were
+ * won by the egg at all.
+ */
+const strideOf = (state: SwarmState, path: Path, unit: Unit): number => paceOf(path, unit.to, state.army[unit.seat].speed) >> (unit.egg ? 1 : 0);
+
 export interface Hut {
   owner: Owner;
   n: number;
@@ -1177,6 +1248,8 @@ export interface Hut {
   reload?: number;
   /** Times the defender at the door of a fort has been killed already. Only a fort has one. */
   hurt?: number;
+  /** Turned golden: it breeds three times as fast and holds half as many again. */
+  gold?: true;
 }
 
 const isTower = (hut: Hut): boolean => hut.reload !== undefined;
@@ -1192,6 +1265,8 @@ export interface Unit {
   d: number;
   /** Sent by a risky order: it routes over the paths that cost lives. */
   risky?: boolean;
+  /** Carrying the egg. */
+  egg?: true;
 }
 
 export interface Army {
@@ -1239,17 +1314,29 @@ export interface SwarmState {
   closed: number[];
   /** The sides that raised the white flag, in the order they did. */
   yielded: Seat[];
+  /** King of the hill: ticks each side has held the hut in the middle, all told. */
+  held: Record<Seat, number>;
+  /** Bounty: the side holding the most huts when last looked, or null for a tie. */
+  leader: Seat | null;
+  /** Bounty: what taking a hut from the leader brings in now, and how many times each side has brought it in. */
+  bounty: number;
+  claimed: Record<Seat, number>;
+  /** Egg: the hut it lies in, or -1 while a unit carries it and in every other mode. */
+  egg: number;
+  /** Regicide: the tick each side's queen fell on, 0 while she stands. */
+  fallen: Record<Seat, number>;
 }
 
 /** The largest tick a path can be closed to: a 32-bit int, so it survives the copy to every client. */
 export const CLOSED_FOREVER = 2147483647;
 
 export function newState(map: SwarmMap): SwarmState {
+  const speed = map.rules.mode === 'blitz' ? 1 : 0;
   return {
     tick: 0,
     huts: map.sites.map((s) => ({ owner: s.owner, n: s.n, level: s.level, grow: 0, out: [], ...(s.tower && { reload: 0 }), ...(s.fort && { hurt: 0 }) })),
     units: [],
-    army: { a: { speed: 0, strength: 0, luck: 0 }, b: { speed: 0, strength: 0, luck: 0 }, c: { speed: 0, strength: 0, luck: 0 }, d: { speed: 0, strength: 0, luck: 0 } },
+    army: { a: { speed, strength: 0, luck: 0 }, b: { speed, strength: 0, luck: 0 }, c: { speed, strength: 0, luck: 0 }, d: { speed, strength: 0, luck: 0 } },
     nextId: 1,
     winner: null,
     tolls: map.paths.map(() => 0),
@@ -1257,6 +1344,12 @@ export function newState(map: SwarmMap): SwarmState {
     shots: [],
     closed: map.paths.map(() => 0),
     yielded: [],
+    held: { a: 0, b: 0, c: 0, d: 0 },
+    leader: null,
+    bounty: map.rules.mode === 'bounty' ? BOUNTY : 0,
+    claimed: { a: 0, b: 0, c: 0, d: 0 },
+    egg: map.rules.mode === 'egg' ? middleOf(map) : -1,
+    fallen: { a: 0, b: 0, c: 0, d: 0 },
   };
 }
 
@@ -1273,6 +1366,12 @@ export function cloneState(state: SwarmState): SwarmState {
     shots: [],
     closed: state.closed.slice(),
     yielded: state.yielded.slice(),
+    held: { ...state.held },
+    leader: state.leader,
+    bounty: state.bounty,
+    claimed: { ...state.claimed },
+    egg: state.egg,
+    fallen: { ...state.fallen },
   };
 }
 
@@ -1407,18 +1506,23 @@ function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, 
 function raiseFlag(state: SwarmState, seat: Seat): void {
   const huts = state.huts.flatMap((hut, at) => (hut.owner === seat ? [at] : []));
   if (huts.length === 0 && !state.units.some((unit) => unit.seat === seat)) return;
-  for (const at of huts) {
-    const hut = state.huts[at];
-    hut.owner = null;
-    hut.grow = 0;
-    hut.out = [];
-  }
-  state.units = state.units.filter((unit) => unit.seat !== seat);
+  vacate(state, seat);
   state.yielded.push(seat);
   state.events.push({ kind: 'flag', seat, huts });
 }
 
 /** Columns queued to leave over a path that has closed since go another way, or stay home when there is none. */
+/** Every hut of a side goes neutral, and its units leave the board. */
+function vacate(state: SwarmState, seat: Seat): void {
+  for (const hut of state.huts) {
+    if (hut.owner !== seat) continue;
+    hut.owner = null;
+    hut.grow = 0;
+    hut.out = [];
+  }
+  state.units = state.units.filter((unit) => unit.seat !== seat);
+}
+
 function reroute(map: SwarmMap, hut: Hut, at: number, closed: Closed): void {
   for (const line of hut.out) {
     if (closed.paths.has(pathIndex(map, at, line.to))) line.to = nextHop(map, at, line.dest, line.risky, closed);
@@ -1574,7 +1678,7 @@ function wounds(hut: Hut): boolean {
 
 function walk(state: SwarmState, map: SwarmMap): void {
   const { index } = lanesOf(map);
-  for (const unit of state.units) unit.d += paceOf(map.paths[index[unit.from][unit.to]], unit.to, state.army[unit.seat].speed);
+  for (const unit of state.units) unit.d += strideOf(state, map.paths[index[unit.from][unit.to]], unit);
 }
 
 /**
@@ -1593,7 +1697,7 @@ function takeTolls(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     const path = map.paths[at];
     if (takesToll(path.kind)) {
-      const before = unit.d - paceOf(path, unit.to, state.army[unit.seat].speed);
+      const before = unit.d - strideOf(state, path, unit);
       // Twice the walk against the whole length: on a path of odd length, half of it rounded down
       // is a middle that two units walking at each other are both over a step before they meet.
       if (2 * before < length[at] && 2 * unit.d >= length[at] && ++state.tolls[at] % TOLL_EVERY === 0) {
@@ -1629,10 +1733,11 @@ function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): 
   }
   state.events.push({ kind: 'hit', hut: unit.to });
   if (!alive) return false;
+  const bounty = claim(state, unit.seat, hut);
   // A hut in the way of a longer march is taken like any other, and the rest
   // of the column then walks through it.
   hut.owner = unit.seat;
-  hut.n = 1;
+  hut.n = 1 + bounty;
   hut.grow = 0;
   hut.out = [];
   // The old garrison can have marched out and left a wound behind it.
@@ -1671,7 +1776,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
     const { unit, x, y } = target;
     state.units = state.units.filter((u) => u !== unit);
     state.shots.push({ tower: index, x, y, seat: unit.seat });
-    tower.reload = TOWER_RELOAD;
+    tower.reload = frenzied(map, state.tick) ? FRENZY_RELOAD : TOWER_RELOAD;
   });
 }
 
@@ -1703,6 +1808,148 @@ export const noOrders = (): Partial<Record<Seat, Order[]>> => ({});
 /** Whether a person still gives the orders of `side` after this tick. */
 const played = (cpu: Computer, side: Seat, tick: number): boolean => cpu[side] === undefined || tick <= cpu[side];
 
+/** Golden: when the huts nearest the middle turn golden, three tenths of the way through a blitz. */
+export const goldenAt = (map: SwarmMap): number => (map.rules.mode === 'blitz' ? Math.floor((map.ticks * GOLDEN_BLITZ_PERCENT) / 100) : GOLDEN_TICK);
+
+/** Frenzy: whether `tick` is in the last minute of the match. */
+export const frenzied = (map: SwarmMap, tick: number): boolean => map.rules.twists.includes('frenzy') && tick > map.ticks - FRENZY_TICKS;
+
+/**
+ * The neutral huts nearest the middle turn golden, every one as near as the
+ * nearest, so that a hut and its twins all do. A tower never does: it does not
+ * breed. With none left neutral the huts nearest the middle turn golden
+ * whoever holds them: played by computers, none was left neutral when the
+ * gold came in 106 of 120 blitzes for two sides and 17 of the 18 classic
+ * games for two that lasted until then.
+ */
+function gild(map: SwarmMap, state: SwarmState): void {
+  const { x, y } = centreOf(map);
+  const reach = (at: number) => (map.sites[at].x - x) * (map.sites[at].x - x) + (map.sites[at].y - y) * (map.sites[at].y - y);
+  const breeders = state.huts.flatMap((hut, at) => (isTower(hut) ? [] : [at]));
+  const neutral = breeders.filter((at) => state.huts[at].owner === null);
+  const open = neutral.length ? neutral : breeders;
+  const nearest = Math.min(...open.map(reach));
+  for (const at of open) if (reach(at) === nearest) state.huts[at].gold = true;
+}
+
+/** A golden hut holds half as many again. */
+const capOf = (hut: Hut): number => (hut.gold ? Math.floor((HUT_CAP[hut.level - 1] * GOLD_CAP_PERCENT) / 100) : HUT_CAP[hut.level - 1]);
+
+/**
+ * Ticks between two units born in a hut of `seat` under the match's rules, or
+ * null while it breeds nothing at all. A blitz breeds in seven tenths of the
+ * time; a side two huts or more behind the leader, with the comeback twist, in
+ * four fifths; everyone in half in a frenzy; and a golden hut in a third.
+ * With the queens twist a side that has lost its home breeds nowhere until it
+ * takes it back.
+ */
+function breeding(map: SwarmMap, state: SwarmState): (seat: Seat, hut: Hut) => number | null {
+  const { mode, twists } = map.rules;
+  const frenzy = frenzied(map, state.tick);
+  const queenless = queenlessOf(map, state);
+  let behind: Seat[] = [];
+  if (twists.includes('comeback')) {
+    const held = map.sides.map((side) => countOf(state, side).huts);
+    behind = map.sides.filter((_, k) => held[k] <= Math.max(...held) - COMEBACK_GAP);
+  }
+  return (seat, hut) => {
+    if (queenless.includes(seat)) return null;
+    let every = GROW_TICKS[hut.level - 1];
+    if (mode === 'blitz') every = Math.floor((every * BLITZ_GROW_PERCENT) / 100);
+    if (behind.includes(seat)) every = Math.floor((every * COMEBACK_GROW_PERCENT) / 100);
+    if (frenzy) every = Math.ceil(every / FRENZY_GROW_DIVISOR);
+    if (hut.gold) every = Math.ceil(every / GOLD_GROW_DIVISOR);
+    return Math.max(1, every);
+  };
+}
+
+/** With the queens twist, the sides that have lost their home and breed nowhere until they take it back. */
+export const queenlessOf = (map: SwarmMap, state: SwarmState): Seat[] =>
+  map.rules.twists.includes('queens') ? map.sides.filter((side, k) => state.huts[map.homes[k]].owner !== side) : [];
+
+/** The side whose own home the egg lies in, or null. */
+export function eggHome(map: SwarmMap, state: SwarmState): Seat | null {
+  const k = state.egg < 0 ? -1 : map.homes.indexOf(state.egg);
+  return k >= 0 && state.huts[state.egg].owner === map.sides[k] ? map.sides[k] : null;
+}
+
+/** Where the egg was as a tick began: the unit carrying it, if one is, and the side it lay at home with. */
+interface EggWatch {
+  carrier: Unit | undefined;
+  home: Seat | null;
+}
+
+/**
+ * The unit just let out of the hut the egg lies in picks it up. With three
+ * sides the middle is the third side's home as well as the egg's nest, and
+ * there it stays put until another side takes the hut.
+ */
+function carry(map: SwarmMap, state: SwarmState, egg: EggWatch): void {
+  const unit = state.units[state.units.length - 1];
+  if (eggHome(map, state) === unit.seat) return;
+  unit.egg = true;
+  state.egg = -1;
+  egg.carrier = unit;
+}
+
+/**
+ * A carrier that is gone, killed or in at a door, leaves the egg in the hut it
+ * was nearer, and a hut taken takes the egg in it. The side that gets it home,
+ * carried in, walked through or left at its door, wins there and then.
+ */
+function settleEgg(map: SwarmMap, state: SwarmState, egg: EggWatch): void {
+  const { carrier } = egg;
+  const walking = carrier !== undefined && state.units.includes(carrier);
+  if (carrier && !walking) state.egg = 2 * carrier.d > pathLength(map, carrier.from, carrier.to) ? carrier.to : carrier.from;
+  const through = walking && carrier.d === 0 && map.homes[map.sides.indexOf(carrier.seat)] === carrier.from ? carrier.seat : null;
+  const home = eggHome(map, state) ?? through;
+  if (home !== null && home !== egg.home) state.winner = home;
+}
+
+/** Regicide: a side whose home is lost is out, and its huts go neutral as under the white flag. */
+function dethrone(map: SwarmMap, state: SwarmState): void {
+  map.sides.forEach((side, k) => {
+    if (state.huts[map.homes[k]].owner === side || state.fallen[side] > 0 || state.yielded.includes(side)) return;
+    state.fallen[side] = state.tick;
+    vacate(state, side);
+  });
+}
+
+/** Bounty: the side with more huts than any other, or null when two have as many. */
+function leaderOf(map: SwarmMap, state: SwarmState): Seat | null {
+  const held = map.sides.map((side) => countOf(state, side).huts);
+  const most = Math.max(...held);
+  return held.filter((n) => n === most).length === 1 ? map.sides[held.indexOf(most)] : null;
+}
+
+/** Bounty: what taking `hut` brings `seat` in on top, which then starts again from BOUNTY. */
+function claim(state: SwarmState, seat: Seat, hut: Hut): number {
+  if (state.leader === null || hut.owner !== state.leader || isTower(hut)) return 0;
+  const paid = state.bounty;
+  state.bounty = BOUNTY;
+  state.claimed[seat]++;
+  return paid;
+}
+
+/** What the mode keeps count of at the end of a tick, and a win it calls there and then. */
+function score(map: SwarmMap, state: SwarmState, egg: EggWatch | null): void {
+  const { mode } = map.rules;
+  if (mode === 'regicide') dethrone(map, state);
+  if (mode === 'hill') {
+    // With three sides the hill is the middle side's base, held from the first tick, and there its time runs at half
+    // speed. Played by three computers over 240 games it then won 76 (a 66, b 98); counted in full it won 159.
+    const crown = middleOf(map);
+    const holder = state.huts[crown].owner;
+    const home = holder !== null && map.homes[map.sides.indexOf(holder)] === crown;
+    if (holder && (!home || state.tick % 2 === 0) && ++state.held[holder] >= HILL_TICKS) state.winner = holder;
+  }
+  if (mode === 'bounty') {
+    if (state.tick % BOUNTY_EVERY === 0) state.leader = leaderOf(map, state);
+    if (state.leader && state.tick % BOUNTY_GROWS === 0 && state.bounty < BOUNTY_MOST) state.bounty++;
+  }
+  if (egg) settleEgg(map, state, egg);
+}
+
 /**
  * The game ends when one side is left, or on the clock, when the side holding
  * the most huts, then the most units, takes it. A tie at the top is a draw.
@@ -1710,6 +1957,7 @@ const played = (cpu: Computer, side: Seat, tick: number): boolean => cpu[side] =
  * and then: nobody is left to watch the computers play it out.
  */
 function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
+  if (state.winner !== null) return;
   // A side with no hut can still win one back with the units it has on the road.
   const counts = map.sides.map((side) => ({ side, ...countOf(state, side) })).filter((count) => count.huts > 0 || count.units > 0);
   const people = map.sides.some((side) => cpu[side] !== 0);
@@ -1717,8 +1965,9 @@ function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
     state.winner = counts.length === 1 ? counts[0].side : 'draw';
   } else if (state.tick >= map.ticks || (people && !counts.some((count) => played(cpu, count.side, state.tick)))) {
     counts.sort((p, q) => q.huts - p.huts || q.units - p.units);
+    if (map.rules.mode === 'hill') counts.sort((p, q) => state.held[q.side] - state.held[p.side]);
     const [first, second] = counts;
-    state.winner = first.huts === second.huts && first.units === second.units ? 'draw' : first.side;
+    state.winner = first.huts === second.huts && first.units === second.units && state.held[first.side] === state.held[second.side] ? 'draw' : first.side;
   }
 }
 
@@ -1735,6 +1984,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
   const closed = closedOn(state, tick);
   state.events = [];
   state.shots = [];
+  const egg = map.rules.mode === 'egg' ? { carrier: state.units.find((unit) => unit.egg), home: eggHome(map, state) } : null;
   map.sides.forEach((side, k) => {
     if (played(cpu, side, tick)) {
       for (const order of orders[side] ?? []) if (order.tick === tick) applyOrder(state, map, side, order, closed);
@@ -1742,11 +1992,14 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     for (const order of planned[k]) applyOrder(state, map, side, order, closed);
   });
 
+  if (tick === goldenAt(map) && map.rules.twists.includes('golden')) gild(map, state);
+  const breed = breeding(map, state);
   for (const hut of state.huts) {
     if (!hut.owner || isTower(hut)) continue;
-    if (++hut.grow < GROW_TICKS[hut.level - 1] * (hut.hurt === undefined ? 1 : FORT_LIVES)) continue;
+    const every = breed(hut.owner, hut);
+    if (every === null || ++hut.grow < every * (hut.hurt === undefined ? 1 : FORT_LIVES)) continue;
     hut.grow = 0;
-    if (hut.n < HUT_CAP[hut.level - 1]) hut.n++;
+    if (hut.n < capOf(hut)) hut.n++;
   }
 
   if (tick % RELEASE_TICKS === 0) {
@@ -1770,6 +2023,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
           d: 0,
           ...(line.risky && { risky: true }),
         });
+        if (egg && index === state.egg) carry(map, state, egg);
       }
       hut.out = hut.out.filter((line) => line.n > 0);
     });
@@ -1791,6 +2045,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     state.units = walking;
   }
   shoot(state, map);
+  score(map, state, egg);
   judge(state, map, cpu);
 }
 
@@ -1869,6 +2124,81 @@ function temperOf(map: SwarmMap, seat: Seat): Temper {
   return { guard: 2 + int(3), spite: 3 * int(3), strong: int(2) === 1, builder: int(2) === 1 };
 }
 
+/** What the match's mode and twists make of the board for one computer side. */
+interface Stakes {
+  /** By hut, how many times its usual worth taking it is. */
+  worth: (to: number) => number;
+  /** By hut, the fewest units one of its own keeps back. */
+  keep: (at: number) => number;
+  /** Sends made before anything else is thought of. */
+  run: Omit<Order, 'tick'>[];
+  /** Huts that send nothing else. */
+  still: number[];
+}
+
+/** The crown and the egg's nest, while another side holds it or nobody does. */
+const CROWN_WORTH = 4;
+/** A hut the egg lies in, an enemy carrier is walking to, or that stands in the way of carrying it home. */
+const EGG_WORTH = 4;
+/** The home of a side in regicide, and of a side whose home is lost under the queens twist. */
+const QUEEN_WORTH = 3;
+const GOLD_WORTH = 2;
+/** What a home keeps back when losing it costs the match, or the breeding of every other hut. */
+const QUEEN_KEEP = 15;
+/** The fewest units in the hut the egg lies in before they set off home with it. */
+const EGG_ESCORT = 4;
+
+function stakesOf(map: SwarmMap, state: SwarmState, seat: Seat, closed?: Closed): Stakes {
+  const { mode, twists } = map.rules;
+  const { huts } = state;
+  const worth = huts.map(() => 1);
+  const keep = huts.map(() => 0);
+  const run: Omit<Order, 'tick'>[] = [];
+  const still: number[] = [];
+  const homeOf = (side: Seat) => map.homes[map.sides.indexOf(side)];
+  const home = homeOf(seat);
+  const theirs = (at: number) => huts[at].owner !== seat;
+
+  if (twists.includes('golden')) for (const at of huts.keys()) if (huts[at].gold && theirs(at)) worth[at] *= GOLD_WORTH;
+  if (mode === 'regicide' || twists.includes('queens')) {
+    for (const side of map.sides) if (side !== seat && huts[homeOf(side)].owner === side) worth[homeOf(side)] *= mode === 'regicide' ? QUEEN_WORTH : 1.5;
+    if (theirs(home)) worth[home] *= QUEEN_WORTH;
+    else keep[home] = QUEEN_KEEP;
+  }
+  if (mode === 'hill') {
+    const crown = middleOf(map);
+    const holder = huts[crown].owner;
+    // The nearer the holder is to a win, the more the hill is worth taking off it.
+    if (holder !== seat) worth[crown] *= CROWN_WORTH + (holder ? (8 * state.held[holder]) / HILL_TICKS : 0);
+    else keep[crown] = capOf(huts[crown]);
+  }
+  if (mode === 'bounty' && state.leader !== null && state.leader !== seat) {
+    for (const at of huts.keys()) if (huts[at].owner === state.leader && !isTower(huts[at])) worth[at] *= 1 + state.bounty / 20;
+  }
+  if (mode === 'egg') {
+    for (const unit of state.units) {
+      if (!unit.egg || unit.seat === seat) continue;
+      for (const at of [unit.to, unit.dest, homeOf(unit.seat)]) if (theirs(at)) worth[at] *= EGG_WORTH;
+    }
+    const nest = state.egg;
+    if (nest >= 0 && theirs(nest)) worth[nest] *= EGG_WORTH;
+    if (nest >= 0 && nest === home) keep[nest] = QUEEN_KEEP;
+    if (nest >= 0 && !theirs(nest) && nest !== home) {
+      // It goes home through its own huts, or it waits in the nest while the way there is cleared.
+      still.push(nest);
+      let blocked = false;
+      for (let at = nest, hop = nextHop(map, at, home, false, closed); hop !== -1; at = hop, hop = at === home ? -1 : nextHop(map, at, home, false, closed)) {
+        if (theirs(hop)) {
+          worth[hop] *= EGG_WORTH;
+          blocked = true;
+        }
+      }
+      if (!blocked && huts[nest].n >= EGG_ESCORT) run.push({ kind: 'half', from: nest, to: home });
+    }
+  }
+  return { worth: (to) => worth[to], keep: (at) => keep[at], run, still };
+}
+
 /** The way a send takes from one of a side's huts: how long its first unit walks, and the paths it walks. */
 interface Way {
   ticks: number;
@@ -1925,11 +2255,13 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const lives = (hut: Hut) => (hut.hurt === undefined ? hut.n : hut.n * FORT_LIVES - hut.hurt);
   // A life costs one unit between armies of one strength, fewer of a stronger army's and more of a weaker one's.
   const toKill = (owner: Owner, n: number) => Math.ceil((n * (LUCK_DEN - army.strength)) / (LUCK_DEN - (owner ? state.army[owner].strength : 0)));
+  const breed = breeding(map, state);
+  const stakes = stakesOf(map, state, seat, closed);
   const bredBy = (at: number, ticks: number) => {
     const hut = huts[at];
     // A hut walked in over its cap breeds nothing, and loses none of what it holds either.
-    if (!hut.owner || isTower(hut) || hut.n >= HUT_CAP[hut.level - 1]) return 0;
-    return Math.min(Math.floor(ticks / GROW_TICKS[hut.level - 1]), (HUT_CAP[hut.level - 1] - hut.n) * (hut.hurt === undefined ? 1 : FORT_LIVES));
+    if (!hut.owner || isTower(hut) || hut.n >= capOf(hut)) return 0;
+    return Math.min(Math.floor(ticks / (breed(hut.owner, hut) ?? Infinity)), (capOf(hut) - hut.n) * (hut.hurt === undefined ? 1 : FORT_LIVES));
   };
 
   // What each side has on its way to each hut, counting the columns still leaving, and how soon the first of it gets there.
@@ -1987,7 +2319,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const last = way.paths[way.paths.length - 1];
     const pace = paceOf(map.paths[last], to, army.speed);
     // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
-    for (const _ of towers) lost += Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
+    lost += towers.size * Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
     if (isTower(huts[to])) lost += Math.ceil((n * RELEASE_TICKS + TOWER_RANGE / pace) / TOWER_RELOAD);
     return Math.min(n, lost);
   };
@@ -2005,11 +2337,16 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     }
     // It holds back less as the game wears on, so that a game between careful sides still comes to an end.
     const guard = Math.max(0, temper.guard - Math.floor((4 * state.tick) / map.ticks));
-    const keep = Math.ceil((strongest * guard) / 8);
+    const keep = Math.max(Math.ceil((strongest * guard) / 8), stakes.keep(at));
     // A tower breeds nothing, so what it sends is gone from its door for good.
     return isTower(huts[at]) ? Math.max(keep, TOWER_START) : keep;
   };
   const free = (at: number) => huts[at].n - queued(huts[at]);
+  for (const order of stakes.run) {
+    orders.push({ ...order, tick });
+    used.add(order.from);
+  }
+  for (const at of stakes.still) used.add(at);
 
   /**
    * The sends that get `need(ticks)` into `to` by the time the last of them is
@@ -2073,7 +2410,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     });
     if (attackers === 0) continue;
     const hut = huts[at];
-    const short = attackers + 1 - lives(hut) - bound[at][me] - (isTower(hut) ? 0 : Math.floor(soonest / GROW_TICKS[hut.level - 1]));
+    const short = attackers + 1 - lives(hut) - bound[at][me] - (isTower(hut) ? 0 : Math.floor(soonest / (breed(seat, hut) ?? Infinity)));
     if (short <= 0) continue;
     const help = muster(at, () => short, soonest);
     if (help) march(at, help);
@@ -2091,7 +2428,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
       if (leading && hut.owner === leader.side) value *= 1 + temper.spite / 8;
       if (standing.find((count) => count.side === hut.owner)!.huts <= 2) value *= 1.5;
     }
-    return value;
+    return value * stakes.worth(to);
   };
   /** What every other side but the owner has marching on `to`, in this side's units. */
   const rivals = (to: number) =>
@@ -2176,7 +2513,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     if (!bought && buy(at, 6 + keepOf(at, -1))) continue;
     // Full, and across a toll is more than it can take: what it has is more use at the front.
     const tolledOnly = map.links[at].every((next) => huts[next].owner === seat || takesToll(map.paths[index[at][next]].kind));
-    if (hut.n >= HUT_CAP[hut.level - 1] && tolledOnly) reinforce(at);
+    if (hut.n >= capOf(hut) && tolledOnly) reinforce(at);
   }
   return orders;
 }
