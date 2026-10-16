@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  CLASSIC,
   CPU_THINK_TICKS,
   FIELD_TOP,
   FORT_LIVES,
@@ -58,7 +59,7 @@ function mapOf(sites: Site[], links: number[][], named: Path[] = []): SwarmMap {
   links.forEach((linked, a) => {
     for (const b of linked) if (a < b) paths.push(named.find((p) => p.a === a && p.b === b) ?? { a, b, kind: 'road' });
   });
-  return { id: 'meadow', scene: 'meadow', sites, links, paths, rivers: [], w: 1000, h: 660, sides: ['a', 'b'], homes: (['a', 'b'] as const).map((seat) => sites.findIndex((site) => site.owner === seat)), size: 'small', ticks: MATCH_TICKS };
+  return { id: 'meadow', scene: 'meadow', sites, links, paths, rivers: [], w: 1000, h: 660, sides: ['a', 'b'], homes: (['a', 'b'] as const).map((seat) => sites.findIndex((site) => site.owner === seat)), size: 'small', ticks: MATCH_TICKS, rules: CLASSIC };
 }
 
 // Two huts 60 apart: ten ticks' walk at the starting speed.

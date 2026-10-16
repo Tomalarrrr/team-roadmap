@@ -12,6 +12,7 @@ import {
   sidesOf,
   type Kind,
   type MapId,
+  type Nest,
   type Seat,
   type SizeId,
   type SwarmMatch,
@@ -241,6 +242,22 @@ export async function setKind(code: string, sessionId: string, kind: Kind): Prom
   if (!result.committed) throw new Error(refusal);
 }
 
+/** Choose how this session starts when the start is nests. Only in the lobby. */
+export async function setNest(code: string, sessionId: string, nest: Nest): Promise<void> {
+  let refusal = '';
+  const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    refusal = 'Room not found';
+    const seat = current && seatOf(current, sessionId);
+    if (!current || !seat) return undefined;
+    if (current.status !== 'waiting') {
+      refusal = 'The nests are chosen before a game starts.';
+      return undefined;
+    }
+    return { ...current, players: { ...current.players, [seat]: { ...current.players[seat], nest } } };
+  });
+  if (!result.committed) throw new Error(refusal);
+}
+
 /**
  * Put the computer in an open seat, or take it out again. Only between games,
  * and never in a seat a person sits in.
@@ -258,9 +275,18 @@ export async function setComputer(code: string, seat: Seat, on: boolean): Promis
 /**
  * Start a game, or a fresh one in a finished room. Needs two sides at least,
  * people or the computer. `map` and `size` are the ones chosen, or null to
- * leave the map to the seed and the size to the map.
+ * leave the map to the seed and the size to the map. `rules` holds the mode,
+ * start and twists chosen; one left out, or the default, is not stored, so
+ * the next game plays without it unless it is chosen again, as with the map.
  */
-export async function startMatch(code: string, serverNow: number, map: MapId | null, size: SizeId | null): Promise<void> {
+export async function startMatch(
+  code: string,
+  serverNow: number,
+  map: MapId | null,
+  size: SizeId | null,
+  rules: Pick<SwarmMatch, 'mode' | 'start' | 'twists'> = {}
+): Promise<void> {
+  const { mode, start, twists } = rules;
   const seed = newSeed();
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     if (!current || current.status === 'playing') return undefined;
@@ -282,6 +308,9 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
       ...(map && { map }),
       ...(size && { size }),
       ...(current.cpu && { cpu: current.cpu }),
+      ...(mode && mode !== 'classic' && { mode }),
+      ...(start && start !== 'home' && { start }),
+      ...(twists && { twists }),
     };
   });
 }

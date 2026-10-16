@@ -8,7 +8,7 @@
 // without limit; and the life on the map is the same for the same seed.
 
 import { describe, it, expect } from 'vitest';
-import { MATCH_TICKS, SEATS, cloneState, kindsOf, newState, pathLength, type Kind, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
+import { CLASSIC, MATCH_TICKS, SEATS, cloneState, kindsOf, newState, pathLength, type Kind, type PathKind, type Seat, type Site, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
 import { pathPoint, riverGap, riverOf } from '../swarm/swarmSceneKit';
 import {
   BANNER_GAP_MS,
@@ -65,6 +65,7 @@ function mapOf(scene: SwarmMap['scene'] = 'meadow'): SwarmMap {
     h: 660,
     size: 'small',
     ticks: MATCH_TICKS,
+    rules: CLASSIC,
   };
 }
 

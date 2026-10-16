@@ -758,7 +758,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           let owed = 0;
           for (const order of game.orders[seatNow]) {
             if (order.tick <= game.shown.tick || order.from !== token.hut) continue;
-            if (order.kind !== 'half' && order.kind !== 'all') owed += upgradeCost(game.shown, token.hut, order.kind) ?? 0;
+            if (order.kind === 'hut' || order.kind === 'speed' || order.kind === 'strength') owed += upgradeCost(game.shown, token.hut, order.kind) ?? 0;
           }
           if (sendSize(game.shown.huts[token.hut], 'all') - owed < token.cost) return refuse(token.hut);
           issue(token.kind, token.hut, token.hut);

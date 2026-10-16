@@ -83,6 +83,8 @@ export interface SwarmPlayer {
   name: string;
   /** The creature this player's side is drawn as, when they picked one. */
   kind?: Kind;
+  /** How this player starts when the start is nests. Without one, big. */
+  nest?: Nest;
 }
 
 /** What a side's units are drawn as. Only the look: every kind plays alike. */
@@ -114,6 +116,48 @@ export function kindsOf(match: Pick<SwarmMatch, 'players'>, sides: readonly Seat
   return kinds as Record<Seat, Kind>;
 }
 
+/** What a game is played for. Classic is the game as it has always been: hold the most huts. */
+export type ModeId = 'classic' | 'blitz' | 'hill' | 'regicide' | 'bounty' | 'egg' | 'teams' | 'survival';
+export const MODE_IDS: readonly ModeId[] = ['classic', 'blitz', 'hill', 'regicide', 'bounty', 'egg', 'teams', 'survival'];
+/** What each side holds on the first tick. Home is the map's own start. */
+export type StartId = 'home' | 'close' | 'scattered' | 'draft' | 'nests';
+export const START_IDS: readonly StartId[] = ['home', 'close', 'scattered', 'draft', 'nests'];
+/** Rules laid over any mode, any number of them at once. */
+export type Twist = 'flood' | 'fog' | 'powers' | 'golden' | 'frenzy' | 'comeback' | 'buildings' | 'queens';
+/** A match stores its twists as one letter each, in this order, which is the order the lobby lists them in. */
+export const TWIST_CHAR: Record<Twist, string> = { flood: 'f', fog: 'o', powers: 'p', golden: 'g', frenzy: 'z', comeback: 'c', buildings: 'b', queens: 'q' };
+export const TWISTS = Object.keys(TWIST_CHAR) as Twist[];
+/** With the nests start: one big hut, or several small ones. */
+export type Nest = 'big' | 'many';
+
+export interface Rules {
+  mode: ModeId;
+  start: StartId;
+  twists: readonly Twist[];
+  /** The nest each person picked. A seat without one starts big. */
+  nests: Partial<Record<Seat, Nest>>;
+}
+
+export const CLASSIC: Rules = { mode: 'classic', start: 'home', twists: [], nests: {} };
+
+/** A match leaves out every choice that is the default, so a match from before there were choices is a classic one. */
+export function rulesOf(match: Pick<SwarmMatch, 'mode' | 'start' | 'twists' | 'players'>): Rules {
+  const nests: Partial<Record<Seat, Nest>> = {};
+  for (const seat of SEATS) {
+    const nest = match.players[seat]?.nest;
+    if (nest) nests[seat] = nest;
+  }
+  return {
+    mode: match.mode ?? CLASSIC.mode,
+    start: match.start ?? CLASSIC.start,
+    twists: TWISTS.filter((twist) => match.twists?.includes(TWIST_CHAR[twist])),
+    nests,
+  };
+}
+
+/** The letters a match stores for a set of twists. */
+export const twistLetters = (twists: readonly Twist[]): string => TWISTS.filter((twist) => twists.includes(twist)).map((twist) => TWIST_CHAR[twist]).join('');
+
 /** `swarm/{code}/m` — the match, changed only by transaction. */
 export interface SwarmMatch {
   status: 'waiting' | 'playing' | 'finished';
@@ -130,6 +174,12 @@ export interface SwarmMatch {
   size?: SizeId;
   /** The seats the computer plays from the start, their letters in seat order. */
   cpu?: string;
+  /** Without one, classic. */
+  mode?: ModeId;
+  /** Without one, home. */
+  start?: StartId;
+  /** One letter per twist, in the order of TWIST_CHAR. Without any, none. */
+  twists?: string;
   /**
    * For each seat whose person left a game of three or more sides, the last
    * tick of theirs: the computer plays the seat after it.
@@ -167,7 +217,15 @@ export interface SwarmSeatState {
   orders: string;
 }
 
-export type OrderKind = 'half' | 'all' | 'hut' | 'speed' | 'strength';
+/**
+ * flag   the white flag: the side gives the game up. `from` and `to` mean nothing
+ * nest   the hut picked in a draft
+ * burn   burn the bridge from `from` to `to`
+ * rain   rain over the board, from any hut of the side's
+ * call   every hut of the side's sends half to `to`
+ * decoy  a column that costs nothing, from `from` to `to`
+ */
+export type OrderKind = 'half' | 'all' | 'hut' | 'speed' | 'strength' | 'flag' | 'nest' | 'burn' | 'rain' | 'call' | 'decoy';
 
 export interface Order {
   tick: number;
@@ -180,7 +238,7 @@ export interface Order {
   risky?: boolean;
 }
 
-const KIND_CHAR: Record<OrderKind, string> = { half: 'h', all: 'a', hut: 'u', speed: 'v', strength: 'p' };
+const KIND_CHAR: Record<OrderKind, string> = { half: 'h', all: 'a', hut: 'u', speed: 'v', strength: 'p', flag: 'w', nest: 'n', burn: 'x', rain: 'r', call: 'c', decoy: 'y' };
 const CHAR_KIND = Object.fromEntries(Object.entries(KIND_CHAR).map(([kind, char]) => [char, kind])) as Record<string, OrderKind>;
 
 /** Tick in base 36, a kind letter, then one base-36 character per hut. The letter is a capital for a risky order. */
@@ -284,6 +342,8 @@ export interface SwarmMap {
   h: number;
   /** The tick the game is called on, when no side has won it before. */
   ticks: number;
+  /** The mode, start and twists the game is played with. */
+  rules: Rules;
 }
 
 /**
@@ -995,7 +1055,7 @@ const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', brid
  * place as far from each seat as from the other, and starts with more
  * there (see startThree): in the middle both seats come at it at once.
  */
-export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length], sides: readonly Seat[] = ['a', 'b'], size?: SizeId): SwarmMap {
+export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length], sides: readonly Seat[] = ['a', 'b'], size?: SizeId, rules: Rules = CLASSIC): SwarmMap {
   const rnd = mulberry32(seed);
   const ground = sizeOf(id, sides.length, size);
   const { w, h } = WORLDS[ground];
@@ -1016,7 +1076,7 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   const homes = sides.map((seat) => sites.findIndex((site) => site.owner === seat));
   if (third) startThree(id, sides, homes, sites, links);
   const ticks = MATCH_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
-  return { id, scene: SCENES[id], sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, homes, size: ground, w, h, ticks };
+  return { id, scene: SCENES[id], sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, homes, size: ground, w, h, ticks, rules };
 }
 
 /**
@@ -1146,7 +1206,9 @@ export type SwarmEvent =
   | { kind: 'upgrade'; hut: number }
   | { kind: 'clash'; from: number; to: number; d: number }
   /** A unit of `seat` died to the spikes or the water, `d` along the path from `from`. */
-  | { kind: 'toll'; from: number; to: number; d: number; seat: Seat };
+  | { kind: 'toll'; from: number; to: number; d: number; seat: Seat }
+  /** `seat` raised the white flag, and `huts` went neutral. */
+  | { kind: 'flag'; seat: Seat; huts: number[] };
 
 /** A tower killed a unit of `seat` standing at x, y. */
 export interface Shot {
@@ -1169,7 +1231,18 @@ export interface SwarmState {
   events: SwarmEvent[];
   /** The towers' shots on the last tick, likewise. */
   shots: Shot[];
+  /**
+   * For each of the map's paths, the last tick it is closed on: 0 for open,
+   * CLOSED_FOREVER for a path that never opens again. Nothing walks onto a
+   * closed path.
+   */
+  closed: number[];
+  /** The sides that raised the white flag, in the order they did. */
+  yielded: Seat[];
 }
+
+/** The largest tick a path can be closed to: a 32-bit int, so it survives the copy to every client. */
+export const CLOSED_FOREVER = 2147483647;
 
 export function newState(map: SwarmMap): SwarmState {
   return {
@@ -1182,6 +1255,8 @@ export function newState(map: SwarmMap): SwarmState {
     tolls: map.paths.map(() => 0),
     events: [],
     shots: [],
+    closed: map.paths.map(() => 0),
+    yielded: [],
   };
 }
 
@@ -1196,17 +1271,37 @@ export function cloneState(state: SwarmState): SwarmState {
     tolls: state.tolls.slice(),
     events: [],
     shots: [],
+    closed: state.closed.slice(),
+    yielded: state.yielded.slice(),
   };
 }
 
 const routeCache = new WeakMap<SwarmMap, number[][][]>();
+/** Tables for the paths closed on some tick, by risk and the closed set's key. Kept apart so an open map's lookup costs nothing more. */
+const closedRouteCache = new WeakMap<SwarmMap, Map<string, number[][]>>();
+
+/** The paths closed on a tick, and a key that names the set. */
+export interface Closed {
+  key: string;
+  paths: ReadonlySet<number>;
+}
+
+/** The paths closed on `tick`, or nothing when every path is open. */
+export function closedOn(state: SwarmState, tick: number): Closed | undefined {
+  const paths: number[] = [];
+  state.closed.forEach((until, at) => {
+    if (until >= tick) paths.push(at);
+  });
+  return paths.length === 0 ? undefined : { key: paths.join(','), paths: new Set(paths) };
+}
 
 /**
  * The hut to walk to next from `from` on the quickest way to `to`, or -1 when
  * no paths join them. A path counts for the time it takes to walk, so a wide
  * road is worth a detour and a climb is not the same both ways. Only a risky
- * march counts the paths that take a toll. Whole numbers and a fixed order of
- * comparison, so both clients route a column the same way.
+ * march counts the paths that take a toll, and none counts a closed path.
+ * Whole numbers and a fixed order of comparison, so both clients route a
+ * column the same way.
  *
  * Every map is its own half-turn, so most marches have two ways as quick: one
  * round each side of the board. Of those it takes the one that sets out
@@ -1214,39 +1309,49 @@ const routeCache = new WeakMap<SwarmMap, number[][][]>();
  * not change. So the way from a hut's twin to another's is the twin of the way
  * between them, and neither seat is routed past more than the other is.
  */
-export function nextHop(map: SwarmMap, from: number, to: number, risky = false): number {
+export function nextHop(map: SwarmMap, from: number, to: number, risky = false, closed?: Closed): number {
+  if (closed) {
+    let tables = closedRouteCache.get(map);
+    if (!tables) closedRouteCache.set(map, (tables = new Map()));
+    const key = `${Number(risky)}:${closed.key}`;
+    let next = tables.get(key);
+    if (!next) tables.set(key, (next = routesOf(map, risky, closed.paths)));
+    return next[from][to];
+  }
   let modes = routeCache.get(map);
   if (!modes) routeCache.set(map, (modes = []));
   let next = modes[Number(risky)];
-  if (!next) {
-    const count = map.sites.length;
-    const walk = map.sites.map(() => map.sites.map(() => Infinity));
-    for (const path of map.paths) {
-      if (takesToll(path.kind) && !risky) continue;
-      const length = pathLength(map, path.a, path.b);
-      walk[path.a][path.b] = Math.floor((length * 100) / percentOn(path, path.b));
-      walk[path.b][path.a] = Math.floor((length * 100) / percentOn(path, path.a));
-    }
-    const cost = walk.map((row, i) => row.map((c, j) => (i === j ? 0 : c)));
-    for (let k = 0; k < count; k++) {
-      for (let i = 0; i < count; i++) {
-        for (let j = 0; j < count; j++) cost[i][j] = Math.min(cost[i][j], cost[i][k] + cost[k][j]);
-      }
-    }
-    const leftOf = (from: number, to: number, hop: number) => {
-      const [p, q, r] = [map.sites[from], map.sites[to], map.sites[hop]];
-      return (q.y - p.y) * (r.x - p.x) - (q.x - p.x) * (r.y - p.y);
-    };
-    next = map.sites.map((_, i) =>
-      map.sites.map((_, j) => {
-        if (i === j || cost[i][j] === Infinity) return -1;
-        const quickest = map.links[i].filter((hop) => walk[i][hop] + cost[hop][j] === cost[i][j]);
-        return quickest.reduce((best, hop) => (leftOf(i, j, hop) > leftOf(i, j, best) ? hop : best));
-      }),
-    );
-    modes[Number(risky)] = next;
-  }
+  if (!next) modes[Number(risky)] = next = routesOf(map, risky, new Set());
   return next[from][to];
+}
+
+/** For every pair of huts, nextHop's answer. */
+function routesOf(map: SwarmMap, risky: boolean, closed: ReadonlySet<number>): number[][] {
+  const count = map.sites.length;
+  const walk = map.sites.map(() => map.sites.map(() => Infinity));
+  map.paths.forEach((path, at) => {
+    if ((takesToll(path.kind) && !risky) || closed.has(at)) return;
+    const length = pathLength(map, path.a, path.b);
+    walk[path.a][path.b] = Math.floor((length * 100) / percentOn(path, path.b));
+    walk[path.b][path.a] = Math.floor((length * 100) / percentOn(path, path.a));
+  });
+  const cost = walk.map((row, i) => row.map((c, j) => (i === j ? 0 : c)));
+  for (let k = 0; k < count; k++) {
+    for (let i = 0; i < count; i++) {
+      for (let j = 0; j < count; j++) cost[i][j] = Math.min(cost[i][j], cost[i][k] + cost[k][j]);
+    }
+  }
+  const leftOf = (from: number, to: number, hop: number) => {
+    const [p, q, r] = [map.sites[from], map.sites[to], map.sites[hop]];
+    return (q.y - p.y) * (r.x - p.x) - (q.x - p.x) * (r.y - p.y);
+  };
+  return map.sites.map((_, i) =>
+    map.sites.map((_, j) => {
+      if (i === j || cost[i][j] === Infinity) return -1;
+      const quickest = map.links[i].filter((hop) => walk[i][hop] + cost[hop][j] === cost[i][j]);
+      return quickest.reduce((best, hop) => (leftOf(i, j, hop) > leftOf(i, j, best) ? hop : best));
+    }),
+  );
 }
 
 const queued = (hut: Hut): number => hut.out.reduce((sum, q) => sum + q.n, 0);
@@ -1267,13 +1372,15 @@ export function upgradeCost(state: SwarmState, hutIndex: number, kind: 'hut' | '
 }
 
 /** An order that no longer holds when its tick comes (the hut fell, the units left) does nothing. */
-function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
+function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, closed?: Closed): void {
+  if (order.kind === 'flag') return raiseFlag(state, seat);
+  if (order.kind === 'nest' || order.kind === 'burn' || order.kind === 'rain' || order.kind === 'call' || order.kind === 'decoy') return;
   const hut = state.huts[order.from];
   if (!hut || hut.owner !== seat) return;
   if (order.kind === 'half' || order.kind === 'all') {
     if (!state.huts[order.to]) return;
     // No hop also covers a send to the hut itself.
-    const hop = nextHop(map, order.from, order.to, order.risky);
+    const hop = nextHop(map, order.from, order.to, order.risky, closed);
     if (hop === -1) return;
     const n = sendSize(hut, order.kind);
     if (n <= 0) return;
@@ -1289,6 +1396,34 @@ function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order):
   if (order.kind === 'hut') hut.level++;
   else state.army[seat][order.kind]++;
   state.events.push({ kind: 'upgrade', hut: order.from });
+}
+
+/**
+ * The white flag. The side's huts go to nobody with what is in them, towers
+ * and forts as they stand, so the sides still playing have loaded huts to race
+ * for; its units on the road go with it. A side with nothing left to give up
+ * has no flag to raise.
+ */
+function raiseFlag(state: SwarmState, seat: Seat): void {
+  const huts = state.huts.flatMap((hut, at) => (hut.owner === seat ? [at] : []));
+  if (huts.length === 0 && !state.units.some((unit) => unit.seat === seat)) return;
+  for (const at of huts) {
+    const hut = state.huts[at];
+    hut.owner = null;
+    hut.grow = 0;
+    hut.out = [];
+  }
+  state.units = state.units.filter((unit) => unit.seat !== seat);
+  state.yielded.push(seat);
+  state.events.push({ kind: 'flag', seat, huts });
+}
+
+/** Columns queued to leave over a path that has closed since go another way, or stay home when there is none. */
+function reroute(map: SwarmMap, hut: Hut, at: number, closed: Closed): void {
+  for (const line of hut.out) {
+    if (closed.paths.has(pathIndex(map, at, line.to))) line.to = nextHop(map, at, line.dest, line.risky, closed);
+  }
+  hut.out = hut.out.filter((line) => line.to !== -1);
 }
 
 function survives(state: SwarmState, owner: Owner): boolean {
@@ -1472,15 +1607,17 @@ function takeTolls(state: SwarmState, map: SwarmMap): void {
 }
 
 /** Returns true when the unit walks on through a hut of its own towards its destination. */
-function arrive(state: SwarmState, map: SwarmMap, unit: Unit): boolean {
+function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): boolean {
   const hut = state.huts[unit.to];
   if (hut.owner === unit.seat) {
-    if (unit.to === unit.dest) {
+    const hop = unit.to === unit.dest ? -1 : nextHop(map, unit.to, unit.dest, unit.risky, closed);
+    // Home, or every way on is closed: it joins the garrison.
+    if (hop === -1) {
       hut.n++;
       return false;
     }
     unit.from = unit.to;
-    unit.to = nextHop(map, unit.from, unit.dest, unit.risky);
+    unit.to = hop;
     unit.d = 0;
     return true;
   }
@@ -1595,13 +1732,14 @@ function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
 export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Seat, Order[]>>, cpu: Computer = {}): void {
   const planned = map.sides.map((side) => (cpu[side] !== undefined && state.tick >= cpu[side] && thinksAt(map, side, state.tick) ? cpuOrders(state, map, side) : []));
   const tick = ++state.tick;
+  const closed = closedOn(state, tick);
   state.events = [];
   state.shots = [];
   map.sides.forEach((side, k) => {
     if (played(cpu, side, tick)) {
-      for (const order of orders[side] ?? []) if (order.tick === tick) applyOrder(state, map, side, order);
+      for (const order of orders[side] ?? []) if (order.tick === tick) applyOrder(state, map, side, order, closed);
     }
-    for (const order of planned[k]) applyOrder(state, map, side, order);
+    for (const order of planned[k]) applyOrder(state, map, side, order, closed);
   });
 
   for (const hut of state.huts) {
@@ -1614,6 +1752,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
   if (tick % RELEASE_TICKS === 0) {
     state.huts.forEach((hut, index) => {
       if (!hut.owner || hut.out.length === 0) return;
+      if (closed) reroute(map, hut, index, closed);
       for (const line of hut.out) {
         // The garrison was killed under the column: what is left stays to defend.
         if (hut.n === 0) {
@@ -1647,7 +1786,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     const walking: Unit[] = [];
     for (const unit of state.units) {
       if (dead.has(unit)) continue;
-      if (unit.d < length[index[unit.from][unit.to]] || arrive(state, map, unit)) walking.push(unit);
+      if (unit.d < length[index[unit.from][unit.to]] || arrive(state, map, unit, closed)) walking.push(unit);
     }
     state.units = walking;
   }
@@ -1776,6 +1915,7 @@ const MIN_SEND = 3;
 export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[] {
   const orders: Order[] = [];
   const tick = state.tick + 1;
+  const closed = closedOn(state, tick);
   const { huts } = state;
   const army = state.army[seat];
   const me = SEATS.indexOf(seat);
@@ -1819,7 +1959,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const paths: number[] = [];
     let ticks = 0;
     for (let at = from; at !== to; ) {
-      const hop = nextHop(map, at, to, risky);
+      const hop = nextHop(map, at, to, risky, closed);
       if (hop === -1 || (hop !== to && huts[hop].owner !== seat)) return null;
       const path = index[at][hop];
       paths.push(path);

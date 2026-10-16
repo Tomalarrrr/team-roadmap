@@ -212,6 +212,29 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), `${M}/size`, 'huge')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/third`, true)).toBe(false);
   });
+
+  it('takes one of the eight modes and five starts', () => {
+    for (const mode of ['classic', 'blitz', 'hill', 'regicide', 'bounty', 'egg', 'teams', 'survival']) expect(allowed(db(waitingRoom()), `${M}/mode`, mode)).toBe(true);
+    for (const start of ['home', 'close', 'scattered', 'draft', 'nests']) expect(allowed(db(waitingRoom()), `${M}/start`, start)).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/mode`, 'warren')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/mode`, 1)).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/start`, 'middle')).toBe(false);
+  });
+
+  it('holds the twists to one letter each in their order', () => {
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'fopgzcbq')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'fq')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'qf')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'ff')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'x')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, true)).toBe(false);
+  });
+
+  it('takes a nest of big or many on a player', () => {
+    expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'many')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'big')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'huge')).toBe(false);
+  });
 });
 
 describe('the swarm rules: starting and playing', () => {
@@ -240,6 +263,24 @@ describe('the swarm rules: starting and playing', () => {
     expect(allowed(before, M, playingRoom({ map: 'open' }))).toBe(false);
     const swapped = { a: person('sa', 'Ann'), b: person('sb', 'Bo'), c: person('sx', 'Cy') };
     expect(allowed(before, M, playingRoom({ players: swapped }))).toBe(false);
+  });
+
+  it('fixes the mode, the start, the twists and every nest for the length of a game', () => {
+    const chosen = { mode: 'blitz', start: 'nests', twists: 'fo', players: { a: person('sa', 'Ann', { nest: 'many' }), b: person('sb', 'Bo'), c: person('sc', 'Cy') } };
+    const before = db(playingRoom(chosen));
+    expect(allowed(before, M, playingRoom(chosen))).toBe(true);
+    expect(allowed(before, M, playingRoom({ ...chosen, status: 'finished', winner: 'a' }))).toBe(true);
+    expect(allowed(before, M, playingRoom({ ...chosen, mode: 'hill' }))).toBe(false);
+    expect(allowed(before, M, playingRoom({ ...chosen, start: 'home' }))).toBe(false);
+    expect(allowed(before, M, playingRoom({ ...chosen, twists: 'f' }))).toBe(false);
+    expect(allowed(before, `${M}/twists`, 'fop')).toBe(false);
+    expect(allowed(before, `${M}/players/a/nest`, 'big')).toBe(false);
+    expect(allowed(before, `${M}/players/b/nest`, 'many')).toBe(false);
+    expect(allowed(db(playingRoom()), `${M}/mode`, 'blitz')).toBe(false);
+    // Between games they are anyone's to change.
+    const finished = db(playingRoom({ ...chosen, status: 'finished', winner: 'a' }));
+    expect(allowed(finished, `${M}/players/a/nest`, 'big')).toBe(true);
+    expect(allowed(finished, M, playingRoom({ ...chosen, mode: 'hill', twists: 'q', game: 3, startAt: NOW + 4000 }))).toBe(true);
   });
 
   it('records any of four seats as the winner, and any as the one who left', () => {

@@ -34,7 +34,7 @@ vi.mock('../dbProxy', () => ({
   },
 }));
 
-import { applyRoomEvent, createRoom, getRoom, joinRoom, putSeat, recordResult, setComputer, setKind, startMatch, vacateSeat } from '../swarmApi';
+import { applyRoomEvent, createRoom, getRoom, joinRoom, putSeat, recordResult, setComputer, setKind, setNest, startMatch, vacateSeat } from '../swarmApi';
 import { COUNTDOWN_MS, type SwarmMatch } from '../../swarmGameLogic';
 
 beforeEach(() => {
@@ -170,6 +170,25 @@ describe('choosing a creature', () => {
   });
 });
 
+describe('choosing a nest', () => {
+  it('sets it on the player, keeps it for the rematch, and is refused during a game', async () => {
+    const code = await seated();
+    await setNest(code, 's-bob', 'many');
+    await setNest(code, 's-ann', 'big');
+    expect((await matchOf(code)).players).toMatchObject({ a: { nest: 'big' }, b: { nest: 'many' } });
+    await startMatch(code, 60_000, null, null, { start: 'nests' });
+    await expect(setNest(code, 's-bob', 'big')).rejects.toThrow('The nests are chosen before a game starts.');
+    await recordResult(code, 1, 'a');
+    await startMatch(code, 120_000, null, null, { start: 'nests' });
+    expect((await matchOf(code)).players.b?.nest).toBe('many');
+  });
+
+  it('is refused a session with no seat', async () => {
+    const code = await seated();
+    await expect(setNest(code, 's-eve', 'many')).rejects.toThrow('Room not found');
+  });
+});
+
 describe('a code that could not be a room', () => {
   // The code goes into the path of the request, and it is typed by a person or read from a link.
   it.each(['', 'AB', 'ABCDE', 'AB/D', 'A.CD', '../x', 'AB D'])('%j is refused without asking the database', async (code) => {
@@ -231,6 +250,19 @@ describe('starting and finishing', () => {
     const m = await matchOf(code);
     expect(m).not.toHaveProperty('map');
     expect(m).not.toHaveProperty('size');
+  });
+
+  it('carries the mode, start and twists chosen, stores none that is the default, and drops them when the next game chooses none', async () => {
+    const code = await seated();
+    await startMatch(code, 60_000, null, null, { mode: 'blitz', start: 'nests', twists: 'fq' });
+    expect(await matchOf(code)).toMatchObject({ mode: 'blitz', start: 'nests', twists: 'fq' });
+    await recordResult(code, 1, 'a');
+    await startMatch(code, 120_000, null, null, { mode: 'classic', start: 'home', twists: '' });
+    const m = await matchOf(code);
+    expect(m).toMatchObject({ status: 'playing', game: 2 });
+    expect(m).not.toHaveProperty('mode');
+    expect(m).not.toHaveProperty('start');
+    expect(m).not.toHaveProperty('twists');
   });
 
   it('does not restart a game that is being played', async () => {
