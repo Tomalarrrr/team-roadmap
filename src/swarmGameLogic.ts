@@ -1076,7 +1076,10 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
     links[path.b].push(path.a);
   }
   const homes = sides.map((seat) => sites.findIndex((site) => site.owner === seat));
+  if (rules.start === 'close') closeIn(sides, homes, sites, links, w, h);
   if (third) startThree(id, sides, homes, sites, links);
+  if (rules.start === 'scattered') scatterStarts(sides, homes, sites, w, h);
+  if (rules.start === 'nests') nestStarts(rules.nests, sides, homes, sites, w, h);
   const ticks = MATCH_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
   return { id, scene: SCENES[id], sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, homes, size: ground, w, h, ticks, rules };
 }
@@ -1112,6 +1115,178 @@ function startThree(id: MapId, sides: readonly Seat[], homes: readonly number[],
   if (own < 0) throw new Error(`No hut to give the first seat of ${id}`);
   sites[own] = { ...sites[own], owner: sides[0] };
   sites[twinOf(own)] = { ...sites[twinOf(own)], owner: sides[1] };
+}
+
+/** The fewest paths between two homes the close start allows: 1 would put them next door. */
+export const CLOSE_PATHS = 2;
+/** The huts the scattered start gives each side besides its home: 1 or 2, as its spread weighs one hut or a pair. */
+export const SCATTERED_HUTS = 2;
+/**
+ * What a big nest's home starts with, at level 3. Against a nest of many, in
+ * cpu games over every map and size, seeds 1 to 8 (2026-10-16), big won 20%
+ * of 2-side games with 15, 41% with 35, 48% with 36, 50% with 37, 55% with 38
+ * and 72% with 60; with 37 a big seat of 4 sides won 27% and of 3 sides 41%.
+ */
+export const BIG_NEST = 37;
+/** The huts a nest of many starts with besides its home. */
+export const MANY_NEST = 3;
+/**
+ * The huts with their images a big nest in the middle of three takes besides
+ * its home. With three big nests the middle won 13 of 120 cpu games with 1
+ * and 51 of 120 with 2, against 23 and 46 for the seats (seeds 1 to 5, every
+ * map and size, 2026-10-16).
+ */
+export const BIG_MIDDLE_PAIRS = 2;
+
+const spanSquared = (p: Point, q: Point) => (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y);
+
+/**
+ * The hut each side stands on where the first side stands on `at`: the
+ * half-turn about the middle of the field takes it to the second side's, and
+ * with four sides the mirror left to right to the third's and top to bottom
+ * to the fourth's, the moves tryGrow deals the starts by. The middle side of
+ * three has none. Null when an image is no hut, or two of them are one.
+ */
+function groupOf(sites: readonly Site[], sides: number, w: number, h: number, at: number): number[] | null {
+  const cy = centreOf({ w, h }).y;
+  const { x, y } = sites[at];
+  const images = [{ x, y }, { x: w - x, y: 2 * cy - y }, { x: w - x, y }, { x, y: 2 * cy - y }].slice(0, sides === 4 ? 4 : 2);
+  const group = images.map((p) => sites.findIndex((site) => site.x === p.x && site.y === p.y));
+  return group.every((g, k) => g >= 0 && group.indexOf(g) === k) ? group : null;
+}
+
+/** Whether hut `at` is nearer side k's home than any other side's: no hut of the board is two sides' own. */
+const ownTo = (sites: readonly Site[], homes: readonly number[], k: number, at: number) =>
+  homes.every((other, j) => j === k || spanSquared(sites[at], sites[homes[k]]) < spanSquared(sites[at], sites[other]));
+
+const openSite = (site: Site) => !site.owner && !site.tower && !site.fort;
+
+/**
+ * The close start. Each home moves to the hut from which the nearest other
+ * side's home is 2 paths away, or the fewest paths over 2 that any choice
+ * leaves, and of those to the hut nearest where it stood. Every side moves to
+ * the image of the first side's new home, so none is nearer another than the
+ * rest are; with three the middle stays and the two seats move in on it. A
+ * home trades places with the hut it moves to, so the board holds what it held.
+ */
+function closeIn(sides: readonly Seat[], homes: number[], sites: Site[], links: readonly number[][], w: number, h: number): void {
+  const hopsFrom = (from: number) => {
+    const hops = sites.map((_, at) => (at === from ? 0 : Infinity));
+    const queue = [from];
+    for (let head = 0; head < queue.length; head++) {
+      for (const next of links[queue[head]]) {
+        if (hops[next] !== Infinity) continue;
+        hops[next] = hops[queue[head]] + 1;
+        queue.push(next);
+      }
+    }
+    return hops;
+  };
+  let best: { group: number[]; apart: number; off: number } | null = null;
+  for (let at = 0; at < sites.length; at++) {
+    const group = groupOf(sites, sides.length, w, h, at);
+    if (!group || !group.every((g, k) => g === homes[k] || openSite(sites[g]))) continue;
+    const hops = hopsFrom(at);
+    const apart = Math.min(...group.slice(1).map((g) => hops[g]), ...(sides.length === 3 ? [hops[homes[2]]] : []));
+    const off = spanSquared(sites[at], sites[homes[0]]);
+    if (apart >= CLOSE_PATHS && (!best || apart < best.apart || (apart === best.apart && off < best.off))) best = { group, apart, off };
+  }
+  if (!best) throw new Error('No close start: every pair of homes is next door');
+  best.group.forEach((to, k) => {
+    const from = homes[k];
+    if (to === from) return;
+    [sites[from], sites[to]] = [{ ...sites[to], x: sites[from].x, y: sites[from].y }, { ...sites[from], x: sites[to].x, y: sites[to].y }];
+    homes[k] = to;
+  });
+}
+
+/**
+ * The open huts of the first side's own part whose images are open too, each
+ * with its images, the nearest its home first; and for the middle side of
+ * three, which has no image, the open huts of its own part paired with their
+ * images. Worked out before any start takes a hut, so that the seats' starts
+ * stay each other's images.
+ */
+function startChoices(sides: readonly Seat[], homes: readonly number[], sites: readonly Site[], w: number, h: number) {
+  const groups = (count: number, k: number) =>
+    sites
+      .flatMap((_, at) => {
+        const group = groupOf(sites, count, w, h, at);
+        // A pair of the middle's is listed once, by the first of its huts.
+        return group && (k === 0 || group[0] < group[1]) && ownTo(sites, homes, k, at) && group.every((g) => openSite(sites[g])) ? [group] : [];
+      })
+      .sort((p, q) => spanSquared(sites[homes[k]], sites[p[0]]) - spanSquared(sites[homes[k]], sites[q[0]]) || p[0] - q[0]);
+  return { seats: groups(sides.length, 0), middle: sides.length === 3 ? groups(2, 2) : [] };
+}
+
+/** Gives `side` the huts at `at`, each of level 1 with what a home starts with. */
+function settleOn(sites: Site[], side: Seat, at: readonly number[]): void {
+  for (const g of at) sites[g] = { ...sites[g], owner: side, n: START_UNITS, level: 1 };
+}
+
+/** The huts each start holds besides its home, by side. */
+const heldBy = (sides: readonly Seat[], homes: readonly number[], sites: readonly Site[]) =>
+  sides.map((side, k) => sites.flatMap((site, at) => (site.owner === side && at !== homes[k] ? [at] : [])));
+
+/**
+ * The scattered start: each side holds two huts more than its home, spread
+ * over its own part of the board. A side takes the open huts of its part, as
+ * many as it is short of two, that stand furthest from each other and from
+ * the huts it holds, by the nearest two. The seats take the images of the
+ * first side's; the middle side of three takes a hut and its image for each
+ * hut a seat was given, since with one hut each it won 10 of 120 cpu games
+ * (seeds 1 to 5, every map and size, 2026-10-16) and with the pairs 48 of
+ * 120, against 31 and 41 for the seats. Where a side's part has fewer open
+ * huts than it is short, which happens to the seats of three on a few small
+ * maps, it takes what there is.
+ */
+function scatterStarts(sides: readonly Seat[], homes: readonly number[], sites: Site[], w: number, h: number): void {
+  const { seats, middle } = startChoices(sides, homes, sites, w, h);
+  const held = heldBy(sides, homes, sites);
+  // Of `choices`, the `want` (or as many as there are) whose huts stand furthest from each other and from `fixed`.
+  const spread = (choices: readonly number[][], fixed: readonly number[], want: number): number[][] => {
+    for (let n = Math.min(want, choices.length); n > 0; n--) {
+      const sets = n === 1 ? choices.map((c) => [c]) : choices.flatMap((c, i) => choices.slice(i + 1).map((d) => [c, d]));
+      let best: { set: number[][]; apart: number } | null = null;
+      for (const set of sets) {
+        const huts = set.flat();
+        const apart = Math.min(...huts.flatMap((p, i) => [...fixed, ...huts.slice(i + 1)].map((q) => spanSquared(sites[p], sites[q]))));
+        if (!best || apart > best.apart) best = { set, apart };
+      }
+      if (best) return best.set;
+    }
+    return [];
+  };
+  // Of each choice of the seats', only the first side's hut decides it: the rest are its images.
+  const firsts = seats.map((group) => [group[0]]);
+  const chosen = spread(firsts, [homes[0], ...held[0]], SCATTERED_HUTS - held[0].length).map(([at]) => seats[firsts.findIndex(([first]) => first === at)]);
+  for (let k = 0; k < (sides.length === 4 ? 4 : 2); k++) settleOn(sites, sides[k], chosen.map((group) => group[k]));
+  if (sides.length === 3) settleOn(sites, sides[2], spread(middle, [homes[2], ...held[2]], chosen.length).flat());
+}
+
+/**
+ * The nests start, each side's own pick. A big nest is a home of level 3 with
+ * BIG_NEST units. A nest of many is the home and the nearest open huts of the
+ * side's own part, of level 1 with 5 units each, until it holds MANY_NEST
+ * besides the home or its part has no more; the huts a third side's start
+ * gives it count. The seats take the images of the first side's nearest; the
+ * middle side of three takes its nearest huts with their images, and so can
+ * end up with 4. A big middle also takes its BIG_MIDDLE_PAIRS nearest huts
+ * and images, as the seats it sits between both come at it.
+ * Measured on 2026-10-16 over every map, size and seeds 1 to 20: two and four
+ * sides hold 3 besides the home on all but a few small Guns and Crossroads
+ * boards, where the towers and forts leave room for 2.
+ */
+function nestStarts(nests: Rules['nests'], sides: readonly Seat[], homes: readonly number[], sites: Site[], w: number, h: number): void {
+  const { seats, middle } = startChoices(sides, homes, sites, w, h);
+  const held = heldBy(sides, homes, sites);
+  const wanted = Math.max(0, MANY_NEST - held[0].length);
+  sides.forEach((side, k) => {
+    const isMiddle = sides.length === 3 && k === 2;
+    if (nests[side] !== 'many') sites[homes[k]] = { ...sites[homes[k]], level: 3, n: BIG_NEST };
+    if (isMiddle) settleOn(sites, side, middle.slice(0, nests[side] === 'many' ? wanted : BIG_MIDDLE_PAIRS).flat());
+    else if (nests[side] === 'many') settleOn(sites, side, seats.slice(0, wanted).map((group) => group[k]));
+  });
 }
 
 /** What a tick asks of every unit about the path it is on, worked out once for a map. */
@@ -1241,6 +1416,10 @@ export interface SwarmState {
   closed: number[];
   /** The sides that raised the white flag, in the order they did. */
   yielded: Seat[];
+  /** Where each side in the map's order really started: the map's homes, until a draft moves them. */
+  homes: number[];
+  /** In a draft, the hut each side in the map's order picked to start from, or -1 for none yet. */
+  picks: number[];
 }
 
 /** The largest tick a path can be closed to: a 32-bit int, so it survives the copy to every client. */
@@ -1259,6 +1438,8 @@ export function newState(map: SwarmMap): SwarmState {
     shots: [],
     closed: map.paths.map(() => 0),
     yielded: [],
+    homes: map.homes.slice(),
+    picks: map.sides.map(() => -1),
   };
 }
 
@@ -1275,6 +1456,8 @@ export function cloneState(state: SwarmState): SwarmState {
     shots: [],
     closed: state.closed.slice(),
     yielded: state.yielded.slice(),
+    homes: state.homes.slice(),
+    picks: state.picks.slice(),
   };
 }
 
@@ -1735,6 +1918,103 @@ function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
   }
 }
 
+/** With the draft start, ticks 1 to 60 are the draft: the sides pick the huts they start from, and nothing breeds, walks or is sent. */
+export const DRAFT_TICKS = 60;
+
+/** Whether `tick` is one of the draft's on this map. */
+export const drafting = (map: SwarmMap, tick: number): boolean => map.rules.start === 'draft' && tick <= DRAFT_TICKS;
+
+/** The draft's tick the computer picks on: half way, so a quick person can beat it to a hut and a slower one sees what it took. */
+export const CPU_PICK_TICK = DRAFT_TICKS / 2;
+
+/** Whether side k can pick hut `at` in the draft: the first hut it picks that is no tower and no other side's pick. */
+const canPick = (state: SwarmState, map: SwarmMap, k: number, at: number) =>
+  state.picks[k] === -1 && !state.yielded.includes(map.sides[k]) && state.huts[at] !== undefined && !isTower(state.huts[at]) && !state.picks.includes(at);
+
+/**
+ * A tick of the draft. A side's first pick of a hut that is not a tower and
+ * no other side has picked stands, and any after it count for nothing; a pick
+ * of a hut another side picked first is refused, and the side can pick again.
+ * The sides take turns to go first, a tick each, so no seat wins every pick
+ * made on the same tick as another's. A white flag still counts, and gives up
+ * the side's pick. On the draft's last tick the picks are settled.
+ */
+function draftStep(state: SwarmState, map: SwarmMap, orders: Partial<Record<Seat, Order[]>>, cpu: Computer): void {
+  const tick = ++state.tick;
+  state.events = [];
+  state.shots = [];
+  for (let turn = 0; turn < map.sides.length; turn++) {
+    const k = (tick + turn) % map.sides.length;
+    const side = map.sides[k];
+    if (!played(cpu, side, tick)) {
+      if (tick >= CPU_PICK_TICK && state.picks[k] === -1 && !state.yielded.includes(side)) state.picks[k] = cpuPick(state, map, k);
+      continue;
+    }
+    for (const order of orders[side] ?? []) {
+      if (order.tick !== tick) continue;
+      if (order.kind === 'flag') {
+        raiseFlag(state, side);
+        state.picks[k] = -1;
+      }
+      if (order.kind === 'nest' && canPick(state, map, k, order.from)) state.picks[k] = order.from;
+    }
+  }
+  if (tick === DRAFT_TICKS) settleDraft(state, map);
+  judge(state, map, cpu);
+}
+
+/**
+ * The hut the computer picks for side k: of the huts nearer its home than any
+ * other side's, the highest level that is no tower, nobody else's and nobody's
+ * pick, then a fort, then the nearest its home. That is its home unless its
+ * part of the board holds a better hut, and nowhere another side could take
+ * from it first. Its own home is the fallback when a person picked the rest.
+ */
+function cpuPick(state: SwarmState, map: SwarmMap, k: number): number {
+  const home = map.homes[k];
+  const fits = (at: number) => (at === home || state.huts[at].owner === null) && canPick(state, map, k, at) && ownTo(map.sites, map.homes, k, at);
+  const rank = (at: number) => [state.huts[at].level, map.sites[at].fort ? 1 : 0, -spanSquared(map.sites[at], map.sites[home])];
+  const better = (p: number, q: number) => {
+    const [a, b] = [rank(p), rank(q)];
+    const first = a.findIndex((value, i) => value !== b[i]);
+    return first >= 0 && a[first] > b[first];
+  };
+  return state.huts.reduce((best, _, at) => (fits(at) && (best < 0 || better(at, best)) ? at : best), -1);
+}
+
+/**
+ * The draft's picks, settled in the map's order of the sides. Picks are of
+ * different huts, so every side that picked takes its pick. A side that did
+ * not takes its own home, or when another side picked that, the nearest hut
+ * to it that is no tower, nobody else's and nobody's pick. A home its side has
+ * left goes to nobody with 5 units, and the hut a side moves to starts with 5
+ * at the level it stands at. Any other hut a side starts with stays its own.
+ */
+function settleDraft(state: SwarmState, map: SwarmMap): void {
+  const taken = state.picks.filter((pick) => pick !== -1);
+  map.sides.forEach((side, k) => {
+    if (state.yielded.includes(side)) return;
+    const home = map.homes[k];
+    let at = state.picks[k] !== -1 ? state.picks[k] : home;
+    if (state.picks[k] === -1 && taken.includes(home)) {
+      const free = (i: number) => !taken.includes(i) && !isTower(state.huts[i]) && (state.huts[i].owner === null || state.huts[i].owner === side);
+      const off = (i: number) => spanSquared(map.sites[home], map.sites[i]);
+      at = state.huts.reduce((best, _, i) => (free(i) && (best < 0 || off(i) < off(best)) ? i : best), -1);
+      if (at < 0) throw new Error(`No hut left for ${side} to start from`);
+      taken.push(at);
+    }
+    state.homes[k] = at;
+  });
+  map.sides.forEach((side, k) => {
+    const from = map.homes[k];
+    const to = state.homes[k];
+    if (from === to) return;
+    if (!state.homes.includes(from)) Object.assign(state.huts[from], { owner: null, n: START_UNITS });
+    Object.assign(state.huts[to], { owner: side, n: START_UNITS });
+    state.events.push({ kind: 'capture', hut: to, seat: side });
+  });
+}
+
 /**
  * Advance one tick. Each side's orders are applied in turn, in the order the
  * map lays the sides out, each list in the order given. A side the computer
@@ -1743,6 +2023,7 @@ function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
  * the ticks after the computer took the side over count for nothing.
  */
 export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Seat, Order[]>>, cpu: Computer = {}): void {
+  if (drafting(map, state.tick + 1)) return draftStep(state, map, orders, cpu);
   const planned = map.sides.map((side) => (cpu[side] !== undefined && state.tick >= cpu[side] && thinksAt(map, side, state.tick) ? cpuOrders(state, map, side) : []));
   const tick = ++state.tick;
   const closed = closedOn(state, tick);

@@ -29,6 +29,7 @@ import {
   type SwarmState,
 } from '../../swarmGameLogic';
 import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type Leg, type Sending } from './swarmAim';
+import { drawPicks } from './swarmDraft';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
 import { drawThreats, type ThreatView } from './swarmThreat';
 import { paintGround } from './swarmSceneGround';
@@ -1317,6 +1318,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   const aim = aimOf(map, state, view, px);
   if (view.drag) drawRanges(ctx, map, state, view);
   drawAimUnder(ctx, map, state, view, scene.standing.legs, aim);
+  drawPicks(ctx, map, state, view);
   drawStanding(ctx, scene, state, view, scale);
   drawFx(ctx, scene, view.now);
   drawCounts(ctx, scene, state, view, scale, px);

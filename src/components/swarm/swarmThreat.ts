@@ -69,7 +69,7 @@ export function threatsOf(map: SwarmMap, state: SwarmState, seat: Seat): Threat[
  */
 export function siegeOf(map: SwarmMap, state: SwarmState, seat: Seat, threats: Threat[]): Threat | null {
   const held = state.huts.flatMap((hut, at) => (hut.owner === seat && !map.sites[at].tower ? [at] : []));
-  const home = homeOf(map, seat);
+  const home = homeOf(map, state, seat);
   const keep = home !== -1 && state.huts[home].owner === seat ? home : held.length === 1 ? held[0] : -1;
   return threats.find((threat) => threat.hut === keep && threat.n >= GATE_COLUMN) ?? null;
 }

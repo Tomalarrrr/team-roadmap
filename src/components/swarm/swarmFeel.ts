@@ -106,9 +106,9 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
 /** Enemy units on the road to the viewer's home before it is called a column. */
 export const GATE_COLUMN = 8;
 
-/** The hut a seat starts the match in. */
-export function homeOf(map: SwarmMap, seat: Seat): number {
-  return map.homes[map.sides.indexOf(seat)];
+/** The hut a seat starts the match in, which a draft can move off the map's. */
+export function homeOf(map: SwarmMap, state: SwarmState, seat: Seat): number {
+  return state.homes[map.sides.indexOf(seat)];
 }
 
 function marchingOn(state: SwarmState, hut: number, seat: Seat): number {
@@ -154,7 +154,7 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   if (!holdsBridge(before, map, seat) && holdsBridge(after, map, seat)) due.add('bridgeHeld');
   if (before.tick < map.ticks && after.tick >= map.ticks && after.winner === null) due.add('overtime');
 
-  const home = homeOf(map, seat);
+  const home = homeOf(map, after, seat);
   if (
     home !== -1 &&
     after.huts[home].owner === seat &&

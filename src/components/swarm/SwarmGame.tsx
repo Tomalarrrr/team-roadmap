@@ -20,6 +20,7 @@ import {
 import {
   CLASSIC,
   COUNTDOWN_MS,
+  DRAFT_TICKS,
   KINDS,
   MODE_IDS,
   SEATS,
@@ -32,6 +33,7 @@ import {
   computerOf,
   MAP_IDS,
   countOf,
+  drafting,
   kindsOf,
   lastTick,
   newState,
@@ -56,7 +58,7 @@ import { KIND_NAME } from './swarmFeel';
 import { BADGE } from './swarmSceneKit';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
-import { columnOf, startsOf, whereOf, type Start } from './swarmStarts';
+import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
 import { clashOf, surpriseOf, unfit, type RulesChoice } from './swarmLobby';
 import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
@@ -467,9 +469,13 @@ interface Hud {
   flag: boolean;
   /** The sides that raised the white flag, in the order they did. */
   yielded: Seat[];
+  /** Left of the draft to pick a hut to start from; null when there is no draft on. */
+  draft: number | null;
+  /** What this seat holds besides one hut of level 1, in words (see holdingOf). */
+  holding: string | null;
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [] };
+const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [], draft: null, holding: null };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -673,7 +679,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     let live = false;
     let tickNow = 0;
     let seatNow: Seat = 'a';
-    let starts: Partial<Record<Seat, Start>> = {};
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let threat: ThreatView | null = null;
     let threatTick = -1;
@@ -864,7 +869,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       if (playing && game?.game !== m.game) {
         const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size), rulesOf(m));
         game = { ...newLockstep(m.game, map), scene: newScene(map, m.seed, kindsOf(m, map.sides)), fxTick: 0, tally: newTally(map, newState(map)) };
-        starts = startsOf(map);
         threat = null;
         threatTick = -1;
         setSummary(null);
@@ -929,10 +933,12 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         secs: null,
         overtime: false,
         counts: {},
-        starts,
+        starts: {},
         picked: false,
         flag: false,
         yielded: [],
+        draft: null,
+        holding: null,
       };
       if (game) {
         const { shown, map } = game;
@@ -944,6 +950,10 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           tickedSecs = next.secs;
           if (live && next.secs > 0 && next.secs <= TICK_FROM_SECS) speaker.play({ kind: 'tick', level: next.secs <= 3 ? 1 : 0.6 });
         }
+        if (drafting(game.map, tick + 1)) next.draft = Math.ceil(((DRAFT_TICKS - Math.max(tick, 0)) * TICK_MS) / 1000);
+        // A draft moves the starts at its end, and the score line moves with them.
+        next.starts = startsOf(game.map, game.shown.homes);
+        next.holding = holdingOf(game.map, game.shown, seat);
         for (const side of game.map.sides) next.counts[side] = countOf(game.shown, side);
         // A hut lost while it was in hand is put down.
         if (selected !== null && game.shown.huts[selected].owner !== seat) selected = null;
@@ -998,6 +1008,20 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       feel.refused = { hut, at: performance.now(), order };
       buzz(BUZZ.refused);
     };
+    // In a draft a press picks the hut to start from: one pick each, never a
+    // tower or a hut another side picked first, and none that would land after
+    // the draft and count for nothing. A pick another side beat to its hut on
+    // the same tick comes back refused, and the person can pick again.
+    const draftPick = (g: Game, p: Press) => {
+      const hut = hutNear(g, p);
+      if (hut === null) return;
+      const lands = tickNow + (solo ? ORDER_DELAY_SOLO : ORDER_DELAY);
+      const waiting = g.orders[seatNow].some((order) => order.kind === 'nest' && order.tick > g.shown.tick);
+      const picked = g.shown.picks[g.map.sides.indexOf(seatNow)] !== -1;
+      if (g.map.sites[hut].tower || picked || waiting || g.shown.picks.includes(hut) || !drafting(g.map, lands)) return refuse(hut);
+      issue('nest', hut, hut);
+      buzz(BUZZ.done);
+    };
 
     const aim = (g: Game, e: React.PointerEvent<HTMLCanvasElement>) => {
       if (!drag) return;
@@ -1045,6 +1069,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         if (!game || !live || drag) return;
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         const p = worldOf(game, e);
+        if (drafting(game.map, tickNow + 1)) return draftPick(game, p);
         const token = tokenAt(game, p);
         if (token) {
           // An upgrade bought a moment ago has not been paid for yet: a second tap must not spend the same units.
@@ -1187,6 +1212,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       drawScene(canvas, game.scene, game.shown, view);
       let cursor = 'default';
       if (drag) cursor = 'grabbing';
+      else if (live && hover && drafting(game.map, tickNow + 1)) cursor = hutNear(game, hover) === null ? 'default' : 'pointer';
       else if (live && hover && tokenAt(game, hover)) cursor = 'pointer';
       else if (live && hover && mine(hutNear(game, hover))) cursor = 'grab';
       if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
@@ -1601,7 +1627,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           <div className={styles.scoreboard}>
             <span className={styles.sideCol}>{column('left')}</span>
             <span className={styles.middle}>
-              {hud.secs !== null && (
+              {hud.draft !== null && <span className={styles.clock}>Pick your nest: {hud.draft}s</span>}
+              {hud.secs !== null && hud.draft === null && (
                 <span
                   className={`${styles.clock} ${hud.secs <= 60 ? styles.clockLate : ''} ${hud.secs <= TICK_FROM_SECS && hud.secs > 0 && playing ? styles.clockLast : ''}`}
                 >
@@ -1629,6 +1656,12 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                 {mySeat && kinds && myStart && (
                   <span className={styles.overlayText}>
                     You are the {KIND_NAME[kinds[mySeat]].many.toLowerCase()}, starting {whereOf(myStart)}
+                  </span>
+                )}
+                {hud.holding && <span className={styles.overlayNote}>{hud.holding}</span>}
+                {hud.draft !== null && (
+                  <span className={styles.overlayNote}>
+                    In the first {(DRAFT_TICKS * TICK_MS) / 1000} seconds, press any hut but a tower to start there instead. A hut goes to whoever picks it first
                   </span>
                 )}
                 <span className={styles.countdown}>{hud.count}</span>

@@ -168,6 +168,19 @@ describe('calloutsFor', () => {
     expect(calloutsFor(start, after(start, column(GATE_COLUMN, 5)), map, 'b', false)).toEqual([]);
   });
 
+  it('watches the hut a draft started the side from, not the home the map gave it', () => {
+    const moved = after(start, (s) => {
+      s.homes[0] = 1;
+      s.huts[1].owner = 'a';
+      s.huts[0].owner = null;
+    });
+    const column = (dest: number) => (s: SwarmState) => {
+      s.units = Array.from({ length: GATE_COLUMN }, (_, i) => unit(i + 1, 'b', 5, 4, 10 * i, dest));
+    };
+    expect(calloutsFor(moved, after(moved, column(1)), map, 'a', false)).toEqual(['enemyAtGate']);
+    expect(calloutsFor(moved, after(moved, column(0)), map, 'a', false)).toEqual([]);
+  });
+
   it('puts bad news ahead of good when both come on one step', () => {
     const two = after(start, (s) => (s.huts[1].owner = 'a'));
     const swap = after(two, (s) => {
