@@ -4,55 +4,61 @@ import {
   createRoom,
   followRoom,
   getRoom,
+  hostOf,
   joinRoom,
   putSeat,
   recordResult,
   seatOf,
   setComputer,
   setKind,
+  setNest,
+  setRules,
   startMatch,
   vacateSeat,
   type SwarmRoom,
 } from '../../api/swarmApi';
 import {
+  CLASSIC,
   COUNTDOWN_MS,
   KINDS,
+  MODE_IDS,
   SEATS,
   SIZE_IDS,
+  START_IDS,
   TICK_MS,
+  TWISTS as TWIST_IDS,
   advance,
   buildMap,
   computerOf,
   MAP_IDS,
   countOf,
   kindsOf,
+  rulesOf,
   sendSize,
   sidesOf,
   sizeOf,
+  twistLetters,
   upgradeCost,
-  type Kind,
+  type ModeId,
+  type Nest,
   type OrderKind,
   type Seat,
   type MapId,
   type SizeId,
+  type StartId,
+  type Twist,
   type SwarmMatch,
   type SwarmState,
 } from '../../swarmGameLogic';
+import { KIND_NAME } from './swarmFeel';
 import { BADGE } from './swarmSceneKit';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
 import { columnOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
+import { clashOf, surpriseOf, unfit, type RulesChoice } from './swarmLobby';
 import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
 import styles from './SwarmGame.module.css';
-
-/** What a side drawn as each creature is called, and one of its units. */
-const KIND_NAME: Record<Kind, { many: string; one: string }> = {
-  ant: { many: 'Ants', one: 'ant' },
-  bee: { many: 'Bees', one: 'bee' },
-  beetle: { many: 'Beetles', one: 'beetle' },
-  spider: { many: 'Spiders', one: 'spider' },
-};
 
 const SIZE_NAME: Record<SizeId, string> = { small: 'Small', medium: 'Medium', large: 'Large' };
 
@@ -154,6 +160,226 @@ function MapPicker({ pick, onPick, size, onSize, sides }: MapPickerProps) {
   );
 }
 
+/** What the lobby says of each mode: what wins, and what is different on the way. */
+const MODES: Record<ModeId, { name: string; about: string }> = {
+  classic: { name: 'Classic', about: 'Take every hut, or hold the most huts when the clock runs out.' },
+  blitz: { name: 'Blitz', about: '3 minutes, 4 with four sides. Huts breed over 40% faster, armies start one speed up and starts hold 10.' },
+  hill: { name: 'King of the hill', about: 'A crown hut with 20 units stands in the middle. Hold it for 60 seconds in all to win.' },
+  regicide: { name: 'Regicide', about: 'Your home hut is your queen. Lose it and you are out; the last queen standing wins.' },
+  bounty: { name: 'Bounty', about: 'Every 5 seconds the side with the most huts is marked. A hut taken from it gains 10 units.' },
+  egg: { name: 'Egg', about: 'An egg lies in the middle hut and goes with the first unit sent out of it. Get it into your home hut to win.' },
+  teams: { name: 'Teams', about: 'Four sides, two teams of neighbours. Allies never fight, and a team is out when both its sides are.' },
+  survival: { name: 'Survival', about: 'People against the computer. Each minute its huts gain 3 units, then 6, then 9 and on. Last to the clock to win.' },
+};
+
+/** What each start gives a side on the first tick. */
+const STARTS: Record<StartId, { name: string; about: string }> = {
+  home: { name: 'Home', about: 'Each side starts from one hut, where the map puts it.' },
+  close: { name: 'Close', about: 'The starts are 2 paths apart instead of across the map.' },
+  scattered: { name: 'Scattered', about: 'Your home hut and 2 more spread over your part of the board, with 5 units in each of the 2.' },
+  draft: { name: 'Draft', about: 'For the first 6 seconds each person picks any hut to start from. The computer keeps its own.' },
+  nests: { name: 'Nests', about: 'Each person picks Big, one level 3 hut of 15 units, or Many, 4 huts of 5. The computer is Big.' },
+};
+
+/** What each twist adds, said when it is pointed at or focused. */
+const TWISTS: Record<Twist, { name: string; about: string }> = {
+  flood: { name: 'Flood', about: 'After 40% of the clock the outer ring of huts floods every 30 seconds, until the inner 40% are left.' },
+  fog: { name: 'Fog', about: 'You see only near your own huts and units. Elsewhere enemy units are hidden and hut counts show ?.' },
+  powers: { name: 'Powers', about: 'One use each of rain (every path slow for 15 seconds), a call (every hut of yours sends half to one) and a decoy column.' },
+  golden: { name: 'Golden hut', about: '3 minutes in (30% of the clock in blitz) the middle hut turns gold: it breeds 3 times as fast and holds half as much again.' },
+  frenzy: { name: 'Frenzy', about: 'In the last minute every hut breeds twice as fast and towers fire every 0.3 seconds.' },
+  comeback: { name: 'Comeback', about: 'A side 2 or more huts behind the leader breeds 25% faster.' },
+  buildings: { name: 'Buildings', about: 'A trap kills half its first takers, barracks send units that survive one death, beacons send faster ones and a granary gives the huts next to it half as much room again.' },
+  queens: { name: 'Queens', about: 'Lose your home hut and your other huts stop breeding until you take it back.' },
+};
+
+const TWISTS_ABOUT = 'Any number of twists can be played at once.';
+
+const NEST_IDS: readonly Nest[] = ['big', 'many'];
+const NEST_NAME: Record<Nest, string> = { big: 'Big', many: 'Many' };
+
+const SURPRISE_ABOUT = 'Draws a mode, a start and 2 twists that the sides here can play. Press again for another draw.';
+
+interface RulesPickerProps {
+  choice: RulesChoice;
+  /** Without it the choice is only shown: a guest sees the host's. */
+  onChoice?: (choice: RulesChoice) => void;
+  /** What a twist says when none is pointed at. */
+  idle: string;
+  /** Against the computer the nest is picked here; in a room, in your seat's row. */
+  nest?: { pick: Nest; onPick: (nest: Nest) => void };
+  /** What the Surprise draw is made from, and the modes the sides there can play. */
+  surprise: { seed: number; fits: (mode: ModeId) => boolean };
+}
+
+export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPickerProps) {
+  // What the shared line is about: a twist or Surprise pointed at, focused or last tapped, since a phone has no hover.
+  const [shown, setShown] = useState<Twist | 'surprise' | null>(null);
+  // Each press draws again; a draw is saved as the choice, so nobody else needs to make it.
+  const [rolls, setRolls] = useState(0);
+  const toggle = (twist: Twist) => {
+    setShown(twist);
+    if (clashOf(twist, choice.mode)) return;
+    const twists = choice.twists.includes(twist) ? choice.twists.filter((each) => each !== twist) : [...choice.twists, twist];
+    onChoice?.({ ...choice, twists });
+  };
+  const read = (what: Twist | 'surprise') => ({
+    onPointerEnter: (e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse') setShown(what);
+    },
+    onPointerLeave: (e: React.PointerEvent) => {
+      if (e.pointerType === 'mouse') setShown(null);
+    },
+    onFocus: () => setShown(what),
+    onBlur: () => setShown(null),
+  });
+  const about = shown === 'surprise' ? SURPRISE_ABOUT : shown ? (clashOf(shown, choice.mode) ?? TWISTS[shown].about) : idle;
+  return (
+    <div className={styles.ruleSet}>
+      <div className={styles.pickRow}>
+        <label className={styles.pickLabel}>
+          Mode
+          <select
+            className={styles.kindPick}
+            value={choice.mode}
+            disabled={!onChoice}
+            onChange={(e) => {
+              const mode = MODE_IDS.find((id) => id === e.target.value);
+              // A twist with nothing to do in the new mode is let go of rather than kept switched on and idle.
+              if (mode) onChoice?.({ ...choice, mode, twists: choice.twists.filter((twist) => !clashOf(twist, mode)) });
+            }}
+          >
+            {MODE_IDS.map((id) => (
+              <option key={id} value={id}>{MODES[id].name}</option>
+            ))}
+          </select>
+        </label>
+        <label className={styles.pickLabel}>
+          Start
+          <select
+            className={styles.kindPick}
+            value={choice.start}
+            disabled={!onChoice}
+            onChange={(e) => {
+              const start = START_IDS.find((id) => id === e.target.value);
+              if (start) onChoice?.({ ...choice, start });
+            }}
+          >
+            {START_IDS.map((id) => (
+              <option key={id} value={id}>{STARTS[id].name}</option>
+            ))}
+          </select>
+        </label>
+        {nest && choice.start === 'nests' && (
+          <label className={styles.pickLabel}>
+            Nest
+            <select
+              className={styles.kindPick}
+              value={nest.pick}
+              onChange={(e) => {
+                const pick = NEST_IDS.find((id) => id === e.target.value);
+                if (pick) nest.onPick(pick);
+              }}
+            >
+              {NEST_IDS.map((id) => (
+                <option key={id} value={id}>{NEST_NAME[id]}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {onChoice && (
+          <button
+            className={styles.choiceBtn}
+            onClick={() => {
+              setShown('surprise');
+              onChoice(surpriseOf(surprise.seed, rolls, surprise.fits));
+              setRolls(rolls + 1);
+            }}
+            {...read('surprise')}
+          >
+            Surprise
+          </button>
+        )}
+      </div>
+      <span className={styles.rules}>{MODES[choice.mode].about} {STARTS[choice.start].about}</span>
+      <div className={`${styles.choiceRow} ${styles.twistRow}`} role="group" aria-label="Twists">
+        {TWIST_IDS.map((twist) => {
+          const on = choice.twists.includes(twist);
+          return (
+            <button
+              key={twist}
+              className={`${styles.choiceBtn} ${on ? styles.choiceBtnOn : ''}`}
+              aria-pressed={on}
+              // Not disabled: a guest can still point at a twist to read what it does, and anyone at one that clashes to read why.
+              aria-disabled={!onChoice || clashOf(twist, choice.mode) !== null}
+              onClick={() => toggle(twist)}
+              {...read(twist)}
+            >
+              {TWISTS[twist].name}
+            </button>
+          );
+        })}
+      </div>
+      <span className={styles.rules} aria-live="polite">{about}</span>
+    </div>
+  );
+}
+
+/** How long the white flag is held before it goes up: longer than any tap or press on the way to the board. */
+export const FLAG_HOLD_MS = 1500;
+
+/**
+ * Giving up, held to be sure. Letting go, sliding off or losing focus before
+ * the fill reaches the end raises nothing. The timer is started by the press
+ * and not by an effect, since the HUD renders this again every second.
+ */
+export function FlagButton({ onRaise }: { onRaise: () => void }) {
+  const [held, setHeld] = useState(false);
+  const timer = useRef(0);
+  const end = () => {
+    window.clearTimeout(timer.current);
+    timer.current = 0;
+    setHeld(false);
+  };
+  const begin = () => {
+    if (timer.current) return;
+    setHeld(true);
+    timer.current = window.setTimeout(() => {
+      timer.current = 0;
+      setHeld(false);
+      onRaise();
+    }, FLAG_HOLD_MS);
+  };
+  // Gone mid-hold (the last hut lost, the game over): the flag is not raised after.
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return (
+    <button
+      className={`${styles.flagBtn} ${held ? styles.flagBtnHeld : ''}`}
+      title="Hold for 1.5 seconds to give up. Your huts are left to the others with their units."
+      onPointerDown={(e) => {
+        if (e.button === 0) begin();
+      }}
+      onPointerUp={end}
+      onPointerLeave={end}
+      onPointerCancel={end}
+      onKeyDown={(e) => {
+        if (e.key !== ' ' && e.key !== 'Enter') return;
+        e.preventDefault();
+        if (!e.repeat) begin();
+      }}
+      onKeyUp={(e) => {
+        if (e.key === ' ' || e.key === 'Enter') end();
+      }}
+      onBlur={end}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      {/* It fills at the pace of the hold, and empties at once when let go. */}
+      <span className={styles.flagFill} style={{ transitionDuration: held ? `${FLAG_HOLD_MS}ms` : '0s' }} />
+      <span className={styles.flagText}>White flag</span>
+    </button>
+  );
+}
+
 /** With no new order to send, a seat still moves its promise on this often, in ticks. */
 const REPORT_EVERY = 4;
 /**
@@ -225,9 +451,13 @@ interface Hud {
   starts: Partial<Record<Seat, Start>>;
   /** A hut is in hand, with its upgrades showing. */
   picked: boolean;
+  /** This seat has something to give up and has not already. */
+  flag: boolean;
+  /** The sides that raised the white flag, in the order they did. */
+  yielded: Seat[];
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false };
+const HUD_IDLE: Hud = { count: null, secs: null, counts: {}, starts: {}, picked: false, flag: false, yielded: [] };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -242,6 +472,7 @@ interface Controls {
   up: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   cancel: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   key: (e: KeyboardEvent) => void;
+  flag: () => void;
 }
 
 interface SwarmGameProps {
@@ -274,6 +505,10 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   // null plays the map at its own size.
   const [sizePick, setSizePick] = useState<SizeId | null>(null);
   const [computers, setComputers] = useState(1);
+  // Against the computer the rules are this client's own; a room keeps them on its match (see setRules).
+  const [rulesPick, setRulesPick] = useState<RulesChoice>(CLASSIC);
+  const [nestPick, setNestPick] = useState<Nest>('big');
+  const [lobbySeed] = useState(() => crypto.getRandomValues(new Uint32Array(1))[0]);
   const [full, setFull] = useState(false);
 
   const [clock] = useState(() => createServerClock(() => performance.now()));
@@ -316,19 +551,22 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       status: 'playing',
       createdAt: Date.now(),
       seed: crypto.getRandomValues(new Uint32Array(1))[0],
-      players: { a: { sessionId, name: userName } },
+      players: { a: { sessionId, name: userName, ...(rulesPick.start === 'nests' && { nest: nestPick }) } },
       game: (soloRef.current?.game ?? 0) + 1,
       startAt: performance.now() + COUNTDOWN_MS,
       ...(mapPick && { map: mapPick }),
       ...(sizePick && { size: sizePick }),
       cpu: SEATS.slice(1, 1 + computers).join(''),
+      ...(rulesPick.mode !== CLASSIC.mode && { mode: rulesPick.mode }),
+      ...(rulesPick.start !== CLASSIC.start && { start: rulesPick.start }),
+      ...(rulesPick.twists.length > 0 && { twists: twistLetters(rulesPick.twists) }),
     };
     soloRef.current = next;
     setError('');
     setHud(HUD_IDLE);
     setMatch(next);
     setSolo(true);
-  }, [sessionId, userName, mapPick, sizePick, computers]);
+  }, [sessionId, userName, mapPick, sizePick, computers, rulesPick, nestPick]);
 
   // An invite link (?swarm=CODE) joins straight away. The parameter is taken
   // off the URL first, so a reload or a second mount does not join again.
@@ -602,7 +840,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
       // A finished game stays on the board until the next one starts.
       if (playing && game?.game !== m.game) {
-        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size));
+        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size), rulesOf(m));
         game = { ...newLockstep(m.game, map), scene: newScene(map, m.seed, kindsOf(m, map.sides)), fxTick: 0 };
         starts = startsOf(map);
         selected = null;
@@ -651,6 +889,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         counts: {},
         starts,
         picked: false,
+        flag: false,
+        yielded: [],
       };
       if (game) {
         const ticks = game.map.ticks;
@@ -661,6 +901,10 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         if (drag) drag.sources = drag.sources.filter((hut) => game?.shown.huts[hut].owner === seat);
         if (drag?.sources.length === 0) drag = null;
         next.picked = selected !== null;
+        const own = next.counts[seat];
+        next.flag = live && own !== undefined && own.huts + own.units > 0 && !game.orders[seat].some((order) => order.kind === 'flag');
+        // A copy: the state is stepped in place, and the HUD is compared with the last one by value.
+        next.yielded = game.shown.yielded.slice();
       }
       const nextKey = JSON.stringify(next);
       if (nextKey !== hudKey) {
@@ -831,6 +1075,9 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           selected = null;
         }
       },
+      flag() {
+        issue('flag', 0, 0);
+      },
     };
 
     const frame = () => {
@@ -992,6 +1239,17 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     if (code && kind) setKind(code, sessionId, kind).catch((err: Error) => setError(err.message));
   };
 
+  const pickRules = (choice: RulesChoice) => {
+    if (code) setRules(code, sessionId, { mode: choice.mode, start: choice.start, twists: twistLetters(choice.twists) }).catch((err: Error) => setError(err.message));
+  };
+
+  const pickNest = (value: string) => {
+    const nest = NEST_IDS.find((each) => each === value);
+    if (code && nest) setNest(code, sessionId, nest).catch((err: Error) => setError(err.message));
+  };
+
+  const raiseFlag = useCallback(() => controlsRef.current?.flag(), []);
+
   const toggleComputer = (seat: Seat, on: boolean) => {
     if (code) setComputer(code, seat, on).catch((err: Error) => setError(err.message));
   };
@@ -1017,10 +1275,11 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     else if (winner === mySeat) first = `You won${how}`;
     else if (!match.players[winner]) first = `The computer's ${KIND_NAME[kinds[winner]].many.toLowerCase()} won${how}`;
     else first = `${nameOf(winner)} won${how}`;
+    const yielded = hud.yielded.map((seat) => (seat === mySeat ? 'You raised the white flag' : `${KIND_NAME[kinds[seat]].many} raised the white flag`));
     const left = SEATS.filter((seat) => match.out?.[seat] !== undefined).map((seat) =>
       seat === mySeat ? 'You left; the computer took over' : `${match.players[seat]?.name} left; the computer took over`
     );
-    return [first, ...left];
+    return [first, ...yielded, ...left];
   };
 
   const tally = (seat: Seat) => {
@@ -1067,7 +1326,15 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
   // Whoever left the last game partway through, and has not come back, is not in the next (see startMatch).
   const nextSides = match ? SEATS.filter((seat) => match.cpu?.includes(seat) || (match.players[seat] && match.out?.[seat] === undefined)) : [];
-  const canStart = solo || (nextSides.length >= 2 && synced);
+  // A guest in the lobby sees the host's rules; against the computer they are this client's own.
+  const rules = code && match ? rulesOf(match) : rulesPick;
+  const host = match ? hostOf(match) : undefined;
+  const computerSides = nextSides.filter((seat) => match?.cpu?.includes(seat)).length;
+  const unfitFor = (mode: ModeId) => (code ? unfit(mode, nextSides.length - computerSides, computerSides) : unfit(mode, 1, computers));
+  const unfitReason = unfitFor(rules.mode);
+  // A room draws from its own seed; against the computer, from one drawn when the lobby opened.
+  const surprise = { seed: code && match ? match.seed : lobbySeed, fits: (mode: ModeId) => unfitFor(mode) === null };
+  const canStart = !unfitReason && (solo || (nextSides.length >= 2 && synced));
   const myStart = mySeat ? hud.starts[mySeat] : undefined;
   return (
     <div
@@ -1152,7 +1419,9 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               </button>
             ))}
           </div>
-          <button className={styles.secondaryBtn} onClick={startSolo} disabled={busy}>
+          <RulesPicker choice={rulesPick} onChoice={setRulesPick} idle={TWISTS_ABOUT} nest={{ pick: nestPick, onPick: setNestPick }} surprise={surprise} />
+          {unfitReason && <span className={styles.rules}>{unfitReason}</span>}
+          <button className={styles.secondaryBtn} onClick={startSolo} disabled={busy || unfitReason !== null}>
             Play the computer
           </button>
           <span className={styles.rules}>{HOW_TO}</span>
@@ -1189,6 +1458,18 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                   ) : (
                     kind && <span className={styles.seatKind}>{KIND_NAME[kind].many}</span>
                   )}
+                  {rules.start === 'nests' && kind && (
+                    seat === mySeat ? (
+                      <select className={styles.kindPick} value={player?.nest ?? 'big'} onChange={(e) => pickNest(e.target.value)} aria-label="Your nest">
+                        {NEST_IDS.map((each) => (
+                          <option key={each} value={each}>{NEST_NAME[each]}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      // The computer always starts big.
+                      <span className={styles.seatKind}>{NEST_NAME[player?.nest ?? 'big']}</span>
+                    )
+                  )}
                   {!player && (
                     <button className={styles.seatBtn} onClick={() => toggleComputer(seat, !computer)}>
                       {computer ? 'Remove' : 'Add computer'}
@@ -1199,6 +1480,13 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
             })}
           </div>
           <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={sides} />
+          <RulesPicker
+            choice={rules}
+            onChoice={host === mySeat ? pickRules : undefined}
+            idle={host && host !== mySeat ? `${nameOf(host)} chooses the mode, start and twists.` : TWISTS_ABOUT}
+            surprise={surprise}
+          />
+          {unfitReason && <span className={styles.rules}>{unfitReason}</span>}
           <div className={styles.buttonRow}>
             <button className={styles.secondaryBtn} onClick={handleCopyLink}>
               {copied ? 'Link copied' : 'Copy invite link'}
@@ -1254,6 +1542,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                     {line}
                   </span>
                 ))}
+                {unfitReason && <span className={styles.overlayNote}>{unfitReason}</span>}
                 <div className={styles.buttonRow}>
                   <button className={styles.primaryBtn} onClick={handleStart} disabled={!canStart}>
                     Play again
@@ -1265,6 +1554,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               </div>
             )}
           </div>
+          <div className={styles.hud}>{hud.flag && <FlagButton onRaise={raiseFlag} />}</div>
           {error ? (
             <div className={styles.footer} role="alert">{error}</div>
           ) : (

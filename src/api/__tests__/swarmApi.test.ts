@@ -34,7 +34,7 @@ vi.mock('../dbProxy', () => ({
   },
 }));
 
-import { applyRoomEvent, createRoom, getRoom, joinRoom, putSeat, recordResult, setComputer, setKind, setNest, startMatch, vacateSeat } from '../swarmApi';
+import { applyRoomEvent, createRoom, getRoom, hostOf, joinRoom, putSeat, recordResult, setComputer, setKind, setNest, setRules, startMatch, vacateSeat } from '../swarmApi';
 import { COUNTDOWN_MS, type SwarmMatch } from '../../swarmGameLogic';
 
 beforeEach(() => {
@@ -176,16 +176,59 @@ describe('choosing a nest', () => {
     await setNest(code, 's-bob', 'many');
     await setNest(code, 's-ann', 'big');
     expect((await matchOf(code)).players).toMatchObject({ a: { nest: 'big' }, b: { nest: 'many' } });
-    await startMatch(code, 60_000, null, null, { start: 'nests' });
+    await setRules(code, 's-ann', { mode: 'classic', start: 'nests', twists: '' });
+    await startMatch(code, 60_000, null, null);
     await expect(setNest(code, 's-bob', 'big')).rejects.toThrow('The nests are chosen before a game starts.');
     await recordResult(code, 1, 'a');
-    await startMatch(code, 120_000, null, null, { start: 'nests' });
-    expect((await matchOf(code)).players.b?.nest).toBe('many');
+    await startMatch(code, 120_000, null, null);
+    expect(await matchOf(code)).toMatchObject({ game: 2, start: 'nests', players: { b: { nest: 'many' } } });
   });
 
   it('is refused a session with no seat', async () => {
     const code = await seated();
     await expect(setNest(code, 's-eve', 'many')).rejects.toThrow('Room not found');
+  });
+});
+
+describe('choosing the rules', () => {
+  it('is the first seated person\'s, and passes on when they leave', async () => {
+    const code = await seated();
+    expect(hostOf(await matchOf(code))).toBe('a');
+    await vacateSeat(code, 'a', 0);
+    expect(hostOf(await matchOf(code))).toBe('b');
+    await setRules(code, 's-bob', { mode: 'hill', start: 'home', twists: '' });
+    expect((await matchOf(code)).mode).toBe('hill');
+  });
+
+  it('stores what is chosen, drops a choice put back to the default, and stores nothing for classic', async () => {
+    const code = await seated();
+    await setRules(code, 's-ann', { mode: 'regicide', start: 'draft', twists: 'opz' });
+    expect(await matchOf(code)).toMatchObject({ mode: 'regicide', start: 'draft', twists: 'opz' });
+    await setRules(code, 's-ann', { mode: 'regicide', start: 'home', twists: 'o' });
+    const m = await matchOf(code);
+    expect(m).toMatchObject({ mode: 'regicide', twists: 'o' });
+    expect(m).not.toHaveProperty('start');
+    await setRules(code, 's-ann', { mode: 'classic', start: 'home', twists: '' });
+    expect(Object.keys(await matchOf(code)).sort()).toEqual(['createdAt', 'game', 'players', 'seed', 'startAt', 'status']);
+  });
+
+  it('is refused anyone but the host, and a session with no seat, leaving the rules as they were', async () => {
+    const code = await seated();
+    await setRules(code, 's-ann', { mode: 'egg', start: 'home', twists: '' });
+    await expect(setRules(code, 's-bob', { mode: 'blitz', start: 'home', twists: 'f' })).rejects.toThrow('The host chooses the rules.');
+    await expect(setRules(code, 's-eve', { mode: 'blitz', start: 'home', twists: 'f' })).rejects.toThrow('Room not found');
+    const m = await matchOf(code);
+    expect(m.mode).toBe('egg');
+    expect(m).not.toHaveProperty('twists');
+  });
+
+  it('is refused once a game has started, and after it', async () => {
+    const code = await seated();
+    await startMatch(code, 60_000, null, null);
+    await expect(setRules(code, 's-ann', { mode: 'blitz', start: 'home', twists: '' })).rejects.toThrow('The rules are chosen before a game starts.');
+    await recordResult(code, 1, 'a');
+    await expect(setRules(code, 's-ann', { mode: 'blitz', start: 'home', twists: '' })).rejects.toThrow('The rules are chosen before a game starts.');
+    expect(await matchOf(code)).not.toHaveProperty('mode');
   });
 });
 
@@ -252,14 +295,21 @@ describe('starting and finishing', () => {
     expect(m).not.toHaveProperty('size');
   });
 
-  it('carries the mode, start and twists chosen, stores none that is the default, and drops them when the next game chooses none', async () => {
+  it('carries the room\'s mode, start and twists into the game and the rematch', async () => {
     const code = await seated();
-    await startMatch(code, 60_000, null, null, { mode: 'blitz', start: 'nests', twists: 'fq' });
-    expect(await matchOf(code)).toMatchObject({ mode: 'blitz', start: 'nests', twists: 'fq' });
+    await setRules(code, 's-ann', { mode: 'blitz', start: 'nests', twists: 'fq' });
+    await startMatch(code, 60_000, null, null);
+    expect(await matchOf(code)).toMatchObject({ status: 'playing', game: 1, mode: 'blitz', start: 'nests', twists: 'fq' });
     await recordResult(code, 1, 'a');
-    await startMatch(code, 120_000, null, null, { mode: 'classic', start: 'home', twists: '' });
+    await startMatch(code, 120_000, null, null);
+    expect(await matchOf(code)).toMatchObject({ status: 'playing', game: 2, mode: 'blitz', start: 'nests', twists: 'fq' });
+  });
+
+  it('plays classic in a room where none were chosen, storing none of the three', async () => {
+    const code = await seated();
+    await startMatch(code, 60_000, null, null);
     const m = await matchOf(code);
-    expect(m).toMatchObject({ status: 'playing', game: 2 });
+    expect(m).toMatchObject({ status: 'playing', game: 1 });
     expect(m).not.toHaveProperty('mode');
     expect(m).not.toHaveProperty('start');
     expect(m).not.toHaveProperty('twists');

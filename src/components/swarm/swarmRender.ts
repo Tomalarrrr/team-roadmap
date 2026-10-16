@@ -78,6 +78,13 @@ const TRAIL_MS = 240;
 const MUZZLE_MS = 260;
 /** How long a tower takes to stand up again after a shot. */
 const RECOIL_MS = 200;
+/**
+ * A hut given up under the white flag shows its old side and nobody by turns,
+ * this long each, twice, before it stays nobody's: two flashes a second, well
+ * under the three a second that is unsafe to flash at.
+ */
+const YIELD_BEAT_MS = 250;
+const YIELD_BEATS = 4;
 /** Burn marks kept on the ground; the oldest goes when another lands. */
 const SCORCH_MAX = 70;
 
@@ -131,6 +138,8 @@ export interface Scene {
   hitAt: number[];
   /** When each tower last fired, for it to sit down under the shot. */
   firedAt: number[];
+  /** When each hut was given up under the white flag, and by whom. */
+  flagged: ({ at: number; seat: Seat } | null)[];
   /** The paths the viewer's columns have still to walk, as of `tick`: worked out once a tick, not once a frame. */
   standing: { tick: number; legs: Leg[] };
   /** Where cannon balls have landed, burnt into the ground. */
@@ -183,6 +192,7 @@ export function newScene(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>)
     fx: [],
     hitAt: map.sites.map(() => -Infinity),
     firedAt: map.sites.map(() => -Infinity),
+    flagged: map.sites.map(() => null),
     standing: { tick: -1, legs: [] },
     scorches: [],
     slots: new Map(),
@@ -327,6 +337,8 @@ export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[],
     } else if (event.kind === 'upgrade') {
       const site = scene.map.sites[event.hut];
       scene.fx.push({ kind: event.kind, x: site.x, y: site.y, at: now, seat: state.huts[event.hut].owner });
+    } else if (event.kind === 'flag') {
+      for (const hut of event.huts) scene.flagged[hut] = { at: now, seat: event.seat };
     }
     // A capture, and a unit lost to the spikes or the water, are drawn by swarmFeel.
   }
@@ -349,6 +361,14 @@ function paintScorch(ctx: CanvasRenderingContext2D, x: number, y: number) {
  * then copied to the board pixel for pixel, with nothing resampled, and the hut
  * still stands exactly where its flags and its count are drawn.
  */
+/** The side a hut is drawn as: its owner, or for a moment after the white flag, by turns the side that gave it up. */
+export function ownerShown(scene: Scene, index: number, owner: Owner, now: number): Owner {
+  const flagged = scene.flagged[index];
+  if (owner !== null || !flagged) return owner;
+  const beat = Math.floor((now - flagged.at) / YIELD_BEAT_MS);
+  return beat >= 0 && beat < YIELD_BEATS && beat % 2 === 0 ? flagged.seat : owner;
+}
+
 function spriteOf(scene: Scene, index: number, owner: Owner, level: number): Sprite {
   const site = scene.map.sites[index];
   const key = `${index}|${owner}|${level}`;
@@ -1177,7 +1197,8 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     const index = rows[row];
     const site = map.sites[index];
     const hut = state.huts[index];
-    const sprite = spriteOf(scene, index, hut.owner, hut.level);
+    const shown = ownerShown(scene, index, hut.owner, view.now);
+    const sprite = spriteOf(scene, index, shown, hut.level);
     // A tower that has just fired is pressed down on its foot by the shot and stands up again.
     const spent = site.tower ? Math.min(1, (view.now - scene.firedAt[index]) / RECOIL_MS) : 1;
     const stand = 1 - 0.035 * (1 - spent) * (1 - spent);
@@ -1190,7 +1211,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       const painted = scene.scale;
       ctx.drawImage(sprite.canvas, sprite.left / painted, site.y - (site.y - sprite.top / painted) * stand, sprite.canvas.width / painted, (sprite.canvas.height / painted) * stand);
     }
-    drawFlags(ctx, map.scene, site, hut.owner, hut.owner && scene.kinds[hut.owner], hut.level, view.now);
+    drawFlags(ctx, map.scene, site, shown, shown && scene.kinds[shown], hut.level, view.now);
   }
 
   // A bee flies, so its shadow is on the ground below and it is drawn above it. They do not all fly at one height.

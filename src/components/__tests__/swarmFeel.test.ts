@@ -31,6 +31,7 @@ import {
   RIPPLE_MS,
   SHOT_LAND_MS,
   WEAR_FULL,
+  calloutWords,
   calloutsFor,
   critterPoint,
   currentCallout,
@@ -176,6 +177,28 @@ describe('calloutsFor', () => {
     expect(calloutsFor(two, swap, map, 'a', false)).toEqual(['lastHut', 'towerTaken']);
   });
 
+  it('calls a white flag raised by another side, and says nothing to the side that raised it', () => {
+    const before = cloneState(start);
+    // b holds the tower and the fort, so giving them up would otherwise be news to it.
+    for (const at of [2, 3, 4, 5]) before.huts[at].owner = 'b';
+    const yielded = after(before, (s) => {
+      for (const at of [2, 3, 4, 5]) s.huts[at].owner = null;
+      s.yielded.push('b');
+    });
+    expect(calloutsFor(before, yielded, map, 'a', false)).toEqual(['flagRaised']);
+    expect(calloutsFor(before, yielded, map, 'b', false)).toEqual([]);
+    // A side that gave up earlier still hears the next one go.
+    const third = after(yielded, (s) => s.yielded.push('c'));
+    expect(calloutsFor(yielded, third, map, 'b', false)).toEqual(['flagRaised']);
+    expect(calloutsFor(yielded, after(yielded, () => {}), map, 'a', false)).toEqual([]);
+  });
+
+  it('names the creatures that raised the flag, and words the rest as it always has', () => {
+    expect(calloutWords({ key: 'flagRaised', at: 0, seat: 'c' }, LOOKS)).toBe('Beetles raised the white flag');
+    expect(calloutWords({ key: 'flagRaised', at: 0, seat: 'b' }, { ...LOOKS, b: 'spider' })).toBe('Spiders raised the white flag');
+    expect(calloutWords({ key: 'towerLost', at: 0 }, LOOKS)).toBe('Tower lost');
+  });
+
   it('is worded plainly', () => {
     expect(CALLOUT_TEXT.backFromOne).toBe('Back from one hut');
     for (const text of Object.values(CALLOUT_TEXT)) expect(text).toMatch(/^[A-Z][a-z ]+$/);
@@ -203,6 +226,14 @@ describe('the callout queue', () => {
     expect(callouts.queue.map((item) => item.key)).toEqual(['lastHut']);
     queueCallouts(callouts, ['lastHut'], CALLOUT_AGAIN_MS.lastHut);
     expect(callouts.queue.map((item) => item.key)).toEqual(['lastHut', 'lastHut']);
+  });
+
+  it('keeps two white flags close together, each with the side it is about', () => {
+    const callouts = fresh();
+    queueCallouts(callouts, ['flagRaised'], 0, { flagRaised: 'b' });
+    queueCallouts(callouts, ['flagRaised'], 10, { flagRaised: 'c' });
+    expect(callouts.queue).toEqual([{ key: 'flagRaised', at: 0, seat: 'b' }, { key: 'flagRaised', at: 10, seat: 'c' }]);
+    expect(currentCallout(callouts, 10)?.seat).toBe('b');
   });
 
   it('keeps the most pressing when more are due than it holds', () => {
@@ -487,6 +518,15 @@ describe('feelStep', () => {
     feelStep(feel, map, back, 'a', 200);
     expect(feel.callouts.queue.map((item) => item.key)).toEqual(['lastHut', 'backFromOne']);
     expect(feel.callouts.reduced).toBe(false);
+  });
+
+  it('queues a white flag with the side that raised it', () => {
+    const map = mapOf();
+    const state = newState(map);
+    state.tick = 1;
+    const feel = seen(map, state);
+    feelStep(feel, map, after(state, (s) => s.yielded.push('b')), 'a', 100);
+    expect(feel.callouts.queue).toEqual([{ key: 'flagRaised', at: 100, seat: 'b' }]);
   });
 
   it('puts a butterfly up when a unit passes close, away from the unit, and leaves a distant one alone', () => {

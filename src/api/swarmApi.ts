@@ -12,9 +12,11 @@ import {
   sidesOf,
   type Kind,
   type MapId,
+  type ModeId,
   type Nest,
   type Seat,
   type SizeId,
+  type StartId,
   type SwarmMatch,
   type SwarmSeatState,
 } from '../swarmGameLogic';
@@ -259,6 +261,48 @@ export async function setNest(code: string, sessionId: string, nest: Nest): Prom
 }
 
 /**
+ * The person who chooses the room's rules: the one in the first seat taken,
+ * which is the room's maker until they leave it.
+ */
+export function hostOf(match: Pick<SwarmMatch, 'players'>): Seat | undefined {
+  return SEATS.find((seat) => match.players[seat]);
+}
+
+/**
+ * Choose the mode, start and twists the room's games are played by. Only the
+ * host, and only in the lobby. One that is the default is not stored, so a
+ * room with none chosen plays classic. Like the creature pick, this is held
+ * to by the clients; the database checks only the values.
+ */
+export async function setRules(code: string, sessionId: string, rules: { mode: ModeId; start: StartId; twists: string }): Promise<void> {
+  let refusal = '';
+  const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    refusal = 'Room not found';
+    const seat = current && seatOf(current, sessionId);
+    if (!current || !seat) return undefined;
+    if (current.status !== 'waiting') {
+      refusal = 'The rules are chosen before a game starts.';
+      return undefined;
+    }
+    if (seat !== hostOf(current)) {
+      refusal = 'The host chooses the rules.';
+      return undefined;
+    }
+    const rest = { ...current };
+    delete rest.mode;
+    delete rest.start;
+    delete rest.twists;
+    return {
+      ...rest,
+      ...(rules.mode !== 'classic' && { mode: rules.mode }),
+      ...(rules.start !== 'home' && { start: rules.start }),
+      ...(rules.twists && { twists: rules.twists }),
+    };
+  });
+  if (!result.committed) throw new Error(refusal);
+}
+
+/**
  * Put the computer in an open seat, or take it out again. Only between games,
  * and never in a seat a person sits in.
  */
@@ -275,18 +319,11 @@ export async function setComputer(code: string, seat: Seat, on: boolean): Promis
 /**
  * Start a game, or a fresh one in a finished room. Needs two sides at least,
  * people or the computer. `map` and `size` are the ones chosen, or null to
- * leave the map to the seed and the size to the map. `rules` holds the mode,
- * start and twists chosen; one left out, or the default, is not stored, so
- * the next game plays without it unless it is chosen again, as with the map.
+ * leave the map to the seed and the size to the map. The mode, start and
+ * twists are the room's own (see setRules), so a rematch plays by them too;
+ * one that is the default is not stored.
  */
-export async function startMatch(
-  code: string,
-  serverNow: number,
-  map: MapId | null,
-  size: SizeId | null,
-  rules: Pick<SwarmMatch, 'mode' | 'start' | 'twists'> = {}
-): Promise<void> {
-  const { mode, start, twists } = rules;
+export async function startMatch(code: string, serverNow: number, map: MapId | null, size: SizeId | null): Promise<void> {
   const seed = newSeed();
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     if (!current || current.status === 'playing') return undefined;
@@ -297,6 +334,7 @@ export async function startMatch(
       if (player && current.out?.[seat] === undefined) players[seat] = player;
     }
     if (sidesOf({ players, cpu: current.cpu }).length < 2) return undefined;
+    const { mode, start, twists } = current;
     // Rebuilt rather than spread: the last game's result must not carry over.
     return {
       status: 'playing',

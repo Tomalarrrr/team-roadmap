@@ -4,8 +4,8 @@
 
 .popup {
   position: fixed;
-  /* The last term keeps the whole board inside a short window, with the score line over it. */
-  width: min(96vw, 1040px, calc((100dvh - 60px) * 1000 / 660));
+  /* The last term keeps the whole board inside a short window, with the score line over it and the button bar under it. */
+  width: min(96vw, 1040px, calc((100dvh - 92px) * 1000 / 660));
   z-index: 11000;
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
@@ -23,9 +23,9 @@
 
 .popup:active { cursor: grabbing; }
 
-/* The lobby and waiting room have little in them; size to that. */
+/* The lobby and waiting room: wide enough for four maps a row and a rule in a line or two, so all of it fits one window. */
 .popupCompact {
-  width: min(94vw, 400px);
+  width: min(94vw, 600px);
   border-radius: var(--radius-xl);
 }
 
@@ -79,8 +79,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
-  padding: 14px 24px 24px;
+  gap: 10px;
+  padding: 14px 24px 20px;
 }
 
 .lobbyTitle,
@@ -92,7 +92,7 @@
   line-height: 1.45;
 }
 
-.rules { max-width: 300px; }
+.rules { max-width: 520px; }
 
 .errorText { color: var(--error-red-dark); }
 
@@ -142,7 +142,7 @@
   flex-wrap: wrap;
   justify-content: center;
   gap: 8px;
-  max-width: 420px;
+  max-width: 560px;
 }
 
 .mapBtn {
@@ -205,11 +205,11 @@
   cursor: default;
 }
 
-/* Every board is the shape of 1000 by 660, and the picture keeps that shape. */
+/* Every board is the shape of 1000 by 660, and the picture keeps that shape. Five to a row. */
 .mapThumb {
   display: block;
-  width: 116px;
-  height: 77px;
+  width: 92px;
+  height: 61px;
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
 }
@@ -272,7 +272,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 9px 2px;
+  padding: 7px 2px;
   border-bottom: 1px solid var(--border-light);
   font-size: 0.85rem;
   color: var(--text-primary);
@@ -298,6 +298,41 @@
   color: var(--text-primary);
   font-size: 0.8rem;
 }
+
+/* A guest reads the host's choice in it: shown plainly, only not open. */
+.kindPick:disabled {
+  color: var(--text-secondary);
+  opacity: 1;
+}
+
+/* The mode, the start and the twists, with what each does: one block, close set. */
+.ruleSet {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.pickRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
+}
+
+.pickLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* Wrapped into even rows rather than a full row and one left over. */
+.twistRow { max-width: 360px; }
+
+/* A guest's twists can be pointed at, to read them, but not pressed. */
+.choiceBtn[aria-disabled='true'] { cursor: default; }
 
 /* Quieter than the seat it is in: putting the computer in is a side choice. */
 .seatBtn {
@@ -440,6 +475,52 @@
   color: var(--text-primary);
 }
 
+/* Under the board: what a side does besides drag on it. Always there in a game, so the board does not move when a button comes or goes. */
+.hud {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.flagBtn {
+  position: relative;
+  overflow: hidden;
+  padding: 4px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  /* It is held, so a long press must not select it or open a menu over it. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.flagBtn:hover { color: var(--text-primary); }
+
+/* The hold fills the pill from the left; how fast is set with the hold's length in FlagButton. */
+.flagFill {
+  position: absolute;
+  inset: 0;
+  background: var(--border-medium);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition-property: transform;
+  transition-timing-function: linear;
+}
+
+.flagBtnHeld .flagFill { transform: scaleX(1); }
+
+.flagText { position: relative; }
+
 .footer {
   padding: 7px 16px 8px;
   font-size: 0.75rem;
@@ -456,18 +537,40 @@
   justify-content: center;
 }
 
-.popupFull .scoreboard {
-  width: min(100vw, calc((100dvh - 40px) * 1000 / 660));
+.popupFull .scoreboard,
+.popupFull .hud {
+  width: min(100vw, calc((100dvh - 72px) * 1000 / 660));
   margin: 0 auto;
   box-sizing: border-box;
 }
 
 /* As wide as the window, or as wide as its height leaves room for under the score. */
 .popupFull .boardWrap {
-  width: min(100vw, calc((100dvh - 40px) * 1000 / 660));
+  width: min(100vw, calc((100dvh - 72px) * 1000 / 660));
   margin: 0 auto;
 }
 
 @media (max-width: 560px) {
   .sideCount { display: none; }
+
+  /* A phone is as tall as a window on a desk but half as wide: closer set, and the maps four to a row at the size of a fingertip. */
+  .lobby {
+    gap: 8px;
+    padding: 10px 14px 16px;
+  }
+
+  .mapRow { gap: 6px; }
+
+  .pickRow { gap: 6px 8px; }
+
+  .mapBtn {
+    gap: 3px;
+    padding: 3px 3px 4px;
+    font-size: 0.65rem;
+  }
+
+  .mapThumb {
+    width: 68px;
+    height: 45px;
+  }
 }

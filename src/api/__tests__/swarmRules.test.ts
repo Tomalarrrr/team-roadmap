@@ -230,6 +230,13 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), `${M}/twists`, true)).toBe(false);
   });
 
+  it('takes the rules chosen in the lobby as a whole match, and their clearing back to classic', () => {
+    const chosen = waitingRoom({ mode: 'survival', start: 'scattered', twists: 'gzc', cpu: 'b' });
+    expect(allowed(db(waitingRoom()), M, chosen)).toBe(true);
+    expect(allowed(db(chosen), M, waitingRoom({ cpu: 'b' }))).toBe(true);
+    expect(allowed(db(waitingRoom()), M, waitingRoom({ mode: 'chess' }))).toBe(false);
+  });
+
   it('takes a nest of big or many on a player', () => {
     expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'many')).toBe(true);
     expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'big')).toBe(true);

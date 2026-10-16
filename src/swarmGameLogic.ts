@@ -1987,7 +1987,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const last = way.paths[way.paths.length - 1];
     const pace = paceOf(map.paths[last], to, army.speed);
     // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
-    for (const _ of towers) lost += Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
+    lost += towers.size * Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
     if (isTower(huts[to])) lost += Math.ceil((n * RELEASE_TICKS + TOWER_RANGE / pace) / TOWER_RELOAD);
     return Math.min(n, lost);
   };

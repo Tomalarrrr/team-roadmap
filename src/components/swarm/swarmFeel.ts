@@ -47,11 +47,20 @@ function blob(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number, r
 
 // The callouts.
 
+/** What a side drawn as each creature is called, and one of its units. */
+export const KIND_NAME: Record<Kind, { many: string; one: string }> = {
+  ant: { many: 'Ants', one: 'ant' },
+  bee: { many: 'Bees', one: 'bee' },
+  beetle: { many: 'Beetles', one: 'beetle' },
+  spider: { many: 'Spiders', one: 'spider' },
+};
+
 export type CalloutKey =
   | 'lastHut'
   | 'enemyAtGate'
   | 'towerLost'
   | 'fortLost'
+  | 'flagRaised'
   | 'towerTaken'
   | 'fortTaken'
   | 'bridgeHeld'
@@ -63,6 +72,7 @@ export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'enemyAtGate',
   'towerLost',
   'fortLost',
+  'flagRaised',
   'towerTaken',
   'fortTaken',
   'bridgeHeld',
@@ -74,6 +84,7 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   enemyAtGate: 'Enemy at the gate',
   towerLost: 'Tower lost',
   fortLost: 'Fort lost',
+  flagRaised: 'White flag raised',
   towerTaken: 'Tower taken',
   fortTaken: 'Fort taken',
   bridgeHeld: 'Bridge held',
@@ -105,7 +116,11 @@ const holdsBridge = (state: SwarmState, map: SwarmMap, seat: Seat): boolean =>
  * in a match would read as a comeback.
  */
 export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap, seat: Seat, reduced: boolean): CalloutKey[] {
+  // The viewer's own white flag gives up every hut at once: none of that is news to them.
+  if (after.yielded.includes(seat) && !before.yielded.includes(seat)) return [];
   const due = new Set<CalloutKey>();
+  // Its huts stand open, with their units in them, for whoever gets there first.
+  if (after.yielded.length > before.yielded.length) due.add('flagRaised');
   after.huts.forEach((hut, index) => {
     const was = before.huts[index].owner;
     if (was === hut.owner) return;
@@ -138,6 +153,11 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   return CALLOUT_ORDER.filter((key) => due.has(key));
 }
 
+/** The words on a callout's banner. A white flag names the creatures that raised it. */
+export function calloutWords(callout: Callout, kinds: Record<Seat, Kind>): string {
+  return callout.key === 'flagRaised' && callout.seat ? `${KIND_NAME[kinds[callout.seat]].many} raised the white flag` : CALLOUT_TEXT[callout.key];
+}
+
 /** A banner comes in, is read, and goes. */
 export const BANNER_MS = { in: 180, hold: 1500, out: 260 };
 export const BANNER_TOTAL_MS = BANNER_MS.in + BANNER_MS.hold + BANNER_MS.out;
@@ -156,33 +176,43 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   enemyAtGate: 20000,
   towerLost: 6000,
   fortLost: 6000,
+  // A side raises it once at most, so each one is news.
+  flagRaised: 0,
   towerTaken: 6000,
   fortTaken: 6000,
   bridgeHeld: 20000,
   backFromOne: 20000,
 };
 
+export interface Callout {
+  key: CalloutKey;
+  at: number;
+  /** The side a callout names: the one that raised a white flag. */
+  seat?: Seat;
+}
+
 export interface Callouts {
-  queue: { key: CalloutKey; at: number }[];
-  showing: { key: CalloutKey; at: number } | null;
+  queue: Callout[];
+  showing: Callout | null;
   /** When each callout was last accepted. */
   saidAt: Partial<Record<CalloutKey, number>>;
   reduced: boolean;
 }
 
-export function queueCallouts(callouts: Callouts, keys: CalloutKey[], now: number): void {
+/** `about` is the side each callout that names one is about. */
+export function queueCallouts(callouts: Callouts, keys: CalloutKey[], now: number, about: Partial<Record<CalloutKey, Seat>> = {}): void {
   for (const key of keys) {
     const said = callouts.saidAt[key];
     if (said !== undefined && now - said < CALLOUT_AGAIN_MS[key]) continue;
     callouts.saidAt[key] = now;
-    callouts.queue.push({ key, at: now });
+    callouts.queue.push({ key, at: now, seat: about[key] });
   }
   callouts.queue.sort((p, q) => CALLOUT_ORDER.indexOf(p.key) - CALLOUT_ORDER.indexOf(q.key) || p.at - q.at);
   callouts.queue.length = Math.min(callouts.queue.length, CALLOUT_QUEUE_MAX);
 }
 
 /** The banner up at `now`, moving the queue on when the last one is done. */
-export function currentCallout(callouts: Callouts, now: number): { key: CalloutKey; at: number } | null {
+export function currentCallout(callouts: Callouts, now: number): Callout | null {
   const { showing } = callouts;
   if (showing && now - showing.at < BANNER_TOTAL_MS) return showing;
   if (showing && now - showing.at < BANNER_TOTAL_MS + BANNER_GAP_MS && callouts.queue.length > 0) return null;
@@ -190,7 +220,7 @@ export function currentCallout(callouts: Callouts, now: number): { key: CalloutK
   while (callouts.queue.length > 0) {
     const next = callouts.queue.shift()!;
     if (now - next.at > CALLOUT_STALE_MS) continue;
-    callouts.showing = { key: next.key, at: now };
+    callouts.showing = { ...next, at: now };
     break;
   }
   return callouts.showing;
@@ -844,7 +874,8 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
     const due = calloutsFor(before, state, map, seat, feel.callouts.reduced);
     if (due.includes('lastHut')) feel.callouts.reduced = true;
     if (due.includes('backFromOne')) feel.callouts.reduced = false;
-    queueCallouts(feel.callouts, due, now);
+    // Two flags in one tick are named by the later one's banner; the result line names both.
+    queueCallouts(feel.callouts, due, now, { flagRaised: state.yielded[state.yielded.length - 1] });
   }
 
   feel.tick = state.tick;
@@ -1536,7 +1567,7 @@ function paintBanner(ctx: CanvasRenderingContext2D, feel: Feel, map: SwarmMap, n
   // In quickly from just above so it is noticed, still while it is read, then lifted away.
   const arriving = Math.min(1, t / BANNER_MS.in);
   const leaving = Math.max(0, (t - BANNER_MS.in - BANNER_MS.hold) / BANNER_MS.out);
-  const text = CALLOUT_TEXT[banner.key];
+  const text = calloutWords(banner, feel.kinds);
   const grow = growOf(13, BANNER_MIN_PX, px);
   ctx.font = fontOf(600, 13 * grow);
   const width = ctx.measureText(text).width + 28 * grow;
