@@ -418,6 +418,10 @@ export interface SwarmSeatState {
  */
 export type OrderKind = 'half' | 'all' | 'hut' | 'speed' | 'strength' | 'flag' | 'nest' | 'burn' | 'rain' | 'call' | 'decoy';
 
+/** With the powers twist each side can use each of these once. */
+export type Power = 'rain' | 'call' | 'decoy';
+export const POWERS: readonly Power[] = ['rain', 'call', 'decoy'];
+
 export interface Order {
   tick: number;
   kind: OrderKind;
@@ -1646,14 +1650,21 @@ function percentOn(path: Path, to: number): number {
   return 100;
 }
 
-/** World units a unit of an army at that speed level walks in a tick, on the path from `from` to `to`. */
-export function paceOn(map: SwarmMap, from: number, to: number, speed: number): number {
-  return paceOf(map, map.paths[pathIndex(map, from, to)], to, speed);
+/** World units a unit of an army at that speed level walks in a tick, on the path from `from` to `to`; `wet` while it rains. */
+export function paceOn(map: SwarmMap, from: number, to: number, speed: number, wet = false): number {
+  return paceOf(map, map.paths[pathIndex(map, from, to)], to, speed, wet);
 }
 
-function paceOf(map: SwarmMap, path: Path, to: number, speed: number): number {
-  return Math.floor((speedOf(map, speed) * percentOn(path, to)) / 100);
+/** The most of an army's speed, in hundredths, any path gives in the rain: a narrow track's, so a climb stays as slow as it was. */
+export const RAIN_PERCENT = NARROW_PERCENT;
+
+function paceOf(map: SwarmMap, path: Path, to: number, speed: number, wet = false): number {
+  const percent = percentOn(path, to);
+  return Math.floor((speedOf(map, speed) * (wet ? Math.min(percent, RAIN_PERCENT) : percent)) / 100);
 }
+
+/** Whether it rains on the state's tick (see RAIN_TICKS). */
+export const rains = (state: SwarmState): boolean => state.tick <= state.rain;
 
 /**
  * How far a unit walks in a tick. The egg is heavy, and its carrier walks at
@@ -1663,7 +1674,7 @@ function paceOf(map: SwarmMap, path: Path, to: number, speed: number): number {
  * half pace 39 did and a won 61 to 59, and at a third 50 did but only 53 were
  * won by the egg at all.
  */
-const strideOf = (state: SwarmState, map: SwarmMap, path: Path, unit: Unit): number => paceOf(map, path, unit.to, unitSpeed(state, unit)) >> (unit.egg ? 1 : 0);
+const strideOf = (state: SwarmState, map: SwarmMap, path: Path, unit: Unit): number => paceOf(map, path, unit.to, unitSpeed(state, unit), rains(state)) >> (unit.egg ? 1 : 0);
 
 export interface Hut {
   owner: Owner;
@@ -1681,6 +1692,8 @@ export interface Hut {
   gold?: true;
   /** What it was built as. A trap is built as one until it is taken. */
   building?: Building;
+  /** Gone under the flood: held by nobody, and every path to it closed for good. */
+  drowned?: true;
 }
 
 const isTower = (hut: Hut): boolean => hut.reload !== undefined;
@@ -1704,6 +1717,8 @@ export interface Unit {
   tough?: boolean;
   /** Out of a beacon, or walked on through one: it marches a speed level above its army. */
   fast?: boolean;
+  /** Part of a decoy column: it kills nothing, takes nothing and is not counted. */
+  decoy?: true;
 }
 
 export interface Army {
@@ -1732,7 +1747,11 @@ export type SwarmEvent =
   /** The fire `seat` set on the bridge `path` went out, because the hut it was lit from was taken. */
   | { kind: 'doused'; path: number; seat: Seat }
   /** The bridge `path` that `seat` set fire to went down, and the `dead` units on it with it. */
-  | { kind: 'burn'; path: number; seat: Seat; dead: number };
+  | { kind: 'burn'; path: number; seat: Seat; dead: number }
+  /** `huts` went under the flood. */
+  | { kind: 'flood'; huts: number[] }
+  /** `seat` used a power: rain from the hut in `from`, a call answered by the huts in `from`, or a decoy from `from` at `to`. */
+  | { kind: 'power'; seat: Seat; power: Power; from: number[]; to: number };
 
 /** A bridge on fire: `seat` lit it from its hut `from`, and it goes down on tick `burns` unless that hut is lost first. */
 export interface Fuse {
@@ -1788,6 +1807,20 @@ export interface SwarmState {
   fallen: Record<Seat, number>;
   /** The bridges on fire, in the order they were lit. */
   fuses: Fuse[];
+  /** With the powers twist, the powers each side has used. */
+  powers: Record<Seat, Power[]>;
+  /** The last tick rain falls on, or 0 when none has been called. */
+  rain: number;
+  /** Decoy columns still to leave their huts, in the order they were sent. */
+  decoys: Decoy[];
+}
+
+/** What is left of a decoy column: `n` units from `from` to `dest` that cost the hut nothing. */
+export interface Decoy {
+  seat: Seat;
+  from: number;
+  dest: number;
+  n: number;
 }
 
 /** The largest tick a path can be closed to: a 32-bit int, so it survives the copy to every client. */
@@ -1816,6 +1849,9 @@ export function newState(map: SwarmMap): SwarmState {
     egg: map.rules.mode === 'egg' ? middleOf(map) : -1,
     fallen: { a: 0, b: 0, c: 0, d: 0 },
     fuses: [],
+    powers: { a: [], b: [], c: [], d: [] },
+    rain: 0,
+    decoys: [],
   };
 }
 
@@ -1841,6 +1877,9 @@ export function cloneState(state: SwarmState): SwarmState {
     egg: state.egg,
     fallen: { ...state.fallen },
     fuses: state.fuses.slice(),
+    powers: { a: state.powers.a.slice(), b: state.powers.b.slice(), c: state.powers.c.slice(), d: state.powers.d.slice() },
+    rain: state.rain,
+    decoys: state.decoys.map((decoy) => ({ ...decoy })),
   };
 }
 
@@ -1943,7 +1982,8 @@ export function upgradeCost(map: SwarmMap, state: SwarmState, hutIndex: number, 
 /** An order that no longer holds when its tick comes (the hut fell, the units left) does nothing. */
 function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, closed?: Closed): void {
   if (order.kind === 'flag') return raiseFlag(state, seat);
-  if (order.kind === 'nest' || order.kind === 'rain' || order.kind === 'call' || order.kind === 'decoy') return;
+  if (order.kind === 'rain' || order.kind === 'call' || order.kind === 'decoy') return spendPower(state, map, seat, order.kind, order, closed);
+  if (order.kind === 'nest') return;
   const hut = state.huts[order.from];
   if (!hut || hut.owner !== seat) return;
   if (order.kind === 'burn') return burnBridge(state, map, seat, order);
@@ -2117,7 +2157,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     if (!mixed(sides[at])) continue;
     const path = map.paths[at];
-    const pace = paceOf(map, path, unit.to, unitSpeed(state, unit));
+    const pace = paceOf(map, path, unit.to, unitSpeed(state, unit), rains(state));
     let lane = lanes.get(at);
     if (!lane) lanes.set(at, (lane = []));
     lane.push(unit.from === path.a ? { unit, at: unit.d, was: unit.d - pace } : { unit, at: lengths[at] - unit.d, was: lengths[at] - unit.d + pace });
@@ -2142,7 +2182,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
         let i = 0;
         let j = 0;
         while (i < below.length && j < above.length && below[i].at >= above[j].at) {
-          const result = fight(state, below[i].unit.seat, above[j].unit.seat);
+          const result = meet(state, below[i].unit, above[j].unit);
           const d = Math.max(0, Math.min(length, Math.floor((below[i].at + above[j].at) / 2)));
           state.events.push({ kind: 'clash', from: low, to: high, d });
           if (result.xDies && !spared(below[i].unit)) dead.add(below[i++].unit.id);
@@ -2190,7 +2230,7 @@ function clashAtDoors(state: SwarmState, map: SwarmMap, arriving: Unit[]): Set<U
       const ys = door[y].filter((unit) => !dead.has(unit));
       for (let i = 0, j = 0; i < xs.length && j < ys.length; ) {
         const at = index[xs[i].from][hut];
-        const result = fight(state, x, y);
+        const result = meet(state, xs[i], ys[j]);
         state.events.push({ kind: 'clash', from: map.paths[at].a, to: map.paths[at].b, d: map.paths[at].b === hut ? length[at] : 0 });
         if (result.xDies && !spared(xs[i])) dead.add(xs[i++]);
         if (result.yDies && !spared(ys[j])) dead.add(ys[j++]);
@@ -2250,6 +2290,7 @@ function takeTolls(state: SwarmState, map: SwarmMap): void {
 /** Returns true when the unit walks on through a hut of its own or an ally's towards its destination. */
 function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): boolean {
   const hut = state.huts[unit.to];
+  if (unit.decoy) return decoyArrives(state, map, unit, closed);
   if (allied(map, hut.owner, unit.seat)) {
     const hop = unit.to === unit.dest ? -1 : nextHop(map, unit.to, unit.dest, unit.risky, closed);
     // Home, or every way on is closed: it joins the garrison.
@@ -2329,8 +2370,191 @@ export function countOf(state: SwarmState, seat: Seat): { huts: number; units: n
     if (!isTower(hut)) huts++;
     units += hut.n;
   }
-  for (const unit of state.units) if (unit.seat === seat) units++;
+  for (const unit of state.units) if (unit.seat === seat && !unit.decoy) units++;
   return { huts, units };
+}
+
+/**
+ * A side's count as `viewer` sees it. Another side's decoys look like any of
+ * its units, so they are counted, and a column that dies without its side's
+ * count going down does not give them away.
+ */
+export function countAsSeen(state: SwarmState, side: Seat, viewer: Seat): { huts: number; units: number } {
+  const count = countOf(state, side);
+  if (side !== viewer) for (const unit of state.units) if (unit.seat === side && unit.decoy) count.units++;
+  return count;
+}
+
+/**
+ * With the flood twist the water comes in from the edge of the board. Every
+ * site is put in a ring by how far it is from the middle of the field, a ring
+ * every FLOOD_BAND world units, and from FLOOD_START_PERCENT of the clock the
+ * rings go under one every FLOOD_EVERY ticks, the outermost first, until the
+ * next would leave fewer than FLOOD_KEEP_PERCENT of the huts. Every map is its own image about
+ * that middle, turned or mirrored, and the distance is compared squared in
+ * whole numbers, so a hut and its twins always go under together.
+ *
+ * Computer against computer, 6 maps by 60 seeds, 2 sides, nobody moving for
+ * the first 1500 ticks so the games run long: 1.16 rings a game went under,
+ * a168 b192, and all 298 games that reached the flood were won outright.
+ * From the first tick, most games are over before the water comes: 0.16
+ * rings a game, a160 b198 against a156 b203 classic.
+ */
+export const FLOOD_BAND = 60;
+export const FLOOD_EVERY = 300;
+export const FLOOD_START_PERCENT = 40;
+export const FLOOD_KEEP_PERCENT = 40;
+/** Ticks a ring is marked on the board before it goes under. */
+export const FLOOD_WARN = 100;
+
+/** One ring of the flood: the tick it goes under on, its huts, and every path with an end among them. */
+export interface Flood {
+  tick: number;
+  huts: number[];
+  paths: number[];
+}
+
+const floodCache = new WeakMap<SwarmMap, Flood[]>();
+
+/** The map's floods in the order they come: none without the flood twist. */
+export function floodsOf(map: SwarmMap): Flood[] {
+  if (!map.rules.twists.includes('flood')) return [];
+  let floods = floodCache.get(map);
+  if (!floods) {
+    const centre = centreOf(map);
+    // Doubled, so a middle on a half unit is still a whole number.
+    const rings = map.sites.map((site) => {
+      const dx = 2 * site.x - 2 * centre.x;
+      const dy = 2 * site.y - 2 * centre.y;
+      let ring = 0;
+      while ((2 * (ring + 1) * FLOOD_BAND) ** 2 <= dx * dx + dy * dy) ring++;
+      return ring;
+    });
+    // Towers are left out of the count: a board left with nothing but towers on it would breed nothing.
+    const breeders = map.sites.filter((site) => !site.tower).length;
+    const keep = Math.ceil((breeders * FLOOD_KEEP_PERCENT) / 100);
+    let left = breeders;
+    floods = [];
+    for (const ring of [...new Set(rings)].sort((p, q) => q - p)) {
+      const huts = rings.flatMap((r, at) => (r === ring ? [at] : []));
+      const lost = huts.filter((at) => !map.sites[at].tower).length;
+      if (left - lost < keep) break;
+      left -= lost;
+      const paths = map.paths.flatMap((path, at) => (rings[path.a] === ring || rings[path.b] === ring ? [at] : []));
+      floods.push({ tick: Math.floor((map.ticks * FLOOD_START_PERCENT) / 100) + floods.length * FLOOD_EVERY, huts, paths });
+    }
+    floodCache.set(map, floods);
+  }
+  return floods;
+}
+
+/** The first flood on `tick` or after it, if any is still to come. */
+export function floodDue(map: SwarmMap, tick: number): Flood | undefined {
+  return floodsOf(map).find((flood) => flood.tick >= tick);
+}
+
+/**
+ * On its tick a ring goes under: its huts with everything in them, every path
+ * to them, and every unit on those paths. What was still to leave for a hut
+ * under the water stays where it is; a unit on its way to one walks on until
+ * it reaches a hut of its own, where with no way on it stays, or a hut of
+ * anyone else's, which it fights for.
+ */
+function flood(state: SwarmState, map: SwarmMap): void {
+  const ring = floodDue(map, state.tick);
+  if (ring?.tick !== state.tick) return;
+  const sunk = new Set(ring.huts);
+  for (const at of ring.huts) {
+    const hut = state.huts[at];
+    hut.owner = null;
+    hut.n = 0;
+    hut.grow = 0;
+    hut.out = [];
+    hut.drowned = true;
+  }
+  for (const path of ring.paths) state.closed[path] = CLOSED_FOREVER;
+  const paths = new Set(ring.paths);
+  const { index } = lanesOf(map);
+  state.units = state.units.filter((unit) => !paths.has(index[unit.from][unit.to]));
+  for (const hut of state.huts) hut.out = hut.out.filter((line) => !sunk.has(line.dest));
+  state.decoys = state.decoys.filter((decoy) => !sunk.has(decoy.dest));
+  state.events.push({ kind: 'flood', huts: ring.huts });
+}
+
+/** Ticks the rain falls for, from the tick it is called on. */
+export const RAIN_TICKS = 150;
+
+/**
+ * Use a power, once a game for each side. An order that would do nothing
+ * leaves it unused: rain called without a hut to call it from, a call that no
+ * hut can answer, a decoy from a hut with nothing in it or no way to its target.
+ */
+function spendPower(state: SwarmState, map: SwarmMap, seat: Seat, power: Power, order: Order, closed?: Closed): void {
+  if (!map.rules.twists.includes('powers') || state.powers[seat].includes(power)) return;
+  let from = [order.from];
+  if (power === 'rain') {
+    const hut = state.huts[order.from];
+    if (!hut || hut.owner !== seat) return;
+    state.rain = Math.max(state.rain, state.tick + RAIN_TICKS - 1);
+  } else if (power === 'call') {
+    if (!state.huts[order.to]) return;
+    from = [];
+    state.huts.forEach((hut, at) => {
+      if (hut.owner !== seat || isTower(hut) || at === order.to) return;
+      const before = queued(hut);
+      applyOrder(state, map, seat, { tick: order.tick, kind: 'half', from: at, to: order.to }, closed);
+      if (queued(hut) > before) from.push(at);
+    });
+    if (from.length === 0) return;
+  } else {
+    const hut = state.huts[order.from];
+    if (!hut || hut.owner !== seat || !state.huts[order.to] || nextHop(map, order.from, order.to, false, closed) === -1) return;
+    const n = sendSize(hut, 'half');
+    if (n <= 0) return;
+    state.decoys.push({ seat, from: order.from, dest: order.to, n });
+  }
+  state.powers[seat].push(power);
+  state.events.push({ kind: 'power', seat, power, from, to: order.to });
+}
+
+/**
+ * Each decoy column lets a unit go every RELEASE_TICKS, as a send does. They
+ * are let go before the real columns of the tick, so of a decoy and a real
+ * unit as near a tower, the tower shoots the decoy.
+ */
+function releaseDecoys(state: SwarmState, map: SwarmMap, closed?: Closed): void {
+  if (state.decoys.length === 0 || state.tick % RELEASE_TICKS !== 0) return;
+  for (const decoy of state.decoys) {
+    const to = nextHop(map, decoy.from, decoy.dest, false, closed);
+    // The hut fell, or every way to the target closed: the rest of the column is never seen.
+    if (state.huts[decoy.from].owner !== decoy.seat || to === -1) {
+      decoy.n = 0;
+      continue;
+    }
+    decoy.n--;
+    state.units.push({ id: state.nextId++, seat: decoy.seat, from: decoy.from, to, dest: decoy.dest, d: 0, decoy: true });
+  }
+  state.decoys = state.decoys.filter((decoy) => decoy.n > 0);
+}
+
+/** Two units of different sides meet. A decoy dies and kills nothing; two real units fight. */
+function meet(state: SwarmState, x: Unit, y: Unit): { xDies: boolean; yDies: boolean } {
+  if (x.decoy || y.decoy) return { xDies: x.decoy === true, yDies: y.decoy === true };
+  return fight(state, x.seat, y.seat);
+}
+
+/** A decoy walks on through its own huts like any unit, and is gone at the end of its march or at anyone else's door. */
+function decoyArrives(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): boolean {
+  if (state.huts[unit.to].owner !== unit.seat) {
+    state.events.push({ kind: 'hit', hut: unit.to });
+    return false;
+  }
+  const hop = unit.to === unit.dest ? -1 : nextHop(map, unit.to, unit.dest, false, closed);
+  if (hop === -1) return false;
+  unit.from = unit.to;
+  unit.to = hop;
+  unit.d = 0;
+  return true;
 }
 
 /** No orders from anyone. */
@@ -2705,6 +2929,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
   }
   if (map.rules.mode === 'survival' && tick % WAVE_TICKS === 0) wave(state, map, tick / WAVE_TICKS);
 
+  releaseDecoys(state, map, closed);
   if (tick % RELEASE_TICKS === 0) {
     state.huts.forEach((hut, index) => {
       if (!hut.owner || hut.out.length === 0) return;
@@ -2753,6 +2978,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
   shoot(state, map);
   if (standing) rally(state, map, standing);
   score(map, state, egg);
+  flood(state, map);
   judge(state, map, cpu);
 }
 
@@ -3030,6 +3256,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const bound = huts.map(() => [0, 0, 0, 0]);
   const soon = huts.map(() => [Infinity, Infinity, Infinity, Infinity]);
   for (const unit of state.units) {
+    if (unit.decoy && unit.seat === seat) continue;
     const k = SEATS.indexOf(unit.seat);
     const ticks = (length[index[unit.from][unit.to]] - unit.d + span(map.sites[unit.to], map.sites[unit.dest])) / speedOf(map, unitSpeed(state, unit));
     // A unit out of a barracks takes two to kill.
@@ -3045,7 +3272,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     }
   });
 
-  const standing = map.sides.filter((side) => !allied(map, side, seat)).map((side) => ({ side, ...countOf(state, side) }));
+  const standing = map.sides.filter((side) => !allied(map, side, seat)).map((side) => ({ side, ...countAsSeen(state, side, seat) }));
   // In teams, allies go after the same one of the other team, the weaker, as each works it out alike from the board: one knocked out leaves two against one.
   const focus = map.rules.mode === 'teams' ? standing.filter((count) => count.huts > 0 || count.units > 0).reduce<{ side: Seat; huts: number; units: number } | null>((best, count) => (!best || count.huts < best.huts || (count.huts === best.huts && count.units < best.units) ? count : best), null)?.side : undefined;
   const leader = standing.reduce((best, count) => (count.huts > best.huts || (count.huts === best.huts && count.units > best.units) ? count : best), standing[0]);
@@ -3060,7 +3287,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
       if (hop === -1 || (hop !== to && !allied(map, huts[hop].owner, seat))) return null;
       const path = index[at][hop];
       paths.push(path);
-      ticks += Math.ceil(length[path] / paceOf(map, map.paths[path], hop, army.speed));
+      ticks += Math.ceil(length[path] / paceOf(map, map.paths[path], hop, army.speed, state.rain >= tick));
       at = hop;
     }
     return { ticks, paths, risky: paths.some((path) => takesToll(map.paths[path].kind)) };
@@ -3082,7 +3309,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
       for (const tower of coverOf(map)[path]) if (tower !== to && huts[tower].owner && !allied(map, huts[tower].owner, seat)) towers.add(tower);
     }
     const last = way.paths[way.paths.length - 1];
-    const pace = paceOf(map, map.paths[last], to, army.speed);
+    const pace = paceOf(map, map.paths[last], to, army.speed, state.rain >= tick);
     // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
     const { range, reload } = map.rules.tune;
     lost += towers.size * Math.ceil((n * RELEASE_TICKS + (2 * range) / pace) / reload);
@@ -3166,12 +3393,16 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   };
 
   orders.push(...burnsOf(state, map, seat, tick));
+  const sinking = sinkingAt(state, map, tick);
+  orders.push(...flee(state, map, seat, sinking, tick, closed));
+  for (const at of sinking) used.add(at);
 
   // Hold what is under attack first, its own and then its allies'.
   const theirs = huts.flatMap((hut, at) => (hut.owner !== seat && allied(map, hut.owner, seat) ? [at] : []));
   /** What this side and its allies have on the way to a hut. */
   const ours = (at: number) => SEATS.reduce((sum, side, k) => (allied(map, side, seat) ? sum + bound[at][k] : sum), 0);
   for (const at of [...mine, ...theirs]) {
+    if (sinking.has(at)) continue;
     let attackers = 0;
     let soonest = Infinity;
     SEATS.forEach((side, k) => {
@@ -3221,7 +3452,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     return toKill(holder, left) + rivals(to) + 2 - bound[to][me];
   };
   // A hut an ally is marching on is left to it: two allies feeding one hut a column each, each too few, feed it for good.
-  const targets = [...new Set(mine.flatMap((at) => map.links[at]))].filter((to) => !allied(map, huts[to].owner, seat) && ours(to) === bound[to][me]).sort((p, q) => p - q);
+  const targets = [...new Set(mine.flatMap((at) => map.links[at]))].filter((to) => !allied(map, huts[to].owner, seat) && ours(to) === bound[to][me] && !sinking.has(to)).sort((p, q) => p - q);
   for (let marches = 0; marches < MARCHES; marches++) {
     let best: { to: number; sends: Send[]; score: number } | null = null;
     for (const to of targets) {
@@ -3237,7 +3468,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     march(best.to, best.sends);
   }
 
-  const front = mine.filter((at) => map.links[at].some((next) => !allied(map, huts[next].owner, seat)));
+  const front = mine.filter((at) => !sinking.has(at) && map.links[at].some((next) => !allied(map, huts[next].owner, seat) && !sinking.has(next)));
   const pressure = (at: number) => {
     let strongest = 0;
     for (const next of map.links[at]) if (huts[next].owner && !allied(map, huts[next].owner, seat)) strongest = Math.max(strongest, toKill(huts[next].owner, huts[next].n));
@@ -3289,6 +3520,115 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     // Full, and across a toll is more than it can take: what it has is more use at the front.
     const tolledOnly = map.links[at].every((next) => allied(map, huts[next].owner, seat) || takesToll(map.paths[index[at][next]].kind));
     if (hut.n >= capOf(map, hut, fed) && tolledOnly) reinforce(at);
+  }
+  orders.unshift(...powerOrders(state, map, seat, tick, orders, sinking, closed));
+  return orders;
+}
+
+/** The huts the computer gives up on: those under the water, and those of the ring marked to go next. */
+function sinkingAt(state: SwarmState, map: SwarmMap, tick: number): Set<number> {
+  const sinking = new Set<number>();
+  state.huts.forEach((hut, at) => {
+    if (hut.drowned) sinking.add(at);
+  });
+  const next = floodDue(map, tick);
+  if (next && next.tick - tick <= FLOOD_WARN) for (const at of next.huts) sinking.add(at);
+  return sinking;
+}
+
+/**
+ * Everything free in a hut of `seat` the water is coming for walks to the
+ * nearest hut that is not going under: one of its own, or when that is
+ * further than twice as far, somebody else's, which it fights for.
+ */
+function flee(state: SwarmState, map: SwarmMap, seat: Seat, sinking: Set<number>, tick: number, closed?: Closed): Order[] {
+  const orders: Order[] = [];
+  state.huts.forEach((hut, from) => {
+    if (hut.owner !== seat || !sinking.has(from) || hut.n - queued(hut) <= 0) return;
+    let best = -1;
+    let nearest = Infinity;
+    state.huts.forEach((other, to) => {
+      if (sinking.has(to) || nextHop(map, from, to, false, closed) === -1) return;
+      const far = span(map.sites[from], map.sites[to]) * (other.owner === seat ? 1 : 2);
+      if (far >= nearest) return;
+      best = to;
+      nearest = far;
+    });
+    if (best !== -1) orders.push({ tick, kind: 'all', from, to: best });
+  });
+  return orders;
+}
+
+/** Another side marching this many or more on one of its huts makes the computer call the rain. */
+export const RAIN_COLUMN = 10;
+/** The computer calls the swarm on a hut only when the call brings this many times what holds it. */
+export const CALL_MARGIN = 3;
+/** The fewest a hut that is not a tower holds for the computer to send a decoy at it. */
+export const DECOY_STRONG = 20;
+
+/**
+ * The computer uses each power once, when it helps:
+ *
+ *  - rain, when another side has RAIN_COLUMN or more on the road to one of its
+ *    huts and more than the hut holds, and it is not raining already, to slow
+ *    them while the hut breeds;
+ *  - the call, on the weakest hut of another side next to its own that none of
+ *    its huts could take alone, once three huts or more can answer with
+ *    CALL_MARGIN times what holds it. Calling on any hut it could reach made
+ *    the side the map put nearest a weak neighbour call by tick 100, half-empty
+ *    every hut and lose: that leant 3-side games 60/40 to one seat;
+ *  - a decoy at a tower it is marching on this think, to draw the tower's
+ *    fire, or else at the strongest hut of another side next to its own.
+ *
+ * They go ahead of its other orders, so the decoy is counted from the hut
+ * before the march takes what is in it.
+ *
+ * Measured computer against computer, 6 maps by 60 seeds, 2 sides: classic
+ * a156 b203, powers a183 b177. With only seat a holding powers, against
+ * a156 b203 without: rain a171, the call a156 (it is used in one game in
+ * five), the decoy a160, all three a167. 3 sides, seeds 61 to 180: classic
+ * b294 c292 a134, powers b310 c253 a157. 4 sides, 30 seeds: classic a44 b54
+ * c38 d44, powers a44 b52 c50 d34. No power wins a game on its own.
+ */
+function powerOrders(state: SwarmState, map: SwarmMap, seat: Seat, tick: number, marches: Order[], sinking: Set<number>, closed?: Closed): Order[] {
+  if (!map.rules.twists.includes('powers')) return [];
+  const used = state.powers[seat];
+  const { huts } = state;
+  const mine = huts.flatMap((hut, at) => (hut.owner === seat && !sinking.has(at) ? [at] : []));
+  if (mine.length === 0) return [];
+  const orders: Order[] = [];
+  const near = [...new Set(mine.flatMap((at) => map.links[at]))].filter((to) => huts[to].owner && huts[to].owner !== seat && !sinking.has(to)).sort((p, q) => p - q);
+  const lives = (hut: Hut) => (hut.hurt === undefined ? hut.n : hut.n * FORT_LIVES - hut.hurt);
+
+  if (!used.includes('rain')) {
+    const coming = huts.map(() => [0, 0, 0, 0]);
+    for (const unit of state.units) if (unit.seat !== seat && huts[unit.dest].owner === seat) coming[unit.dest][SEATS.indexOf(unit.seat)]++;
+    const falls = coming.some((sides, at) => sides.some((n) => n >= RAIN_COLUMN && n > lives(huts[at])));
+    if (falls && state.rain < tick) orders.push({ tick, kind: 'rain', from: mine[0], to: mine[0] });
+  }
+
+  if (!used.includes('call')) {
+    let best = -1;
+    for (const to of near) {
+      const callers = mine.filter((from) => from !== to && !isTower(huts[from]) && nextHop(map, from, to, false, closed) !== -1);
+      const brings = callers.reduce((sum, from) => sum + sendSize(huts[from], 'half'), 0);
+      if (callers.length < 3 || brings < CALL_MARGIN * (lives(huts[to]) + 1)) continue;
+      // A hut one of its own could take alone is not worth emptying half of every hut for.
+      if (callers.some((from) => huts[from].n - queued(huts[from]) > lives(huts[to]))) continue;
+      if (best === -1 || lives(huts[to]) < lives(huts[best])) best = to;
+    }
+    if (best !== -1) orders.push({ tick, kind: 'call', from: best, to: best });
+  }
+
+  if (!used.includes('decoy')) {
+    const onTower = marches.find((order) => (order.kind === 'half' || order.kind === 'all') && isTower(huts[order.to]) && huts[order.to].owner !== seat);
+    if (onTower) {
+      orders.push({ tick, kind: 'decoy', from: onTower.from, to: onTower.to });
+    } else {
+      const strong = near.filter((to) => !isTower(huts[to]) && lives(huts[to]) >= DECOY_STRONG).sort((p, q) => lives(huts[q]) - lives(huts[p]) || p - q)[0];
+      const from = strong === undefined ? undefined : mine.filter((at) => map.links[strong].includes(at)).sort((p, q) => sendSize(huts[q], 'half') - sendSize(huts[p], 'half') || p - q)[0];
+      if (from !== undefined && sendSize(huts[from], 'half') >= MIN_SEND) orders.push({ tick, kind: 'decoy', from, to: strong });
+    }
   }
   return orders;
 }

@@ -1,0 +1,49 @@
+/* The power pills sit in the HUD under the board, before the white flag, and
+   are drawn like it. */
+
+.hint {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.pill {
+  padding: 4px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill:hover:not(:disabled) { color: var(--text-primary); }
+
+.armed {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.sent,
+.running {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.used {
+  cursor: default;
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.left {
+  margin-left: 6px;
+  color: var(--text-secondary);
+}

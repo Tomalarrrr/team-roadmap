@@ -113,7 +113,7 @@ describe('the white flag button', () => {
 describe('a hut given up under the white flag', () => {
   const map = buildMap(1, 'meadow', ['a', 'b']);
   const state = newState(map);
-  const scene = newScene(map, 1, kindsOf({ players: {} }, SEATS));
+  const scene = newScene(map, 1, kindsOf({ players: {} }, SEATS), 'a');
   const home = map.homes[0];
   const other = map.homes[1];
   addEvents(scene, state, [{ kind: 'flag', seat: 'a', huts: [home] }], 1000, 'b');

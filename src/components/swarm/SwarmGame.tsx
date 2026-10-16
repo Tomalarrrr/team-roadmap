@@ -38,6 +38,7 @@ import {
   computerOf,
   MAP_IDS,
   BURN_COST,
+  countAsSeen,
   countOf,
   drafting,
   encodeTune,
@@ -54,6 +55,7 @@ import {
   type ModeId,
   type Nest,
   type OrderKind,
+  type Power,
   type Seat,
   type MapId,
   type SizeId,
@@ -72,6 +74,8 @@ import { carriedOf } from './swarmAim';
 import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
 import { READY_MODES, READY_TWISTS, clashOf, leaveWarning, surpriseOf, tuneSummary, unfit, type RulesChoice } from './swarmLobby';
+import { floodIn, pillsOf, type PowerPill } from './swarmPowerHud';
+import { SwarmPowerPills } from './SwarmPowerPills';
 import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
 import { siegeBeat, siegeOf, threatsOf, type ThreatView } from './swarmThreat';
 import { clockOf, newTally, tallyStep, type Tally } from './swarmTally';
@@ -561,8 +565,8 @@ interface Hud {
   secs: number | null;
   /** Level on huts at the clock and playing on. */
   overtime: boolean;
-  /** Each side's huts and units on the board. */
-  counts: Partial<Record<Seat, { huts: number; units: number }>>;
+  /** Each side's huts and units on the board; under the fog, another side's units are not known. */
+  counts: Partial<Record<Seat, { huts: number; units: number | null }>>;
   starts: Partial<Record<Seat, Start>>;
   /** A hut is in hand, with its upgrades showing. */
   picked: boolean;
@@ -580,9 +584,13 @@ interface Hud {
   notes: ModeNote[];
   /** What the mode adds to the result once there is one. */
   story: string[];
+  /** Seconds until the next ring of the flood goes under, or 'over'; null with no flood. */
+  flood: number | 'over' | null;
+  /** With the powers twist, this seat's. */
+  powers: PowerPill[] | null;
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [], draft: null, holding: null, survival: null, notes: [], story: [] };
+const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [], draft: null, holding: null, survival: null, notes: [], story: [], flood: null, powers: null };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -600,6 +608,7 @@ interface Controls {
   cancel: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   key: (e: KeyboardEvent) => void;
   flag: () => void;
+  power: (power: Power) => void;
 }
 
 interface SwarmGameProps {
@@ -751,6 +760,10 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     let rejoining = false;
     let hudKey = '';
     let selected: number | null = null;
+    // A call or a decoy picked from its pill, waiting for the tap or the drag that aims it.
+    let armed: Power | null = null;
+    // The hut this seat's call went to, for its pill to count what is still on the way.
+    let calledOn: number | null = null;
     /** A place on the board in world units, a finger's reach there, and how many world units a CSS pixel is. */
     interface Press {
       x: number;
@@ -781,6 +794,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       held: boolean;
       /** The drag crossed spikes or a ford, which is how the short cut is asked for. */
       risky: boolean;
+      /** It aims a decoy: one hut, half of it, and no sweeping up others. */
+      decoy: boolean;
     } | null = null;
     // Where the mouse is, for the cursor to say what a press there would do.
     let hover: Press | null = null;
@@ -979,10 +994,12 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       // A finished game stays on the board until the next one starts.
       if (playing && game?.game !== m.game) {
         const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size), rulesOf(m));
-        game = { ...newLockstep(m.game, map), scene: newScene(map, m.seed, kindsOf(m, map.sides)), fxTick: 0, tally: newTally(map, newState(map)) };
+        game = { ...newLockstep(m.game, map), scene: newScene(map, m.seed, kindsOf(m, map.sides), seat), fxTick: 0, tally: newTally(map, newState(map)) };
         threat = null;
         threatTick = -1;
         setSummary(null);
+        armed = null;
+        calledOn = null;
         selected = null;
         drag = null;
       }
@@ -997,6 +1014,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         const harvest = (state: SwarmState) => {
           if (state.tick <= active.fxTick) return;
           active.fxTick = state.tick;
+          for (const event of state.events) if (event.kind === 'power' && event.seat === seat && event.power === 'call') calledOn = event.to;
           addEvents(active.scene, state, state.events, performance.now(), seat);
         };
         // A rerun of the confirmed game starts again from its first tick, and so does its record.
@@ -1046,6 +1064,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         survival: null,
         notes: [],
         story: [],
+        flood: null,
+        powers: null,
       };
       if (game) {
         const { shown, map } = game;
@@ -1063,13 +1083,20 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           const due = (waves + 1) * WAVE_TICKS;
           next.survival = { waves, next: due < ticks ? Math.ceil(((due - at) * TICK_MS) / 1000) : null, lasted: Math.floor((at * TICK_MS) / 1000) };
         }
-        for (const side of game.map.sides) next.counts[side] = countOf(game.shown, side);
+        const fogged = game.scene.fog !== null && game.shown.winner === null;
+        for (const side of game.map.sides) {
+          const count = countAsSeen(game.shown, side, seat);
+          next.counts[side] = fogged && side !== seat ? { huts: count.huts, units: null } : count;
+        }
+        next.flood = floodIn(game.map, game.shown.tick);
+        next.powers = pillsOf(game.map, game.shown, game.orders[seat], seat, armed, calledOn);
         // A hut lost while it was in hand is put down.
         if (selected !== null && game.shown.huts[selected].owner !== seat) selected = null;
         if (drag) drag.sources = drag.sources.filter((hut) => game?.shown.huts[hut].owner === seat);
         if (drag?.sources.length === 0) drag = null;
         next.picked = selected !== null;
-        const own = next.counts[seat];
+        // Read whole: the fog hides other sides' units, never this seat's own.
+        const own = next.counts[seat] && countOf(game.shown, seat);
         next.flag = live && own !== undefined && own.huts + own.units > 0 && !game.orders[seat].some((order) => order.kind === 'flag');
         // A copy: the state is stepped in place, and the HUD is compared with the last one by value.
         next.yielded = game.shown.yielded.slice();
@@ -1150,7 +1177,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       // Sweeping over another hut of yours adds it: they will all send to wherever the drag ends.
       // Only the hut's own picture counts here, because a hut once added cannot be dropped again.
       const over = hutAt(g.map, g.shown, p.x, p.y);
-      if (mine(over) && !drag.sources.includes(over)) {
+      if (mine(over) && !drag.sources.includes(over) && !drag.decoy) {
         drag.sources.push(over);
         buzz(BUZZ.add);
       }
@@ -1186,7 +1213,15 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         if (e.pointerType === 'mouse' && e.button !== 0) return;
         const p = worldOf(game, e);
         if (drafting(game.map, tickNow + 1)) return draftPick(game, p);
-        const token = tokenAt(game, p);
+        if (armed === 'call') {
+          const called = hutNear(game, p);
+          armed = null;
+          if (called === null) return;
+          issue('call', called, called);
+          buzz(BUZZ.done);
+          return;
+        }
+        const token = armed ? null : tokenAt(game, p);
         if (token) {
           // An upgrade bought a moment ago has not been paid for yet: a second tap must not spend the same units.
           let owed = 0;
@@ -1225,6 +1260,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           restAt: performance.now(),
           held: false,
           risky: false,
+          decoy: armed === 'decoy',
         };
       },
       move(e) {
@@ -1237,9 +1273,17 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         const g = game;
         if (!drag || e.pointerId !== drag.pointer || !g) return;
         aim(g, e);
-        const { sources, moved, target, risky } = drag;
+        const { sources, moved, target, risky, decoy } = drag;
         const kind = drag.shift || drag.held ? 'all' : 'half';
         drag = null;
+        if (decoy) {
+          // A tap, or a drag back to its own hut, leaves the decoy waiting to be aimed.
+          if (!moved || target === null || target === sources[0]) return;
+          armed = null;
+          issue('decoy', sources[0], target);
+          buzz(BUZZ.done);
+          return;
+        }
         if (!moved) {
           // A tap picks the hut up to show its upgrades, and a second tap puts it down.
           selected = selected === sources[0] ? null : sources[0];
@@ -1264,10 +1308,26 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         if (e.key === 'Escape' && e.type === 'keydown') {
           drag = null;
           selected = null;
+          armed = null;
         }
       },
       flag() {
         issue('flag', 0, 0);
+      },
+      power(power) {
+        if (!game || !live) return;
+        drag = null;
+        selected = null;
+        if (power !== 'rain') {
+          armed = armed === power ? null : power;
+          return;
+        }
+        armed = null;
+        // Rain is called from a hut of the side's, which any one will do for.
+        const from = game.shown.huts.findIndex((hut) => hut.owner === seatNow);
+        if (from === -1) return;
+        issue('rain', from, from);
+        buzz(BUZZ.done);
       },
     };
 
@@ -1286,7 +1346,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       let alpha = 0;
       if (m && now !== null && live) alpha = Math.min(Math.max((now - m.startAt) / TICK_MS - game.shown.tick, 0), 1.5);
       const at = performance.now();
-      if (drag?.moved && drag.target !== null && !drag.held && at - drag.restAt >= HOLD_ALL_MS) {
+      if (drag?.moved && drag.target !== null && !drag.held && !drag.decoy && at - drag.restAt >= HOLD_ALL_MS) {
         drag.held = true;
         buzz(BUZZ.all);
       }
@@ -1295,7 +1355,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         alpha,
         now: at,
         selected,
-        sendAll: Boolean(drag && (drag.shift || drag.held)),
+        sendAll: Boolean(drag && !drag.decoy && (drag.shift || drag.held)),
         drag: null,
         hold: drag?.moved && drag.target !== null ? Math.min((at - drag.restAt) / HOLD_ALL_MS, 1) : 0,
         ...feel,
@@ -1329,6 +1389,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       let cursor = 'default';
       if (drag) cursor = 'grabbing';
       else if (live && hover && drafting(game.map, tickNow + 1)) cursor = hutNear(game, hover) === null ? 'default' : 'pointer';
+      else if (armed === 'call') cursor = 'crosshair';
       else if (live && hover && tokenAt(game, hover)) cursor = 'pointer';
       else if (live && hover && mine(hutNear(game, hover))) cursor = 'grab';
       if (canvas.style.cursor !== cursor) canvas.style.cursor = cursor;
@@ -1526,7 +1587,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     const count = hud.counts[seat];
     if (!count || !kinds) return '';
     const { many, one } = KIND_NAME[kinds[seat]];
-    return `${count.huts} ${count.huts === 1 ? 'hut' : 'huts'}, ${count.units} ${count.units === 1 ? one : many.toLowerCase()}`;
+    return `${count.huts} ${count.huts === 1 ? 'hut' : 'huts'}, ${count.units ?? '?'} ${count.units === 1 ? one : many.toLowerCase()}`;
   };
 
   const sideTag = (seat: Seat, end: boolean) => {
@@ -1800,6 +1861,12 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                   ))}
                 </span>
               ))}
+              {hud.flood === 'over' && <span className={styles.flood}>Flood over</span>}
+              {typeof hud.flood === 'number' && (
+                <span className={styles.flood}>
+                  Flood in {Math.floor(hud.flood / 60)}:{String(hud.flood % 60).padStart(2, '0')}
+                </span>
+              )}
               {column('middle')}
             </span>
             <span className={`${styles.sideCol} ${styles.sideColEnd}`}>{column('right')}</span>
@@ -1877,6 +1944,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                 Settings changed: {tuned}
               </span>
             )}
+            {hud.powers && <SwarmPowerPills pills={hud.powers} onPress={(power) => controlsRef.current?.power(power)} />}
             {hud.flag && <FlagButton onRaise={raiseFlag} />}
           </div>
           {error ? (

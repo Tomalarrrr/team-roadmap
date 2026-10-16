@@ -575,7 +575,7 @@ export function drawAimOver(ctx: Ctx, map: SwarmMap, state: SwarmState, view: Vi
     const sent = own ? `+${total}` : String(total);
     const sentWidth = pillWidth(ctx, sent, size);
     // Against a hut that is not the player's, the two numbers and no verdict: what is held breeds on, a fort's defenders die twice, and towers and tolls thin a column on its way.
-    const held = String(hut.n);
+    const held = view.sight?.unknown.has(aim.order.to) ? '?' : String(hut.n);
     const heldWidth = own ? 0 : pillWidth(ctx, held, size) + size * 0.2;
     const left = Math.min(Math.max(x - (sentWidth + heldWidth) / 2, 4), map.w - 4 - sentWidth - heldWidth);
     pill(ctx, left, y, sentWidth, sent, tone, size);

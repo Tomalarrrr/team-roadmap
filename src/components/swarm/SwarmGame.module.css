@@ -505,6 +505,13 @@
   gap: 3px;
 }
 
+/* Under the clock in a game with the flood: counts down to the next ring. */
+.flood {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
 .boardWrap {
   position: relative;
   overflow: hidden;
