@@ -73,6 +73,12 @@
 
 .cornerBtn:hover { color: var(--text-primary); }
 
+/* Sound, on the other side from leaving: the two are never pressed for each other. */
+.cornerStart {
+  right: auto;
+  left: 8px;
+}
+
 /* --- Lobby and waiting room --- */
 
 .lobby {
@@ -404,9 +410,20 @@
 }
 
 .clock {
+  /* Padded always, so the last ten seconds can be filled in without the score line moving. */
+  padding: 0 6px;
+  border-radius: var(--radius-full);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
+}
+
+/* The last minute is in ink, the last ten seconds inverted: read from the corner of the eye. */
+.clockLate { color: var(--text-primary); }
+
+.clockLast {
+  background: var(--text-primary);
+  color: var(--bg-secondary);
 }
 
 .boardWrap {
@@ -550,6 +567,95 @@
   margin: 0 auto;
 }
 
+/* The end of a game: its huts over time and four counts a side, over the board and inside it. */
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(520px, calc(100% - 24px));
+  box-sizing: border-box;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+
+.chart {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.chart svg {
+  display: block;
+  touch-action: none;
+}
+
+.chartRead {
+  min-height: 1.3em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.chartAxis {
+  stroke: var(--border-medium);
+  stroke-width: 1;
+}
+
+.chartClock {
+  stroke: var(--border-medium);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.chartTick {
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  fill: var(--text-muted);
+}
+
+.chartLabel {
+  font-size: 10px;
+  font-weight: 600;
+  fill: var(--text-primary);
+}
+
+.stats {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.stats th,
+.stats td {
+  padding: 1px 4px;
+  font-weight: 400;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.stats thead th {
+  font-weight: 600;
+}
+
+.stats thead th .dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 4px;
+}
+
+.stats tbody th {
+  text-align: left;
+  color: var(--text-secondary);
+}
+
 @media (max-width: 560px) {
   .sideCount { display: none; }
 
@@ -573,4 +679,15 @@
     width: 68px;
     height: 45px;
   }
+
+  .overlayEnd { gap: 5px; }
+  .summary {
+    gap: 2px;
+    padding: 4px 8px 6px;
+    font-size: 0.68rem;
+  }
+  .stats th,
+  .stats td { padding: 0 3px; }
+  .overlayEnd .primaryBtn,
+  .overlayEnd .secondaryBtn { padding: 5px 14px; }
 }

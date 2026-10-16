@@ -12,6 +12,7 @@ import {
   countOf,
   decodeOrders,
   encodeOrders,
+  lastTick,
   newState,
   sidesOf,
   type Order,
@@ -575,12 +576,13 @@ describe('sending', () => {
     return game;
   };
 
-  it('promises through the tick it is sent on and no further than the map\'s game runs', () => {
+  it('promises through the tick it is sent on and no further than the map\'s game can run, overtime and all', () => {
     const game = lock();
     expect(sending(game, 'a', 41, 12)).toEqual({ seq: 41, game: 3, k: 12, orders: '9:a01' });
     expect(game.promised).toBe(12);
     expect(sending(game, 'a', 42, 7).k).toBe(12);
-    expect(sending(game, 'a', 43, game.map.ticks + 50).k).toBe(game.map.ticks);
+    expect(sending(game, 'a', 43, game.map.ticks + 50).k).toBe(game.map.ticks + 50);
+    expect(sending(game, 'a', 44, lastTick(game.map) + 50).k).toBe(lastTick(game.map));
     expect(sending(lock(), 'a', 44, -20).k).toBe(0);
   });
 

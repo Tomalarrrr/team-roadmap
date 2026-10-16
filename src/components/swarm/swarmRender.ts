@@ -30,6 +30,7 @@ import {
 } from '../../swarmGameLogic';
 import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type Leg, type Sending } from './swarmAim';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
+import { drawThreats, type ThreatView } from './swarmThreat';
 import { paintGround } from './swarmSceneGround';
 import { drawFlags, paintSite } from './swarmSceneHuts';
 import {
@@ -219,6 +220,8 @@ export interface View {
   refused: { hut: number; at: number; order?: Sending } | null;
   /** The order just given, shown at once because its units leave some ticks later. */
   sent: { order: Sending; at: number } | null;
+  /** What is marching on the viewer's huts, for a player still in the game. */
+  threat: ThreatView | null;
 }
 
 export function hutAt(map: SwarmMap, state: SwarmState, x: number, y: number): number | null {
@@ -1326,6 +1329,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
       if (cost !== null) drawToken(ctx, spot.kind, spot.x, spot.y, grow, cost, sendSize(hut, 'all') >= cost);
     }
   }
+  if (view.threat) drawThreats(ctx, map, state, view.threat, view.now, px);
   drawOver(ctx, scene.feel, map, state, view.now, px);
   if (aim) drawAimOver(ctx, map, state, view, aim, px);
 }

@@ -22,6 +22,7 @@ import {
 } from '../../swarmGameLogic';
 import { BADGE, LANE, PATH_W, areaOf, crossingsOf, fontOf, growOf, pathPoint, riverDir, riverOf, siteRadius, summitOf, type Crossing } from './swarmSceneKit';
 import { WIND } from './swarmSceneGround';
+import { momentumStep, newMomentum, type Momentum, type MomentumKey } from './swarmMomentum';
 
 const TAU = Math.PI * 2;
 
@@ -64,10 +65,13 @@ export type CalloutKey =
   | 'towerTaken'
   | 'fortTaken'
   | 'bridgeHeld'
-  | 'backFromOne';
+  | 'backFromOne'
+  | 'overtime'
+  | MomentumKey;
 
 /** Most pressing first: when several are due at once, bad news is read before good. */
 export const CALLOUT_ORDER: readonly CalloutKey[] = [
+  'overtime',
   'lastHut',
   'enemyAtGate',
   'towerLost',
@@ -75,8 +79,11 @@ export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'flagRaised',
   'towerTaken',
   'fortTaken',
+  'held',
+  'rout',
   'bridgeHeld',
   'backFromOne',
+  'run',
 ];
 
 export const CALLOUT_TEXT: Record<CalloutKey, string> = {
@@ -89,6 +96,11 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   fortTaken: 'Fort taken',
   bridgeHeld: 'Bridge held',
   backFromOne: 'Back from one hut',
+  overtime: 'Overtime',
+  // Said with their numbers in (see swarmMomentum): these are only what the banner falls back on.
+  run: 'Run',
+  rout: 'Rout',
+  held: 'Held',
 };
 
 /** Enemy units on the road to the viewer's home before it is called a column. */
@@ -140,6 +152,7 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   if (reduced && hutsWas === 1 && huts > 1) due.add('backFromOne');
 
   if (!holdsBridge(before, map, seat) && holdsBridge(after, map, seat)) due.add('bridgeHeld');
+  if (before.tick < map.ticks && after.tick >= map.ticks && after.winner === null) due.add('overtime');
 
   const home = homeOf(map, seat);
   if (
@@ -155,6 +168,7 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
 
 /** The words on a callout's banner. A white flag names the creatures that raised it. */
 export function calloutWords(callout: Callout, kinds: Record<Seat, Kind>): string {
+  if (callout.text !== undefined) return callout.text;
   return callout.key === 'flagRaised' && callout.seat ? `${KIND_NAME[kinds[callout.seat]].many} raised the white flag` : CALLOUT_TEXT[callout.key];
 }
 
@@ -182,13 +196,19 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   fortTaken: 6000,
   bridgeHeld: 20000,
   backFromOne: 20000,
+  overtime: 60000,
+  run: 3000,
+  rout: 4000,
+  held: 4000,
 };
 
+/** A callout waiting or up, with the words it is said in when they carry a number. */
 export interface Callout {
   key: CalloutKey;
   at: number;
   /** The side a callout names: the one that raised a white flag. */
   seat?: Seat;
+  text?: string;
 }
 
 export interface Callouts {
@@ -200,12 +220,18 @@ export interface Callouts {
 }
 
 /** `about` is the side each callout that names one is about. */
-export function queueCallouts(callouts: Callouts, keys: CalloutKey[], now: number, about: Partial<Record<CalloutKey, Seat>> = {}): void {
-  for (const key of keys) {
+export function queueCallouts(
+  callouts: Callouts,
+  keys: (CalloutKey | { key: CalloutKey; text: string })[],
+  now: number,
+  about: Partial<Record<CalloutKey, Seat>> = {},
+): void {
+  for (const each of keys) {
+    const { key, text } = typeof each === 'string' ? { key: each, text: undefined } : each;
     const said = callouts.saidAt[key];
     if (said !== undefined && now - said < CALLOUT_AGAIN_MS[key]) continue;
     callouts.saidAt[key] = now;
-    callouts.queue.push({ key, at: now, seat: about[key] });
+    callouts.queue.push({ key, at: now, seat: about[key], ...(text !== undefined && { text }) });
   }
   callouts.queue.sort((p, q) => CALLOUT_ORDER.indexOf(p.key) - CALLOUT_ORDER.indexOf(q.key) || p.at - q.at);
   callouts.queue.length = Math.min(callouts.queue.length, CALLOUT_QUEUE_MAX);
@@ -716,6 +742,7 @@ export interface Feel {
   /** When each blade and each reed was last brushed by a unit. */
   stirred: { blades: Float64Array; reeds: Float64Array };
   callouts: Callouts;
+  momentum: Momentum;
   ambient: Ambient;
   /** How many of its garrison each hut is showing, on the way to how many it should. */
   mill: number[];
@@ -755,6 +782,7 @@ export function newFeel(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>):
       reeds: new Float64Array(ambient.reeds.length / 4).fill(-Infinity),
     },
     callouts: { queue: [], showing: null, saidAt: {}, reduced: false },
+    momentum: newMomentum(),
     ambient,
     mill: map.sites.map(() => 0),
     drawnAt: -Infinity,
@@ -875,7 +903,9 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
     if (due.includes('lastHut')) feel.callouts.reduced = true;
     if (due.includes('backFromOne')) feel.callouts.reduced = false;
     // Two flags in one tick are named by the later one's banner; the result line names both.
-    queueCallouts(feel.callouts, due, now, { flagRaised: state.yielded[state.yielded.length - 1] });
+    queueCallouts(feel.callouts, [...due, ...momentumStep(feel.momentum, map, before, state, seat)], now, {
+      flagRaised: state.yielded[state.yielded.length - 1],
+    });
   }
 
   feel.tick = state.tick;
