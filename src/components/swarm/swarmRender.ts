@@ -14,12 +14,12 @@
 import {
   TICK_MS,
   allied,
+  isTower,
   mulberry32,
-  paceOn,
   pathLength,
   pathOf,
   sendSize,
-  unitSpeed,
+  reachOf,
   upgradeCost,
   type Army,
   type Kind,
@@ -29,7 +29,9 @@ import {
   type SwarmEvent,
   type SwarmMap,
   type SwarmState,
+  type Upgrade,
 } from '../../swarmGameLogic';
+import { ARMOURY_ICON, buildUp, drawArmoury, drawBlind, drawKit, noteArmoury, paceShown, tokenKinds } from './swarmArmoury';
 import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type Leg, type Sending } from './swarmAim';
 import { drawPicks } from './swarmDraft';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
@@ -262,8 +264,6 @@ export function hutAt(map: SwarmMap, state: SwarmState, x: number, y: number): n
   return best;
 }
 
-export type UpgradeKind = 'hut' | 'speed' | 'strength';
-const UPGRADE_KINDS: UpgradeKind[] = ['hut', 'speed', 'strength'];
 export const TOKEN_R = 17;
 /** From the middle of one token to the middle of the next, and how far a token's price hangs below its disc. */
 const TOKEN_STEP = 42;
@@ -298,25 +298,29 @@ const SPOT_STEP = 0.5;
 const SPOT_REACH = 14;
 
 /**
- * Where the three upgrade tokens of the hut in hand sit. Under it in a row
+ * Where the upgrade tokens of the hut in hand sit. Under it in rows of three
  * when nothing is in the way, as close to that as there is clear ground when
- * something is, and stood in a column where a row will not go. Clear means
+ * something is, and stood in columns of three where rows will not go. Clear means
  * over no hut and no hut's count; on a board so small that nowhere is, they go
  * where they cover the fewest. They are always on the board. `px` is world
  * units to a CSS pixel, which is what the tokens' size goes by.
  */
-export function upgradeSpots(map: SwarmMap, state: SwarmState, hut: number, px: number): { kind: UpgradeKind; x: number; y: number }[] {
+export function upgradeSpots(map: SwarmMap, state: SwarmState, hut: number, px: number): { kind: Upgrade; x: number; y: number }[] {
+  const kinds = tokenKinds(map, state, hut);
+  // Three to a line, as the three every hut has always been; the armoury's go on a second.
+  const long = Math.min(3, kinds.length);
+  const short = Math.ceil(kinds.length / 3);
   const grow = tokenGrow(px);
   const radius = TOKEN_R * grow;
   const step = TOKEN_STEP * grow;
   const hang = TOKEN_HANG * grow;
   const boxes = map.sites.map((site, index) => standingBox(site, state.huts[index].level, badgeGrow(px)));
-  const home = { x: map.sites[hut].x, y: boxes[hut].y1 + 6 + radius };
+  const home = { x: map.sites[hut].x, y: boxes[hut].y1 + 6 + radius + (short - 1) * step * 0.5 };
   let best = { ...home, upright: false };
   let bestCost = Infinity;
   for (const upright of [false, true]) {
-    const across = radius + (upright ? 0 : step);
-    const up = radius + (upright ? step : 0);
+    const across = radius + ((upright ? short : long) - 1) * step * 0.5;
+    const up = radius + ((upright ? long : short) - 1) * step * 0.5;
     const down = up + hang;
     for (let i = -SPOT_REACH; i <= SPOT_REACH; i++) {
       for (let j = -SPOT_REACH; j <= SPOT_REACH; j++) {
@@ -336,11 +340,11 @@ export function upgradeSpots(map: SwarmMap, state: SwarmState, hut: number, px: 
       }
     }
   }
-  return UPGRADE_KINDS.map((kind, index) => ({
-    kind,
-    x: best.x + (best.upright ? 0 : (index - 1) * step),
-    y: best.y + (best.upright ? (index - 1) * step : 0),
-  }));
+  return kinds.map((kind, index) => {
+    const along = (index % 3) - (long - 1) * 0.5;
+    const over = Math.floor(index / 3) - (short - 1) * 0.5;
+    return { kind, x: best.x + (best.upright ? over : along) * step, y: best.y + (best.upright ? along : over) * step };
+  });
 }
 
 /** `seat` is whose screen this is: the callouts are worded for them. */
@@ -353,9 +357,12 @@ export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[],
   feelStep(scene.feel, scene.map, state, seat, now);
   builtEvents(scene.built, state, events, now, seat);
   for (const shot of state.shots) {
+    // A mortar's or a ballista's kill is drawn by swarmArmoury as its shell or its bolt.
+    if (shot.type) continue;
     scene.fx.push({ kind: 'shot', x: shot.x, y: shot.y, at: now, seat: shot.seat, tower: shot.tower });
     scene.firedAt[shot.tower] = now;
   }
+  noteArmoury(scene, state, events, now);
   for (const event of events) {
     if (event.kind === 'hit') {
       scene.hitAt[event.hut] = now;
@@ -923,9 +930,9 @@ function strengthIcon(ctx: CanvasRenderingContext2D) {
   ctx.fill();
 }
 
-const TOKEN_ICON: Record<UpgradeKind | 'burn', (ctx: CanvasRenderingContext2D) => void> = { hut: hutIcon, speed: speedIcon, strength: strengthIcon, burn: flameIcon };
+const TOKEN_ICON: Record<Upgrade | 'burn', (ctx: CanvasRenderingContext2D) => void> = { hut: hutIcon, speed: speedIcon, strength: strengthIcon, burn: flameIcon, ...ARMOURY_ICON };
 
-function drawToken(ctx: CanvasRenderingContext2D, kind: UpgradeKind | 'burn', x: number, y: number, grow: number, cost: number, affordable: boolean) {
+function drawToken(ctx: CanvasRenderingContext2D, kind: Upgrade | 'burn', x: number, y: number, grow: number, cost: number, affordable: boolean) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(grow, grow);
@@ -1146,9 +1153,10 @@ function drawRanges(ctx: CanvasRenderingContext2D, map: SwarmMap, state: SwarmSt
   ctx.lineWidth = 1.6;
   ctx.strokeStyle = map.scene === 'ice' ? 'rgba(30, 54, 92, 0.6)' : 'rgba(255, 255, 255, 0.6)';
   state.huts.forEach((hut, index) => {
-    if (!map.sites[index].tower || allied(map, hut.owner, view.seat) || view.sight?.unseen.has(index)) return;
-    ellipse(ctx, map.sites[index].x, map.sites[index].y, map.rules.tune.range, map.rules.tune.range);
+    if (!isTower(hut) || allied(map, hut.owner, view.seat) || view.sight?.unseen.has(index)) return;
+    ellipse(ctx, map.sites[index].x, map.sites[index].y, reachOf(map, hut), reachOf(map, hut));
     ctx.stroke();
+    drawBlind(ctx, map.sites[index], hut);
   });
   ctx.setLineDash([]);
 }
@@ -1188,13 +1196,14 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
   const sheet = sheetOf(scene, state.army);
   const ants: Marcher[] = [];
   const bees: Marcher[] = [];
+  const paceOf = paceShown(map, state);
   for (const unit of state.units) {
     const kind = scene.kinds[unit.seat];
     const length = pathLength(map, unit.from, unit.to);
     // Everything that tells one unit from the next is read off its id, so it is the same unit in every frame.
     const own = Math.imul(unit.id, 0x9e3779b1) >>> 0;
     // The engine lets them out on the beat. Each is drawn a little ahead of its place or behind, so the column does not tick past like a ruler.
-    const d = Math.min(length, Math.max(0, unit.d + paceOn(map, unit.from, unit.to, unitSpeed(state, unit), state.tick + 1 <= state.rain) * view.alpha + ((own >>> 16) % 7 - 3) * 0.5));
+    const d = Math.min(length, Math.max(0, unit.d + paceOf(unit) * view.alpha + ((own >>> 16) % 7 - 3) * 0.5));
     const column = unit.from * 64 + unit.to;
     const key = unit.id * 4096 + column;
     let slot = scene.slots.get(key);
@@ -1264,7 +1273,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       continue;
     }
     // A tower that has just fired is pressed down on its foot by the shot and stands up again.
-    const spent = site.tower ? Math.min(1, (view.now - scene.firedAt[index]) / RECOIL_MS) : 1;
+    const spent = isTower(hut) ? Math.min(1, (view.now - scene.firedAt[index]) / RECOIL_MS) : 1;
     const stand = 1 - 0.035 * (1 - spent) * (1 - spent);
     if (stand === 1 && scene.scale === scale) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1276,6 +1285,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       ctx.drawImage(sprite.canvas, sprite.left / painted, site.y - (site.y - sprite.top / painted) * stand, sprite.canvas.width / painted, (sprite.canvas.height / painted) * stand);
     }
     drawFlags(ctx, map.scene, site, shown, shown && scene.kinds[shown], hut.level, view.now);
+    drawKit(ctx, site, hut);
   }
 
   // A bee flies, so its shadow is on the ground below and it is drawn above it. They do not all fly at one height.
@@ -1354,6 +1364,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   }
   const box = boxes.get(canvas) ?? measured(canvas);
   if (box.w === 0 || box.h === 0) return;
+  buildUp(scene, state);
   const { map } = scene;
   if (canvas.width !== box.w || canvas.height !== box.h) {
     canvas.width = box.w;
@@ -1400,6 +1411,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   drawFx(ctx, scene, view.now);
   drawModes(ctx, map, state, view.alpha, px);
   drawCalls(ctx, scene.calls, view.now);
+  drawArmoury(ctx, scene, state, view.now, view.alpha);
   if (sight) drawMist(ctx, (scene.mist ??= newMist(map)), sight);
   drawRain(ctx, map, state, state.tick + view.alpha, view.now);
   drawCounts(ctx, scene, state, view, scale, px);

@@ -42,6 +42,7 @@ import {
   countOf,
   drafting,
   encodeTune,
+  isUpgrade,
   kindsOf,
   lastTick,
   newState,
@@ -71,6 +72,7 @@ import { modeNotes, modeStory, type ModeNote } from './swarmModes';
 import { burnSpots } from './swarmSceneBuilt';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
+import { notesOf } from './swarmArmoury';
 import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
 import { READY_MODES, READY_TWISTS, clashOf, leaveWarning, surpriseOf, tuneSummary, unfit, type RulesChoice } from './swarmLobby';
@@ -217,6 +219,7 @@ const TWISTS: Record<Twist, { name: string; about: string }> = {
   comeback: { name: 'Comeback', about: 'A side 2 or more huts behind the leader breeds 25% faster.' },
   buildings: { name: 'Buildings', about: 'A trap kills half its first takers, barracks send units that survive one death, beacons send faster ones and a granary gives the huts next to it half as much room again.' },
   queens: { name: 'Queens', about: 'Lose your home hut and your other huts stop breeding until you take it back.' },
+  armoury: { name: 'Armoury', about: 'Kit out towers, refit them, build them.' },
 };
 
 const TWISTS_ABOUT = 'Any number of twists can be played at once.';
@@ -591,9 +594,11 @@ interface Hud {
   flood: number | 'over' | null;
   /** With the powers twist, this seat's. */
   powers: PowerPill[] | null;
+  /** What the armoury's tokens for the hut in hand do. */
+  kit: string[];
 }
 
-const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [], draft: null, holding: null, survival: null, notes: [], story: [], flood: null, powers: null };
+const HUD_IDLE: Hud = { count: null, secs: null, overtime: false, counts: {}, starts: {}, picked: false, flag: false, yielded: [], draft: null, holding: null, survival: null, notes: [], story: [], flood: null, powers: null, kit: [] };
 
 /** One game as this client holds it. */
 interface Game extends Lockstep {
@@ -1069,6 +1074,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         story: [],
         flood: null,
         powers: null,
+        kit: [],
       };
       if (game) {
         const { shown, map } = game;
@@ -1109,6 +1115,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           const them = (other: Seat) => `The ${KIND_NAME[kinds[other]].many.toLowerCase()}`;
           next.story = modeStory(game.map, game.shown, (other) => (other === seat ? { name: 'You', whose: 'Your' } : { name: them(other), whose: `${them(other)}'` }));
         }
+        if (selected !== null) next.kit = notesOf(game.scene.map, game.shown, selected);
       }
       const nextKey = JSON.stringify(next);
       if (nextKey !== hudKey) {
@@ -1141,7 +1148,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       const hut = selected;
       if (hut === null) return null;
       const disc = TOKEN_R * tokenGrow(p.px) + 4;
-      const spots: { kind: OrderKind; x: number; y: number; cost: number; to: number }[] = upgradeSpots(g.map, g.shown, hut, p.px).flatMap((spot) => {
+      // The drawing's map, which knows the towers built since the game began, so the tokens are pressed where they are drawn.
+      const spots: { kind: OrderKind; x: number; y: number; cost: number; to: number }[] = upgradeSpots(g.scene.map, g.shown, hut, p.px).flatMap((spot) => {
         const cost = upgradeCost(g.map, g.shown, hut, spot.kind);
         return cost === null ? [] : [{ ...spot, cost, to: hut }];
       });
@@ -1230,7 +1238,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           let owed = 0;
           for (const order of game.orders[seatNow]) {
             if (order.tick <= game.shown.tick || order.from !== token.hut) continue;
-            if (order.kind === 'hut' || order.kind === 'speed' || order.kind === 'strength') owed += upgradeCost(game.map, game.shown, token.hut, order.kind) ?? 0;
+            if (isUpgrade(order.kind)) owed += upgradeCost(game.map, game.shown, token.hut, order.kind) ?? 0;
             if (order.kind === 'burn') owed += BURN_COST;
           }
           if (sendSize(game.shown.huts[token.hut], 'all') - owed < token.cost) return refuse(token.hut);
@@ -1950,6 +1958,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
             {hud.powers && <SwarmPowerPills pills={hud.powers} onPress={(power) => controlsRef.current?.power(power)} />}
             {hud.flag && <FlagButton onRaise={raiseFlag} />}
           </div>
+          {hud.kit.length > 0 && <div className={styles.footer}>{hud.kit.join('. ')}</div>}
           {error ? (
             <div className={styles.footer} role="alert">{error}</div>
           ) : (

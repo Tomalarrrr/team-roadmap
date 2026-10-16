@@ -880,7 +880,8 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
   // One that walked into a hut its side or an ally now holds is inside it, not dead.
   const fell = ({ unit, reached }: { unit: Unit; reached: boolean }) => !(reached && allied(map, state.huts[unit.to].owner, unit.seat));
 
-  for (const shot of state.shots) addMark(feel, 'pool', shot.x, shot.y, shot.seat, now + SHOT_LAND_MS);
+  // A unit its carapace saved leaves nothing on the ground, and what a shell or a bolt kills is dead where it stands now, not when a ball comes down.
+  for (const shot of state.shots) if (!shot.spared) addMark(feel, 'pool', shot.x, shot.y, shot.seat, now + (shot.type ? 0 : SHOT_LAND_MS));
 
   const struck = new Set<number>();
   for (const event of state.events) {
