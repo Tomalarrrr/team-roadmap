@@ -12,7 +12,6 @@
 // buildings in swarmSceneHuts, and the orders a player gives in swarmAim.
 
 import {
-  TOWER_RANGE,
   mulberry32,
   paceOn,
   pathLength,
@@ -1095,7 +1094,7 @@ function drawRanges(ctx: CanvasRenderingContext2D, map: SwarmMap, state: SwarmSt
   ctx.strokeStyle = map.scene === 'ice' ? 'rgba(30, 54, 92, 0.6)' : 'rgba(255, 255, 255, 0.6)';
   state.huts.forEach((hut, index) => {
     if (!map.sites[index].tower || hut.owner === view.seat) return;
-    ellipse(ctx, map.sites[index].x, map.sites[index].y, TOWER_RANGE, TOWER_RANGE);
+    ellipse(ctx, map.sites[index].x, map.sites[index].y, map.rules.tune.range, map.rules.tune.range);
     ctx.stroke();
   });
   ctx.setLineDash([]);
@@ -1327,7 +1326,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
     const hut = state.huts[view.selected];
     const grow = tokenGrow(px);
     for (const spot of upgradeSpots(map, state, view.selected, px)) {
-      const cost = upgradeCost(state, view.selected, spot.kind);
+      const cost = upgradeCost(map, state, view.selected, spot.kind);
       if (cost !== null) drawToken(ctx, spot.kind, spot.x, spot.y, grow, cost, sendSize(hut, 'all') >= cost);
     }
   }

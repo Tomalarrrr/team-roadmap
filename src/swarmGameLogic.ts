@@ -75,6 +75,71 @@ export const TOLL_EVERY = 4;
  */
 export const FORT_LIVES = 2;
 
+/** Ticks in a minute of the clock. */
+export const MINUTE_TICKS = 60000 / TICK_MS;
+
+/**
+ * The numbers a host can tune for a match, one line each. Every value is a
+ * whole number held between `min` and `max`, and `standard` is the game as it
+ * is untuned, so a match that stores none plays unit for unit as before.
+ * A knob's id is what the match stores, so it is short and never renamed.
+ * `unit` is written straight after the number, so it carries its own space.
+ */
+export const KNOBS = [
+  { id: 'len', label: 'Match length', unit: ' min', min: 2, max: 30, standard: MATCH_TICKS / MINUTE_TICKS, about: 'Minutes on the clock. Four sides and the large ground still add 3 minutes each.' },
+  { id: 'grow', label: 'Breeding', unit: '%', min: 25, max: 400, standard: 100, about: 'How fast huts breed. At 200 a hut breeds twice as fast.' },
+  { id: 'cap', label: 'Hut room', unit: '%', min: 50, max: 300, standard: 100, about: 'What a hut holds before it stops breeding: 30, 50 and 80 by level at 100%.' },
+  { id: 'speed', label: 'Marching', unit: '%', min: 50, max: 200, standard: 100, about: 'How fast units walk. At 50% a column takes twice as long to arrive.' },
+  { id: 'cost', label: 'Upgrade cost', unit: '%', min: 25, max: 300, standard: 100, about: 'What upgrades cost: a hut 15 then 30, an army 20, 35 then 50 at 100%.' },
+  { id: 'start', label: 'Starting units', unit: '', min: 1, max: 60, standard: START_UNITS, about: 'Units in each side\'s first hut when the game starts.' },
+  { id: 'range', label: 'Tower range', unit: '', min: 50, max: 250, standard: TOWER_RANGE, about: 'How far a tower shoots, on a board 1000 across. Towers stand where they always do.' },
+  { id: 'reload', label: 'Tower reload', unit: ' tenths', min: 2, max: 30, standard: TOWER_RELOAD, about: 'Tenths of a second between two shots of a tower.' },
+] as const;
+
+export type KnobId = (typeof KNOBS)[number]['id'];
+export type Tune = Record<KnobId, number>;
+export const STANDARD_TUNE = Object.fromEntries(KNOBS.map((knob) => [knob.id, knob.standard])) as Tune;
+
+/** A value held to its knob's range, as a whole number. */
+export function clampKnob(id: KnobId, value: number): number {
+  const knob = KNOBS.find((each) => each.id === id)!;
+  return Math.min(knob.max, Math.max(knob.min, Math.round(value)));
+}
+
+/**
+ * The tune a match stores, as `len=15;grow=150`: only the knobs off standard,
+ * in table order. A match that stores nothing is standard.
+ */
+export function encodeTune(tune: Tune): string {
+  return KNOBS.filter((knob) => tune[knob.id] !== knob.standard)
+    .map((knob) => `${knob.id}=${tune[knob.id]}`)
+    .join(';');
+}
+
+/**
+ * The tune a match plays by. Each value is held to its range, so every client
+ * reads the same numbers from the same string. A knob this build does not know
+ * is skipped: the database only lets the shape through, not the names.
+ */
+export function parseTune(text: string | undefined): Tune {
+  const tune = { ...STANDARD_TUNE };
+  for (const part of text ? text.split(';') : []) {
+    const [id, value] = part.split('=');
+    const knob = KNOBS.find((each) => each.id === id);
+    if (knob && /^\d+$/.test(value)) tune[knob.id] = clampKnob(knob.id, Number(value));
+  }
+  return tune;
+}
+
+/** Ticks between two units born in a hut of this level. */
+export const growTicks = (map: SwarmMap, level: number): number => Math.max(1, Math.floor((GROW_TICKS[level - 1] * 100) / map.rules.tune.grow));
+/** What a hut of this level holds before it stops breeding. */
+export const hutCap = (map: SwarmMap, level: number): number => Math.max(1, Math.floor((HUT_CAP[level - 1] * map.rules.tune.cap) / 100));
+/** World units walked per tick at this speed level, before the path has its say. */
+export const speedOf = (map: SwarmMap, level: number): number => Math.max(1, Math.floor((SPEED[level] * map.rules.tune.speed) / 100));
+/** What an upgrade listed at `cost` costs in this match. */
+export const tunedCost = (map: SwarmMap, cost: number): number => Math.max(1, Math.floor((cost * map.rules.tune.cost) / 100));
+
 /** The four sides there can be on the board. Each is played by a person or by the computer. */
 export type Seat = 'a' | 'b' | 'c' | 'd';
 export type Owner = Seat | null;
@@ -138,12 +203,14 @@ export interface Rules {
   twists: readonly Twist[];
   /** The nest each person picked. A seat without one starts big. */
   nests: Partial<Record<Seat, Nest>>;
+  /** The host's numbers (see KNOBS). */
+  tune: Tune;
 }
 
-export const CLASSIC: Rules = { mode: 'classic', start: 'home', twists: [], nests: {} };
+export const CLASSIC: Rules = { mode: 'classic', start: 'home', twists: [], nests: {}, tune: STANDARD_TUNE };
 
 /** A match leaves out every choice that is the default, so a match from before there were choices is a classic one. */
-export function rulesOf(match: Pick<SwarmMatch, 'mode' | 'start' | 'twists' | 'players'>): Rules {
+export function rulesOf(match: Pick<SwarmMatch, 'mode' | 'start' | 'twists' | 'players' | 'tune'>): Rules {
   const nests: Partial<Record<Seat, Nest>> = {};
   for (const seat of SEATS) {
     const nest = match.players[seat]?.nest;
@@ -154,6 +221,7 @@ export function rulesOf(match: Pick<SwarmMatch, 'mode' | 'start' | 'twists' | 'p
     start: match.start ?? CLASSIC.start,
     twists: TWISTS.filter((twist) => match.twists?.includes(TWIST_CHAR[twist])),
     nests,
+    tune: parseTune(match.tune),
   };
 }
 
@@ -182,6 +250,8 @@ export interface SwarmMatch {
   start?: StartId;
   /** One letter per twist, in the order of TWIST_CHAR. Without any, none. */
   twists?: string;
+  /** The knobs off standard, as encodeTune writes them. Without it, standard. */
+  tune?: string;
   /**
    * For each seat whose person left a game of three or more sides, the last
    * tick of theirs: the computer plays the seat after it.
@@ -1080,7 +1150,9 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   if (third) startThree(id, sides, homes, sites, links);
   if (rules.start === 'scattered') scatterStarts(sides, homes, sites, w, h);
   if (rules.start === 'nests') nestStarts(rules.nests, sides, homes, sites, w, h);
-  const ticks = MATCH_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
+  const extra = rules.tune.start - START_UNITS;
+  if (extra) for (const home of homes) sites[home] = { ...sites[home], n: Math.max(1, sites[home].n + extra) };
+  const ticks = rules.tune.len * MINUTE_TICKS + (sides.length === 4 ? EXTRA_TICKS : 0) + (ground === 'large' ? EXTRA_TICKS : 0);
   return { id, scene: SCENES[id], sites, links, paths: drawn.paths, rivers: drawn.rivers, sides, homes, size: ground, w, h, ticks, rules };
 }
 
@@ -1335,11 +1407,11 @@ function percentOn(path: Path, to: number): number {
 
 /** World units a unit of an army at that speed level walks in a tick, on the path from `from` to `to`. */
 export function paceOn(map: SwarmMap, from: number, to: number, speed: number): number {
-  return paceOf(map.paths[pathIndex(map, from, to)], to, speed);
+  return paceOf(map, map.paths[pathIndex(map, from, to)], to, speed);
 }
 
-function paceOf(path: Path, to: number, speed: number): number {
-  return Math.floor((SPEED[speed] * percentOn(path, to)) / 100);
+function paceOf(map: SwarmMap, path: Path, to: number, speed: number): number {
+  return Math.floor((speedOf(map, speed) * percentOn(path, to)) / 100);
 }
 
 export interface Hut {
@@ -1548,12 +1620,12 @@ export function sendSize(hut: Hut, kind: 'half' | 'all'): number {
 }
 
 /** What the upgrade costs from this hut, or null when it is already at the top. A tower sells none. */
-export function upgradeCost(state: SwarmState, hutIndex: number, kind: 'hut' | 'speed' | 'strength'): number | null {
+export function upgradeCost(map: SwarmMap, state: SwarmState, hutIndex: number, kind: 'hut' | 'speed' | 'strength'): number | null {
   const hut = state.huts[hutIndex];
   if (!hut.owner || isTower(hut)) return null;
-  if (kind === 'hut') return hut.level < MAX_HUT_LEVEL ? HUT_COST[hut.level - 1] : null;
+  if (kind === 'hut') return hut.level < MAX_HUT_LEVEL ? tunedCost(map, HUT_COST[hut.level - 1]) : null;
   const level = state.army[hut.owner][kind];
-  return level < MAX_ARMY_LEVEL ? ARMY_COST[level] : null;
+  return level < MAX_ARMY_LEVEL ? tunedCost(map, ARMY_COST[level]) : null;
 }
 
 /** An order that no longer holds when its tick comes (the hut fell, the units left) does nothing. */
@@ -1575,7 +1647,7 @@ function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, 
     else hut.out.push({ to: hop, dest: order.to, n, ...(order.risky && { risky: true }) });
     return;
   }
-  const cost = upgradeCost(state, order.from, order.kind);
+  const cost = upgradeCost(map, state, order.from, order.kind);
   if (cost === null || hut.n - queued(hut) < cost) return;
   hut.n -= cost;
   if (order.kind === 'hut') hut.level++;
@@ -1667,7 +1739,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     if (!mixed(sides[at])) continue;
     const path = map.paths[at];
-    const pace = paceOf(path, unit.to, state.army[unit.seat].speed);
+    const pace = paceOf(map, path, unit.to, state.army[unit.seat].speed);
     let lane = lanes.get(at);
     if (!lane) lanes.set(at, (lane = []));
     lane.push(unit.from === path.a ? { unit, at: unit.d, was: unit.d - pace } : { unit, at: lengths[at] - unit.d, was: lengths[at] - unit.d + pace });
@@ -1759,7 +1831,7 @@ function wounds(hut: Hut): boolean {
 
 function walk(state: SwarmState, map: SwarmMap): void {
   const { index } = lanesOf(map);
-  for (const unit of state.units) unit.d += paceOf(map.paths[index[unit.from][unit.to]], unit.to, state.army[unit.seat].speed);
+  for (const unit of state.units) unit.d += paceOf(map, map.paths[index[unit.from][unit.to]], unit.to, state.army[unit.seat].speed);
 }
 
 /**
@@ -1778,7 +1850,7 @@ function takeTolls(state: SwarmState, map: SwarmMap): void {
     const at = index[unit.from][unit.to];
     const path = map.paths[at];
     if (takesToll(path.kind)) {
-      const before = unit.d - paceOf(path, unit.to, state.army[unit.seat].speed);
+      const before = unit.d - paceOf(map, path, unit.to, state.army[unit.seat].speed);
       // Twice the walk against the whole length: on a path of odd length, half of it rounded down
       // is a middle that two units walking at each other are both over a step before they meet.
       if (2 * before < length[at] && 2 * unit.d >= length[at] && ++state.tolls[at] % TOLL_EVERY === 0) {
@@ -1838,7 +1910,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
     if (tower.reload > 0) return;
     const site = map.sites[index];
     let target: { unit: Unit; x: number; y: number } | null = null;
-    let nearest = TOWER_RANGE * TOWER_RANGE;
+    let nearest = map.rules.tune.range * map.rules.tune.range;
     for (const unit of state.units) {
       if (tower.owner ? unit.seat === tower.owner : unit.to !== index) continue;
       const from = map.sites[unit.from];
@@ -1856,7 +1928,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
     const { unit, x, y } = target;
     state.units = state.units.filter((u) => u !== unit);
     state.shots.push({ tower: index, x, y, seat: unit.seat });
-    tower.reload = TOWER_RELOAD;
+    tower.reload = map.rules.tune.reload;
   });
 }
 
@@ -2010,7 +2082,7 @@ function settleDraft(state: SwarmState, map: SwarmMap): void {
     const to = state.homes[k];
     if (from === to) return;
     if (!state.homes.includes(from)) Object.assign(state.huts[from], { owner: null, n: START_UNITS });
-    Object.assign(state.huts[to], { owner: side, n: START_UNITS });
+    Object.assign(state.huts[to], { owner: side, n: map.rules.tune.start });
     state.events.push({ kind: 'capture', hut: to, seat: side });
   });
 }
@@ -2038,9 +2110,9 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
 
   for (const hut of state.huts) {
     if (!hut.owner || isTower(hut)) continue;
-    if (++hut.grow < GROW_TICKS[hut.level - 1] * (hut.hurt === undefined ? 1 : FORT_LIVES)) continue;
+    if (++hut.grow < growTicks(map, hut.level) * (hut.hurt === undefined ? 1 : FORT_LIVES)) continue;
     hut.grow = 0;
-    if (hut.n < HUT_CAP[hut.level - 1]) hut.n++;
+    if (hut.n < hutCap(map, hut.level)) hut.n++;
   }
 
   if (tick % RELEASE_TICKS === 0) {
@@ -2131,7 +2203,7 @@ function coverOf(map: SwarmMap): number[][] {
       return towers.filter((tower) => {
         const r = map.sites[tower];
         const t = Math.max(0, Math.min(1, ((r.x - p.x) * dx + (r.y - p.y) * dy) / (dx * dx + dy * dy)));
-        return far({ x: p.x + t * dx, y: p.y + t * dy }, r, TOWER_RANGE + 1) === false;
+        return far({ x: p.x + t * dx, y: p.y + t * dy }, r, map.rules.tune.range + 1) === false;
       });
     });
     coverCache.set(map, cover);
@@ -2222,8 +2294,8 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const bredBy = (at: number, ticks: number) => {
     const hut = huts[at];
     // A hut walked in over its cap breeds nothing, and loses none of what it holds either.
-    if (!hut.owner || isTower(hut) || hut.n >= HUT_CAP[hut.level - 1]) return 0;
-    return Math.min(Math.floor(ticks / GROW_TICKS[hut.level - 1]), (HUT_CAP[hut.level - 1] - hut.n) * (hut.hurt === undefined ? 1 : FORT_LIVES));
+    if (!hut.owner || isTower(hut) || hut.n >= hutCap(map, hut.level)) return 0;
+    return Math.min(Math.floor(ticks / growTicks(map, hut.level)), (hutCap(map, hut.level) - hut.n) * (hut.hurt === undefined ? 1 : FORT_LIVES));
   };
 
   // What each side has on its way to each hut, counting the columns still leaving, and how soon the first of it gets there.
@@ -2231,7 +2303,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const soon = huts.map(() => [Infinity, Infinity, Infinity, Infinity]);
   for (const unit of state.units) {
     const k = SEATS.indexOf(unit.seat);
-    const ticks = (length[index[unit.from][unit.to]] - unit.d + span(map.sites[unit.to], map.sites[unit.dest])) / SPEED[state.army[unit.seat].speed];
+    const ticks = (length[index[unit.from][unit.to]] - unit.d + span(map.sites[unit.to], map.sites[unit.dest])) / speedOf(map, state.army[unit.seat].speed);
     bound[unit.dest][k]++;
     soon[unit.dest][k] = Math.min(soon[unit.dest][k], ticks);
   }
@@ -2240,7 +2312,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const k = SEATS.indexOf(hut.owner);
     for (const line of hut.out) {
       bound[line.dest][k] += line.n;
-      soon[line.dest][k] = Math.min(soon[line.dest][k], span(map.sites[at], map.sites[line.dest]) / SPEED[state.army[hut.owner].speed]);
+      soon[line.dest][k] = Math.min(soon[line.dest][k], span(map.sites[at], map.sites[line.dest]) / speedOf(map, state.army[hut.owner].speed));
     }
   });
 
@@ -2257,7 +2329,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
       if (hop === -1 || (hop !== to && huts[hop].owner !== seat)) return null;
       const path = index[at][hop];
       paths.push(path);
-      ticks += Math.ceil(length[path] / paceOf(map.paths[path], hop, army.speed));
+      ticks += Math.ceil(length[path] / paceOf(map, map.paths[path], hop, army.speed));
       at = hop;
     }
     return { ticks, paths, risky: paths.some((path) => takesToll(map.paths[path].kind)) };
@@ -2279,10 +2351,11 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
       for (const tower of coverOf(map)[path]) if (tower !== to && huts[tower].owner && huts[tower].owner !== seat) towers.add(tower);
     }
     const last = way.paths[way.paths.length - 1];
-    const pace = paceOf(map.paths[last], to, army.speed);
+    const pace = paceOf(map, map.paths[last], to, army.speed);
     // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
-    lost += towers.size * Math.ceil((n * RELEASE_TICKS + (2 * TOWER_RANGE) / pace) / TOWER_RELOAD);
-    if (isTower(huts[to])) lost += Math.ceil((n * RELEASE_TICKS + TOWER_RANGE / pace) / TOWER_RELOAD);
+    const { range, reload } = map.rules.tune;
+    lost += towers.size * Math.ceil((n * RELEASE_TICKS + (2 * range) / pace) / reload);
+    if (isTower(huts[to])) lost += Math.ceil((n * RELEASE_TICKS + range / pace) / reload);
     return Math.min(n, lost);
   };
 
@@ -2367,7 +2440,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     });
     if (attackers === 0) continue;
     const hut = huts[at];
-    const short = attackers + 1 - lives(hut) - bound[at][me] - (isTower(hut) ? 0 : Math.floor(soonest / GROW_TICKS[hut.level - 1]));
+    const short = attackers + 1 - lives(hut) - bound[at][me] - (isTower(hut) ? 0 : Math.floor(soonest / growTicks(map, hut.level)));
     if (short <= 0) continue;
     const help = muster(at, () => short, soonest);
     if (help) march(at, help);
@@ -2377,7 +2450,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const leading = leader && (leader.huts > mineCount.huts || (leader.huts === mineCount.huts && leader.units > mineCount.units));
   const worth = (to: number) => {
     const hut = huts[to];
-    let value = isTower(hut) ? 1.5 : 10 / GROW_TICKS[hut.level - 1];
+    let value = isTower(hut) ? 1.5 : 10 / growTicks(map, hut.level);
     if (map.sites[to].fort) value += 0.5;
     value *= 1 + 0.1 * Math.max(0, map.links[to].length - 2);
     if (hut.owner) {
@@ -2445,7 +2518,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const order: ('hut' | 'speed' | 'strength')[] = speedFirst ? ['hut', 'speed', 'strength'] : ['hut', 'strength', 'speed'];
     const kinds = hut ? order : order.filter((kind) => kind !== 'hut');
     const kind = kinds.find((k) => {
-      const cost = upgradeCost(state, at, k);
+      const cost = upgradeCost(map, state, at, k);
       return cost !== null && free(at) >= cost + margin;
     });
     if (!kind) return false;
@@ -2459,7 +2532,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     if (!front.includes(at)) {
       // A builder grows the huts behind its front when it can pay for it, and otherwise does what the others do: a builder that sat
       // saving up for the next level won 79 of 195 games against one that did not, and 95 of 195 once it stopped.
-      if (temper.builder && hut.level < MAX_HUT_LEVEL && free(at) >= HUT_COST[hut.level - 1] + 4) {
+      if (temper.builder && hut.level < MAX_HUT_LEVEL && free(at) >= tunedCost(map, HUT_COST[hut.level - 1]) + 4) {
         if (!bought) buy(at, 4);
       } else {
         const upgraded = !bought && buy(at, 4, false);
@@ -2470,7 +2543,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     if (!bought && buy(at, 6 + keepOf(at, -1))) continue;
     // Full, and across a toll is more than it can take: what it has is more use at the front.
     const tolledOnly = map.links[at].every((next) => huts[next].owner === seat || takesToll(map.paths[index[at][next]].kind));
-    if (hut.n >= HUT_CAP[hut.level - 1] && tolledOnly) reinforce(at);
+    if (hut.n >= hutCap(map, hut.level) && tolledOnly) reinforce(at);
   }
   return orders;
 }

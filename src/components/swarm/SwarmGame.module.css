@@ -73,10 +73,18 @@
 
 .cornerBtn:hover { color: var(--text-primary); }
 
-/* Sound, on the other side from leaving: the two are never pressed for each other. */
+/* Sound and the way back to the start screen, on the other side from closing: the two
+   are never pressed for each other, and the scoreboard keeps this corner clear as it does the right. */
 .cornerStart {
   right: auto;
   left: 8px;
+}
+
+/* A set width, so the scoreboard can be padded clear of Menu and sound side by side: 8 + 44 + 6 + 24. */
+.cornerMenu {
+  width: 44px;
+  font-size: 0.7rem;
+  font-weight: 600;
 }
 
 /* --- Lobby and waiting room --- */
@@ -337,6 +345,55 @@
 /* Wrapped into even rows rather than a full row and one left over. */
 .twistRow { max-width: 360px; }
 
+/* The settings: label, number and unit in rows, so the fields line up; two columns where there is room. */
+.knobGrid {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 4px 14px;
+}
+
+@media (max-width: 480px) {
+  .knobGrid { grid-template-columns: auto; }
+}
+
+.knobLabel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* Typed, not stepped: the browser's arrows crowd a field this narrow. */
+.knobInput {
+  width: 3.6em;
+  appearance: textfield;
+  -moz-appearance: textfield;
+  padding: 2px 4px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.knobInput::-webkit-inner-spin-button,
+.knobInput::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.knobInput:read-only { color: var(--text-secondary); }
+
+.knobUnit {
+  width: 3.4em;
+  text-align: left;
+}
+
 /* A guest's twists can be pointed at, to read them, but not pressed. */
 .choiceBtn[aria-disabled='true'] { cursor: default; }
 
@@ -367,8 +424,8 @@
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 12px;
-  /* The same on both sides, so the clock stays over the middle of the board with the corner buttons in one of them. */
-  padding: 7px 72px;
+  /* The same on both sides, so the clock stays over the middle of the board, and clear of the wider left corner. */
+  padding: 7px 88px;
   font-size: 0.8rem;
   color: var(--text-primary);
 }
@@ -501,6 +558,16 @@
   height: 32px;
   padding: 0 12px;
   box-sizing: border-box;
+}
+
+/* Settings off standard, said once, quietly, on the side away from the flag. */
+.hudNote {
+  margin-right: auto;
+  overflow: hidden;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .flagBtn {

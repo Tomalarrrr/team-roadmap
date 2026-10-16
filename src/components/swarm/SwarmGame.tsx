@@ -22,18 +22,22 @@ import {
   COUNTDOWN_MS,
   DRAFT_TICKS,
   KINDS,
+  KNOBS,
   MODE_IDS,
   SEATS,
   SIZE_IDS,
+  STANDARD_TUNE,
   START_IDS,
   TICK_MS,
   TWISTS as TWIST_IDS,
   advance,
   buildMap,
+  clampKnob,
   computerOf,
   MAP_IDS,
   countOf,
   drafting,
+  encodeTune,
   kindsOf,
   lastTick,
   newState,
@@ -43,6 +47,7 @@ import {
   sizeOf,
   twistLetters,
   upgradeCost,
+  type KnobId,
   type ModeId,
   type Nest,
   type OrderKind,
@@ -51,6 +56,7 @@ import {
   type SizeId,
   type StartId,
   type Twist,
+  type Tune,
   type SwarmMatch,
   type SwarmState,
 } from '../../swarmGameLogic';
@@ -60,7 +66,7 @@ import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, t
 import { carriedOf } from './swarmAim';
 import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
-import { clashOf, surpriseOf, unfit, type RulesChoice } from './swarmLobby';
+import { clashOf, leaveWarning, surpriseOf, tuneSummary, unfit, type RulesChoice } from './swarmLobby';
 import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
 import { TICK_FROM_SECS, cuesFor, newSound, siegeBeat, type CueKind } from './swarmSound';
 import { siegeOf, threatsOf, type ThreatView } from './swarmThreat';
@@ -202,6 +208,7 @@ const TWISTS: Record<Twist, { name: string; about: string }> = {
 };
 
 const TWISTS_ABOUT = 'Any number of twists can be played at once.';
+const TUNE_ABOUT = 'Every setting is at standard. Pick one to read what it does.';
 
 const NEST_IDS: readonly Nest[] = ['big', 'many'];
 const NEST_NAME: Record<Nest, string> = { big: 'Big', many: 'Many' };
@@ -329,6 +336,91 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
         })}
       </div>
       <span className={styles.rules} aria-live="polite">{about}</span>
+    </div>
+  );
+}
+
+interface TunePanelProps {
+  tune: Tune;
+  /** Without it the settings are only shown: a guest sees the host's. */
+  onTune?: (tune: Tune) => void;
+  /** What the shared line says when no setting is being read. */
+  idle: string;
+  /** Held by the lobby, which makes room for the settings by folding the rest away while they are open. */
+  open: boolean;
+  onOpen: (open: boolean) => void;
+}
+
+/**
+ * The numbers behind the rules, folded away so that one tap still starts the
+ * standard game. A value is held to its range when its field is left, not on
+ * each keystroke, so a room is never written one half typed.
+ */
+export function TunePanel({ tune, onTune, idle, open, onOpen }: TunePanelProps) {
+  const [shown, setShown] = useState<KnobId | null>(null);
+  const [drafts, setDrafts] = useState<Partial<Record<KnobId, string>>>({});
+  const changed = tuneSummary(tune);
+  const commit = (id: KnobId) => {
+    const draft = drafts[id];
+    setDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    // Anything but digits is let go of, and the field shows the value it had.
+    if (draft === undefined || !/^\d+$/.test(draft)) return;
+    const value = clampKnob(id, Number(draft));
+    if (value !== tune[id]) onTune?.({ ...tune, [id]: value });
+  };
+  const knob = KNOBS.find((each) => each.id === shown);
+  const about = knob
+    ? `${knob.about} Standard is ${knob.standard}${knob.unit}; from ${knob.min} to ${knob.max}.`
+    : changed
+      ? `Settings changed: ${changed}.`
+      : idle;
+  return (
+    <div className={styles.ruleSet}>
+      <button className={`${styles.choiceBtn} ${open ? styles.choiceBtnOn : ''}`} aria-expanded={open} onClick={() => onOpen(!open)}>
+        {open ? 'Done' : 'Settings'}
+      </button>
+      {open && (
+        <>
+          <div className={styles.knobGrid} role="group" aria-label="Settings">
+            {KNOBS.map((each) => (
+              <label key={each.id} className={styles.knobLabel}>
+                {each.label}
+                <input
+                  className={styles.knobInput}
+                  type="number"
+                  inputMode="numeric"
+                  min={each.min}
+                  max={each.max}
+                  step={1}
+                  value={drafts[each.id] ?? String(tune[each.id])}
+                  // Read only rather than disabled, so a guest can still focus one to read what it does.
+                  readOnly={!onTune}
+                  onChange={(e) => setDrafts({ ...drafts, [each.id]: e.target.value })}
+                  onFocus={() => setShown(each.id)}
+                  onBlur={() => {
+                    commit(each.id);
+                    setShown(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur();
+                  }}
+                />
+                <span className={styles.knobUnit}>{each.unit.trim()}</span>
+              </label>
+            ))}
+          </div>
+          {onTune && (
+            <button className={styles.choiceBtn} disabled={!changed} onClick={() => onTune(STANDARD_TUNE)}>
+              Reset to standard
+            </button>
+          )}
+        </>
+      )}
+      {(open || changed) && <span className={styles.rules} aria-live="polite">{about}</span>}
     </div>
   );
 }
@@ -528,6 +620,11 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   // Against the computer the rules are this client's own; a room keeps them on its match (see setRules).
   const [rulesPick, setRulesPick] = useState<RulesChoice>(CLASSIC);
   const [nestPick, setNestPick] = useState<Nest>('big');
+  const [tunePick, setTunePick] = useState<Tune>(STANDARD_TUNE);
+  // The Menu was pressed in a game and is waiting on the answer to what leaving costs.
+  const [leaving, setLeaving] = useState(false);
+  // The settings are open, and the map and rules are folded away to fit them in the one view.
+  const [tuning, setTuning] = useState(false);
   const [lobbySeed] = useState(() => crypto.getRandomValues(new Uint32Array(1))[0]);
   const [full, setFull] = useState(false);
   const [speaker] = useState(newSound);
@@ -583,13 +680,15 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       ...(rulesPick.mode !== CLASSIC.mode && { mode: rulesPick.mode }),
       ...(rulesPick.start !== CLASSIC.start && { start: rulesPick.start }),
       ...(rulesPick.twists.length > 0 && { twists: twistLetters(rulesPick.twists) }),
+      ...(encodeTune(tunePick) && { tune: encodeTune(tunePick) }),
     };
     soloRef.current = next;
     setError('');
     setHud(HUD_IDLE);
     setMatch(next);
+    setTuning(false);
     setSolo(true);
-  }, [sessionId, userName, mapPick, sizePick, computers, rulesPick, nestPick]);
+  }, [sessionId, userName, mapPick, sizePick, computers, rulesPick, nestPick, tunePick]);
 
   // An invite link (?swarm=CODE) joins straight away. The parameter is taken
   // off the URL first, so a reload or a second mount does not join again.
@@ -997,7 +1096,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       if (hut === null) return null;
       const disc = TOKEN_R * tokenGrow(p.px) + 4;
       const spots = upgradeSpots(g.map, g.shown, hut, p.px).flatMap((spot) => {
-        const cost = upgradeCost(g.shown, hut, spot.kind);
+        const cost = upgradeCost(g.map, g.shown, hut, spot.kind);
         return cost === null ? [] : [{ ...spot, cost }];
       });
       const reach = hutAt(g.map, g.shown, p.x, p.y) === null ? Math.max(disc, p.reach) : disc;
@@ -1076,7 +1175,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           let owed = 0;
           for (const order of game.orders[seatNow]) {
             if (order.tick <= game.shown.tick || order.from !== token.hut) continue;
-            if (order.kind === 'hut' || order.kind === 'speed' || order.kind === 'strength') owed += upgradeCost(game.shown, token.hut, order.kind) ?? 0;
+            if (order.kind === 'hut' || order.kind === 'speed' || order.kind === 'strength') owed += upgradeCost(game.map, game.shown, token.hut, order.kind) ?? 0;
           }
           if (sendSize(game.shown.huts[token.hut], 'all') - owed < token.cost) return refuse(token.hut);
           issue(token.kind, token.hut, token.hut);
@@ -1247,6 +1346,24 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
   const playing = match?.status === 'playing';
 
+  // Back to the start screen, which is Swarm's menu: the seat is given up as
+  // on closing, but the popup stays open. In a game this is asked first (see leaveWarning).
+  const toMenu = useCallback(() => {
+    if (code && mySeat) {
+      rememberRoom(null);
+      vacateSeat(code, mySeat, 0).catch((err) => console.warn('[Swarm] Could not leave the room:', err));
+    }
+    if (document.fullscreenElement) void document.exitFullscreen();
+    setFull(false);
+    setLeaving(false);
+    setTuning(false);
+    setCode(null);
+    setSolo(false);
+    setMatch(null);
+    setHud(HUD_IDLE);
+    setError('');
+  }, [code, mySeat]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isSearchOpenRef.current) return;
@@ -1319,6 +1436,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   };
 
   const handleStart = () => {
+    setTuning(false);
     if (solo) return startSolo();
     const now = clock.now();
     if (!code || now === null) return;
@@ -1336,8 +1454,9 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     if (code && kind) setKind(code, sessionId, kind).catch((err: Error) => setError(err.message));
   };
 
-  const pickRules = (choice: RulesChoice) => {
-    if (code) setRules(code, sessionId, { mode: choice.mode, start: choice.start, twists: twistLetters(choice.twists) }).catch((err: Error) => setError(err.message));
+  // The rules and the settings are written together, each kept as the room has it when the other changes.
+  const pickRules = (choice: RulesChoice, tune: Tune) => {
+    if (code) setRules(code, sessionId, { mode: choice.mode, start: choice.start, twists: twistLetters(choice.twists), tune: encodeTune(tune) }).catch((err: Error) => setError(err.message));
   };
 
   const pickNest = (value: string) => {
@@ -1426,6 +1545,11 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   // A guest in the lobby sees the host's rules; against the computer they are this client's own.
   const rules = code && match ? rulesOf(match) : rulesPick;
   const host = match ? hostOf(match) : undefined;
+  // Like the rules: a room's are on its match, and against the computer they are this client's own.
+  const tune = match ? rulesOf(match).tune : tunePick;
+  const tuned = tuneSummary(tune);
+  const warning = leaveWarning(playing, solo, sides.length);
+  const pressMenu = () => (warning ? setLeaving(true) : toMenu());
   const computerSides = nextSides.filter((seat) => match?.cpu?.includes(seat)).length;
   const unfitFor = (mode: ModeId) => (code ? unfit(mode, nextSides.length - computerSides, computerSides) : unfit(mode, 1, computers));
   const unfitReason = unfitFor(rules.mode);
@@ -1450,27 +1574,32 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       onPointerUp={() => { dragRef.current = null; }}
       onPointerCancel={() => { dragRef.current = null; }}
     >
-      {wide && (
+      {(code || solo) && (
         <div className={`${styles.corner} ${styles.cornerStart} ${playing ? styles.cornerQuiet : ''}`}>
-          <button
-            className={styles.cornerBtn}
-            onClick={() => {
-              speaker.setMuted(!muted);
-              setMuted(!muted);
-            }}
-            aria-label={muted ? 'Turn sound on' : 'Turn sound off'}
-            title={muted ? 'Sound off' : 'Sound on'}
-          >
-            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-              <path d="M2 5h2.5L8 2v10L4.5 9H2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-              <path
-                d={muted ? 'M10 5.5l3 3M13 5.5l-3 3' : 'M10 4.5c1 1.4 1 3.6 0 5'}
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
+          <button className={`${styles.cornerBtn} ${styles.cornerMenu}`} onClick={pressMenu} title="Back to the Swarm menu">
+            Menu
           </button>
+          {wide && (
+            <button
+              className={styles.cornerBtn}
+              onClick={() => {
+                speaker.setMuted(!muted);
+                setMuted(!muted);
+              }}
+              aria-label={muted ? 'Turn sound on' : 'Turn sound off'}
+              title={muted ? 'Sound off' : 'Sound on'}
+            >
+              <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
+                <path d="M2 5h2.5L8 2v10L4.5 9H2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                <path
+                  d={muted ? 'M10 5.5l3 3M13 5.5l-3 3' : 'M10 4.5c1 1.4 1 3.6 0 5'}
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       )}
       <div className={`${styles.corner} ${playing ? styles.cornerQuiet : ''}`}>
@@ -1527,26 +1656,31 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               Join
             </button>
           </form>
-          <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={SEATS.slice(0, 1 + computers)} />
-          <div className={styles.choiceRow} role="radiogroup" aria-label="Computer sides">
-            {[1, 2, 3].map((n) => (
-              <button
-                key={n}
-                className={`${styles.choiceBtn} ${n === computers ? styles.choiceBtnOn : ''}`}
-                role="radio"
-                aria-checked={n === computers}
-                onClick={() => setComputers(n)}
-              >
-                {n === 1 ? '1 computer' : `${n} computers`}
-              </button>
-            ))}
-          </div>
-          <RulesPicker choice={rulesPick} onChoice={setRulesPick} idle={TWISTS_ABOUT} nest={{ pick: nestPick, onPick: setNestPick }} surprise={surprise} />
+          {!tuning && (
+            <>
+              <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={SEATS.slice(0, 1 + computers)} />
+              <div className={styles.choiceRow} role="radiogroup" aria-label="Computer sides">
+                {[1, 2, 3].map((n) => (
+                  <button
+                    key={n}
+                    className={`${styles.choiceBtn} ${n === computers ? styles.choiceBtnOn : ''}`}
+                    role="radio"
+                    aria-checked={n === computers}
+                    onClick={() => setComputers(n)}
+                  >
+                    {n === 1 ? '1 computer' : `${n} computers`}
+                  </button>
+                ))}
+              </div>
+              <RulesPicker choice={rulesPick} onChoice={setRulesPick} idle={TWISTS_ABOUT} nest={{ pick: nestPick, onPick: setNestPick }} surprise={surprise} />
+            </>
+          )}
+          <TunePanel tune={tunePick} onTune={setTunePick} idle={TUNE_ABOUT} open={tuning} onOpen={setTuning} />
           {unfitReason && <span className={styles.rules}>{unfitReason}</span>}
           <button className={styles.secondaryBtn} onClick={startSolo} disabled={busy || unfitReason !== null}>
             Play the computer
           </button>
-          <span className={styles.rules}>{HOW_TO}</span>
+          {!tuning && <span className={styles.rules}>{HOW_TO}</span>}
           {error && <span className={styles.errorText} role="alert">{error}</span>}
         </div>
       )}
@@ -1601,12 +1735,23 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               );
             })}
           </div>
-          <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={sides} />
-          <RulesPicker
-            choice={rules}
-            onChoice={host === mySeat ? pickRules : undefined}
-            idle={host && host !== mySeat ? `${nameOf(host)} chooses the mode, start and twists.` : TWISTS_ABOUT}
-            surprise={surprise}
+          {!tuning && (
+            <>
+              <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={sides} />
+              <RulesPicker
+                choice={rules}
+                onChoice={host === mySeat ? (choice) => pickRules(choice, tune) : undefined}
+                idle={host && host !== mySeat ? `${nameOf(host)} chooses the mode, start and twists.` : TWISTS_ABOUT}
+                surprise={surprise}
+              />
+            </>
+          )}
+          <TunePanel
+            tune={tune}
+            onTune={host === mySeat ? (next) => pickRules(rules, next) : undefined}
+            idle={host && host !== mySeat ? `${nameOf(host)} sets these.` : TUNE_ABOUT}
+            open={tuning}
+            onOpen={setTuning}
           />
           {unfitReason && <span className={styles.rules}>{unfitReason}</span>}
           <div className={styles.buttonRow}>
@@ -1617,7 +1762,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               Start game
             </button>
           </div>
-          <span className={styles.rules}>{HOW_TO}</span>
+          {!tuning && <span className={styles.rules}>{HOW_TO}</span>}
           {error && <span className={styles.errorText} role="alert">{error}</span>}
         </div>
       )}
@@ -1693,8 +1838,28 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                 </div>
               </div>
             )}
+            {leaving && warning && (
+              <div className={`${styles.overlay} ${styles.overlayEnd}`} role="alertdialog" aria-label="Leave the game">
+                <span className={styles.overlayText}>{warning}</span>
+                <div className={styles.buttonRow}>
+                  <button className={styles.secondaryBtn} onClick={() => setLeaving(false)}>
+                    Keep playing
+                  </button>
+                  <button className={styles.primaryBtn} onClick={toMenu}>
+                    Leave game
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-          <div className={styles.hud}>{hud.flag && <FlagButton onRaise={raiseFlag} />}</div>
+          <div className={styles.hud}>
+            {tuned && (
+              <span className={styles.hudNote} title={`Settings changed: ${tuned}`}>
+                Settings changed: {tuned}
+              </span>
+            )}
+            {hud.flag && <FlagButton onRaise={raiseFlag} />}
+          </div>
           {error ? (
             <div className={styles.footer} role="alert">{error}</div>
           ) : (

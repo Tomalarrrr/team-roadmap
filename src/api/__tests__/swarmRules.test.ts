@@ -237,6 +237,20 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), M, waitingRoom({ mode: 'chess' }))).toBe(false);
   });
 
+  it('takes the host\'s numbers as knob=value pairs, and nothing shaped otherwise', () => {
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'len=15')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'len=15;grow=150;reload=12')).toBe(true);
+    expect(allowed(db(waitingRoom()), M, waitingRoom({ tune: 'cap=200' }))).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, '')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'len=15;')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'len=-5')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'len=12345')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'LEN=15')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 'len=1.5')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, 15)).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/tune`, Array.from({ length: 20 }, () => 'speed=100').join(';'))).toBe(false);
+  });
+
   it('takes a nest of big or many on a player', () => {
     expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'many')).toBe(true);
     expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'big')).toBe(true);
@@ -273,13 +287,14 @@ describe('the swarm rules: starting and playing', () => {
   });
 
   it('fixes the mode, the start, the twists and every nest for the length of a game', () => {
-    const chosen = { mode: 'blitz', start: 'nests', twists: 'fo', players: { a: person('sa', 'Ann', { nest: 'many' }), b: person('sb', 'Bo'), c: person('sc', 'Cy') } };
+    const chosen = { mode: 'blitz', start: 'nests', twists: 'fo', tune: 'len=20', players: { a: person('sa', 'Ann', { nest: 'many' }), b: person('sb', 'Bo'), c: person('sc', 'Cy') } };
     const before = db(playingRoom(chosen));
     expect(allowed(before, M, playingRoom(chosen))).toBe(true);
     expect(allowed(before, M, playingRoom({ ...chosen, status: 'finished', winner: 'a' }))).toBe(true);
     expect(allowed(before, M, playingRoom({ ...chosen, mode: 'hill' }))).toBe(false);
     expect(allowed(before, M, playingRoom({ ...chosen, start: 'home' }))).toBe(false);
     expect(allowed(before, M, playingRoom({ ...chosen, twists: 'f' }))).toBe(false);
+    expect(allowed(before, M, playingRoom({ ...chosen, tune: 'len=2' }))).toBe(false);
     expect(allowed(before, `${M}/twists`, 'fop')).toBe(false);
     expect(allowed(before, `${M}/players/a/nest`, 'big')).toBe(false);
     expect(allowed(before, `${M}/players/b/nest`, 'many')).toBe(false);
@@ -287,7 +302,7 @@ describe('the swarm rules: starting and playing', () => {
     // Between games they are anyone's to change.
     const finished = db(playingRoom({ ...chosen, status: 'finished', winner: 'a' }));
     expect(allowed(finished, `${M}/players/a/nest`, 'big')).toBe(true);
-    expect(allowed(finished, M, playingRoom({ ...chosen, mode: 'hill', twists: 'q', game: 3, startAt: NOW + 4000 }))).toBe(true);
+    expect(allowed(finished, M, playingRoom({ ...chosen, mode: 'hill', twists: 'q', tune: 'grow=50', game: 3, startAt: NOW + 4000 }))).toBe(true);
   });
 
   it('records any of four seats as the winner, and any as the one who left', () => {

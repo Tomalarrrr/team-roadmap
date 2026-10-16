@@ -269,12 +269,12 @@ export function hostOf(match: Pick<SwarmMatch, 'players'>): Seat | undefined {
 }
 
 /**
- * Choose the mode, start and twists the room's games are played by. Only the
- * host, and only in the lobby. One that is the default is not stored, so a
- * room with none chosen plays classic. Like the creature pick, this is held
+ * Choose the mode, start, twists and settings (`tune`, see encodeTune) the
+ * room's games are played by. Only the host, and only in the lobby. One that
+ * is the default is not stored, so a room with none chosen plays classic. Like the creature pick, this is held
  * to by the clients; the database checks only the values.
  */
-export async function setRules(code: string, sessionId: string, rules: { mode: ModeId; start: StartId; twists: string }): Promise<void> {
+export async function setRules(code: string, sessionId: string, rules: { mode: ModeId; start: StartId; twists: string; tune: string }): Promise<void> {
   let refusal = '';
   const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     refusal = 'Room not found';
@@ -292,11 +292,13 @@ export async function setRules(code: string, sessionId: string, rules: { mode: M
     delete rest.mode;
     delete rest.start;
     delete rest.twists;
+    delete rest.tune;
     return {
       ...rest,
       ...(rules.mode !== 'classic' && { mode: rules.mode }),
       ...(rules.start !== 'home' && { start: rules.start }),
       ...(rules.twists && { twists: rules.twists }),
+      ...(rules.tune && { tune: rules.tune }),
     };
   });
   if (!result.committed) throw new Error(refusal);
@@ -319,8 +321,8 @@ export async function setComputer(code: string, seat: Seat, on: boolean): Promis
 /**
  * Start a game, or a fresh one in a finished room. Needs two sides at least,
  * people or the computer. `map` and `size` are the ones chosen, or null to
- * leave the map to the seed and the size to the map. The mode, start and
- * twists are the room's own (see setRules), so a rematch plays by them too;
+ * leave the map to the seed and the size to the map. The mode, start,
+ * twists and settings are the room's own (see setRules), so a rematch plays by them too;
  * one that is the default is not stored.
  */
 export async function startMatch(code: string, serverNow: number, map: MapId | null, size: SizeId | null): Promise<void> {
@@ -334,7 +336,7 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
       if (player && current.out?.[seat] === undefined) players[seat] = player;
     }
     if (sidesOf({ players, cpu: current.cpu }).length < 2) return undefined;
-    const { mode, start, twists } = current;
+    const { mode, start, twists, tune } = current;
     // Rebuilt rather than spread: the last game's result must not carry over.
     return {
       status: 'playing',
@@ -349,6 +351,7 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
       ...(mode && mode !== 'classic' && { mode }),
       ...(start && start !== 'home' && { start }),
       ...(twists && { twists }),
+      ...(tune && { tune }),
     };
   });
 }
