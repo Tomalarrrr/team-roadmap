@@ -94,7 +94,9 @@ describe.each(MAP_IDS)('the %s map played for the middle', (id) => {
           expect(crossed > 0, label).toBe(path.kind === 'bridge' || path.kind === 'ford');
           for (const other of map.paths) {
             const shared = [other.a, other.b].includes(path.a) || [other.a, other.b].includes(path.b);
-            if (!shared && (path.a === crown || path.b === crown)) expect(cross(sites[path.a], sites[path.b], sites[other.a], sites[other.b]), label).toBe(false);
+            // A tunnel runs under the roads, so only the ways over the ground can cross.
+            const under = path.kind === 'tunnel' || other.kind === 'tunnel';
+            if (!shared && !under && (path.a === crown || path.b === crown)) expect(cross(sites[path.a], sites[path.b], sites[other.a], sites[other.b]), label).toBe(false);
           }
           expect([nextHop(map, path.a, path.b, true), nextHop(map, path.b, path.a, true)], label).toEqual([path.b, path.a]);
         }

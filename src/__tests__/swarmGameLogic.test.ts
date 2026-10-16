@@ -183,7 +183,7 @@ describe.each(MAP_IDS)('the %s map', (id) => {
   });
 
   it('lies in a world of the one shape, sized as asked, and its own size when not', () => {
-    const own = id === 'meadow' || id === 'crossroads' ? 'medium' : 'small';
+    const own = id === 'meadow' || id === 'crossroads' || id === 'warren' ? 'medium' : 'small';
     expect(buildMap(1, id).size).toBe(own);
     for (const size of SIZE_IDS) {
       const { w, h, size: got } = buildMap(1, id, ['a', 'b'], size);
@@ -224,8 +224,8 @@ describe('the places', () => {
   it('the seed picks one when the host has not, and each has its own scene', () => {
     expect(MAP_SEEDS.map((seed) => buildMap(seed).id)).toEqual(MAP_SEEDS.map((seed) => MAP_IDS[seed % MAP_IDS.length]));
     expect(buildMap(0xdeadbeef).id).toBe(MAP_IDS[0xdeadbeef % MAP_IDS.length]);
-    expect(buildMap(9)).toEqual(buildMap(9, 'guns'));
-    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace', 'valley']);
+    expect(buildMap(9)).toEqual(buildMap(9, 'bridges'));
+    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace', 'valley', 'meadow']);
   });
 
   it.each<MapId>(['thorns', 'bridges', 'hill'])('%s is drawn three ways, each of them both ways up', (id) => {
@@ -1724,10 +1724,10 @@ function faults(state: SwarmState, map: SwarmMap, lastNextId: number): string[] 
 }
 
 type Stand = { lane: number; at: number; seat: Seat };
-// Where each unit stands, measured from the lower-numbered hut of its path.
+// Where each unit stands, measured from the lower-numbered hut of its path. Sides pass each other in a tunnel, so a unit in one is left out.
 const standing = (state: SwarmState, map: SwarmMap) =>
   new Map<number, Stand>(
-    state.units.map((u) => [
+    state.units.filter((u) => pathOf(map, u.from, u.to)!.kind !== 'tunnel').map((u) => [
       u.id,
       { lane: Math.min(u.from, u.to) * 100 + Math.max(u.from, u.to), at: u.from < u.to ? u.d : pathLength(map, u.from, u.to) - u.d, seat: u.seat },
     ])
@@ -1786,8 +1786,9 @@ describe.each(MAP_IDS)('a scrambled game on the %s map', (id) => {
         most = Math.max(most, state.units.length);
       });
     }
-    // Enough was fought for the checks to have had something to see. On the guns map it is the towers that fight.
-    expect(clashes).toBeGreaterThan(100);
+    // Enough was fought for the checks to have had something to see. On the guns map it is the towers that fight, and
+    // on the warren columns in the tunnels go past each other: 94 fights there.
+    expect(clashes).toBeGreaterThan(id === 'warren' ? 80 : 100);
     expect(most).toBeGreaterThan(30);
   });
 

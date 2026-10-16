@@ -37,6 +37,7 @@ import {
   clampKnob,
   computerOf,
   MAP_IDS,
+  BURN_COST,
   countOf,
   drafting,
   encodeTune,
@@ -65,6 +66,7 @@ import {
 import { KIND_NAME } from './swarmFeel';
 import { BADGE } from './swarmSceneKit';
 import { modeNotes, modeStory, type ModeNote } from './swarmModes';
+import { burnSpots } from './swarmSceneBuilt';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
 import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
@@ -86,6 +88,7 @@ const MAPS: Record<MapId, { name: string; about: string }> = {
   guns: { name: 'Frozen Guns', about: 'Two lines of cannon guard the middle and fire on whoever marches at them.' },
   hill: { name: 'The Hill', about: 'A fort on high ground. The climb is slow and its defenders each take two to kill.' },
   crossroads: { name: 'Crossroads', about: 'Cannon on the busiest crossings and forts half way out. Roads round the edge are fast, tracks through the middle slow.' },
+  warren: { name: 'The Warren', about: 'Four tunnels run under the map between huts far apart. Columns in a tunnel pass each other without a fight, and the other side sees yours only as it comes up.' },
 };
 
 /** The layout each map shows in the lobby. Any seed would do; one keeps the picture still between visits. */
@@ -1108,10 +1111,11 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       const hut = selected;
       if (hut === null) return null;
       const disc = TOKEN_R * tokenGrow(p.px) + 4;
-      const spots = upgradeSpots(g.map, g.shown, hut, p.px).flatMap((spot) => {
+      const spots: { kind: OrderKind; x: number; y: number; cost: number; to: number }[] = upgradeSpots(g.map, g.shown, hut, p.px).flatMap((spot) => {
         const cost = upgradeCost(g.map, g.shown, hut, spot.kind);
-        return cost === null ? [] : [{ ...spot, cost }];
+        return cost === null ? [] : [{ ...spot, cost, to: hut }];
       });
+      spots.push(...burnSpots(g.map, g.shown, hut));
       const reach = hutAt(g.map, g.shown, p.x, p.y) === null ? Math.max(disc, p.reach) : disc;
       const spot = nearest(spots, p.x, p.y, reach, null);
       return spot === null ? null : { hut, ...spots[spot] };
@@ -1189,9 +1193,10 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           for (const order of game.orders[seatNow]) {
             if (order.tick <= game.shown.tick || order.from !== token.hut) continue;
             if (order.kind === 'hut' || order.kind === 'speed' || order.kind === 'strength') owed += upgradeCost(game.map, game.shown, token.hut, order.kind) ?? 0;
+            if (order.kind === 'burn') owed += BURN_COST;
           }
           if (sendSize(game.shown.huts[token.hut], 'all') - owed < token.cost) return refuse(token.hut);
-          issue(token.kind, token.hut, token.hut);
+          issue(token.kind, token.hut, token.to);
           buzz(BUZZ.done);
           return;
         }
