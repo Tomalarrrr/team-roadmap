@@ -5,7 +5,7 @@
 .popup {
   position: fixed;
   /* The last term keeps the whole board inside a short window, with the score line over it. */
-  width: min(96vw, 1040px, calc((100dvh - 60px) * 1000 / 660));
+  width: min(96vw, 1040px, calc((100dvh - 92px) * 1000 / 660));
   z-index: 11000;
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
@@ -374,6 +374,13 @@
   color: var(--text-secondary);
 }
 
+/* Under the clock in a game with the flood: counts down to the next ring. */
+.flood {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
 .boardWrap {
   position: relative;
   overflow: hidden;
@@ -457,14 +464,14 @@
 }
 
 .popupFull .scoreboard {
-  width: min(100vw, calc((100dvh - 40px) * 1000 / 660));
+  width: min(100vw, calc((100dvh - 72px) * 1000 / 660));
   margin: 0 auto;
   box-sizing: border-box;
 }
 
 /* As wide as the window, or as wide as its height leaves room for under the score. */
 .popupFull .boardWrap {
-  width: min(100vw, calc((100dvh - 40px) * 1000 / 660));
+  width: min(100vw, calc((100dvh - 72px) * 1000 / 660));
   margin: 0 auto;
 }
 

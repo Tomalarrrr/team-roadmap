@@ -1,0 +1,59 @@
+/* The power pills sit in the row under the board, beside the white flag, and
+   are drawn like it. */
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  box-sizing: border-box;
+}
+
+.hint {
+  margin-right: auto;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.pill {
+  padding: 4px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill:hover:not(:disabled) { color: var(--text-primary); }
+
+.armed {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.sent,
+.running {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.used {
+  cursor: default;
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.left {
+  margin-left: 6px;
+  color: var(--text-secondary);
+}

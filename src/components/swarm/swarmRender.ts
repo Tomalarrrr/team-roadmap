@@ -12,6 +12,7 @@
 // buildings in swarmSceneHuts, and the orders a player gives in swarmAim.
 
 import {
+  TICK_MS,
   TOWER_RANGE,
   mulberry32,
   paceOn,
@@ -30,6 +31,9 @@ import {
 } from '../../swarmGameLogic';
 import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type Leg, type Sending } from './swarmAim';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
+import { ageOf, drawMist, fogOf, newFog, newMist, type Fog, type Mist, type Sight } from './swarmFog';
+import { drawDrowned, drawFlood } from './swarmFloodFx';
+import { addPowerFx, drawCalls, drawRain, type CallFx } from './swarmPowerFx';
 import { paintGround } from './swarmSceneGround';
 import { drawFlags, paintSite } from './swarmSceneHuts';
 import {
@@ -141,6 +145,10 @@ export interface Scene {
   rivers: River[];
   glints: Glint[];
   feel: Feel;
+  /** With the fog twist, what the viewer has seen, and the mist over the rest. */
+  fog: Fog | null;
+  mist: Mist | null;
+  calls: CallFx[];
 }
 
 /** How far from the middle of a bridge or a ford the water is left unlit, so no glint shows through the planks. */
@@ -167,7 +175,8 @@ function glintsOf(map: SwarmMap, seed: number, rivers: River[]): Glint[] {
   return glints;
 }
 
-export function newScene(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>): Scene {
+/** `seat` is whose screen it is: under the fog, it is what that side can see. */
+export function newScene(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>, seat: Seat): Scene {
   const rivers = map.rivers.map(riverOf);
   return {
     map,
@@ -190,6 +199,9 @@ export function newScene(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>)
     rivers,
     glints: glintsOf(map, seed, rivers),
     feel: newFeel(map, seed, kinds),
+    fog: newFog(map, seat),
+    mist: null,
+    calls: [],
   };
 }
 
@@ -209,6 +221,8 @@ export interface View {
   refused: { hut: number; at: number; order?: Sending } | null;
   /** The order just given, shown at once because its units leave some ticks later. */
   sent: { order: Sending; at: number } | null;
+  /** Under the fog, what the viewer can see on this tick. Set by drawScene. */
+  sight?: Sight;
 }
 
 export function hutAt(map: SwarmMap, state: SwarmState, x: number, y: number): number | null {
@@ -311,6 +325,11 @@ export function upgradeSpots(map: SwarmMap, state: SwarmState, hut: number, px: 
 
 /** `seat` is whose screen this is: the callouts are worded for them. */
 export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[], now: number, seat: Seat): void {
+  // Under the fog the feel, the shots and the calls are only of what the viewer can see.
+  if (scene.fog) {
+    state = fogOf(scene.fog, scene.map, state).state;
+    events = state.events;
+  }
   feelStep(scene.feel, scene.map, state, seat, now);
   for (const shot of state.shots) {
     scene.fx.push({ kind: 'shot', x: shot.x, y: shot.y, at: now, seat: shot.seat, tower: shot.tower });
@@ -329,6 +348,7 @@ export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[],
       scene.fx.push({ kind: event.kind, x: site.x, y: site.y, at: now, seat: state.huts[event.hut].owner });
     }
     // A capture, and a unit lost to the spikes or the water, are drawn by swarmFeel.
+    addPowerFx(scene.calls, scene.map, event, now);
   }
 }
 
@@ -708,6 +728,21 @@ function countWidth(ctx: CanvasRenderingContext2D, text: string): number {
   return width;
 }
 
+/** A note beside a count, such as how long ago it was seen: its size at a count's 16, and the gap before it. */
+const NOTE_PX = 11;
+const NOTE_GAP = 5;
+const noteWidths = new Map<string, number>();
+
+function noteWidth(ctx: CanvasRenderingContext2D, text: string): number {
+  let width = noteWidths.get(text);
+  if (width === undefined) {
+    ctx.font = fontOf(600, NOTE_PX);
+    width = ctx.measureText(text).width;
+    noteWidths.set(text, width);
+  }
+  return width;
+}
+
 /**
  * A count in a speech bubble whose tail points at x, y; `aside` puts it up and
  * to the left of that point, not over it.
@@ -717,10 +752,11 @@ function countWidth(ctx: CanvasRenderingContext2D, text: string): number {
  * pixel has a grey line along each side, and this is the thing on the board
  * that is read most. It leaves the canvas in device pixels.
  */
-function drawBadge(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, n: number, owner: Owner, aside: boolean) {
+function drawBadge(ctx: CanvasRenderingContext2D, x: number, y: number, u: number, text: string, owner: Owner, aside: boolean, note?: string) {
   const tone = BADGE[owner ?? 'none'];
-  const text = String(n);
-  const half = Math.round((Math.max(32, countWidth(ctx, text) + 18) * u) / 2);
+  const wide = countWidth(ctx, text);
+  const extra = note === undefined ? 0 : noteWidth(ctx, note) + NOTE_GAP;
+  const half = Math.round((Math.max(32, wide + extra + 18) * u) / 2);
   const tall = Math.round(12 * u);
   const tail = Math.round(BADGE_TAIL * u);
   const spread = Math.round(7 * u);
@@ -750,7 +786,13 @@ function drawBadge(ctx: CanvasRenderingContext2D, x: number, y: number, u: numbe
   ctx.font = fontOf(700, 16 * u);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(text, 0, 0.5 * u);
+  ctx.fillText(text, (-extra / 2) * u, 0.5 * u);
+  if (note !== undefined) {
+    ctx.font = fontOf(600, NOTE_PX * u);
+    ctx.textAlign = 'left';
+    ctx.globalAlpha *= 0.8;
+    ctx.fillText(note, ((wide - extra) / 2 + NOTE_GAP) * u, 1 * u);
+  }
 }
 
 const TOKEN_INK = '#2b241a';
@@ -1070,7 +1112,7 @@ function drawRanges(ctx: CanvasRenderingContext2D, map: SwarmMap, state: SwarmSt
   ctx.lineWidth = 1.6;
   ctx.strokeStyle = map.scene === 'ice' ? 'rgba(30, 54, 92, 0.6)' : 'rgba(255, 255, 255, 0.6)';
   state.huts.forEach((hut, index) => {
-    if (!map.sites[index].tower || hut.owner === view.seat) return;
+    if (!map.sites[index].tower || hut.owner === view.seat || view.sight?.unseen.has(index)) return;
     ellipse(ctx, map.sites[index].x, map.sites[index].y, TOWER_RANGE, TOWER_RANGE);
     ctx.stroke();
   });
@@ -1094,6 +1136,9 @@ interface Marcher {
   row: number;
 }
 
+/** How strongly the viewer's own decoys are drawn: they are there, and the viewer is not to take them for an army. */
+const DECOY_FAINT = 0.45;
+
 /** How much wider than the path's own column a column of bees flies: the banks of a track do not hem in what is over them. */
 const BEE_ROOM = 2.5;
 
@@ -1115,7 +1160,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     // Everything that tells one unit from the next is read off its id, so it is the same unit in every frame.
     const own = Math.imul(unit.id, 0x9e3779b1) >>> 0;
     // The engine lets them out on the beat. Each is drawn a little ahead of its place or behind, so the column does not tick past like a ruler.
-    const d = Math.min(length, Math.max(0, unit.d + paceOn(map, unit.from, unit.to, state.army[unit.seat].speed) * view.alpha + ((own >>> 16) % 7 - 3) * 0.5));
+    const d = Math.min(length, Math.max(0, unit.d + paceOn(map, unit.from, unit.to, state.army[unit.seat].speed, state.tick + 1 <= state.rain) * view.alpha + ((own >>> 16) % 7 - 3) * 0.5));
     const column = unit.from * 64 + unit.to;
     const key = unit.id * 4096 + column;
     let slot = scene.slots.get(key);
@@ -1136,7 +1181,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       y: p.y + Math.cos(p.angle) * lane,
       angle,
       d,
-      out,
+      out: unit.decoy && unit.seat === view.seat ? out * DECOY_FAINT : out,
       id: unit.id,
       own,
       size: UNIT_SCALE * (0.92 + ((own >>> 8) % 9) * 0.02),
@@ -1178,6 +1223,11 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
     const site = map.sites[index];
     const hut = state.huts[index];
     const sprite = spriteOf(scene, index, hut.owner, hut.level);
+    if (hut.drowned) {
+      const painted = scene.scale;
+      drawDrowned(ctx, map, index, hut.level, view.now, () => ctx.drawImage(sprite.canvas, sprite.left / painted, sprite.top / painted, sprite.canvas.width / painted, sprite.canvas.height / painted));
+      continue;
+    }
     // A tower that has just fired is pressed down on its foot by the shot and stands up again.
     const spent = site.tower ? Math.min(1, (view.now - scene.firedAt[index]) / RECOIL_MS) : 1;
     const stand = 1 - 0.035 * (1 - spent) * (1 - spent);
@@ -1207,9 +1257,13 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 }
 
+/** How strongly a count last seen a while ago is drawn. */
+const MEMORY_ALPHA = 0.6;
+
 function drawCounts(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmState, view: View, scale: number, px: number) {
   const grow = badgeGrow(px);
   state.huts.forEach((hut, index) => {
+    if (hut.drowned) return;
     const site = scene.map.sites[index];
     const jolt = Math.max(0, 1 - (view.now - scene.hitAt[index]) / 220);
     const aside = badgeAside(site, hut.level, grow);
@@ -1217,7 +1271,12 @@ function drawCounts(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmSta
     const shake = no < 1 ? Math.sin(no * Math.PI * 5) * 6 * (1 - no) : 0;
     const x = (aside ? site.x - siteRadius(site, hut.level) * 0.34 : site.x) + shake;
     const y = Math.max(BADGE_ROOM * grow, badgeTip(site, hut.level));
-    drawBadge(ctx, Math.round(x * scale), Math.round(y * scale), scale * grow * (1 + jolt * 0.22), hut.n, hut.owner, aside);
+    const memory = view.sight?.unseen.has(index) ? view.sight.memory[index] : null;
+    // Out of sight, the count is the one last seen, faded and with how long ago; a hut never seen is a question.
+    if (view.sight?.unseen.has(index)) ctx.globalAlpha = MEMORY_ALPHA;
+    const text = view.sight?.unknown.has(index) ? '?' : String(hut.n);
+    drawBadge(ctx, Math.round(x * scale), Math.round(y * scale), scale * grow * (1 + jolt * 0.22), text, hut.owner, aside, memory ? ageOf(memory, state.tick, TICK_MS) : undefined);
+    ctx.globalAlpha = 1;
   });
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
 }
@@ -1253,6 +1312,11 @@ export function watchBoard(canvas: HTMLCanvasElement): () => void {
 const SETTLE_MS = 140;
 
 export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmState, view: View): void {
+  const sight = scene.fog && fogOf(scene.fog, scene.map, state);
+  if (sight) {
+    state = sight.state;
+    view = { ...view, sight };
+  }
   const box = boxes.get(canvas) ?? measured(canvas);
   if (box.w === 0 || box.h === 0) return;
   const { map } = scene;
@@ -1286,6 +1350,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   ctx.setTransform(scale, 0, 0, scale, 0, 0);
   drawShimmer(ctx, scene, view.now);
   drawUnder(ctx, scene.feel, map, state, view.now);
+  drawFlood(ctx, map, state, state.tick + view.alpha);
 
   if (scene.standing.tick !== state.tick) scene.standing = { tick: state.tick, legs: standingOf(map, state, view.seat) };
   // World units to a CSS pixel: a finger is the same size on every board.
@@ -1295,6 +1360,9 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   drawAimUnder(ctx, map, state, view, scene.standing.legs, aim);
   drawStanding(ctx, scene, state, view, scale);
   drawFx(ctx, scene, view.now);
+  drawCalls(ctx, scene.calls, view.now);
+  if (sight) drawMist(ctx, (scene.mist ??= newMist(map)), sight);
+  drawRain(ctx, map, state, state.tick + view.alpha, view.now);
   drawCounts(ctx, scene, state, view, scale, px);
 
   if (view.selected !== null && !view.drag) {
