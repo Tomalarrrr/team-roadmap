@@ -73,12 +73,6 @@
 
 .cornerBtn:hover { color: var(--text-primary); }
 
-/* Sound, on the other side from leaving: the two are never pressed for each other. */
-.cornerStart {
-  right: auto;
-  left: 8px;
-}
-
 /* --- Lobby and waiting room --- */
 
 .lobby {

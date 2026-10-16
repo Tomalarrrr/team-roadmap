@@ -11,20 +11,16 @@ import {
   newState,
   paceOn,
   step,
-  type Kind,
   type Order,
   type Seat,
   type Site,
   type SwarmMap,
   type SwarmState,
 } from '../swarmGameLogic';
-import { MARCH_EVERY, MARCH_FULL, MAX_VOICES, BACKGROUND_VOICES, admit, cuesFor, newMixer, noteOf, siegeBeat, type Cue } from '../components/swarm/swarmSound';
-import { THREAT_LEAST, siegeOf, threatsOf } from '../components/swarm/swarmThreat';
+import { THREAT_LEAST, siegeBeat, siegeOf, threatsOf } from '../components/swarm/swarmThreat';
 import { newMomentum, momentumStep } from '../components/swarm/swarmMomentum';
 import { SAMPLE_TICKS, clockOf, newTally, tallyStep } from '../components/swarm/swarmTally';
 import { GATE_COLUMN, calloutsFor } from '../components/swarm/swarmFeel';
-
-const KINDS: Record<Seat, Kind> = { a: 'ant', b: 'bee', c: 'spider', d: 'beetle' };
 
 // Huts linked by roads as given, for sides a and b.
 function mapOf(sites: Site[], links: number[][]): SwarmMap {
@@ -44,142 +40,10 @@ function walk(state: SwarmState, map: SwarmMap, orders: Orders, to: number, each
   }
 }
 
-// a's hut 0 with 20 next to b's hut 1 with one unit, 60 apart; b's home 2 off on its own, so taking hut 1 does not end the game.
-function raid() {
-  const map = mapOf(
-    [
-      { x: 100, y: 100, owner: 'a', n: 20, level: 1 },
-      { x: 160, y: 100, owner: 'b', n: 1, level: 1 },
-      { x: 900, y: 500, owner: 'b', n: 5, level: 1 },
-    ],
-    [[1], [0], []],
-  );
-  return { map, state: newState(map) };
-}
-
-describe('Swarm sound: what is heard', () => {
-  it('gives each hut a note of the pentatonic scale, an octave up for the next five', () => {
-    expect([0, 1, 2, 3, 4].map(noteOf)).toEqual([0, 3, 5, 7, 10]);
-    expect([5, 6, 9].map(noteOf)).toEqual([12, 15, 22]);
-    expect(noteOf(10)).toBe(0);
-  });
-
-  it('plays a hut you take in your voice, and the same hut lost in the taker\'s', () => {
-    const { map, state } = raid();
-    const heard: Record<'a' | 'b', Cue[]> = { a: [], b: [] };
-    walk(state, map, { a: [send(1, 0, 1)], b: [] }, 40, (before, after) => {
-      if (!after.events.some((event) => event.kind === 'capture')) return;
-      heard.a.push(...cuesFor(before, after, map, 'a', KINDS));
-      heard.b.push(...cuesFor(before, after, map, 'b', KINDS));
-    });
-    expect(heard.a.filter((cue) => cue.kind === 'take')).toEqual([{ kind: 'take', level: 1, voice: 'ant', note: noteOf(1) }]);
-    expect(heard.b.filter((cue) => cue.kind === 'lose')).toEqual([{ kind: 'lose', level: 1, voice: 'ant', note: noteOf(1) }]);
-    expect(heard.a.some((cue) => cue.kind === 'lose')).toBe(false);
-    expect(heard.b.some((cue) => cue.kind === 'take')).toBe(false);
-  });
-
-  it('plays a capture between two other sides quietly, in the taker\'s voice', () => {
-    const { map, state } = raid();
-    let cues: Cue[] = [];
-    walk(state, map, { a: [send(1, 0, 1)], b: [] }, 40, (before, after) => {
-      if (after.events.some((event) => event.kind === 'capture')) cues = cuesFor(before, after, map, 'c', KINDS);
-    });
-    expect(cues.filter((cue) => cue.kind === 'capture')).toEqual([{ kind: 'capture', level: 0.45, voice: 'ant', note: noteOf(1) }]);
-  });
-
-  it('says only the result on the tick the game ends', () => {
-    const map = mapOf(
-      [
-        { x: 100, y: 100, owner: 'a', n: 20, level: 1 },
-        { x: 160, y: 100, owner: 'b', n: 1, level: 1 },
-      ],
-      [[1], [0]],
-    );
-    const state = newState(map);
-    const heard: Record<'a' | 'b', Cue[]> = { a: [], b: [] };
-    walk(state, map, { a: [send(1, 0, 1)], b: [] }, 60, (before, after) => {
-      if (after.winner === null) return;
-      heard.a = cuesFor(before, after, map, 'a', KINDS);
-      heard.b = cuesFor(before, after, map, 'b', KINDS);
-    });
-    expect(state.winner).toBe('a');
-    expect(heard.a).toEqual([{ kind: 'won', level: 1, voice: 'ant' }]);
-    expect(heard.b).toEqual([{ kind: 'lost', level: 1, voice: 'bee' }]);
-  });
-
-  it('sounds overtime once, on the tick play goes past the clock level on huts', () => {
-    const map = mapOf(
-      [
-        { x: 100, y: 100, owner: 'a', n: 5, level: 1 },
-        { x: 900, y: 500, owner: 'b', n: 5, level: 1 },
-      ],
-      [[], []],
-    );
-    const state = newState(map);
-    state.tick = MATCH_TICKS - 2;
-    const at: number[] = [];
-    walk(state, map, { a: [], b: [] }, MATCH_TICKS + 3, (before, after) => {
-      if (cuesFor(before, after, map, 'a', KINDS).some((cue) => cue.kind === 'overtime')) at.push(after.tick);
-    });
-    expect(state.winner).toBeNull();
-    expect(at).toEqual([MATCH_TICKS]);
-  });
-
-  it('patters every fourth tick while your units march, louder as the square root of how many', () => {
-    const map = mapOf(
-      [
-        { x: 100, y: 100, owner: 'a', n: 9, level: 1 },
-        { x: 700, y: 100, owner: null, n: 1, level: 1 },
-        { x: 900, y: 500, owner: 'b', n: 5, level: 1 },
-      ],
-      [[1], [0], []],
-    );
-    const state = newState(map);
-    const marches: { tick: number; level: number; walking: number }[] = [];
-    walk(state, map, { a: [send(1, 0, 1)], b: [] }, 30, (before, after) => {
-      const march = cuesFor(before, after, map, 'a', KINDS).find((cue) => cue.kind === 'march');
-      if (march) marches.push({ tick: after.tick, level: march.level, walking: after.units.filter((unit) => unit.seat === 'a').length });
-    });
-    expect(marches.length).toBeGreaterThan(3);
-    for (const march of marches) {
-      expect(march.tick % MARCH_EVERY).toBe(0);
-      expect(march.level).toBeCloseTo(Math.sqrt(march.walking / MARCH_FULL));
-    }
-    // b has nothing on the road and hears no patter.
-    const quiet = newState(map);
-    let heard = false;
-    walk(quiet, map, { a: [send(1, 0, 1)], b: [] }, 30, (before, after) => {
-      if (cuesFor(before, after, map, 'b', KINDS).some((cue) => cue.kind === 'march')) heard = true;
-    });
-    expect(heard).toBe(false);
-  });
-});
-
-describe('Swarm sound: room in the mix', () => {
-  const take: Cue = { kind: 'take', level: 1 };
-  const march: Cue = { kind: 'march', level: 1 };
-  const won: Cue = { kind: 'won', level: 1 };
-
-  it('lets one cue through no sooner than its gap after the last of it', () => {
-    const mixer = newMixer();
-    expect(admit(mixer, take, 0)).toBe(true);
-    expect(admit(mixer, take, 89)).toBe(false);
-    expect(admit(mixer, take, 90)).toBe(true);
-  });
-
-  it('drops the background first once five voices sound, and everything at ten', () => {
-    const mixer = newMixer();
-    for (let i = 0; i < BACKGROUND_VOICES; i++) expect(admit(mixer, won, 0)).toBe(true);
-    expect(admit(mixer, march, 0)).toBe(false);
-    for (let i = BACKGROUND_VOICES; i < MAX_VOICES; i++) expect(admit(mixer, won, 0)).toBe(true);
-    expect(admit(mixer, take, 0)).toBe(false);
-    // Once they have died away there is room again.
-    expect(admit(mixer, march, 2300)).toBe(true);
-  });
-
-  it('beats a siege slow and low far off, quick and higher at the door', () => {
-    expect(siegeBeat(10)).toEqual({ gapMs: 1100, hz: 52 });
-    expect(siegeBeat(1)).toEqual({ gapMs: 500, hz: 72 });
+describe('Swarm siege beat', () => {
+  it('beats slow far off and quick at the door', () => {
+    expect(siegeBeat(10)).toEqual({ gapMs: 1100 });
+    expect(siegeBeat(1)).toEqual({ gapMs: 500 });
     expect(siegeBeat(5).gapMs).toBeLessThan(1100);
     expect(siegeBeat(5).gapMs).toBeGreaterThan(500);
   });

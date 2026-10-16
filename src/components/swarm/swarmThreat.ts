@@ -121,3 +121,13 @@ export function drawThreats(ctx: CanvasRenderingContext2D, map: SwarmMap, state:
   }
   ctx.restore();
 }
+
+/**
+ * The beat of the board's frame while a column is on its way to your home:
+ * slow when it is far off, quicker as it closes. `secs` is how long until its
+ * head is at the door.
+ */
+export function siegeBeat(secs: number): { gapMs: number } {
+  const near = 1 - Math.min(Math.max(secs - 1, 0), 9) / 9;
+  return { gapMs: Math.round(1100 - 600 * near) };
+}

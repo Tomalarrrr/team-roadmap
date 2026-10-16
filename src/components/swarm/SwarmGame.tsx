@@ -27,7 +27,6 @@ import {
   SIZE_IDS,
   START_IDS,
   TICK_MS,
-  TWISTS as TWIST_IDS,
   advance,
   buildMap,
   computerOf,
@@ -60,10 +59,9 @@ import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, t
 import { carriedOf } from './swarmAim';
 import { columnOf, holdingOf, startsOf, whereOf, type Start } from './swarmStarts';
 import { latch, nearest, reachOf } from './swarmPick';
-import { clashOf, surpriseOf, unfit, type RulesChoice } from './swarmLobby';
+import { READY_MODES, READY_TWISTS, clashOf, surpriseOf, unfit, type RulesChoice } from './swarmLobby';
 import { newLockstep, orderTick, pace, restingReport, sending, settle, silent, sound, type Ear, type Lockstep, type SeatWrite } from './swarmSync';
-import { TICK_FROM_SECS, cuesFor, newSound, siegeBeat, type CueKind } from './swarmSound';
-import { siegeOf, threatsOf, type ThreatView } from './swarmThreat';
+import { siegeBeat, siegeOf, threatsOf, type ThreatView } from './swarmThreat';
 import { clockOf, newTally, tallyStep, type Tally } from './swarmTally';
 import { SwarmSummary } from './SwarmSummary';
 import styles from './SwarmGame.module.css';
@@ -186,7 +184,7 @@ const STARTS: Record<StartId, { name: string; about: string }> = {
   close: { name: 'Close', about: 'The starts are 2 paths apart instead of across the map.' },
   scattered: { name: 'Scattered', about: 'Your home hut and 2 more spread over your part of the board, with 5 units in each of the 2.' },
   draft: { name: 'Draft', about: 'For the first 6 seconds each person picks any hut to start from. The computer keeps its own.' },
-  nests: { name: 'Nests', about: 'Each person picks Big, one level 3 hut of 15 units, or Many, 4 huts of 5. The computer is Big.' },
+  nests: { name: 'Nests', about: 'Each person picks Big, one level 3 hut of 37 units, or Many, 3 huts of 5. The computer is Big.' },
 };
 
 /** What each twist adds, said when it is pointed at or focused. */
@@ -245,6 +243,7 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
   return (
     <div className={styles.ruleSet}>
       <div className={styles.pickRow}>
+        {READY_MODES.length > 1 && (
         <label className={styles.pickLabel}>
           Mode
           <select
@@ -257,11 +256,12 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
               if (mode) onChoice?.({ ...choice, mode, twists: choice.twists.filter((twist) => !clashOf(twist, mode)) });
             }}
           >
-            {MODE_IDS.map((id) => (
+            {READY_MODES.map((id) => (
               <option key={id} value={id}>{MODES[id].name}</option>
             ))}
           </select>
         </label>
+        )}
         <label className={styles.pickLabel}>
           Start
           <select
@@ -295,7 +295,7 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
             </select>
           </label>
         )}
-        {onChoice && (
+        {onChoice && READY_TWISTS.length > 0 && (
           <button
             className={styles.choiceBtn}
             onClick={() => {
@@ -310,8 +310,9 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
         )}
       </div>
       <span className={styles.rules}>{MODES[choice.mode].about} {STARTS[choice.start].about}</span>
+      {READY_TWISTS.length > 0 && (
       <div className={`${styles.choiceRow} ${styles.twistRow}`} role="group" aria-label="Twists">
-        {TWIST_IDS.map((twist) => {
+        {READY_TWISTS.map((twist) => {
           const on = choice.twists.includes(twist);
           return (
             <button
@@ -328,7 +329,8 @@ export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPic
           );
         })}
       </div>
-      <span className={styles.rules} aria-live="polite">{about}</span>
+      )}
+      {READY_TWISTS.length > 0 && <span className={styles.rules} aria-live="polite">{about}</span>}
     </div>
   );
 }
@@ -424,10 +426,10 @@ const HOLD_ALL_MS = 450;
 
 // iOS Safari has no navigator.vibrate.
 const CAN_BUZZ = 'vibrate' in navigator;
-/** Milliseconds. A refusal, a siege and overtime are felt as two. */
-const BUZZ = { add: 8, latch: 8, done: 14, all: 20, refused: [10, 50, 10], taken: 12, lost: 35, siege: [12, 90, 12], overtime: [30, 100, 30] };
-/** What of the game is felt as well as heard. */
-const FELT: Partial<Record<CueKind, number | number[]>> = { take: BUZZ.taken, lose: BUZZ.lost, overtime: BUZZ.overtime };
+/** Milliseconds. A refusal and a siege are felt as two. */
+const BUZZ = { add: 8, latch: 8, done: 14, all: 20, refused: [10, 50, 10], siege: [12, 90, 12] };
+/** The last seconds of the clock, and of overtime, are shown counting down. */
+const LAST_SECS = 10;
 /** A siege beats every second or faster; the hand is told of it no more often than this. */
 const SIEGE_BUZZ_MS = 3000;
 
@@ -530,8 +532,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   const [nestPick, setNestPick] = useState<Nest>('big');
   const [lobbySeed] = useState(() => crypto.getRandomValues(new Uint32Array(1))[0]);
   const [full, setFull] = useState(false);
-  const [speaker] = useState(newSound);
-  const [muted, setMuted] = useState(speaker.muted);
   const [summary, setSummary] = useState<{ game: number; tally: Tally; clock: number } | null>(null);
 
   const [clock] = useState(() => createServerClock(() => performance.now()));
@@ -683,7 +683,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     let threat: ThreatView | null = null;
     let threatTick = -1;
     let siegeBuzzAt = -Infinity;
-    let tickedSecs: number | null = null;
 
     const leaveRoom = (message: string) => {
       rememberRoom(null);
@@ -886,14 +885,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         const harvest = (state: SwarmState) => {
           if (state.tick <= active.fxTick) return;
           active.fxTick = state.tick;
-          const before = active.scene.feel.before;
           addEvents(active.scene, state, state.events, performance.now(), seat);
-          if (!before || before.tick !== state.tick - 1) return;
-          for (const cue of cuesFor(before, state, active.map, seat, active.scene.kinds)) {
-            speaker.play(cue);
-            const felt = FELT[cue.kind];
-            if (felt !== undefined) buzz(felt);
-          }
         };
         // A rerun of the confirmed game starts again from its first tick, and so does its record.
         const record = (state: SwarmState) => {
@@ -946,10 +938,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         next.overtime = shown.tick > map.ticks || (shown.tick === map.ticks && shown.winner === null);
         const ticks = next.overtime ? lastTick(map) : map.ticks;
         next.secs = Math.ceil(((ticks - Math.min(Math.max(tick, 0), ticks)) * TICK_MS) / 1000);
-        if (next.secs !== tickedSecs) {
-          tickedSecs = next.secs;
-          if (live && next.secs > 0 && next.secs <= TICK_FROM_SECS) speaker.play({ kind: 'tick', level: next.secs <= 3 ? 1 : 0.6 });
-        }
         if (drafting(game.map, tick + 1)) next.draft = Math.ceil(((DRAFT_TICKS - Math.max(tick, 0)) * TICK_MS) / 1000);
         // A draft moves the starts at its end, and the score line moves with them.
         next.starts = startsOf(game.map, game.shown.homes);
@@ -1195,7 +1183,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
           const beat = siegeBeat(threat.siege.secs);
           if (at - threat.beatAt >= beat.gapMs) {
             threat.beatAt = at;
-            speaker.play({ kind: 'siege', level: 1 }, beat.hz);
             if (at - siegeBuzzAt >= SIEGE_BUZZ_MS) {
               siegeBuzzAt = at;
               buzz(BUZZ.siege);
@@ -1232,7 +1219,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       unfollow?.();
       controlsRef.current = null;
     };
-  }, [code, solo, sessionId, userName, clock, speaker]);
+  }, [code, solo, sessionId, userName, clock]);
 
   // Leaving is done here and not in an effect's cleanup: StrictMode runs
   // cleanups on mount, which would give the seat up the moment it was taken.
@@ -1252,7 +1239,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       if (isSearchOpenRef.current) return;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-      if (e.type === 'keydown') speaker.wake();
       // During a game Escape puts down whatever is in hand. It only closes the
       // popup outside one: a stray Escape in a game would forfeit it.
       if (playing) controlsRef.current?.key(e);
@@ -1264,7 +1250,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('keyup', onKey, true);
     };
-  }, [playing, handleClose, speaker]);
+  }, [playing, handleClose]);
 
   // --- Popup position and dragging ---
   const popupRef = useRef<HTMLDivElement | null>(null);
@@ -1440,8 +1426,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       style={full && wide ? undefined : { left: position.x, top: position.y }}
       // With no title bar, the popup is moved by any part of it that is not a control or the board.
       onPointerDown={(e) => {
-        // The first press anywhere in the game is what lets it make a sound at all.
-        speaker.wake();
         if (full || (e.target as HTMLElement).closest('button, input, select, label, canvas')) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         dragRef.current = { dx: e.clientX - position.x, dy: e.clientY - position.y };
@@ -1450,29 +1434,6 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       onPointerUp={() => { dragRef.current = null; }}
       onPointerCancel={() => { dragRef.current = null; }}
     >
-      {wide && (
-        <div className={`${styles.corner} ${styles.cornerStart} ${playing ? styles.cornerQuiet : ''}`}>
-          <button
-            className={styles.cornerBtn}
-            onClick={() => {
-              speaker.setMuted(!muted);
-              setMuted(!muted);
-            }}
-            aria-label={muted ? 'Turn sound on' : 'Turn sound off'}
-            title={muted ? 'Sound off' : 'Sound on'}
-          >
-            <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-              <path d="M2 5h2.5L8 2v10L4.5 9H2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-              <path
-                d={muted ? 'M10 5.5l3 3M13 5.5l-3 3' : 'M10 4.5c1 1.4 1 3.6 0 5'}
-                stroke="currentColor"
-                strokeWidth="1.4"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
-        </div>
-      )}
       <div className={`${styles.corner} ${playing ? styles.cornerQuiet : ''}`}>
         {wide && (
           <button
@@ -1630,7 +1591,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               {hud.draft !== null && <span className={styles.clock}>Pick your nest: {hud.draft}s</span>}
               {hud.secs !== null && hud.draft === null && (
                 <span
-                  className={`${styles.clock} ${hud.secs <= 60 ? styles.clockLate : ''} ${hud.secs <= TICK_FROM_SECS && hud.secs > 0 && playing ? styles.clockLast : ''}`}
+                  className={`${styles.clock} ${hud.secs <= 60 ? styles.clockLate : ''} ${hud.secs <= LAST_SECS && hud.secs > 0 && playing ? styles.clockLast : ''}`}
                 >
                   {hud.overtime && 'Overtime '}
                   {clockOf((hud.secs * 1000) / TICK_MS)}
