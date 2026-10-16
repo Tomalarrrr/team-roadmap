@@ -82,7 +82,7 @@ import { clockOf, newTally, tallyStep, type Tally } from './swarmTally';
 import { SwarmSummary } from './SwarmSummary';
 import styles from './SwarmGame.module.css';
 
-const SIZE_NAME: Record<SizeId, string> = { small: 'Small', medium: 'Medium', large: 'Large' };
+const SIZE_NAME: Record<SizeId, string> = { small: 'Small', medium: 'Medium', large: 'Large', huge: 'Huge' };
 
 /** What the lobby says of each map: its name, and the one thing that is different about it. */
 const MAPS: Record<MapId, { name: string; about: string }> = {
@@ -93,6 +93,9 @@ const MAPS: Record<MapId, { name: string; about: string }> = {
   hill: { name: 'The Hill', about: 'A fort on high ground. The climb is slow and its defenders each take two to kill.' },
   crossroads: { name: 'Crossroads', about: 'Cannon on the busiest crossings and forts half way out. Roads round the edge are fast, tracks through the middle slow.' },
   warren: { name: 'The Warren', about: 'Four tunnels run under the map between huts far apart. Columns in a tunnel pass each other without a fight, and the other side sees yours only as it comes up.' },
+  archipelago: { name: 'Archipelago', about: 'The corner starts are islands, each reached by a ford and a bridge. Every other island has one bridge to the land in the middle: hold its far end and the island is yours.' },
+  ring: { name: 'The Ring', about: 'A fast road loops round the map through the corner starts, so you can attack either way round. The big hut in the middle has roads out to the loop.' },
+  canyon: { name: 'Canyon', about: 'Long corridors that meet only at their ends, and one climb in the middle that links them. Whoever holds the top of it takes the short way.' },
 };
 
 /** The layout each map shows in the lobby. Any seed would do; one keeps the picture still between visits. */
@@ -164,7 +167,7 @@ function MapPicker({ pick, onPick, size, onSize, sides }: MapPickerProps) {
         ))}
       </div>
       <span className={styles.rules}>{pick ? MAPS[pick].about : 'A different map each game.'}</span>
-      <div className={styles.choiceRow} role="radiogroup" aria-label="Size">
+      <div className={`${styles.choiceRow} ${styles.sizeRow}`} role="radiogroup" aria-label="Size">
         {/* With the map left to the seed, there is no one size that is the map's own to show. */}
         {(pick ? SIZE_IDS : [null, ...SIZE_IDS]).map((each) => (
           <button
@@ -175,7 +178,7 @@ function MapPicker({ pick, onPick, size, onSize, sides }: MapPickerProps) {
             disabled={four && each === 'small'}
             onClick={() => onSize(each)}
           >
-            {each ? SIZE_NAME[each] : "Each map's own size"}
+            {each ? SIZE_NAME[each] : 'Own size'}
           </button>
         ))}
       </div>

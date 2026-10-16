@@ -114,7 +114,7 @@ describe('every start decided when the map is built', () => {
       for (let k = 1; k < (sides === 4 ? 4 : 2); k++) expect(heldBy(map, map.sides[k], IMAGES[k]), label).toEqual(first);
       if (sides === 3) expect(heldBy(map, 'c', IMAGES[1]), label).toEqual(heldBy(map, 'c'));
     }
-    expect(boardsSeen).toBe(MAP_IDS.length * 3 * 4 * SEEDS.length);
+    expect(boardsSeen).toBe(MAP_IDS.length * 3 * (SIZE_IDS.length + 1) * SEEDS.length);
   });
 
   it.each(STARTS)('builds the same board from the same seed with the %s start', (_, start, nests) => {
@@ -239,7 +239,8 @@ describe('the nests start', () => {
         expect(extras.length, label).toBeLessThanOrEqual(3);
         if (extras.length < 3) {
           short++;
-          expect(['guns', 'crossroads'], label).toContain(map.id);
+          // Four corner islands on the archipelago hold too few huts for a third.
+          expect(['guns', 'crossroads', 'archipelago'], label).toContain(map.id);
         }
         expect(map.sites[map.homes[k]], label).toMatchObject({ level: 1 });
         for (const at of extras) {

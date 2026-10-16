@@ -4,6 +4,7 @@ import {
   CPU_THINK_TICKS,
   FIELD_TOP,
   FORT_LIVES,
+  HUGE_EXTRA_TICKS,
   LUCK_DEN,
   MAP_IDS,
   MATCH_TICKS,
@@ -49,6 +50,7 @@ import {
   type SwarmEvent,
   type SwarmMap,
   type SwarmState,
+  type SizeId,
 } from '../swarmGameLogic';
 
 const SEEDS = [1, 2, 3, 7, 42, 99, 1234, 98765, 4242424, 0xdeadbeef];
@@ -126,7 +128,9 @@ describe.each(MAP_IDS)('the %s map', (id) => {
         const [a, b] = [twinOf(path.a), twinOf(path.b)].sort(byNumber);
         expect(pathOf(map, a, b)).toEqual({ ...path, a, b, up: path.up === undefined ? undefined : twinOf(path.up) });
       }
-      expect(rivers.map((river) => river.map(turn).reverse())).toEqual(rivers);
+      // A river may be its own twin or another's, and is the same river drawn from either end.
+      const shape = (river: Point[]) => [JSON.stringify(river), JSON.stringify(river.slice().reverse())].sort()[0];
+      expect(rivers.map((river) => shape(river.map(turn))).sort()).toEqual(rivers.map(shape).sort());
     }
   });
 
@@ -183,7 +187,7 @@ describe.each(MAP_IDS)('the %s map', (id) => {
   });
 
   it('lies in a world of the one shape, sized as asked, and its own size when not', () => {
-    const own = id === 'meadow' || id === 'crossroads' || id === 'warren' ? 'medium' : 'small';
+    const own = ['meadow', 'crossroads', 'warren', 'archipelago', 'ring', 'canyon'].includes(id) ? 'medium' : 'small';
     expect(buildMap(1, id).size).toBe(own);
     for (const size of SIZE_IDS) {
       const { w, h, size: got } = buildMap(1, id, ['a', 'b'], size);
@@ -224,8 +228,8 @@ describe('the places', () => {
   it('the seed picks one when the host has not, and each has its own scene', () => {
     expect(MAP_SEEDS.map((seed) => buildMap(seed).id)).toEqual(MAP_SEEDS.map((seed) => MAP_IDS[seed % MAP_IDS.length]));
     expect(buildMap(0xdeadbeef).id).toBe(MAP_IDS[0xdeadbeef % MAP_IDS.length]);
-    expect(buildMap(9)).toEqual(buildMap(9, 'bridges'));
-    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace', 'valley', 'meadow']);
+    expect(buildMap(12)).toEqual(buildMap(12, MAP_IDS[12 % MAP_IDS.length]));
+    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace', 'valley', 'meadow', 'valley', 'meadow', 'scrub']);
   });
 
   it.each<MapId>(['thorns', 'bridges', 'hill'])('%s is drawn three ways, each of them both ways up', (id) => {
@@ -402,6 +406,191 @@ describe('the places', () => {
     );
     expect(crossing.length).toBeGreaterThan(0);
   });
+});
+
+describe('the maps grown for any number of sides, at any size', () => {
+  const SIDES = [SEATS.slice(0, 2), SEATS.slice(0, 3), SEATS];
+  const GROUNDS: (SizeId | undefined)[] = [undefined, ...SIZE_IDS];
+  const NEW: MapId[] = ['archipelago', 'ring', 'canyon'];
+  const DEALS = Array.from({ length: 10 }, (_, i) => i * 7919 + 5);
+  /** Every way each map can be dealt: its places, the sides and the grounds. */
+  const dealsOf = (ids: readonly MapId[], grounds = GROUNDS) => ids.flatMap((id) => SIDES.flatMap((sides) => grounds.map((size) => ({ id, sides, size }))));
+  // The new maps everywhere, and every map on the huge ground.
+  const CHECKED = [...dealsOf(NEW), ...dealsOf(MAP_IDS.filter((id) => !NEW.includes(id)), ['huge'])];
+  const centreHut = (map: SwarmMap) => map.sites.findIndex((site) => site.x === centreOf(map).x && site.y === centreOf(map).y);
+
+  /** What is not where a move of the board that each side sees it from puts it: the half-turn, and with four sides the two mirrors. */
+  const unlike = (map: SwarmMap) => {
+    const centre = centreOf(map);
+    const moves = [(p: Point) => ({ x: 2 * centre.x - p.x, y: 2 * centre.y - p.y })];
+    if (map.sides.length === 4) moves.push((p) => ({ x: 2 * centre.x - p.x, y: p.y }), (p) => ({ x: p.x, y: 2 * centre.y - p.y }));
+    const shape = (river: Point[]) => [JSON.stringify(river), JSON.stringify(river.slice().reverse())].sort()[0];
+    const strip = (site: Site) => JSON.stringify({ n: site.n, level: site.level, tower: !!site.tower, fort: !!site.fort, held: site.owner !== null });
+    const found: string[] = [];
+    moves.forEach((move, m) => {
+      const twin = map.sites.map((site) => map.sites.findIndex((other) => other.x === move(site).x && other.y === move(site).y));
+      map.sites.forEach((site, i) => {
+        if (twin[i] < 0 || strip(map.sites[twin[i]]) !== strip(site)) found.push(`move ${m}: hut ${i}`);
+      });
+      for (const path of map.paths) {
+        const image = pathOf(map, twin[path.a], twin[path.b]);
+        if (!image || image.kind !== path.kind || (path.up !== undefined && image.up !== twin[path.up])) found.push(`move ${m}: path ${path.a}-${path.b}`);
+      }
+      if (JSON.stringify(map.rivers.map((river) => shape(river.map(move))).sort()) !== JSON.stringify(map.rivers.map(shape).sort())) found.push(`move ${m}: rivers`);
+    });
+    return found;
+  };
+
+  it('never holds more huts than an order can name, nor the new maps and the huge ground more than leave room for one more', () => {
+    let most = 0;
+    for (const { id, sides, size } of dealsOf(MAP_IDS)) {
+      for (const seed of [...DEALS, ...DEALS.map((seed) => seed + 1)]) {
+        const map = buildMap(seed, id, sides, size);
+        expect(map.sites.length, `${id} for ${sides.length} at ${map.size}, seed ${seed}`).toBeLessThanOrEqual(NEW.includes(id) || map.size === 'huge' ? 34 : 36);
+        most = Math.max(most, map.sites.length);
+      }
+    }
+    // The large maps were among those dealt.
+    expect(most).toBeGreaterThanOrEqual(35);
+  }, 60000);
+
+  it('is the same board from every start, huts, paths and rivers', () => {
+    for (const { id, sides, size } of CHECKED) {
+      for (const seed of DEALS) expect(unlike(buildMap(seed, id, sides, size)), `${id} for ${sides.length} at ${size}, seed ${seed}`).toEqual([]);
+    }
+  }, 60000);
+
+  it('sees a board that is not the same from every start', () => {
+    const map = buildMap(5, 'ring', SEATS, 'huge');
+    expect(unlike(map)).toEqual([]);
+    const moved = { ...map, sites: map.sites.map((site, i) => (i === 7 ? { ...site, n: site.n + 1 } : site)) };
+    expect(unlike(moved).length).toBeGreaterThan(0);
+  });
+
+  it('deals the same map from the same seed, and another from another', () => {
+    for (const { id, sides, size } of CHECKED) {
+      expect(buildMap(77, id, sides, size)).toEqual(buildMap(77, id, sides, size));
+      expect(buildMap(77, id, sides, size)).not.toEqual(buildMap(78, id, sides, size));
+    }
+  });
+
+  it('marches a path to the hut at its other end, never round it', () => {
+    for (const { id, sides, size } of CHECKED) {
+      for (const seed of DEALS.slice(0, 4)) {
+        const map = buildMap(seed, id, sides, size);
+        for (const path of map.paths) {
+          expect([nextHop(map, path.a, path.b, true), nextHop(map, path.b, path.a, true)]).toEqual([path.b, path.a]);
+          if (!takesToll(path.kind)) expect([nextHop(map, path.a, path.b), nextHop(map, path.b, path.a)]).toEqual([path.b, path.a]);
+        }
+      }
+    }
+  }, 60000);
+
+  it('spreads the huts of the huge ground so that on a phone they stand as far apart as on the large one', () => {
+    const onPhone = (map: SwarmMap) => {
+      const huts = map.sites.filter((site) => !site.tower);
+      const nearest = Math.min(...huts.flatMap((p, i) => huts.slice(i + 1).map((q) => Math.hypot(p.x - q.x, p.y - q.y))));
+      return (nearest * 356) / map.w;
+    };
+    const large = (150 * 356) / WORLDS.large.w;
+    for (const { id, sides } of dealsOf(MAP_IDS, ['huge'])) {
+      for (const seed of DEALS) expect(onPhone(buildMap(seed, id, sides, 'huge'))).toBeGreaterThanOrEqual(large);
+    }
+    // The large ground itself packs them that close.
+    expect(Math.min(...DEALS.map((seed) => onPhone(buildMap(seed, 'meadow', ['a', 'b'], 'large'))))).toBeLessThan(large * 1.05);
+  });
+
+  it('gives the huge ground more clock than the large, for its longer marches', () => {
+    for (const sides of SIDES) expect(buildMap(3, 'meadow', sides, 'huge').ticks - buildMap(3, 'meadow', sides, 'large').ticks).toBe(HUGE_EXTRA_TICKS);
+    expect(HUGE_EXTRA_TICKS).toBeGreaterThan(0);
+  });
+
+  it('runs a loop of wide road on the ring through every start but the middle, so each can be come at either way round', () => {
+    for (const { sides, size } of dealsOf(['ring'])) {
+      for (const seed of DEALS) {
+        const map = buildMap(seed, 'ring', sides, size);
+        const wide = map.paths.filter((path) => path.kind === 'wide');
+        const along = (hut: number, without = -1) => wide.flatMap((path) => (path.a === hut ? [path.b] : path.b === hut ? [path.a] : [])).filter((next) => next !== without);
+        const reached = (from: number, without: number) => {
+          const seen = new Set([from]);
+          for (const hut of seen) for (const next of along(hut, without)) seen.add(next);
+          return seen;
+        };
+        const looped = map.homes.filter((home) => map.sites[home].owner !== 'c' || sides.length === 4);
+        expect(looped.length).toBe(sides.length === 3 ? 2 : sides.length);
+        for (const home of looped) {
+          // Two ways out along the loop, and the one comes round to the other without coming back through the start.
+          const [one, other] = along(home);
+          expect(along(home).length).toBe(2);
+          expect(reached(one, home).has(other)).toBe(true);
+          for (const next of looped) expect(reached(home, -1).has(next)).toBe(true);
+        }
+        // The middle is reached by road from the loop, from its top and bottom, and on four sides from its ends as well.
+        expect(map.links[centreHut(map)].length).toBe(sides.length === 4 ? 4 : 2);
+      }
+    }
+  }, 60000);
+
+  it('lays the canyon as long corridors that a climb up to the middle cuts short', () => {
+    for (const { sides, size } of dealsOf(['canyon'])) {
+      for (const seed of DEALS) {
+        const map = buildMap(seed, 'canyon', sides, size);
+        const middle = centreHut(map);
+        const climbs = map.paths.filter((path) => path.kind === 'climb');
+        expect(climbs.length).toBe(2);
+        for (const climb of climbs) expect(climb.up).toBe(middle);
+        // Off the middle, no hut is where more than two corridors meet.
+        map.links.forEach((linked, hut) => expect(hut === middle || linked.length <= 3).toBe(true));
+        const walk = (from: number, paths: Path[]) => {
+          const best = map.sites.map(() => Infinity);
+          best[from] = 0;
+          for (let round = 0; round < map.sites.length; round++) {
+            for (const path of paths) {
+              const length = pathLength(map, path.a, path.b);
+              best[path.b] = Math.min(best[path.b], best[path.a] + length);
+              best[path.a] = Math.min(best[path.a], best[path.b] + length);
+            }
+          }
+          return best[middle];
+        };
+        // From the foot of a climb, the middle without it is the long way round.
+        for (const climb of climbs) {
+          const foot = climb.a === middle ? climb.b : climb.a;
+          expect(walk(foot, map.paths.filter((path) => path.kind !== 'climb'))).toBeGreaterThan(1.5 * walk(foot, map.paths));
+        }
+        // On four sides each corner has a way down to the middle corridor of its own, so the middle is in reach without the climb.
+        if (sides.length === 4) {
+          for (const home of map.homes) expect(walk(home, map.paths.filter((path) => path.kind !== 'climb'))).toBeLessThan(Infinity);
+        }
+      }
+    }
+  }, 60000);
+
+  it('gives every island of the archipelago one bridge to the land in the middle, and a side its own a ford as well', () => {
+    for (const { sides, size } of dealsOf(['archipelago'])) {
+      for (const seed of DEALS) {
+        const map = buildMap(seed, 'archipelago', sides, size);
+        const crossing = (path: Path) => path.kind === 'bridge' || path.kind === 'ford';
+        const land = map.sites.map(() => -1);
+        map.sites.forEach((_, from) => {
+          if (land[from] >= 0) return;
+          const seen = new Set([from]);
+          for (const hut of seen) for (const path of map.paths) if (!crossing(path) && (path.a === hut || path.b === hut)) seen.add(path.a === hut ? path.b : path.a);
+          for (const hut of seen) land[hut] = from;
+        });
+        const middle = land[centreHut(map)];
+        const islands = [...new Set(land)].filter((one) => one !== middle);
+        // Every channel cuts off an island, and every island has huts on it.
+        expect(islands.length).toBe(map.rivers.length);
+        for (const island of islands) {
+          const off = map.paths.filter((path) => crossing(path) && (land[path.a] === island) !== (land[path.b] === island));
+          const held = map.sites.some((site, hut) => land[hut] === island && site.owner);
+          expect(off.every((path) => land[path.a] === middle || land[path.b] === middle)).toBe(true);
+          expect(off.map((path) => path.kind).sort()).toEqual(held ? ['bridge', 'ford'] : ['bridge']);
+        }
+      }
+    }
+  }, 60000);
 });
 
 describe('orders on the wire', () => {
@@ -1776,7 +1965,8 @@ describe.each(MAP_IDS)('a scrambled game on the %s map', (id) => {
     for (const seed of [1, 2, 3]) {
       let nextId = 1;
       let stood = new Map<number, Stand>();
-      play(seed, 600, (state, map) => {
+      // On the archipelago the sides meet only once they are over the water, which takes them longer.
+      play(seed, id === 'archipelago' ? 1200 : 600, (state, map) => {
         expect(faults(state, map, nextId)).toEqual([]);
         nextId = state.nextId;
         const stand = standing(state, map);

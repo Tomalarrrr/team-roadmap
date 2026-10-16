@@ -150,26 +150,29 @@
   gap: 8px;
 }
 
-/* The map choice: a picture of each layout, quieter than the buttons that start a game. */
+/* The map choice: a picture of each layout, quieter than the buttons that start a game. Four to a row, so a
+   dozen maps and the size under them fit the lobby without a scroll on a phone. The picture's width is what four
+   tiles leave of the compact popup's: its width, less the lobby's padding, three gaps and each tile's own edge. */
 .mapRow {
-  display: flex;
-  flex-wrap: wrap;
+  --thumb: calc((min(94vw, 400px) - 48px - 18px) / 4 - 10px);
+  display: grid;
+  grid-template-columns: repeat(4, auto);
   justify-content: center;
-  gap: 8px;
-  max-width: 560px;
+  gap: 6px;
 }
 
 .mapBtn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 4px 4px 5px;
+  gap: 3px;
+  padding: 4px 4px 3px;
   border: 1px solid var(--border-light);
   border-radius: var(--radius-md);
   background: var(--bg-secondary);
   color: var(--text-secondary);
-  font-size: 0.7rem;
+  font-size: 0.65rem;
+  white-space: nowrap;
   font-weight: 500;
   cursor: pointer;
 }
@@ -219,16 +222,20 @@
   cursor: default;
 }
 
-/* Every board is the shape of 1000 by 660, and the picture keeps that shape. Five to a row. */
+/* Five sizes to a row under the maps, at the width a phone leaves the lobby. */
+.sizeRow { gap: 4px; }
+.sizeRow .choiceBtn { padding-inline: 10px; }
+
+/* Every board is the shape of 1000 by 660, and the picture keeps that shape. */
 .mapThumb {
   display: block;
-  width: 92px;
-  height: 61px;
+  width: var(--thumb);
+  height: calc(var(--thumb) * 0.66);
   border-radius: var(--radius-sm);
   background: var(--bg-tertiary);
 }
 
-/* Each map shows the slice down its middle, so five fit in the room of one. */
+/* Each map shows the slice down its middle, so all of them fit in the room of one. */
 .shuffleThumb {
   display: flex;
   overflow: hidden;
