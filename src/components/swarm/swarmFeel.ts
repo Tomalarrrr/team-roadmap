@@ -8,6 +8,8 @@
 // seed and the clock, so the two players see the same wind and the same snow.
 
 import {
+  WAVE_TICKS,
+  allied,
   cloneState,
   countOf,
   mulberry32,
@@ -55,6 +57,8 @@ export const KIND_NAME: Record<Kind, { many: string; one: string }> = {
   beetle: { many: 'Beetles', one: 'beetle' },
   spider: { many: 'Spiders', one: 'spider' },
 };
+/** In survival, how long before a wave lands it is called. */
+export const WAVE_WARN_TICKS = 50;
 
 export type CalloutKey =
   | 'lastHut'
@@ -67,13 +71,17 @@ export type CalloutKey =
   | 'bridgeHeld'
   | 'backFromOne'
   | 'overtime'
+  | 'allyOut'
+  | 'waveSoon'
   | MomentumKey;
 
 /** Most pressing first: when several are due at once, bad news is read before good. */
 export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'overtime',
   'lastHut',
+  'waveSoon',
   'enemyAtGate',
+  'allyOut',
   'towerLost',
   'fortLost',
   'flagRaised',
@@ -95,6 +103,8 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   towerTaken: 'Tower taken',
   fortTaken: 'Fort taken',
   bridgeHeld: 'Bridge held',
+  allyOut: 'Ally out so your huts rally',
+  waveSoon: 'Wave coming',
   backFromOne: 'Back from one hut',
   overtime: 'Overtime',
   // Said with their numbers in (see swarmMomentum): these are only what the banner falls back on.
@@ -111,9 +121,9 @@ export function homeOf(map: SwarmMap, state: SwarmState, seat: Seat): number {
   return state.homes[map.sides.indexOf(seat)];
 }
 
-function marchingOn(state: SwarmState, hut: number, seat: Seat): number {
+function marchingOn(state: SwarmState, map: SwarmMap, hut: number, seat: Seat): number {
   let count = 0;
-  for (const unit of state.units) if (unit.dest === hut && unit.seat !== seat) count++;
+  for (const unit of state.units) if (unit.dest === hut && !allied(map, unit.seat, seat)) count++;
   return count;
 }
 
@@ -153,13 +163,15 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
 
   if (!holdsBridge(before, map, seat) && holdsBridge(after, map, seat)) due.add('bridgeHeld');
   if (before.tick < map.ticks && after.tick >= map.ticks && after.winner === null) due.add('overtime');
+  if (after.events.some((event) => event.kind === 'rally' && event.seat === seat)) due.add('allyOut');
+  if (map.rules.mode === 'survival' && after.tick + WAVE_WARN_TICKS < map.ticks && Math.floor((after.tick + WAVE_WARN_TICKS) / WAVE_TICKS) > Math.floor((before.tick + WAVE_WARN_TICKS) / WAVE_TICKS)) due.add('waveSoon');
 
   const home = homeOf(map, after, seat);
   if (
     home !== -1 &&
     after.huts[home].owner === seat &&
-    marchingOn(before, home, seat) < GATE_COLUMN &&
-    marchingOn(after, home, seat) >= GATE_COLUMN
+    marchingOn(before, map, home, seat) < GATE_COLUMN &&
+    marchingOn(after, map, home, seat) >= GATE_COLUMN
   ) {
     due.add('enemyAtGate');
   }
@@ -200,6 +212,8 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   run: 3000,
   rout: 4000,
   held: 4000,
+  allyOut: 20000,
+  waveSoon: 20000,
 };
 
 /** A callout waiting or up, with the words it is said in when they carry a number. */
@@ -823,8 +837,8 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
       gone.push({ unit, reached: unit.d + speedOf(map, state.army[unit.seat].speed) >= pathLength(map, unit.from, unit.to) });
     }
   }
-  // One that walked into a hut its side now holds is inside it, not dead.
-  const fell = ({ unit, reached }: { unit: Unit; reached: boolean }) => !(reached && state.huts[unit.to].owner === unit.seat);
+  // One that walked into a hut its side or an ally now holds is inside it, not dead.
+  const fell = ({ unit, reached }: { unit: Unit; reached: boolean }) => !(reached && allied(map, state.huts[unit.to].owner, unit.seat));
 
   for (const shot of state.shots) addMark(feel, 'pool', shot.x, shot.y, shot.seat, now + SHOT_LAND_MS);
 
@@ -864,7 +878,7 @@ export function feelStep(feel: Feel, map: SwarmMap, state: SwarmState, seat: Sea
       const held = state.huts[hut];
       let step: { x: number; y: number } | null = null;
       for (const item of gone) {
-        if (item.unit.to !== hut || !item.reached || item.unit.seat === was.owner) continue;
+        if (item.unit.to !== hut || !item.reached || allied(map, item.unit.seat, was.owner)) continue;
         step = doorstep(map, item.unit.from, hut, held.level);
         if (fell(item)) addMark(feel, 'pool', step.x, step.y, item.unit.seat, now);
       }

@@ -58,6 +58,32 @@ export const TOWER_RANGE = 110;
 /** Ticks between two shots of a tower: one unit in three of a column released every RELEASE_TICKS. */
 export const TOWER_RELOAD = 6;
 /**
+ * In survival, ticks between two waves. Over 120 games a setup with every seat
+ * played by the computer, the people won 31 with one person against one
+ * computer side, all by wiping it out before the clock (the rest were out by
+ * tick 1465 on average); 70 with two against one; and 51 or 52 with two
+ * against two, by which corners the people had. With no waves those were 57,
+ * 75, and 70 or 69. One person against two or three never won.
+ */
+export const WAVE_TICKS = 600;
+/** Wave k puts this many times k into every hut the computer holds. */
+export const WAVE_UNITS = 3;
+/**
+ * In teams, what a side takes into each of its huts when its ally is beaten.
+ * Over 407 games of four computers in which one side went out first, its ally
+ * went on to win 29 (7%) with no rally, 37 with 10, 58 (14%) with 20; a free
+ * level of strength and 10 made 60, and breeding 3 ticks faster for the rest
+ * of the game 58. Still two against one, but no longer a foregone loss.
+ */
+export const RALLY_UNITS = 20;
+/**
+ * In teams, how much more a computer side values a hut of the weaker side of
+ * the other team, which its ally values alike. Given to one team only over four
+ * runs of 240 games, that team won 6, 7, 1 and 11 more than without it; at 2
+ * it won none more.
+ */
+export const TEAM_FOCUS = 1.5;
+/**
  * What a path makes of an army's speed, in hundredths, rounded down to whole
  * world units a tick. At the starting speed of 6 that is 8 on a wide road and
  * downhill, 4 on a narrow track and 3 uphill.
@@ -205,12 +231,18 @@ export interface Rules {
   nests: Partial<Record<Seat, Nest>>;
   /** The host's numbers (see KNOBS). */
   tune: Tune;
+  /** In survival, the seats the computer plays from the start: one team. Every other seat is the people's. */
+  computer?: readonly Seat[];
 }
 
 export const CLASSIC: Rules = { mode: 'classic', start: 'home', twists: [], nests: {}, tune: STANDARD_TUNE };
 
-/** A match leaves out every choice that is the default, so a match from before there were choices is a classic one. */
-export function rulesOf(match: Pick<SwarmMatch, 'mode' | 'start' | 'twists' | 'players' | 'tune'>): Rules {
+/**
+ * A match leaves out every choice that is the default, so a match from before
+ * there were choices is a classic one. In survival who the computer plays is a
+ * rule too, read from the match like the rest, so every client sees the same teams.
+ */
+export function rulesOf(match: Pick<SwarmMatch, 'mode' | 'start' | 'twists' | 'players' | 'tune' | 'cpu'>): Rules {
   const nests: Partial<Record<Seat, Nest>> = {};
   for (const seat of SEATS) {
     const nest = match.players[seat]?.nest;
@@ -222,6 +254,7 @@ export function rulesOf(match: Pick<SwarmMatch, 'mode' | 'start' | 'twists' | 'p
     twists: TWISTS.filter((twist) => match.twists?.includes(TWIST_CHAR[twist])),
     nests,
     tune: parseTune(match.tune),
+    ...(match.mode === 'survival' && { computer: SEATS.filter((seat) => match.cpu?.includes(seat)) }),
   };
 }
 
@@ -278,6 +311,35 @@ export function computerOf(match: Pick<SwarmMatch, 'cpu' | 'out'>): Computer {
   for (const seat of SEATS) if (match.cpu?.includes(seat)) plays[seat] = 0;
   return plays;
 }
+
+/**
+ * In teams, for each of four sides by where it starts in the map's order, the
+ * side it plays with. The four start in the corners (see tryGrow), and these
+ * are the two on the left and the two on the right: allies start the board's
+ * height apart and each team holds a half. Over 480 games of four computers
+ * (40 a map, seeds 1000 and 5000 on) the team of the side first in the order
+ * won 233 and the other 226, with 21 drawn. Paired top and bottom, allies the
+ * board's width apart, it was 255 to 222 with 3 drawn.
+ */
+const PARTNER = [3, 2, 1, 0];
+
+/**
+ * The seat a side plays for: in teams, the first in the map's order of it and
+ * its partner, and in survival, the first seat of the computer's or of the
+ * people's. In every other mode, and for a seat not in the game, its own. The
+ * lobby can ask it of `{ sides: sidesOf(match), rules: rulesOf(match) }`.
+ */
+export function teamOf(map: Pick<SwarmMap, 'sides' | 'rules'>, seat: Seat): Seat {
+  const { mode, computer } = map.rules;
+  const k = map.sides.indexOf(seat);
+  if (k === -1) return seat;
+  if (mode === 'teams' && map.sides.length === 4) return map.sides[Math.min(k, PARTNER[k])];
+  if (mode === 'survival' && computer) return map.sides.find((side) => computer.includes(side) === computer.includes(seat))!;
+  return seat;
+}
+
+/** Whether two owners play for one team: never fought, their huts walked through and joined. A side is its own ally; nobody is an empty hut's. */
+export const allied = (map: Pick<SwarmMap, 'sides' | 'rules'>, x: Owner, y: Owner): boolean => x !== null && y !== null && teamOf(map, x) === teamOf(map, y);
 
 /** `swarm/{code}/s/{seat}` — one player's orders, written only by its own client. */
 export interface SwarmSeatState {
@@ -1457,7 +1519,11 @@ export type SwarmEvent =
   /** A unit of `seat` died to the spikes or the water, `d` along the path from `from`. */
   | { kind: 'toll'; from: number; to: number; d: number; seat: Seat }
   /** `seat` raised the white flag, and `huts` went neutral. */
-  | { kind: 'flag'; seat: Seat; huts: number[] };
+  | { kind: 'flag'; seat: Seat; huts: number[] }
+  /** Survival's wave `k` landed in `huts`. */
+  | { kind: 'wave'; k: number; huts: number[] }
+  /** In teams, `seat`'s ally went out, and `huts` took in RALLY_UNITS each. */
+  | { kind: 'rally'; seat: Seat; huts: number[] };
 
 /** A tower killed a unit of `seat` standing at x, y. */
 export interface Shot {
@@ -1722,7 +1788,7 @@ interface Walker {
  * Along the path the units fall into runs of one side. Two runs that touch
  * fight front to front, and when one is wiped out the run beyond it joins the
  * winner's side of the fight, so a unit that outlives a whole run goes on to
- * meet the next.
+ * meet the next. Allies count as one side here.
  */
 const SIDE_BIT: Record<Seat, number> = { a: 1, b: 2, c: 4, d: 8 };
 
@@ -1730,7 +1796,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
   const { index, length: lengths } = lanesOf(map);
   // Most paths carry one side's column and nothing else, and are done with here.
   const sides = map.paths.map(() => 0);
-  for (const unit of state.units) sides[index[unit.from][unit.to]] |= SIDE_BIT[unit.seat];
+  for (const unit of state.units) sides[index[unit.from][unit.to]] |= SIDE_BIT[teamOf(map, unit.seat)];
   const mixed = (bits: number) => (bits & (bits - 1)) !== 0;
   if (!sides.some(mixed)) return;
   // Kept in the order their first unit was made: the fights of a tick draw on each army's luck in turn.
@@ -1754,7 +1820,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
       let above = [walker];
       while (above.length > 0 && runs.length > 0) {
         const below = runs[runs.length - 1];
-        if (below[0].unit.seat === above[0].unit.seat) {
+        if (allied(map, below[0].unit.seat, above[0].unit.seat)) {
           above = below.concat(above);
           runs.pop();
           continue;
@@ -1792,7 +1858,7 @@ function clashOnPaths(state: SwarmState, map: SwarmMap): void {
  * The sides that start at opposite ends fight it out first, so a side from
  * between them meets whichever is left and neither is put in front of it by
  * its letter. By where the sides start in the map's order, so a seat left
- * empty moves no one up.
+ * empty moves no one up. Allies walk in together.
  */
 const DOOR_FIGHTS: [number, number][] = [[0, 1], [2, 3], [0, 2], [1, 3], [0, 3], [1, 2]];
 
@@ -1805,7 +1871,7 @@ function clashAtDoors(state: SwarmState, map: SwarmMap, arriving: Unit[]): Set<U
     door[unit.seat].push(unit);
   }
   const { index, length } = lanesOf(map);
-  const pairs = DOOR_FIGHTS.filter(([, y]) => y < map.sides.length).map(([x, y]) => [map.sides[x], map.sides[y]]);
+  const pairs = DOOR_FIGHTS.filter(([x, y]) => y < map.sides.length && !allied(map, map.sides[x], map.sides[y])).map(([x, y]) => [map.sides[x], map.sides[y]]);
   for (const [hut, door] of doors) {
     for (const [x, y] of pairs) {
       const xs = door[x].filter((unit) => !dead.has(unit));
@@ -1863,10 +1929,10 @@ function takeTolls(state: SwarmState, map: SwarmMap): void {
   state.units = walking;
 }
 
-/** Returns true when the unit walks on through a hut of its own towards its destination. */
+/** Returns true when the unit walks on through a hut of its own or an ally's towards its destination. */
 function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): boolean {
   const hut = state.huts[unit.to];
-  if (hut.owner === unit.seat) {
+  if (allied(map, hut.owner, unit.seat)) {
     const hop = unit.to === unit.dest ? -1 : nextHop(map, unit.to, unit.dest, unit.risky, closed);
     // Home, or every way on is closed: it joins the garrison.
     if (hop === -1) {
@@ -1912,7 +1978,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
     let target: { unit: Unit; x: number; y: number } | null = null;
     let nearest = map.rules.tune.range * map.rules.tune.range;
     for (const unit of state.units) {
-      if (tower.owner ? unit.seat === tower.owner : unit.to !== index) continue;
+      if (tower.owner ? allied(map, unit.seat, tower.owner) : unit.to !== index) continue;
       const from = map.sites[unit.from];
       const to = map.sites[unit.to];
       const length = lanes.length[lanes.index[unit.from][unit.to]];
@@ -1976,6 +2042,7 @@ export const inOvertime = (state: SwarmState, map: SwarmMap): boolean => state.w
  * play it out.
  */
 function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
+  if (map.rules.mode === 'teams' || map.rules.mode === 'survival') return judgeTeams(state, map, cpu);
   // A side with no hut can still win one back with the units it has on the road.
   const counts = map.sides.map((side) => ({ side, ...countOf(state, side) })).filter((count) => count.huts > 0 || count.units > 0);
   const people = map.sides.some((side) => cpu[side] !== 0);
@@ -2088,6 +2155,52 @@ function settleDraft(state: SwarmState, map: SwarmMap): void {
 }
 
 /**
+ * Judged by team (see teamOf): a team is out when every side of it is, and the
+ * last team left wins, named by its first seat. On the clock, or when every
+ * person in the game is beaten or gone, the team holding the most huts, then
+ * the most units, takes it. Survival is called otherwise: the people take it
+ * if any side of theirs lives at the clock, however little it holds, and the
+ * computer once none does, or once no person is left to play one.
+ */
+function judgeTeams(state: SwarmState, map: SwarmMap, cpu: Computer): void {
+  const teams = new Map<Seat, { team: Seat; huts: number; units: number; played: boolean }>();
+  for (const side of map.sides) {
+    const { huts, units } = countOf(state, side);
+    if (huts === 0 && units === 0) continue;
+    const team = teamOf(map, side);
+    const count = teams.get(team);
+    if (!count) teams.set(team, { team, huts, units, played: played(cpu, side, state.tick) });
+    else teams.set(team, { team, huts: count.huts + huts, units: count.units + units, played: count.played || played(cpu, side, state.tick) });
+  }
+  const counts = [...teams.values()];
+  const over = state.tick >= map.ticks;
+  const unwatched = map.sides.some((side) => cpu[side] !== 0) && !counts.some((count) => count.played);
+  if (counts.length <= 1) {
+    state.winner = counts.length === 1 ? counts[0].team : 'draw';
+  } else if (map.rules.mode === 'survival') {
+    const people = counts.find((count) => !map.rules.computer?.includes(count.team))!;
+    if (over) state.winner = people.team;
+    else if (unwatched) state.winner = counts.find((count) => count !== people)!.team;
+  } else if (over || unwatched) {
+    counts.sort((p, q) => q.huts - p.huts || q.units - p.units);
+    const [first, second] = counts;
+    state.winner = first.huts === second.huts && first.units === second.units ? 'draw' : first.team;
+  }
+}
+
+
+/** Survival's wave `k`: WAVE_UNITS * k into every hut of the computer's but its towers, which never breed, past the cap if it comes to that. */
+function wave(state: SwarmState, map: SwarmMap, k: number): void {
+  const huts: number[] = [];
+  state.huts.forEach((hut, at) => {
+    if (!hut.owner || isTower(hut) || !map.rules.computer?.includes(hut.owner)) return;
+    hut.n += WAVE_UNITS * k;
+    huts.push(at);
+  });
+  state.events.push({ kind: 'wave', k, huts });
+}
+
+/**
  * Advance one tick. Each side's orders are applied in turn, in the order the
  * map lays the sides out, each list in the order given. A side the computer
  * plays (see Computer) is given its orders here, from the state the tick
@@ -2098,6 +2211,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
   if (drafting(map, state.tick + 1)) return draftStep(state, map, orders, cpu);
   const planned = map.sides.map((side) => (cpu[side] !== undefined && state.tick >= cpu[side] && thinksAt(map, side, state.tick) ? cpuOrders(state, map, side) : []));
   const tick = ++state.tick;
+  const standing = map.rules.mode === 'teams' ? map.sides.filter((side) => !isOut(state, side)) : null;
   const closed = closedOn(state, tick);
   state.events = [];
   state.shots = [];
@@ -2114,6 +2228,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     hut.grow = 0;
     if (hut.n < hutCap(map, hut.level)) hut.n++;
   }
+  if (map.rules.mode === 'survival' && tick % WAVE_TICKS === 0) wave(state, map, tick / WAVE_TICKS);
 
   if (tick % RELEASE_TICKS === 0) {
     state.huts.forEach((hut, index) => {
@@ -2157,7 +2272,34 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
     state.units = walking;
   }
   shoot(state, map);
+  if (standing) rally(state, map, standing);
   judge(state, map, cpu);
+}
+
+/** A side with no hut and no unit anywhere, which can never come back. */
+const isOut = (state: SwarmState, side: Seat): boolean => {
+  const { huts, units } = countOf(state, side);
+  return huts === 0 && units === 0;
+};
+
+/**
+ * In teams, a side whose ally has just gone out, by the fight and not by the
+ * white flag, has RALLY_UNITS put into every hut it holds but its towers, past
+ * the cap if it comes to that. `standing` is who was in at the start of the tick.
+ */
+function rally(state: SwarmState, map: SwarmMap, standing: Seat[]): void {
+  for (const side of standing) {
+    if (!isOut(state, side) || state.yielded.includes(side)) continue;
+    const ally = standing.find((other) => other !== side && allied(map, other, side) && !isOut(state, other));
+    if (!ally) continue;
+    const huts: number[] = [];
+    state.huts.forEach((hut, at) => {
+      if (hut.owner !== ally || isTower(hut)) return;
+      hut.n += RALLY_UNITS;
+      huts.push(at);
+    });
+    state.events.push({ kind: 'rally', seat: ally, huts });
+  }
 }
 
 /** Run `state` on to tick `to`. `onStep` sees the state after each tick. */
@@ -2177,7 +2319,7 @@ export function advance(
 
 /** For each hut, how many paths it is from the nearest hut `seat` does not hold, by the paths that take no toll. */
 function stepsToFront(state: SwarmState, map: SwarmMap, seat: Seat): number[] {
-  const steps = state.huts.map((hut) => (hut.owner === seat ? Infinity : 0));
+  const steps = state.huts.map((hut) => (allied(map, hut.owner, seat) ? Infinity : 0));
   const queue = steps.flatMap((s, index) => (s === 0 ? [index] : []));
   for (let head = 0; head < queue.length; head++) {
     for (const next of map.links[queue[head]]) {
@@ -2316,7 +2458,9 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     }
   });
 
-  const standing = map.sides.filter((side) => side !== seat).map((side) => ({ side, ...countOf(state, side) }));
+  const standing = map.sides.filter((side) => !allied(map, side, seat)).map((side) => ({ side, ...countOf(state, side) }));
+  // In teams, allies go after the same one of the other team, the weaker, as each works it out alike from the board: one knocked out leaves two against one.
+  const focus = map.rules.mode === 'teams' ? standing.filter((count) => count.huts > 0 || count.units > 0).reduce<{ side: Seat; huts: number; units: number } | null>((best, count) => (!best || count.huts < best.huts || (count.huts === best.huts && count.units < best.units) ? count : best), null)?.side : undefined;
   const leader = standing.reduce((best, count) => (count.huts > best.huts || (count.huts === best.huts && count.units > best.units) ? count : best), standing[0]);
   const mineCount = countOf(state, seat);
 
@@ -2326,7 +2470,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     let ticks = 0;
     for (let at = from; at !== to; ) {
       const hop = nextHop(map, at, to, risky, closed);
-      if (hop === -1 || (hop !== to && huts[hop].owner !== seat)) return null;
+      if (hop === -1 || (hop !== to && !allied(map, huts[hop].owner, seat))) return null;
       const path = index[at][hop];
       paths.push(path);
       ticks += Math.ceil(length[path] / paceOf(map, map.paths[path], hop, army.speed));
@@ -2348,7 +2492,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const towers = new Set<number>();
     for (const path of way.paths) {
       if (takesToll(map.paths[path].kind)) lost += Math.floor(((state.tolls[path] % TOLL_EVERY) + n) / TOLL_EVERY);
-      for (const tower of coverOf(map)[path]) if (tower !== to && huts[tower].owner && huts[tower].owner !== seat) towers.add(tower);
+      for (const tower of coverOf(map)[path]) if (tower !== to && huts[tower].owner && !allied(map, huts[tower].owner, seat)) towers.add(tower);
     }
     const last = way.paths[way.paths.length - 1];
     const pace = paceOf(map, map.paths[last], to, army.speed);
@@ -2368,7 +2512,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     let strongest = 0;
     for (const next of map.links[at]) {
       const other = huts[next];
-      if (next !== but && other.owner && other.owner !== seat) strongest = Math.max(strongest, toKill(other.owner, other.n));
+      if (next !== but && other.owner && !allied(map, other.owner, seat)) strongest = Math.max(strongest, toKill(other.owner, other.n));
     }
     // It holds back less as the game wears on, so that a game between careful sides still comes to an end.
     const guard = Math.max(0, temper.guard - Math.floor((4 * state.tick) / map.ticks));
@@ -2429,18 +2573,21 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     }
   };
 
-  // Hold what is under attack first.
-  for (const at of mine) {
+  // Hold what is under attack first, its own and then its allies'.
+  const theirs = huts.flatMap((hut, at) => (hut.owner !== seat && allied(map, hut.owner, seat) ? [at] : []));
+  /** What this side and its allies have on the way to a hut. */
+  const ours = (at: number) => SEATS.reduce((sum, side, k) => (allied(map, side, seat) ? sum + bound[at][k] : sum), 0);
+  for (const at of [...mine, ...theirs]) {
     let attackers = 0;
     let soonest = Infinity;
     SEATS.forEach((side, k) => {
-      if (side === seat || bound[at][k] === 0) return;
+      if (allied(map, side, seat) || bound[at][k] === 0) return;
       attackers += toKill(side, bound[at][k]);
       soonest = Math.min(soonest, soon[at][k]);
     });
     if (attackers === 0) continue;
     const hut = huts[at];
-    const short = attackers + 1 - lives(hut) - bound[at][me] - (isTower(hut) ? 0 : Math.floor(soonest / growTicks(map, hut.level)));
+    const short = attackers + 1 - lives(hut) - ours(at) - (isTower(hut) ? 0 : Math.floor(soonest / growTicks(map, hut.level)));
     if (short <= 0) continue;
     const help = muster(at, () => short, soonest);
     if (help) march(at, help);
@@ -2457,12 +2604,13 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
       value *= 1.5;
       if (leading && hut.owner === leader.side) value *= 1 + temper.spite / 8;
       if (standing.find((count) => count.side === hut.owner)!.huts <= 2) value *= 1.5;
+      if (hut.owner === focus) value *= TEAM_FOCUS;
     }
     return value;
   };
   /** What every other side but the owner has marching on `to`, in this side's units. */
   const rivals = (to: number) =>
-    SEATS.reduce((sum, side, k) => (side === seat || side === huts[to].owner ? sum : sum + toKill(side, bound[to][k])), 0);
+    SEATS.reduce((sum, side, k) => (allied(map, side, seat) || side === huts[to].owner ? sum : sum + toKill(side, bound[to][k])), 0);
   /**
    * What this side has to beat in `to` when its last unit gets in: the
    * garrison, what it breeds and what its owner sends it, and every other
@@ -2476,7 +2624,8 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const left = lives(huts[to]) + bredBy(to, ticks) + (holder ? bound[to][SEATS.indexOf(holder)] : 0);
     return toKill(holder, left) + rivals(to) + 2 - bound[to][me];
   };
-  const targets = [...new Set(mine.flatMap((at) => map.links[at]))].filter((to) => huts[to].owner !== seat).sort((p, q) => p - q);
+  // A hut an ally is marching on is left to it: two allies feeding one hut a column each, each too few, feed it for good.
+  const targets = [...new Set(mine.flatMap((at) => map.links[at]))].filter((to) => !allied(map, huts[to].owner, seat) && ours(to) === bound[to][me]).sort((p, q) => p - q);
   for (let marches = 0; marches < MARCHES; marches++) {
     let best: { to: number; sends: Send[]; score: number } | null = null;
     for (const to of targets) {
@@ -2492,10 +2641,10 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     march(best.to, best.sends);
   }
 
-  const front = mine.filter((at) => map.links[at].some((next) => huts[next].owner !== seat));
+  const front = mine.filter((at) => map.links[at].some((next) => !allied(map, huts[next].owner, seat)));
   const pressure = (at: number) => {
     let strongest = 0;
-    for (const next of map.links[at]) if (huts[next].owner && huts[next].owner !== seat) strongest = Math.max(strongest, toKill(huts[next].owner, huts[next].n));
+    for (const next of map.links[at]) if (huts[next].owner && !allied(map, huts[next].owner, seat)) strongest = Math.max(strongest, toKill(huts[next].owner, huts[next].n));
     return Math.max(0, strongest - huts[at].n);
   };
   const steps = stepsToFront(state, map, seat);
@@ -2542,7 +2691,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     }
     if (!bought && buy(at, 6 + keepOf(at, -1))) continue;
     // Full, and across a toll is more than it can take: what it has is more use at the front.
-    const tolledOnly = map.links[at].every((next) => huts[next].owner === seat || takesToll(map.paths[index[at][next]].kind));
+    const tolledOnly = map.links[at].every((next) => allied(map, huts[next].owner, seat) || takesToll(map.paths[index[at][next]].kind));
     if (hut.n >= hutCap(map, hut.level) && tolledOnly) reinforce(at);
   }
   return orders;
