@@ -333,6 +333,13 @@ function checkState(state: SwarmState, map: SwarmMap): void {
   if (new Set(state.yielded).size !== state.yielded.length || state.yielded.some((seat) => !map.sides.includes(seat))) bad(`yielded ${state.yielded}`);
   for (const seat of state.yielded) if (state.huts.some((hut) => hut.owner === seat)) bad(`${seat} gave up and holds a hut`);
   if (state.winner !== null && state.winner !== 'draw' && !map.sides.includes(state.winner)) bad(`won by ${state.winner}, not a side`);
+  const { mode, tune } = map.rules;
+  const target = mode === 'domination' ? tune.domTarget : mode === 'raid' ? tune.raidTarget : 0;
+  for (const seat of SEATS) {
+    const points = state.points[seat];
+    if (points < 0 || (target === 0 && points !== 0)) bad(`${seat} has ${points} points in ${mode}`);
+    if (target > 0 && points >= target && state.winner === null) bad(`${seat} has ${points} of ${target} points and nobody has won`);
+  }
   // No mode plays past the clock: one that does has to say here by how much.
   if (state.tick >= map.ticks && state.winner === null) bad(`the clock ran out at ${map.ticks} with nobody winning`);
 }

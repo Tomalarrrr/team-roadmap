@@ -105,7 +105,7 @@ describe.each(MAP_IDS)('the %s map played for the middle', (id) => {
   }, 60_000);
 
   it('is the same map as ever when the match is not played for the middle', () => {
-    for (const mode of ['classic', 'blitz', 'regicide', 'bounty'] as const) {
+    for (const mode of ['classic', 'blitz', 'regicide', 'bounty', 'domination', 'raid', 'famine'] as const) {
       for (const seed of CROWN_SEEDS.slice(0, 6)) {
         const sides: Seat[] = ['a', 'b'];
         const played = buildMap(seed, id, sides, undefined, rulesFor(mode));
@@ -434,6 +434,181 @@ describe('the comeback twist', () => {
   });
 });
 
+describe('domination', () => {
+  const tuned = (domTarget: number): Rules => ({ ...rulesFor('domination'), tune: { ...CLASSIC.tune, domTarget } });
+  // a holds levels 1 and 3, b a level 2 and a tower; nothing is linked, so nothing changes hands.
+  const field = (rules: Rules) =>
+    boardOf([hut(100, 'a', 5), hut(300, 'a', 5, 3), hut(700, 'b', 5, 2), { ...hut(900, 'b', 5), tower: true }], [[], [], [], []], rules);
+
+  it('scores each side the levels of the huts it holds every 50 ticks, and nothing for a tower', () => {
+    const board = field(rulesFor('domination'));
+    const state = newState(board);
+    advance(state, board, {}, 49);
+    expect([state.points.a, state.points.b]).toEqual([0, 0]);
+    advance(state, board, {}, 50);
+    expect([state.points.a, state.points.b]).toEqual([4, 2]);
+    advance(state, board, {}, 149);
+    expect([state.points.a, state.points.b]).toEqual([8, 4]);
+  });
+
+  it('is won on the tick a side gets to the target, and not one before', () => {
+    const board = field(tuned(12));
+    const state = newState(board);
+    advance(state, board, {}, 149);
+    expect([state.winner, state.points.a]).toEqual([null, 8]);
+    advance(state, board, {}, 1000);
+    expect([state.winner, state.tick, state.points.a]).toEqual(['a', 150, 12]);
+  });
+
+  it('goes to the most points of two that get to the target together, and is a draw when they are level on everything', () => {
+    const board = field(tuned(4));
+    const state = newState(board);
+    // b gets to 5 on the tick a gets to 4, and takes it with fewer huts.
+    state.points.b = 3;
+    advance(state, board, {}, 100);
+    expect([state.winner, state.tick, state.points.a, state.points.b]).toEqual(['b', 50, 4, 5]);
+    const even = boardOf([hut(100, 'a', 5, 2), hut(900, 'b', 5, 2)], [[], []], tuned(4));
+    const level = newState(even);
+    advance(level, even, {}, 200);
+    expect([level.winner, level.tick]).toEqual(['draw', 100]);
+  });
+
+  it('on the clock goes to the most points, even with fewer huts', () => {
+    const board = { ...boardOf([hut(100, 'a', 5, 3), hut(700, 'b', 5), hut(900, 'b', 5)], [[], [], []], rulesFor('domination')), ticks: 100 };
+    const state = newState(board);
+    advance(state, board, {}, 100);
+    expect([state.winner, state.points.a, state.points.b]).toEqual(['a', 6, 4]);
+    const classic = { ...board, rules: CLASSIC };
+    const counted = newState(classic);
+    advance(counted, classic, {}, 100);
+    expect(counted.winner).toBe('b');
+  });
+
+  it('plays on past the clock while the leaders are level on points and huts', () => {
+    const board = { ...boardOf([hut(100, 'a', 5), hut(900, 'b', 5)], [[], []], rulesFor('domination')), ticks: 100 };
+    const state = newState(board);
+    advance(state, board, {}, 100);
+    expect([state.winner, state.points.a, state.points.b]).toEqual([null, 2, 2]);
+    // Only units are left to tell them apart once overtime runs out.
+    state.huts[0].n = 50;
+    advance(state, board, {}, 100 + CLASSIC.tune.overtime);
+    expect([state.winner, state.tick]).toEqual(['a', 100 + CLASSIC.tune.overtime]);
+  });
+});
+
+describe('raid', () => {
+  const tuned = (raidTarget: number): Rules => ({ ...rulesFor('raid'), tune: { ...CLASSIC.tune, raidTarget } });
+  // a's 40 sit between b's level 2 hut, a neutral level 3 hut and b's tower.
+  const field = (rules: Rules) =>
+    boardOf(
+      [hut(500, 'a', 40), hut(300, 'b', 1, 2), hut(700, null, 1, 3), { ...hut(500, 'b', 1, 1, MID.y + 150), tower: true }, hut(900, 'b', 5, 1, MID.y + 250)],
+      [[1, 2, 3], [0], [0], [0], []],
+      rules
+    );
+  const send = (to: number, tick = 1) => ({ tick, kind: 'half' as const, from: 0, to });
+
+  it('scores the level of a hut taken from another side, and nothing for a neutral hut or a tower', () => {
+    const board = field(rulesFor('raid'));
+    const state = newState(board);
+    advance(state, board, { a: [send(1)] }, 100);
+    expect([state.huts[1].owner, state.points.a, state.points.b]).toEqual(['a', 2, 0]);
+    advance(state, board, { a: [send(2, 101), send(3, 102)] }, 300);
+    expect([state.huts[2].owner, state.huts[3].owner, state.points.a]).toEqual(['a', 'a', 2]);
+  });
+
+  it('is won on the capture that gets a side to the target', () => {
+    const board = field(tuned(2));
+    const state = newState(board);
+    let taken = 0;
+    advance(state, board, { a: [send(1)] }, 400, {}, (s) => {
+      if (!taken && s.huts[1].owner === 'a') taken = s.tick;
+    });
+    expect(taken).toBeGreaterThan(0);
+    expect([state.winner, state.tick]).toEqual(['a', taken]);
+  });
+
+  it('on the clock goes to the most points, even with fewer huts', () => {
+    const board = { ...field(rulesFor('raid')), ticks: 300 };
+    const state = newState(board);
+    state.huts[2].owner = 'b';
+    advance(state, board, { a: [send(1)] }, 300);
+    expect([state.points.a, state.winner]).toEqual([2, 'a']);
+    expect(state.huts.filter((h) => h.owner === 'b').length).toBeGreaterThan(state.huts.filter((h) => h.owner === 'a').length);
+  });
+
+  it('keeps no points in any other mode', () => {
+    const board = field(CLASSIC);
+    const state = newState(board);
+    advance(state, board, { a: [send(1)] }, 200);
+    expect([state.huts[1].owner, state.points.a]).toEqual(['a', 0]);
+  });
+});
+
+describe('famine', () => {
+  const tuned = (famineAt: number): Rules => ({ ...rulesFor('famine'), tune: { ...CLASSIC.tune, famineAt } });
+
+  it('breeds up to the famine tick and never after, where classic goes on', () => {
+    const board = boardOf([hut(200, 'a', 5), hut(800, 'b', 5)], [[], []], tuned(30));
+    const state = newState(board);
+    advance(state, board, {}, 30);
+    expect(state.huts[0].n).toBe(8);
+    advance(state, board, {}, 300);
+    expect([state.huts[0].n, state.huts[1].n]).toEqual([8, 8]);
+    const classic = { ...board, rules: CLASSIC };
+    const fed = newState(classic);
+    advance(fed, classic, {}, 300);
+    expect(fed.huts[0].n).toBe(30);
+  });
+
+  it('on the clock goes to the most units, even with fewer huts, and level on units to the most huts', () => {
+    const board = { ...boardOf([hut(100, 'a', 40), hut(700, 'b', 5), hut(900, 'b', 5)], [[], [], []], tuned(300)), ticks: 100 };
+    const state = newState(board);
+    advance(state, board, {}, 100);
+    expect(state.winner).toBe('a');
+    const classic = { ...board, rules: CLASSIC };
+    const counted = newState(classic);
+    advance(counted, classic, {}, 100);
+    expect(counted.winner).toBe('b');
+    const even = { ...boardOf([hut(100, 'a', 30), hut(700, 'b', 5), hut(900, 'b', 5)], [[], [], []], tuned(0)), ticks: 100 };
+    const level = newState(even);
+    level.huts[0].n = 10;
+    advance(level, even, {}, 100);
+    expect(level.winner).toBe('b');
+  });
+
+  it('plays on past the clock only while the leaders are level on units and huts', () => {
+    const board = { ...boardOf([hut(100, 'a', 10), hut(900, 'b', 10)], [[], []], tuned(0)), ticks: 100 };
+    const state = newState(board);
+    advance(state, board, {}, 100);
+    expect(state.winner).toBeNull();
+    advance(state, board, {}, 100 + CLASSIC.tune.overtime);
+    expect([state.winner, state.tick]).toEqual(['draw', 100 + CLASSIC.tune.overtime]);
+    const ahead = newState(board);
+    ahead.huts[1].n = 9;
+    advance(ahead, board, {}, 200);
+    expect([ahead.winner, ahead.tick]).toEqual(['a', 100]);
+  });
+
+  it('stops the computer buying hut levels once nothing breeds', () => {
+    const levelsAfter = (famineAt: number) => {
+      let bought = 0;
+      for (const seed of [1, 2, 3]) {
+        const map = buildMap(seed, 'meadow', ['a', 'b'], undefined, tuned(famineAt));
+        const state = newState(map);
+        let levels = state.huts.map((h) => h.level);
+        advance(state, map, {}, 2400, { a: 0, b: 0 }, (s) => {
+          if (s.tick > 600) bought += s.huts.filter((h, at) => h.level > levels[at]).length;
+          levels = s.huts.map((h) => h.level);
+        });
+      }
+      return bought;
+    };
+    expect(levelsAfter(600)).toBe(0);
+    // The same games with the famine past their end buy hut levels after 600, so the zero above is the famine's doing.
+    expect(levelsAfter(4800)).toBeGreaterThan(0);
+  });
+});
+
 describe('a match with modes and twists', () => {
   const CONFIGS: [string, Rules, number][] = [
     ['blitz', rulesFor('blitz', ['golden']), 2],
@@ -443,6 +618,9 @@ describe('a match with modes and twists', () => {
     ['bounty', rulesFor('bounty', ['comeback']), 2],
     ['egg', EGG, 4],
     ['frenzy', rulesFor('classic', ['frenzy']), 2],
+    ['domination', rulesFor('domination', ['golden']), 3],
+    ['raid', rulesFor('raid'), 4],
+    ['famine', rulesFor('famine', ['comeback']), 2],
   ];
 
   it.each(CONFIGS)('%s plays out the same twice from the same seed', (_, rules, count) => {
@@ -475,12 +653,13 @@ describe('a match with modes and twists', () => {
     const map = buildMap(3, 'thorns');
     const state = newState(map);
     advance(state, map, {}, 1500, { a: 0, b: 0 });
-    expect([state.held, state.leader, state.bounty, state.claimed, state.egg, state.fallen]).toEqual([
+    expect([state.held, state.leader, state.bounty, state.claimed, state.egg, state.fallen, state.points]).toEqual([
       { a: 0, b: 0, c: 0, d: 0 },
       null,
       0,
       { a: 0, b: 0, c: 0, d: 0 },
       -1,
+      { a: 0, b: 0, c: 0, d: 0 },
       { a: 0, b: 0, c: 0, d: 0 },
     ]);
   });

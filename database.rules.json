@@ -386,7 +386,7 @@
           "map": { ".validate": "newData.isString() && newData.val().matches(/^[a-z]{1,12}$/)" },
           "size": { ".validate": "newData.isString() && (newData.val() == 'small' || newData.val() == 'medium' || newData.val() == 'large' || newData.val() == 'huge')" },
           "cpu": { ".validate": "newData.isString() && newData.val().matches(/^a?b?c?d?$/)" },
-          "mode": { ".validate": "newData.isString() && (newData.val() == 'classic' || newData.val() == 'blitz' || newData.val() == 'hill' || newData.val() == 'regicide' || newData.val() == 'bounty' || newData.val() == 'egg' || newData.val() == 'teams' || newData.val() == 'survival')" },
+          "mode": { ".validate": "newData.isString() && (newData.val() == 'classic' || newData.val() == 'blitz' || newData.val() == 'hill' || newData.val() == 'regicide' || newData.val() == 'bounty' || newData.val() == 'egg' || newData.val() == 'teams' || newData.val() == 'survival' || newData.val() == 'domination' || newData.val() == 'raid' || newData.val() == 'famine')" },
           "start": { ".validate": "newData.isString() && (newData.val() == 'home' || newData.val() == 'close' || newData.val() == 'scattered' || newData.val() == 'draft' || newData.val() == 'nests')" },
           "twists": { ".validate": "newData.isString() && newData.val().matches(/^f?o?p?g?z?c?b?q?a?$/)" },
           "tune": { ".validate": "newData.isString() && newData.val().length <= 400 && newData.val().matches(/^[a-z][a-zA-Z]{1,11}=[0-9]{1,4}(;[a-z][a-zA-Z]{1,11}=[0-9]{1,4})*$/)" },

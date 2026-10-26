@@ -56,6 +56,25 @@ describe('modeNotes', () => {
     expect([label(at - 301), label(at - 300), label(at - 1), label(at)]).toEqual([[], ['Golden hut in 30s'], ['Golden hut in 1s'], []]);
   });
 
+  it('gives each side its points and the target, in domination and in a raid', () => {
+    for (const [mode, label] of [['domination', 'Domination, 300 wins'], ['raid', 'Raid, 25 wins']] as const) {
+      const map = mapFor(rulesFor(mode));
+      const state = newState(map);
+      state.points.b = 17;
+      expect(modeNotes(map, state)).toEqual([{ label, sides: [{ seat: 'a', text: '0' }, { seat: 'b', text: '17' }] }]);
+    }
+  });
+
+  it('counts down to the famine to the second, then says nothing breeds', () => {
+    const map = mapFor(rulesFor('famine'));
+    const state = newState(map);
+    const label = (tick: number) => {
+      state.tick = tick;
+      return modeNotes(map, state).map((note) => note.label);
+    };
+    expect([label(0), label(889), label(900), label(901)]).toEqual([['Famine in 90s'], ['Famine in 1s'], ['Famine in 0s'], ['Famine: nothing breeds']]);
+  });
+
   it('shows the frenzy for its last minute only', () => {
     const map = mapFor(rulesFor('classic', ['frenzy']));
     const state = newState(map);
@@ -109,11 +128,31 @@ describe('modeStory', () => {
     expect(modeStory(map, state, NAMES)).toEqual([]);
   });
 
+  it('tells each side\'s points, most first, and leaves out a side with none', () => {
+    const map = mapFor(rulesFor('raid'), ['a', 'b', 'c']);
+    const state = newState(map);
+    state.points = { a: 1, b: 25, c: 0, d: 0 };
+    state.winner = 'b';
+    expect(modeStory(map, state, NAMES)).toEqual(['The bees scored 25 points', 'You scored 1 point']);
+  });
+
+  it('tells when the famine came, once it has', () => {
+    const map = mapFor(rulesFor('famine'));
+    const state = newState(map);
+    state.winner = 'a';
+    state.tick = 900;
+    expect(modeStory(map, state, NAMES)).toEqual([]);
+    state.tick = 901;
+    expect(modeStory(map, state, NAMES)).toEqual(['Nothing bred after 1:30']);
+  });
+
   it('adds nothing in classic, whatever the counters hold', () => {
     const map = mapFor(CLASSIC);
     const state = newState(map);
     state.held.a = 300;
     state.claimed.a = 2;
+    state.points.a = 40;
+    state.tick = 5000;
     state.winner = 'a';
     expect(modeStory(map, state, NAMES)).toEqual([]);
   });

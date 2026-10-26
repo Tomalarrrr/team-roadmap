@@ -8,6 +8,7 @@ import {
   frenzied,
   goldenAt,
   middleOf,
+  starved,
   type Seat,
   type SwarmMap,
   type SwarmState,
@@ -51,6 +52,14 @@ export function modeNotes(map: SwarmMap, state: SwarmState): ModeNote[] {
   if (mode === 'bounty') {
     notes.push(state.leader ? { label: `Bounty +${state.bounty} on`, sides: [{ seat: state.leader, text: '' }] } : { label: 'Bounty: no leader', sides: [] });
   }
+  if (mode === 'domination' || mode === 'raid') {
+    const target = mode === 'domination' ? map.rules.tune.domTarget : map.rules.tune.raidTarget;
+    notes.push({ label: `${mode === 'domination' ? 'Domination' : 'Raid'}, ${target} wins`, sides: map.sides.map((seat) => ({ seat, text: `${state.points[seat]}` })) });
+  }
+  if (mode === 'famine') {
+    const left = map.rules.tune.famineAt - state.tick;
+    notes.push({ label: left >= 0 ? `Famine in ${seconds(left)}s` : 'Famine: nothing breeds', sides: [] });
+  }
   if (twists.includes('golden')) {
     const left = goldenAt(map) - state.tick;
     if (left > 0 && left <= GOLDEN_WARN_TICKS) notes.push({ label: `Golden hut in ${Math.ceil((left * TICK_MS) / 1000)}s`, sides: [] });
@@ -83,6 +92,11 @@ export function modeStory(map: SwarmMap, state: SwarmState, names: Names): strin
     const claimed = map.sides.filter((seat) => state.claimed[seat] > 0).sort((p, q) => state.claimed[q] - state.claimed[p]);
     for (const seat of claimed) lines.push(`${names(seat).name} collected the bounty ${times(state.claimed[seat])}`);
   }
+  if (mode === 'domination' || mode === 'raid') {
+    const scored = map.sides.filter((seat) => state.points[seat] > 0).sort((p, q) => state.points[q] - state.points[p]);
+    for (const seat of scored) lines.push(`${names(seat).name} scored ${state.points[seat]} ${state.points[seat] === 1 ? 'point' : 'points'}`);
+  }
+  if (mode === 'famine' && starved(map, state.tick)) lines.push(`Nothing bred after ${clockAt(map.rules.tune.famineAt)}`);
   // With three sides the egg starts in the middle side's home, and lying there at the end says nothing about who carried it.
   if (mode === 'egg' && winner && eggHome(map, state) === winner && state.egg !== middleOf(map)) {
     lines.push(`${names(winner).name} got the egg home at ${clockAt(state.tick)}`);
@@ -113,5 +127,6 @@ export function modeCallouts(before: SwarmState, after: SwarmState, map: SwarmMa
   }
   if (twists.includes('golden') && !before.huts.some((hut) => hut.gold) && after.huts.some((hut) => hut.gold)) due.push('goldenHut');
   if (!frenzied(map, before.tick) && frenzied(map, after.tick)) due.push('frenzy');
+  if (mode === 'famine' && !starved(map, before.tick) && starved(map, after.tick)) due.push('famine');
   return due;
 }
