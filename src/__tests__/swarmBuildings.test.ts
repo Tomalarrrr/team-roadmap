@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  BUILDINGS,
   BURN_COST,
   BURN_FUSE,
   BURN_TICKS,
@@ -184,6 +185,7 @@ describe('where the buildings go', () => {
   const strip = (map: SwarmMap) => ({ ...map, rules: CLASSIC, sites: map.sites.map((site) => {
       const plain = { ...site };
       delete plain.building;
+      delete plain.arm;
       return plain;
     }) });
 
@@ -221,7 +223,7 @@ describe('where the buildings go', () => {
         }
       }
     }
-    expect([...seen].sort()).toEqual(['barracks', 'beacon', 'granary', 'trap']);
+    expect([...seen].sort()).toEqual([...BUILDINGS].sort());
   });
 
   it('any kind can be the one built where there is room for only one or two', () => {
@@ -233,7 +235,7 @@ describe('where the buildings go', () => {
         if (kinds.size <= 2) for (const kind of kinds) seen.add(kind);
       }
     }
-    expect([...seen].sort()).toEqual(['barracks', 'beacon', 'granary', 'trap']);
+    expect([...seen].sort()).toEqual([...BUILDINGS].sort());
   });
 });
 

@@ -2,7 +2,7 @@
 // The engine keeps one state for every side. What a side cannot see here,
 // a column underground or a trap, is hidden from the eye and nothing else.
 
-import { BURN_FUSE, CLOSED_FOREVER, burnCost, pathLength, pathOf, type Building, type Seat, type SwarmEvent, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
+import { BURN_FUSE, CLOSED_FOREVER, WATCH_REACH, burnCost, pathLength, pathOf, type Building, type Seat, type SwarmEvent, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
 import { TUNNEL_MOUTH } from './swarmSceneGround';
 import { BADGE, PALETTE, PATH_W, crossingsOf, ellipse, fontOf, growOf, pathPoint, siteRadius, type Crossing, type Ctx, type River } from './swarmSceneKit';
 
@@ -124,7 +124,7 @@ function deckOf(map: SwarmMap, crossing: Crossing) {
   return { mid, span: Math.max(50, (crossing.f1 - crossing.f0) * pathLength(map, path.a, path.b) + 22), half: PATH_W.bridge / 2 + 1 };
 }
 
-function flame(ctx: Ctx, x: number, y: number, h: number, sway: number) {
+export function flame(ctx: Ctx, x: number, y: number, h: number, sway: number) {
   ctx.fillStyle = 'rgba(232, 118, 46, 0.9)';
   ctx.beginPath();
   ctx.moveTo(x - h * 0.32, y);
@@ -289,13 +289,91 @@ export function flameIcon(ctx: Ctx) {
   flame(ctx, 0, 4, 14, 1.2);
 }
 
-const BUILT_ICON: Record<Exclude<Building, 'trap'>, (ctx: Ctx) => void> = { barracks: barracksIcon, granary: granaryIcon, beacon: beaconIcon };
+/** A long roof over two doors: one house that holds many. */
+function hallIcon(ctx: Ctx) {
+  ctx.fillStyle = '#9a6b3c';
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(-9, 0);
+  ctx.lineTo(-6, -6);
+  ctx.lineTo(6, -6);
+  ctx.lineTo(9, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#e2d3ae';
+  ctx.fillRect(-7.5, 0, 15, 7);
+  ctx.strokeRect(-7.5, 0, 15, 7);
+  ctx.fillStyle = INK;
+  for (const side of [-1, 1]) ctx.fillRect(side * 3.5 - 1.3, 2.5, 2.6, 4.5);
+}
+
+/** A lookout on four legs, with its platform and rail. */
+function watchIcon(ctx: Ctx) {
+  ctx.strokeStyle = '#6b4a2a';
+  ctx.lineWidth = 1.3;
+  ctx.beginPath();
+  ctx.moveTo(-5, 8);
+  ctx.lineTo(-3, -3);
+  ctx.moveTo(5, 8);
+  ctx.lineTo(3, -3);
+  ctx.moveTo(-4.4, 4);
+  ctx.lineTo(3.6, -1);
+  ctx.moveTo(4.4, 4);
+  ctx.lineTo(-3.6, -1);
+  ctx.stroke();
+  ctx.fillStyle = '#9a6b3c';
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1;
+  ctx.fillRect(-6, -5, 12, 2.4);
+  ctx.strokeRect(-6, -5, 12, 2.4);
+  ctx.beginPath();
+  ctx.moveTo(-5.5, -5);
+  ctx.lineTo(-5.5, -9);
+  ctx.lineTo(5.5, -9);
+  ctx.lineTo(5.5, -5);
+  ctx.stroke();
+}
+
+/** A heap of dug earth with the dark of a hole in its face. */
+function burrowIcon(ctx: Ctx) {
+  ctx.fillStyle = '#8a6a48';
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(-9, 6);
+  ctx.quadraticCurveTo(-7, -7, 0, -7);
+  ctx.quadraticCurveTo(7, -7, 9, 6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#1c1610';
+  ctx.beginPath();
+  ctx.moveTo(-4, 6);
+  ctx.quadraticCurveTo(-4, -1.5, 0, -1.5);
+  ctx.quadraticCurveTo(4, -1.5, 4, 6);
+  ctx.closePath();
+  ctx.fill();
+}
+
+const BUILT_ICON: Record<Exclude<Building, 'trap'>, (ctx: Ctx) => void> = {
+  barracks: barracksIcon,
+  granary: granaryIcon,
+  beacon: beaconIcon,
+  hall: hallIcon,
+  watch: watchIcon,
+  burrow: burrowIcon,
+};
 
 /** What each building does, in one line under it. */
 export const BUILT_LINE: Record<Exclude<Building, 'trap'>, string> = {
   barracks: 'Never breeds. What leaves it or walks through survives one fight',
   granary: 'Never breeds. Your huts next to it hold half as many again',
   beacon: 'Never breeds. What leaves it or walks through goes one speed faster',
+  hall: 'Breeds at half the pace of a hut and holds twice as many',
+  watch: `Never breeds. Your towers next to it reach ${WATCH_REACH} further`,
+  burrow: 'Never breeds. What leaves it or walks through is out of tower reach to the next hut',
 };
 
 /**

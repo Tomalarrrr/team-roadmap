@@ -33,6 +33,7 @@ import {
   type Upgrade,
 } from '../../swarmGameLogic';
 import { SHOT_LAND_MS } from './swarmFeel';
+import { flame } from './swarmSceneBuilt';
 import { TOWER_BALL, TOWER_H, ellipse, pathPoint } from './swarmSceneKit';
 import type { Scene } from './swarmRender';
 
@@ -76,9 +77,10 @@ export function notesOf(map: SwarmMap, state: SwarmState, hut: number): string[]
  */
 export function paceShown(map: SwarmMap, state: SwarmState): (unit: Unit) => number {
   const plain = (unit: Unit) => paceOn(map, unit.from, unit.to, unitSpeed(state, unit), state.tick + 1 <= state.rain);
-  if (!armed(map)) return plain;
+  // A web can stand on the board from the start without the armoury, so it is the webs that are looked for.
   const webs = state.huts.flatMap((hut, at) => (hut.type === 'web' ? [at] : []));
   const held = state.units.filter((unit) => unit.held !== undefined);
+  if (webs.length === 0 && held.length === 0) return plain;
   return (unit) => {
     if (unit.held !== undefined) return 0;
     let pace = plain(unit);
@@ -86,7 +88,7 @@ export function paceShown(map: SwarmMap, state: SwarmState): (unit: Unit) => num
     const caught = webs.some((at) => {
       if (!atWar(map, state.huts[at].owner, at, unit)) return false;
       const site = map.sites[at];
-      return (spot.x - site.x) ** 2 + (spot.y - site.y) ** 2 <= reachOf(map, state.huts[at]) ** 2;
+      return (spot.x - site.x) ** 2 + (spot.y - site.y) ** 2 <= reachOf(map, state, at) ** 2;
     });
     if (caught) pace = Math.max(1, Math.floor((pace * NARROW_PERCENT) / 100));
     for (const ahead of held) {
@@ -109,7 +111,7 @@ export function buildUp(scene: Scene, state: SwarmState): void {
 }
 
 interface Mark {
-  kind: 'blast' | 'bolt' | 'glance' | 'cast';
+  kind: 'blast' | 'bolt' | 'glance' | 'cast' | 'burn';
   x: number;
   y: number;
   /** Where a bolt or a strand of silk came from. */
@@ -118,7 +120,7 @@ interface Mark {
   at: number;
 }
 
-const MARK_MS: Record<Mark['kind'], number> = { blast: 420, bolt: 240, glance: 320, cast: 260 };
+const MARK_MS: Record<Mark['kind'], number> = { blast: 420, bolt: 240, glance: 320, cast: 260, burn: 520 };
 /** How high over the board a shell goes, and how high on its tower it leaves from. */
 const LOB = 120;
 const MUZZLE = TOWER_H + TOWER_BALL;
@@ -134,6 +136,10 @@ export function noteArmoury(scene: Scene, state: SwarmState, events: SwarmEvent[
   // A cannon's ball takes its time to come down, and the shell glances off only when it does.
   for (const shot of state.shots) {
     if (shot.spared) marks.push({ kind: 'glance', x: shot.x, y: shot.y, ...top(shot.tower), at: now + (shot.type ? 0 : SHOT_LAND_MS) });
+    if (shot.type === 'flame') {
+      marks.push({ kind: 'burn', x: shot.x, y: shot.y, ...top(shot.tower), at: now });
+      scene.firedAt[shot.tower] = now;
+    }
   }
   for (const event of events) {
     if (event.kind === 'blast') marks.push({ kind: 'blast', x: event.x, y: event.y, ...top(event.hut), at: now });
@@ -164,7 +170,7 @@ function webOn(map: SwarmMap, state: SwarmState, unit: Unit): number | null {
   state.huts.forEach((hut, at) => {
     if (hut.type !== 'web' || !atWar(map, hut.owner, at, unit)) return;
     const gap = (spot.x - map.sites[at].x) ** 2 + (spot.y - map.sites[at].y) ** 2;
-    if (gap <= reachOf(map, hut) ** 2 && gap < bestGap) {
+    if (gap <= reachOf(map, state, at) ** 2 && gap < bestGap) {
       best = at;
       bestGap = gap;
     }
@@ -175,7 +181,6 @@ function webOn(map: SwarmMap, state: SwarmState, unit: Unit): number | null {
 /** Shells in the air, units in silk, and the marks of shots: over the units, under the counts. */
 export function drawArmoury(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmState, now: number, alpha: number): void {
   const { map } = scene;
-  if (!armed(map)) return;
   const ice = map.scene === 'ice';
   const line = ice ? 'rgba(30, 54, 92, 0.7)' : 'rgba(255, 255, 255, 0.75)';
 
@@ -247,6 +252,10 @@ export function drawArmoury(ctx: CanvasRenderingContext2D, scene: Scene, state: 
       ctx.moveTo(mark.fromX, mark.fromY);
       ctx.lineTo(mark.fromX + (mark.x - mark.fromX) * head, mark.fromY + (mark.y - mark.fromY) * head);
       ctx.stroke();
+    } else if (mark.kind === 'burn') {
+      // A tongue of fire where each one burnt stood, burning down.
+      ctx.globalAlpha = 1 - t;
+      flame(ctx, mark.x, mark.y + 2, 12 * (1 - 0.5 * t), Math.sin(mark.x + now / 90) * 2);
     } else if (mark.kind === 'cast') {
       ctx.globalAlpha = 0.7 * (1 - t);
       ctx.strokeStyle = '#f4f2ea';
@@ -271,8 +280,8 @@ export function drawArmoury(ctx: CanvasRenderingContext2D, scene: Scene, state: 
   ctx.globalAlpha = 1;
 }
 
-/** Iron hoops for each level of armour, and on a refitted tower what it was refitted with, in place of the ball. */
-export function drawKit(ctx: CanvasRenderingContext2D, site: Site, hut: Hut): void {
+/** Iron hoops for each level of armour, and on a tower with a gun other than a cannon that gun, in place of the ball. */
+export function drawKit(ctx: CanvasRenderingContext2D, site: Site, hut: Hut, now: number): void {
   if (!isTower(hut)) return;
   const { x, y } = site;
   ctx.strokeStyle = '#2f3234';
@@ -325,6 +334,28 @@ export function drawKit(ctx: CanvasRenderingContext2D, site: Site, hut: Hut): vo
     ctx.moveTo(cx, cy + 10);
     ctx.lineTo(cx, cy - 12);
     ctx.stroke();
+  } else if (hut.type === 'flame') {
+    // A bowl of fire on the rim, always alight.
+    ctx.fillStyle = '#3a3532';
+    ctx.beginPath();
+    ctx.moveTo(cx - 15, cy - 2);
+    ctx.quadraticCurveTo(cx, cy + 16, cx + 15, cy - 2);
+    ctx.closePath();
+    ctx.fill();
+    flame(ctx, cx, cy - 2, 20, Math.sin(now / 160) * 2.5);
+  } else if (hut.type === 'longgun') {
+    // A long barrel laid over the rim on a block, its mouth out past the tower's side.
+    ctx.fillStyle = '#26292b';
+    ctx.save();
+    ctx.translate(cx, cy + 4);
+    ctx.rotate(-0.32);
+    ctx.fillRect(-14, -3.5, 40, 7);
+    ctx.fillStyle = '#0b0c0d';
+    ellipse(ctx, 26, 0, 2, 3.5);
+    ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#6b4a2a';
+    ctx.fillRect(cx - 9, cy + 4, 14, 8);
   } else {
     // Spokes and a spiral strung over the top.
     ctx.strokeStyle = 'rgba(246, 244, 236, 0.9)';

@@ -123,6 +123,9 @@ export const BURN_AT = 8;
 export const TRAP_EVERY = 2;
 /** How much more, in hundredths of its cap, a hut next to its owner's granary breeds up to. */
 export const GRANARY_EXTRA = 50;
+/** A hall takes this many times a hut's time to breed each unit, and holds this many times its cap. */
+export const HALL_SLOW = 2;
+export const HALL_CAP = 2;
 /** Speed levels a unit out of or through a beacon marches above its army, up to the top level. */
 export const BEACON_STEP = 1;
 
@@ -512,22 +515,26 @@ export interface Site {
   tower?: boolean;
   /** A fort: each of its defenders has to be killed twice. */
   fort?: boolean;
-  /** What the hut was built as, with the buildings twist. */
+  /** What the hut was built as, with the buildings twist or in the editor. */
   building?: Building;
+  /** The gun a tower stands with from the start. Without one it is a cannon. */
+  arm?: GunType;
 }
 
 /**
  * With the buildings twist a few neutral huts are built as something other
  * than a hut. A trap kills every second unit of the column that takes it and
- * is then a hut like any other. The others never breed: a unit that leaves
+ * is then a hut like any other. A hall breeds at half the pace of a hut and
+ * holds twice as many. The others never breed: a unit that leaves
  * or walks on through a barracks lives through the first fight it would die
  * in, one that leaves or walks on through a beacon marches a speed level
- * faster than its army,
- * and the huts next to a granary its owner holds breed up to half as many
- * again.
+ * faster than its army, one that leaves or walks on through a burrow goes
+ * under ground, out of every tower's reach, until it reaches the next hut;
+ * the huts next to a granary its owner holds breed up to half as many
+ * again, and the towers next to a watchtower its owner holds reach further.
  */
-export type Building = 'trap' | 'barracks' | 'granary' | 'beacon';
-export const BUILDINGS: readonly Building[] = ['trap', 'barracks', 'granary', 'beacon'];
+export type Building = 'trap' | 'barracks' | 'granary' | 'beacon' | 'hall' | 'watch' | 'burrow';
+export const BUILDINGS: readonly Building[] = ['trap', 'barracks', 'granary', 'beacon', 'hall', 'watch', 'burrow'];
 
 /** The designed places a game can be played on. Each has one rule of its own. */
 export type MapId = 'meadow' | 'thorns' | 'bridges' | 'guns' | 'hill' | 'crossroads' | 'warren' | 'archipelago' | 'ring' | 'canyon';
@@ -1874,20 +1881,24 @@ function nestStarts({ nests, tune }: Rules, sides: readonly Seat[], homes: reado
 
 /**
  * The buildings twist. A neutral hut and its image at the half-turn, or for
- * four sides its three images, are built as one of a kind: a trap, a
- * barracks, a granary or a beacon, one kind to a group, for up to four groups.
+ * four sides its three images, are built as one of a kind of BUILDINGS, one
+ * kind to a group, for up to BUILT_GROUPS groups, so a game shows some of the
+ * kinds and not always the same ones.
  * Each is a group of huts no side starts in or next to, and that are not
- * towers, forts or the middle; the seed picks the groups and the kinds.
+ * towers, forts or the middle; the seed picks the groups and the kinds. Each
+ * group of towers is then drawn a gun: a cannon, a flame or a long gun.
  * Over 140 two-sided computer games across the maps seat a won 42% with the
- * twist and 41% without, and four sides won 33, 24, 26 and 27 of 112.
+ * twist and 41% without, and four sides won 33, 24, 26 and 27 of 112; that
+ * was with the first four kinds and every tower a cannon.
  */
 function placeBuildings(rnd: () => number, centre: Point, four: boolean, homes: readonly number[], sites: Site[], links: number[][]): void {
   const at = (x: number, y: number) => sites.findIndex((site) => site.x === x && site.y === y);
   const open = (k: number) => !sites[k].owner && !sites[k].tower && !sites[k].fort && homes.every((home) => home !== k && !links[home].includes(k));
+  const imagesOf = (x: number, y: number) =>
+    four ? [at(2 * centre.x - x, 2 * centre.y - y), at(2 * centre.x - x, y), at(x, 2 * centre.y - y)] : [at(2 * centre.x - x, 2 * centre.y - y)];
   const groups: number[][] = [];
   sites.forEach(({ x, y }, k) => {
-    const images = four ? [at(2 * centre.x - x, 2 * centre.y - y), at(2 * centre.x - x, y), at(x, 2 * centre.y - y)] : [at(2 * centre.x - x, 2 * centre.y - y)];
-    const group = [k, ...images];
+    const group = [k, ...imagesOf(x, y)];
     // A hut on a line of the symmetry is its own image and makes no group. Every other group is counted once, from its first hut.
     if (group.every((image, j) => image > k || j === 0) && group.every(open)) groups.push(group);
   });
@@ -1901,10 +1912,21 @@ function placeBuildings(rnd: () => number, centre: Point, four: boolean, homes: 
     const j = Math.floor(rnd() * (k + 1));
     [kinds[k], kinds[j]] = [kinds[j], kinds[k]];
   }
-  groups.slice(0, kinds.length).forEach((group, k) => {
+  groups.slice(0, BUILT_GROUPS).forEach((group, k) => {
     for (const image of group) sites[image] = { ...sites[image], building: kinds[k] };
   });
+  const guns: (GunType | null)[] = [null, 'flame', 'longgun'];
+  sites.forEach(({ x, y, tower }, k) => {
+    const group = [k, ...imagesOf(x, y)];
+    // A group of towers draws once, from its first: every side has to face the same guns.
+    if (!tower || group.some((image) => image < k)) return;
+    const gun = guns[Math.floor(rnd() * guns.length)];
+    if (gun) for (const image of group) sites[image] = { ...sites[image], arm: gun };
+  });
 }
+
+/** How many groups of huts the buildings twist builds on, at the most. */
+export const BUILT_GROUPS = 4;
 
 /** What a tick asks of every unit about the path it is on, worked out once for a map. */
 interface Lanes {
@@ -2005,15 +2027,15 @@ export interface Hut {
   range?: number;
   rate?: number;
   armour?: number;
-  /** What a tower was refitted into. Without one it is the cannon it started as. */
-  type?: TowerType;
+  /** What a tower was refitted into, or the gun it stood with from the start. Without one it is a cannon. */
+  type?: GunType;
   /** A mortar's shell in the air. */
   shell?: Shell;
 }
 
 export const isTower = (hut: Hut): boolean => hut.reload !== undefined;
-/** Every building but a trap. */
-const barren = (hut: Hut): boolean => hut.building !== undefined && hut.building !== 'trap';
+/** Every building but a trap and a hall. */
+const barren = (hut: Hut): boolean => hut.building !== undefined && hut.building !== 'trap' && hut.building !== 'hall';
 
 export interface Unit {
   id: number;
@@ -2032,6 +2054,8 @@ export interface Unit {
   tough?: boolean;
   /** Out of a beacon, or walked on through one: it marches a speed level above its army. */
   fast?: boolean;
+  /** Out of a burrow, or walked on through one: under ground and out of every tower's reach until it reaches a hut. */
+  under?: true;
   /** Part of a decoy column: it kills nothing, takes nothing and is not counted. */
   decoy?: true;
   /** Ticks it is still caught in a web's silk. */
@@ -2092,8 +2116,8 @@ export interface Shot {
   x: number;
   y: number;
   seat: Seat;
-  /** The tower was a mortar or a ballista. */
-  type?: 'mortar' | 'ballista';
+  /** The tower was a mortar, a ballista or a flame. A long gun's shot is drawn as a cannon's. */
+  type?: 'mortar' | 'ballista' | 'flame';
   /** The unit's carapace took the hit, and it walks on. */
   spared?: boolean;
 }
@@ -2159,7 +2183,7 @@ export function newState(map: SwarmMap): SwarmState {
   const speed = map.rules.mode === 'blitz' ? 1 : 0;
   return {
     tick: 0,
-    huts: map.sites.map((s) => ({ owner: s.owner, n: s.n, level: s.level, grow: 0, out: [], ...(s.tower && { reload: 0 }), ...(s.fort && { hurt: 0 }), ...(s.building && { building: s.building }) })),
+    huts: map.sites.map((s) => ({ owner: s.owner, n: s.n, level: s.level, grow: 0, out: [], ...(s.tower && { reload: 0 }), ...(s.tower && s.arm && { type: s.arm }), ...(s.fort && { hurt: 0 }), ...(s.building && { building: s.building }) })),
     units: [],
     army: { a: { speed, strength: 0, luck: 0 }, b: { speed, strength: 0, luck: 0 }, c: { speed, strength: 0, luck: 0 }, d: { speed, strength: 0, luck: 0 } },
     nextId: 1,
@@ -2639,6 +2663,8 @@ function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): 
     unit.d = 0;
     if (hut.building === 'beacon') unit.fast = true;
     if (hut.building === 'barracks') unit.tough = true;
+    if (hut.building === 'burrow') unit.under = true;
+    else delete unit.under;
     return true;
   }
   let alive = true;
@@ -2675,7 +2701,7 @@ function shoot(state: SwarmState, map: SwarmMap): void {
     if (tower.type) return fire(state, map, index);
     const site = map.sites[index];
     let target: { unit: Unit; x: number; y: number } | null = null;
-    let nearest = reachOf(map, tower) * reachOf(map, tower);
+    let nearest = reachOf(map, state, index) * reachOf(map, state, index);
     for (const unit of state.units) {
       if (!atWar(map, tower.owner, index, unit)) continue;
       const { x, y } = spotOf(map, unit);
@@ -2702,13 +2728,24 @@ function shoot(state: SwarmState, map: SwarmMap): void {
 //  mortar    reaches far, and lands its shell where it aimed MORTAR_FLIGHT ticks later, killing all
 //            round. A fast column, spaced out, walks out from under it; one packed by the silk does not.
 //            Blind close in, so a column that gets under it is safe.
-//  ballista  reaches furthest, and its bolt goes through up to BOLT_PIERCE units in line, but loads
+//  ballista  reaches far, and its bolt goes through up to BOLT_PIERCE units in line, but loads
 //            slowly. A column coming at it head on dies in rows; one crossing its line loses one a bolt.
 //  web       kills nothing. Slows all in reach, and holds one unit fast at a time while what follows
 //            it on its path piles up behind. Taken like any hut, since it stops no one getting in.
+//
+// Two more guns are never bought, only found: a tower can stand with one from the start, by the
+// buildings twist's draw or from the map editor.
+//
+//  flame     reaches short, and burns every unit in reach at once, slowly. A packed column dies in
+//            heaps close in; a thin one, or one that keeps out of its short reach, hardly feels it.
+//  long gun  reaches furthest, and shoots the unit furthest from it. It thins a column as it sets
+//            out, and does nothing about the units already at its door.
 
 export type TowerType = 'mortar' | 'ballista' | 'web';
+/** The refits the armoury sells. Each is an order kind, so the list does not grow with the guns that are only found. */
 export const TOWER_TYPES: readonly TowerType[] = ['mortar', 'ballista', 'web'];
+export type GunType = TowerType | 'flame' | 'longgun';
+export const GUN_TYPES: readonly GunType[] = [...TOWER_TYPES, 'flame', 'longgun'];
 export type KitKind = 'range' | 'rate' | 'armour';
 export const KIT_KINDS: readonly KitKind[] = ['range', 'rate', 'armour'];
 /** What a side can buy from the armoury: a tower's kit, its refit, a tower built, the carapace. */
@@ -2735,10 +2772,19 @@ export const BUILD_COST = 30;
 export const CARAPACE_COST = 35;
 /** World units of reach a level of range adds. */
 export const REACH_STEP = 20;
-/** Reach a type has over a cannon's. */
-export const EXTRA_REACH: Record<TowerType, number> = { mortar: 30, ballista: 40, web: 20 };
+/** Reach a type has over a cannon's. A flame's is less. */
+export const EXTRA_REACH: Record<GunType, number> = { mortar: 30, ballista: 40, web: 20, flame: -40, longgun: 90 };
 /** Ticks between two shots, by type, then by rate level. */
-export const RELOADS: Record<TowerType | 'cannon', readonly number[]> = { cannon: [TOWER_RELOAD, 5, 4], mortar: [24, 19, 15], ballista: [16, 13, 10], web: [9, 7, 5] };
+export const RELOADS: Record<GunType | 'cannon', readonly number[]> = {
+  cannon: [TOWER_RELOAD, 5, 4],
+  mortar: [24, 19, 15],
+  ballista: [16, 13, 10],
+  web: [9, 7, 5],
+  flame: [12, 10, 8],
+  longgun: [14, 11, 9],
+};
+/** Reach a tower gains next to a watchtower its owner holds. */
+export const WATCH_REACH = 40;
 /** A mortar fires at nothing nearer than this. */
 export const MORTAR_BLIND = 60;
 /** A mortar's shell kills everything at war with it within this of where it lands. */
@@ -2761,6 +2807,55 @@ export interface Shell {
 
 /** Whether the armoury is in this game. */
 export const armed = (map: SwarmMap): boolean => map.rules.twists.includes('armoury');
+
+/** Every piece a site can stand as. The map editor lays them; the buildings twist draws some of them. */
+export type PieceId = 'hut' | 'cannon' | GunType | 'fort' | Building;
+export const PIECE_IDS: readonly PieceId[] = ['hut', 'cannon', ...GUN_TYPES, 'fort', ...BUILDINGS];
+
+const secs = (ticks: number) => `${(ticks * TICK_MS) / 1000} s`;
+const reach = (gun: GunType | 'cannon') => `Reach ${TOWER_RANGE + (gun === 'cannon' ? 0 : EXTRA_REACH[gun])}.`;
+const every = (gun: GunType | 'cannon') => `every ${secs(RELOADS[gun][0])}`;
+
+/** What each piece does, as the editor shows it: reaches are on a board 1000 across with towers at their standard range. */
+export const PIECES: Record<PieceId, { name: string; about: string }> = {
+  hut: { name: 'Hut', about: 'Breeds units for whoever holds it, up to the cap of its level.' },
+  cannon: { name: 'Cannon tower', about: `Never breeds. Shoots the nearest enemy unit ${every('cannon')}. ${reach('cannon')} Starts with ${TOWER_START} defenders.` },
+  mortar: {
+    name: 'Mortar',
+    about: `Never breeds. Lobs a shell ${every('mortar')} that lands ${secs(MORTAR_FLIGHT)} later and kills every unit within ${MORTAR_SPLASH}. Cannot hit within ${MORTAR_BLIND}. ${reach('mortar')}`,
+  },
+  ballista: { name: 'Ballista', about: `Never breeds. Fires a bolt ${every('ballista')} that kills up to ${BOLT_PIERCE} units in a line. ${reach('ballista')}` },
+  web: {
+    name: 'Web',
+    about: `Never breeds and kills nothing. Holds one unit for ${secs(HOLD_TICKS)} ${every('web')}, and every unit in reach walks at ${NARROW_PERCENT}% pace. ${reach('web')}`,
+  },
+  flame: { name: 'Flame tower', about: `Never breeds. Burns every enemy unit in reach at once, ${every('flame')}. ${reach('flame')}` },
+  longgun: { name: 'Long gun', about: `Never breeds. Shoots the enemy unit furthest from it ${every('longgun')}, so not the ones at its door. ${reach('longgun')}` },
+  fort: { name: 'Fort', about: `Each defender has to be killed ${FORT_LIVES} times. Breeds at 1/${FORT_LIVES} the pace of a hut.` },
+  trap: { name: 'Trap', about: `Looks like a hut. Kills 1 in ${TRAP_EVERY} of the column that takes it, then is a plain hut.` },
+  barracks: { name: 'Barracks', about: 'Never breeds. A unit that leaves it or walks through lives through the first fight it would die in.' },
+  granary: { name: 'Granary', about: `Never breeds. Its owner's huts next to it hold ${GRANARY_EXTRA}% more.` },
+  beacon: { name: 'Beacon', about: 'Never breeds. A unit that leaves it or walks through marches one speed level faster.' },
+  hall: { name: 'Hall', about: `Breeds at 1/${HALL_SLOW} the pace of a hut and holds ${HALL_CAP} times as many.` },
+  watch: { name: 'Watchtower', about: `Never breeds. Its owner's towers next to it reach ${WATCH_REACH} further.` },
+  burrow: { name: 'Burrow', about: "Never breeds. A unit that leaves it or walks through goes under ground, out of every tower's reach, until it reaches the next hut." },
+};
+
+const isGun = (piece: PieceId): piece is GunType => (GUN_TYPES as readonly PieceId[]).includes(piece);
+const isBuilding = (piece: PieceId): piece is Building => (BUILDINGS as readonly PieceId[]).includes(piece);
+
+/**
+ * The site stood as `piece`, keeping where it is and who holds it. A tower of any gun starts as the maps' towers
+ * do, at level 1 with TOWER_START defenders; every other piece keeps the site's count and level.
+ */
+export function withPiece(site: Site, piece: PieceId): Site {
+  const { x, y, owner, n, level } = site;
+  if (piece === 'cannon') return { x, y, owner, n: TOWER_START, level: 1, tower: true };
+  if (isGun(piece)) return { x, y, owner, n: TOWER_START, level: 1, tower: true, arm: piece };
+  if (piece === 'fort') return { x, y, owner, n, level, fort: true };
+  if (isBuilding(piece)) return { x, y, owner, n, level, building: piece };
+  return { x, y, owner, n, level };
+}
 
 /** What the armoury sells from this hut, or null when it sells it none of that. */
 function armouryCost(map: SwarmMap, state: SwarmState, at: number, kind: ArmouryKind): number | null {
@@ -2786,7 +2881,12 @@ function fit(state: SwarmState, hut: Hut, seat: Seat, kind: ArmouryKind): void {
   } else hut.type = kind;
 }
 
-export const reachOf = (map: SwarmMap, tower: Hut): number => map.rules.tune.range + REACH_STEP * (tower.range ?? 0) + (tower.type ? EXTRA_REACH[tower.type] : 0);
+/** How far the tower at `at` shoots: its type's reach, its range kit, and WATCH_REACH more next to a watchtower its owner holds. */
+export function reachOf(map: SwarmMap, state: SwarmState, at: number): number {
+  const tower = state.huts[at];
+  const watched = tower.owner !== null && map.links[at].some((next) => state.huts[next].building === 'watch' && state.huts[next].owner === tower.owner);
+  return map.rules.tune.range + REACH_STEP * (tower.range ?? 0) + (tower.type ? EXTRA_REACH[tower.type] : 0) + (watched ? WATCH_REACH : 0);
+}
 /** A tuned reload stretches every type and rate level by the same share, so a plain cannon reloads at exactly the tuned figure. */
 export const reloadOf = (map: SwarmMap, tower: Hut): number =>
   Math.max(1, Math.round((RELOADS[tower.type ?? 'cannon'][tower.rate ?? 0] * map.rules.tune.reload) / TOWER_RELOAD));
@@ -2809,10 +2909,10 @@ const gapOf = (p: { x: number; y: number }, q: { x: number; y: number }) => (p.x
 
 /**
  * Whether a tower fired by `seat` kills this unit: one of a side not allied to it, or when nobody holds the tower,
- * one marching on it. Nothing in a tunnel is in reach.
+ * one marching on it. Nothing in a tunnel, or under ground out of a burrow, is in reach.
  */
 export const atWar = (map: SwarmMap, seat: Owner, tower: number, unit: Unit): boolean =>
-  map.paths[lanesOf(map).index[unit.from][unit.to]].kind !== 'tunnel' && (seat ? !allied(map, unit.seat, seat) : unit.to === tower);
+  !unit.under && map.paths[lanesOf(map).index[unit.from][unit.to]].kind !== 'tunnel' && (seat ? !allied(map, unit.seat, seat) : unit.to === tower);
 
 /** A tower's hit. A unit with its carapace whole loses it and walks on. Returns whether the unit died. */
 function struck(state: SwarmState, unit: Unit): boolean {
@@ -2828,11 +2928,11 @@ interface Mark {
   gap: number;
 }
 
-/** A refitted tower that is loaded fires, when it has something to fire at. */
+/** A tower with a gun other than a cannon that is loaded fires, when it has something to fire at. */
 function fire(state: SwarmState, map: SwarmMap, index: number): void {
   const tower = state.huts[index];
   const site = map.sites[index];
-  const reach = reachOf(map, tower);
+  const reach = reachOf(map, state, index);
   // Kept in the order the units were made, so of two as good it is the lower id that is picked.
   const near: Mark[] = [];
   for (const unit of state.units) {
@@ -2876,6 +2976,22 @@ function fire(state: SwarmState, map: SwarmMap, index: number): void {
     const out = Math.max(1, Math.floor(Math.sqrt(line)));
     state.events.push({ kind: 'bolt', hut: index, x: site.x + Math.trunc((dx * reach) / out), y: site.y + Math.trunc((dy * reach) / out) });
     if (dead.size > 0) state.units = state.units.filter((unit) => !dead.has(unit));
+  } else if (tower.type === 'flame') {
+    if (near.length === 0) return;
+    const dead = new Set<Unit>();
+    for (const p of near) {
+      const killed = struck(state, p.unit);
+      if (killed) dead.add(p.unit);
+      state.shots.push({ tower: index, x: p.x, y: p.y, seat: p.unit.seat, type: 'flame', ...(!killed && { spared: true }) });
+    }
+    if (dead.size > 0) state.units = state.units.filter((unit) => !dead.has(unit));
+  } else if (tower.type === 'longgun') {
+    // Of two as far, the one made first, which comes first in `near`.
+    const aim = near.reduce<Mark | null>((best, p) => (!best || p.gap > best.gap ? p : best), null);
+    if (!aim) return;
+    const killed = struck(state, aim.unit);
+    if (killed) state.units = state.units.filter((unit) => unit !== aim.unit);
+    state.shots.push({ tower: index, x: aim.x, y: aim.y, seat: aim.unit.seat, ...(!killed && { spared: true }) });
   } else {
     const aim = nearestOf(near, (p) => p.unit.held === undefined);
     if (!aim) return;
@@ -2921,7 +3037,7 @@ function slow(state: SwarmState, map: SwarmMap): void {
     }
     if (webs.length === 0) continue;
     const spot = spotOf(map, unit);
-    const caught = webs.some((at) => atWar(map, state.huts[at].owner, at, unit) && gapOf(spot, map.sites[at]) <= reachOf(map, state.huts[at]) * reachOf(map, state.huts[at]));
+    const caught = webs.some((at) => atWar(map, state.huts[at].owner, at, unit) && gapOf(spot, map.sites[at]) <= reachOf(map, state, at) * reachOf(map, state, at));
     if (caught) walked.set(unit, Math.max(1, Math.floor((walked.get(unit)! * NARROW_PERCENT) / 100)));
   }
   // Of two level, the one made first is in front, so a pile wears free a unit at a time.
@@ -3173,9 +3289,9 @@ function gild(map: SwarmMap, state: SwarmState): void {
   for (const at of open) if (reach(at) === nearest) state.huts[at].gold = true;
 }
 
-/** The most a hut breeds up to: half as many again golden, and GRANARY_EXTRA in a hundred more next to its owner's granary. */
+/** The most a hut breeds up to: HALL_CAP times as many in a hall, half as many again golden, and GRANARY_EXTRA in a hundred more next to its owner's granary. */
 const capOf = (map: SwarmMap, hut: Hut, fed: Set<Hut>): number => {
-  const cap = hutCap(map, hut.level);
+  const cap = hutCap(map, hut.level) * (hut.building === 'hall' ? HALL_CAP : 1);
   return (hut.gold ? Math.floor((cap * GOLD_CAP_PERCENT) / 100) : cap) + (fed.has(hut) ? Math.floor((cap * GRANARY_EXTRA) / 100) : 0);
 };
 
@@ -3183,7 +3299,8 @@ const capOf = (map: SwarmMap, hut: Hut, fed: Set<Hut>): number => {
  * Ticks between two units born in a hut of `seat` under the match's rules, or
  * null while it breeds nothing at all. A blitz breeds in seven tenths of the
  * time; a side two huts or more behind the leader, with the comeback twist, in
- * four fifths; everyone in half in a frenzy; and a golden hut in a third.
+ * four fifths; everyone in half in a frenzy; a golden hut in a third; and a
+ * hall in twice the time.
  * With the queens twist a side that has lost its home breeds nowhere until it
  * takes it back.
  */
@@ -3203,6 +3320,7 @@ function breeding(map: SwarmMap, state: SwarmState): (seat: Seat, hut: Hut) => n
     if (behind.includes(seat)) every = Math.floor((every * COMEBACK_GROW_PERCENT) / 100);
     if (frenzy) every = Math.ceil(every / FRENZY_GROW_DIVISOR);
     if (hut.gold) every = Math.ceil(every / GOLD_GROW_DIVISOR);
+    if (hut.building === 'hall') every *= HALL_SLOW;
     return Math.max(1, every);
   };
 }
@@ -3524,6 +3642,7 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
           ...(line.risky && { risky: true }),
           ...(hut.building === 'barracks' && { tough: true }),
           ...(hut.building === 'beacon' && { fast: true }),
+          ...(hut.building === 'burrow' && { under: true }),
         });
         if (egg && index === state.egg) carry(map, state, egg);
       }
@@ -3883,8 +4002,8 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     const last = way.paths[way.paths.length - 1];
     const pace = paceOf(map, map.paths[last], to, army.speed, state.rain >= tick);
     // A column is under a tower's fire while it walks past, and a tower it marches on fires while the column leaves and walks in.
-    for (const tower of towers) lost += fireOn(state, map, seat, huts[tower], n, pace, 2);
-    if (isTower(huts[to])) lost += fireOn(state, map, seat, huts[to], n, pace, 1);
+    for (const tower of towers) lost += fireOn(state, map, seat, tower, n, pace, 2);
+    if (isTower(huts[to])) lost += fireOn(state, map, seat, to, n, pace, 1);
     return Math.min(n, lost);
   };
 
@@ -3993,7 +4112,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const leading = leader && (leader.huts > mineCount.huts || (leader.huts === mineCount.huts && leader.units > mineCount.units));
   const worth = (to: number) => {
     const hut = huts[to];
-    let value = isTower(hut) ? 1.5 : barren(hut) ? builtWorth(state, map, to, seat) : 10 / growTicks(map, hut.level);
+    let value = isTower(hut) ? 1.5 : barren(hut) ? builtWorth(state, map, to, seat) : 10 / (growTicks(map, hut.level) * (hut.building === 'hall' ? HALL_SLOW : 1));
     if (map.sites[to].fort) value += 0.5;
     value *= 1 + 0.1 * Math.max(0, map.links[to].length - 2);
     if (hut.owner) {
@@ -4214,7 +4333,9 @@ function powerOrders(state: SwarmState, map: SwarmMap, seat: Seat, tick: number,
  * What a building is worth to the computer next to what a hut breeding one
  * unit every 10 ticks is (1). None of them breeds. A barracks doubles what
  * goes out of it, a granary is worth a third more for each hut of the
- * computer's it would feed, and a beacon is a quicker way to the front.
+ * computer's it would feed, a watchtower half more for each of its towers
+ * it would lengthen, and a beacon and a burrow are quicker or safer ways to
+ * the front. A hall breeds, and is worth what its pace is worth.
  *
  * None of them is worth as much as the plain hut it stands in for. Over 700
  * two-sided computer games on medium ground with the pair's far half made a
@@ -4223,11 +4344,14 @@ function powerOrders(state: SwarmState, map: SwarmMap, seat: Seat, tick: number,
  * less (0.3 each) or more (4 each) moved that by three points at most, and a
  * granary feeding twice the extra did not move it at all: huts in play seldom
  * reach their cap. So they are a choice to make, never a hut to take first.
+ * The watchtower's and the burrow's worths are set to match and have not been
+ * benched.
  */
 function builtWorth(state: SwarmState, map: SwarmMap, at: number, seat: Seat): number {
   const building = state.huts[at].building;
   if (building === 'barracks') return 2;
   if (building === 'granary') return map.links[at].filter((next) => state.huts[next].owner === seat).length / 3;
+  if (building === 'watch') return map.links[at].filter((next) => state.huts[next].owner === seat && isTower(state.huts[next])).length / 2;
   return 1;
 }
 
@@ -4277,25 +4401,30 @@ function burnsOf(state: SwarmState, map: SwarmMap, seat: Seat, tick: number): Or
 /** For each path, the towers on the board as it stands now that can shoot a unit somewhere on it, each at its own reach. */
 function armouryCover(state: SwarmState, map: SwarmMap): number[][] {
   const towers = state.huts.flatMap((hut, at) => (isTower(hut) ? [at] : []));
-  return map.paths.map((path) => towers.filter((at) => reaches(map, path, map.sites[at], reachOf(map, state.huts[at]))));
+  return map.paths.map((path) => towers.filter((at) => reaches(map, path, map.sites[at], reachOf(map, state, at))));
 }
 
 /**
  * What a column of n of `seat` walking at `pace` loses to a tower whose reach
  * it walks `passes` times across: a shot each reload, a kill a shot, but a
  * shell lands on as many of the column as fit under it, a bolt goes through
- * as many as it can, and a web kills none.
+ * as many as it can, a flame burns as many as are in its reach at once, and a
+ * web kills none.
  * Carapace makes each kill take two hits.
  */
-function fireOn(state: SwarmState, map: SwarmMap, seat: Seat, tower: Hut, n: number, pace: number, passes: number): number {
+function fireOn(state: SwarmState, map: SwarmMap, seat: Seat, at: number, n: number, pace: number, passes: number): number {
+  const tower = state.huts[at];
   if (tower.type === 'web') return 0;
-  const shots = Math.ceil((n * RELEASE_TICKS + (passes * reachOf(map, tower)) / pace) / reloadOf(map, tower));
+  const reach = reachOf(map, state, at);
+  const shots = Math.ceil((n * RELEASE_TICKS + (passes * reach) / pace) / reloadOf(map, tower));
   const kills =
     tower.type === 'mortar'
       ? shots * Math.min(n, Math.ceil((2 * MORTAR_SPLASH) / (pace * RELEASE_TICKS)))
       : tower.type === 'ballista'
         ? Math.min(n, BOLT_PIERCE) * shots
-        : shots;
+        : tower.type === 'flame'
+          ? shots * Math.min(n, Math.ceil((2 * reach) / (pace * RELEASE_TICKS)))
+          : shots;
   return state.army[seat].carapace ? Math.ceil(kills / 2) : kills;
 }
 
@@ -4322,7 +4451,7 @@ function kitUp(state: SwarmState, map: SwarmMap, seat: Seat, at: number, keep: n
   const order = (kind: ArmouryKind): Order[] => (affords(kind) ? [{ tick, kind, from: at, to: at }] : []);
   if (!tower.type) {
     // Near enough that the reach of one tower overlaps a cannon's about the other.
-    const near = (k: number, to: number) => state.huts[k].owner === seat && !far(map.sites[k], map.sites[to], reachOf(map, state.huts[k]) + map.rules.tune.range);
+    const near = (k: number, to: number) => state.huts[k].owner === seat && !far(map.sites[k], map.sites[to], reachOf(map, state, k) + map.rules.tune.range);
     const killer = state.huts.findIndex((hut, k) => (hut.type === 'mortar' || hut.type === 'ballista') && near(k, at));
     if (killer >= 0 && !state.huts.some((hut, k) => hut.type === 'web' && near(killer, k))) return order('web');
     let head = 0;

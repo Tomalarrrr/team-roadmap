@@ -10,6 +10,8 @@ import { pathPoint } from './swarmSceneKit';
 /** World units a side sees round each of its huts, and round each of its units. */
 export const SIGHT_HUT = 160;
 export const SIGHT_UNIT = 90;
+/** How far a watchtower sees for its owner. */
+export const SIGHT_WATCH = 320;
 /**
  * What was seen last tick stays seen this much further out. Without it a unit
  * walking along the edge of sight, or a hut on it while one of the viewer's
@@ -73,7 +75,7 @@ export function newFog(map: SwarmMap, seat: Seat): Fog | null {
 function eyesOf(map: SwarmMap, state: SwarmState, sides: readonly Seat[]): Eye[] {
   const eyes: Eye[] = [];
   state.huts.forEach((hut, at) => {
-    if (hut.owner && sides.includes(hut.owner)) eyes.push({ x: map.sites[at].x, y: map.sites[at].y, r: SIGHT_HUT });
+    if (hut.owner && sides.includes(hut.owner)) eyes.push({ x: map.sites[at].x, y: map.sites[at].y, r: hut.building === 'watch' ? SIGHT_WATCH : SIGHT_HUT });
   });
   const taken = new Set<number>();
   for (const unit of state.units) {

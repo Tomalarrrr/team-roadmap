@@ -357,7 +357,7 @@ export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[],
   feelStep(scene.feel, scene.map, state, seat, now);
   builtEvents(scene.built, state, events, now, seat);
   for (const shot of state.shots) {
-    // A mortar's or a ballista's kill is drawn by swarmArmoury as its shell or its bolt.
+    // A mortar's, a ballista's or a flame's kill is drawn by swarmArmoury as its shell, its bolt or its fire.
     if (shot.type) continue;
     scene.fx.push({ kind: 'shot', x: shot.x, y: shot.y, at: now, seat: shot.seat, tower: shot.tower });
     scene.firedAt[shot.tower] = now;
@@ -1154,7 +1154,7 @@ function drawRanges(ctx: CanvasRenderingContext2D, map: SwarmMap, state: SwarmSt
   ctx.strokeStyle = map.scene === 'ice' ? 'rgba(30, 54, 92, 0.6)' : 'rgba(255, 255, 255, 0.6)';
   state.huts.forEach((hut, index) => {
     if (!isTower(hut) || allied(map, hut.owner, view.seat) || view.sight?.unseen.has(index)) return;
-    ellipse(ctx, map.sites[index].x, map.sites[index].y, reachOf(map, hut), reachOf(map, hut));
+    ellipse(ctx, map.sites[index].x, map.sites[index].y, reachOf(map, state, index), reachOf(map, state, index));
     ctx.stroke();
     drawBlind(ctx, map.sites[index], hut);
   });
@@ -1180,6 +1180,8 @@ interface Marcher {
 
 /** How strongly the viewer's own decoys are drawn: they are there, and the viewer is not to take them for an army. */
 const DECOY_FAINT = 0.45;
+/** How strongly a unit out of a burrow is drawn while it is under ground and no tower can reach it. */
+const UNDER_FAINT = 0.5;
 
 /** How much wider than the path's own column a column of bees flies: the banks of a track do not hem in what is over them. */
 const BEE_ROOM = 2.5;
@@ -1224,7 +1226,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       y: p.y + Math.cos(p.angle) * lane,
       angle,
       d,
-      out: unit.decoy && unit.seat === view.seat ? out * DECOY_FAINT : out,
+      out: out * (unit.decoy && unit.seat === view.seat ? DECOY_FAINT : 1) * (unit.under ? UNDER_FAINT : 1),
       id: unit.id,
       own,
       size: UNIT_SCALE * (0.92 + ((own >>> 8) % 9) * 0.02),
@@ -1285,7 +1287,7 @@ function drawStanding(ctx: CanvasRenderingContext2D, scene: Scene, state: SwarmS
       ctx.drawImage(sprite.canvas, sprite.left / painted, site.y - (site.y - sprite.top / painted) * stand, sprite.canvas.width / painted, (sprite.canvas.height / painted) * stand);
     }
     drawFlags(ctx, map.scene, site, shown, shown && scene.kinds[shown], hut.level, view.now);
-    drawKit(ctx, site, hut);
+    drawKit(ctx, site, hut, view.now);
   }
 
   // A bee flies, so its shadow is on the ground below and it is drawn above it. They do not all fly at one height.
