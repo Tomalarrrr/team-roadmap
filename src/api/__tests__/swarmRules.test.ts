@@ -215,10 +215,11 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), `${M}/third`, true)).toBe(false);
   });
 
-  it('takes one of the eight modes and five starts', () => {
-    for (const mode of ['classic', 'blitz', 'hill', 'regicide', 'bounty', 'egg', 'teams', 'survival']) expect(allowed(db(waitingRoom()), `${M}/mode`, mode)).toBe(true);
+  it('takes one of the eleven modes and five starts', () => {
+    for (const mode of ['classic', 'blitz', 'hill', 'regicide', 'bounty', 'egg', 'teams', 'survival', 'domination', 'raid', 'famine']) expect(allowed(db(waitingRoom()), `${M}/mode`, mode)).toBe(true);
     for (const start of ['home', 'close', 'scattered', 'draft', 'nests']) expect(allowed(db(waitingRoom()), `${M}/start`, start)).toBe(true);
     expect(allowed(db(waitingRoom()), `${M}/mode`, 'warren')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/mode`, 'famined')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/mode`, 1)).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/start`, 'middle')).toBe(false);
   });

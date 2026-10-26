@@ -307,6 +307,18 @@ describe('calloutsFor under a mode or twist', () => {
     const on = { ...start, tick: 401 };
     expect(calloutsFor(on, after(on, () => {}), map, 'b', false)).toEqual([]);
   });
+
+  it('calls the famine once, on the first tick nothing breeds, and only in a famine', () => {
+    for (const [mode, said] of [['famine', ['famine']], ['classic', []]] as const) {
+      const map = ruled({ ...RULES(mode), tune: { ...CLASSIC.tune, famineAt: 300 } });
+      const fed = { ...newState(map), tick: 299 };
+      const last = after(fed, () => {});
+      expect(calloutsFor(fed, last, map, 'a', false), mode).toEqual([]);
+      expect(calloutsFor(last, after(last, () => {}), map, 'a', false), mode).toEqual(said);
+      const starving = { ...last, tick: 301 };
+      expect(calloutsFor(starving, after(starving, () => {}), map, 'a', false), mode).toEqual([]);
+    }
+  });
 });
 
 describe('the callout queue', () => {

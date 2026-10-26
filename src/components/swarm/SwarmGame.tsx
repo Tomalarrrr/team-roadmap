@@ -196,6 +196,9 @@ const MODES: Record<ModeId, { name: string; about: string }> = {
   egg: { name: 'Egg', about: 'An egg lies in the middle hut and goes with the first unit sent out of it. Get it into your home hut to win.' },
   teams: { name: 'Teams', about: 'Four sides, two teams of neighbours. Allies never fight, and a team is out when both its sides are.' },
   survival: { name: 'Survival', about: 'People against the computer. Each minute its huts gain 3 units, then 6, then 9 and on. Last to the clock to win.' },
+  domination: { name: 'Domination', about: 'Every 5 seconds each side scores the levels of the huts it holds, 1 to 3 a hut; towers score nothing. First to 300 points wins, or the most points at the clock.' },
+  raid: { name: 'Raid', about: 'Taking a hut from another side scores its level, 1 to 3. A neutral hut or a tower scores nothing. First to 25 points wins, or the most points at the clock.' },
+  famine: { name: 'Famine', about: 'After 1 minute 30 seconds no hut breeds again. Every unit lost is gone for good, and at the clock the side with the most units wins.' },
 };
 
 /** What each start gives a side on the first tick. */

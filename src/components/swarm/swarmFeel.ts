@@ -81,6 +81,7 @@ export type CalloutKey =
   | 'eggTaken'
   | 'goldenHut'
   | 'frenzy'
+  | 'famine'
   | MomentumKey;
 
 /** Most pressing first: when several are due at once, bad news is read before good. */
@@ -97,6 +98,7 @@ export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'hillLost',
   'eggLost',
   'flagRaised',
+  'famine',
   'frenzy',
   'goldenHut',
   'towerTaken',
@@ -135,6 +137,7 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   eggTaken: 'Egg taken',
   goldenHut: 'Golden hut',
   frenzy: 'Frenzy',
+  famine: 'Famine',
 };
 
 /** Enemy units on the road to the viewer's home before it is called a column. */
@@ -249,6 +252,8 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   eggTaken: 6000,
   goldenHut: 20000,
   frenzy: 20000,
+  // It comes once a game.
+  famine: 0,
 };
 
 /** A callout waiting or up, with the words it is said in when they carry a number. */

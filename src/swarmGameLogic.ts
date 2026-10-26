@@ -130,6 +130,28 @@ export const BEACON_STEP = 1;
 export const MINUTE_TICKS = 60000 / TICK_MS;
 
 /**
+ * Domination's and raid's points to win, untuned: what the leader reaches in
+ * about half of computer games before a side is wiped out, so the points end a
+ * game about as often as the fighting does. Played by computers to the end
+ * with no target, over every map for 2, 3 and 4 sides, seeds 1 to 3
+ * (2026-10-26), the leader got to 250 domination points before the end in 60
+ * of 90 games, 300 in 47 and 350 in 31; to 20 raid points in 66, 25 in 42 and
+ * 30 in 33. With four sides a raid gets there far more often (25 of 30 games)
+ * than with two (9 of 30): more sides, more huts to take from someone.
+ */
+const DOM_TARGET_STANDARD = 300;
+const RAID_TARGET_STANDARD = 25;
+/**
+ * The famine's tick, untuned: 1:30, early enough to come in nearly every game
+ * and late enough that it rarely freezes one. Computers wipe each other out
+ * in about 2 minutes (median tick 1220), so a later famine is mostly never
+ * reached. Over the same games, with it at 600, 900, 1200, 1800 and 2400, 87,
+ * 77, 48, 10 and 3 of 90 were still on when it came, and 52, 21, 8, 4 and 3
+ * went to the clock.
+ */
+const FAMINE_STANDARD = 900;
+
+/**
  * The numbers a host can tune for a match, one line each. Every value is a
  * whole number held between `min` and `max`, and `standard` is the game as it
  * is untuned, so a match that stores none plays unit for unit as before.
@@ -159,6 +181,9 @@ export const KNOBS = [
    * In classic it lost 11.
    */
   { id: 'bountyMost', on: 'bounty', label: 'Bounty cap', unit: '', min: 10, max: 50, standard: 20, about: 'The most the bounty on the leader grows to.' },
+  { id: 'domTarget', on: 'domination', label: 'Points to win', unit: '', min: 100, max: 2000, standard: DOM_TARGET_STANDARD, about: 'Points that win a domination game: every 5 seconds each side scores the levels of the huts it holds.' },
+  { id: 'raidTarget', on: 'raid', label: 'Points to win', unit: '', min: 5, max: 60, standard: RAID_TARGET_STANDARD, about: 'Points that win a raid: taking a hut from another side scores its level.' },
+  { id: 'famineAt', on: 'famine', label: 'Famine at', unit: ' tenths', min: 300, max: 4800, standard: FAMINE_STANDARD, about: 'Tenths of a second in when every hut stops breeding for good.' },
   { id: 'goldenAt', on: 'golden', label: 'Gold at', unit: ' tenths', min: 600, max: 4800, standard: 1800, about: 'Tenths of a second in when the middle huts turn golden. A blitz still turns them 30% of the way through.' },
   { id: 'floodEvery', on: 'flood', label: 'Flood every', unit: ' tenths', min: 150, max: 600, standard: 300, about: 'Tenths of a second between two rings going under.' },
   { id: 'floodKeep', on: 'flood', label: 'Flood leaves', unit: '%', min: 20, max: 70, standard: 40, about: 'The share of huts the flood leaves standing.' },
@@ -236,6 +261,8 @@ export const CROWN_UNITS = 20;
  * top of the one unit that took it, and a unit more for every BOUNTY_GROWS ticks nobody has, up to BOUNTY_MOST.
  */
 export const BOUNTY_EVERY = 50;
+/** Domination scores every side the levels of the huts it holds this often: every 5 seconds. */
+export const DOMINATION_EVERY = 50;
 export const BOUNTY = 10;
 export const BOUNTY_GROWS = 10;
 /** Three minutes in, or three tenths of the way through a blitz, the huts nearest the middle turn golden. */
@@ -296,8 +323,8 @@ export function kindsOf(match: Pick<SwarmMatch, 'players'>, sides: readonly Seat
 }
 
 /** What a game is played for. Classic is the game as it has always been: hold the most huts. */
-export type ModeId = 'classic' | 'blitz' | 'hill' | 'regicide' | 'bounty' | 'egg' | 'teams' | 'survival';
-export const MODE_IDS: readonly ModeId[] = ['classic', 'blitz', 'hill', 'regicide', 'bounty', 'egg', 'teams', 'survival'];
+export type ModeId = 'classic' | 'blitz' | 'hill' | 'regicide' | 'bounty' | 'egg' | 'teams' | 'survival' | 'domination' | 'raid' | 'famine';
+export const MODE_IDS: readonly ModeId[] = ['classic', 'blitz', 'hill', 'regicide', 'bounty', 'egg', 'teams', 'survival', 'domination', 'raid', 'famine'];
 /** What each side holds on the first tick. Home is the map's own start. */
 export type StartId = 'home' | 'close' | 'scattered' | 'draft' | 'nests';
 export const START_IDS: readonly StartId[] = ['home', 'close', 'scattered', 'draft', 'nests'];
@@ -2134,6 +2161,8 @@ export interface SwarmState {
   egg: number;
   /** Regicide: the tick each side's queen fell on, 0 while she stands. */
   fallen: Record<Seat, number>;
+  /** Domination and raid: each side's points, 0 in every other mode. */
+  points: Record<Seat, number>;
   /** The bridges on fire, in the order they were lit. */
   fuses: Fuse[];
   /** With the powers twist, the powers each side has used. */
@@ -2177,6 +2206,7 @@ export function newState(map: SwarmMap): SwarmState {
     claimed: { a: 0, b: 0, c: 0, d: 0 },
     egg: map.rules.mode === 'egg' ? middleOf(map) : -1,
     fallen: { a: 0, b: 0, c: 0, d: 0 },
+    points: { a: 0, b: 0, c: 0, d: 0 },
     fuses: [],
     powers: { a: [], b: [], c: [], d: [] },
     rain: 0,
@@ -2205,6 +2235,7 @@ export function cloneState(state: SwarmState): SwarmState {
     claimed: { ...state.claimed },
     egg: state.egg,
     fallen: { ...state.fallen },
+    points: { ...state.points },
     fuses: state.fuses.map((fuse) => ({ ...fuse })),
     powers: { a: state.powers.a.slice(), b: state.powers.b.slice(), c: state.powers.c.slice(), d: state.powers.d.slice() },
     rain: state.rain,
@@ -2650,6 +2681,7 @@ function arrive(state: SwarmState, map: SwarmMap, unit: Unit, closed?: Closed): 
   state.events.push({ kind: 'hit', hut: unit.to });
   if (!alive) return false;
   const bounty = claim(state, unit.seat, hut);
+  if (map.rules.mode === 'raid' && hut.owner !== null && !isTower(hut)) state.points[unit.seat] += hut.level;
   // A hut in the way of a longer march is taken like any other, and the rest
   // of the column then walks through it.
   hut.owner = unit.seat;
@@ -3196,8 +3228,9 @@ function breeding(map: SwarmMap, state: SwarmState): (seat: Seat, hut: Hut) => n
     const held = map.sides.map((side) => countOf(state, side).huts);
     behind = map.sides.filter((_, k) => held[k] <= Math.max(...held) - COMEBACK_GAP);
   }
+  const famished = mode === 'famine' && starved(map, state.tick);
   return (seat, hut) => {
-    if (queenless.includes(seat)) return null;
+    if (famished || queenless.includes(seat)) return null;
     let every = growTicks(map, hut.level);
     if (mode === 'blitz') every = Math.floor((every * BLITZ_GROW_PERCENT) / 100);
     if (behind.includes(seat)) every = Math.floor((every * COMEBACK_GROW_PERCENT) / 100);
@@ -3206,6 +3239,9 @@ function breeding(map: SwarmMap, state: SwarmState): (seat: Seat, hut: Hut) => n
     return Math.max(1, every);
   };
 }
+
+/** Famine: whether `tick` comes after the last tick anything breeds on. */
+export const starved = (map: SwarmMap, tick: number): boolean => tick > map.rules.tune.famineAt;
 
 /** With the queens twist, the sides that have lost their home and breed nowhere until they take it back. */
 export const queenlessOf = (map: SwarmMap, state: SwarmState): Seat[] =>
@@ -3291,13 +3327,25 @@ function score(map: SwarmMap, state: SwarmState, egg: EggWatch | null): void {
     if (state.tick % BOUNTY_EVERY === 0) state.leader = leaderOf(map, state);
     if (state.leader && state.tick % BOUNTY_GROWS === 0 && state.bounty < map.rules.tune.bountyMost) state.bounty++;
   }
+  if (mode === 'domination' && state.tick % DOMINATION_EVERY === 0) {
+    for (const hut of state.huts) if (hut.owner && !isTower(hut)) state.points[hut.owner] += hut.level;
+  }
+  if (mode === 'domination' || mode === 'raid') {
+    const target = mode === 'domination' ? map.rules.tune.domTarget : map.rules.tune.raidTarget;
+    const there = map.sides.filter((side) => state.points[side] >= target).map((side) => ({ side, ...countOf(state, side) }));
+    // Two can get there on one tick: the most points take it, then the most huts and units, and the very same is a draw.
+    there.sort((p, q) => state.points[q.side] - state.points[p.side] || q.huts - p.huts || q.units - p.units);
+    const [first, second] = there;
+    if (first) state.winner = second && state.points[second.side] === state.points[first.side] && second.huts === first.huts && second.units === first.units ? 'draw' : first.side;
+  }
   if (egg) settleEgg(map, state, egg);
 }
 
 /**
  * The game ends when one side is left, or on the clock, when the side holding
  * the most huts, then the most units, takes it. A tie at the top is a draw.
- * The top two level on huts at the clock play on in overtime, until a hut
+ * Hill's time, and domination's and raid's points, count before huts; in a
+ * famine units count before huts. The top two level on huts at the clock play on in overtime, until a hut
  * changes hands and one of them is ahead, for at most OVERTIME_TICKS; units
  * decide only after that. When every person in it is beaten or gone it is
  * called the same way there and then: nobody is left to watch the computers
@@ -3313,10 +3361,13 @@ function judge(state: SwarmState, map: SwarmMap, cpu: Computer): void {
   if (counts.length <= 1) {
     state.winner = counts.length === 1 ? counts[0].side : 'draw';
   } else if (state.tick >= map.ticks || nobody) {
-    counts.sort((p, q) => q.huts - p.huts || q.units - p.units);
-    if (map.rules.mode === 'hill') counts.sort((p, q) => state.held[q.side] - state.held[p.side]);
+    const { mode } = map.rules;
+    // Hill's time and the points of domination and raid come first, and are 0 for everyone in every other mode.
+    const mark = (side: Seat) => (mode === 'hill' ? state.held[side] : state.points[side]);
+    if (mode === 'famine') counts.sort((p, q) => q.units - p.units || q.huts - p.huts);
+    else counts.sort((p, q) => mark(q.side) - mark(p.side) || q.huts - p.huts || q.units - p.units);
     const [first, second] = counts;
-    const level = first.huts === second.huts && state.held[first.side] === state.held[second.side];
+    const level = first.huts === second.huts && mark(first.side) === mark(second.side) && (mode !== 'famine' || first.units === second.units);
     if (level && !nobody && state.tick < lastTick(map)) return;
     state.winner = level && first.units === second.units ? 'draw' : first.side;
   }
@@ -3733,6 +3784,13 @@ function stakesOf(map: SwarmMap, state: SwarmState, seat: Seat, closed?: Closed)
   if (mode === 'bounty' && state.leader !== null && state.leader !== seat) {
     for (const at of huts.keys()) if (huts[at].owner === state.leader && !isTower(huts[at])) worth[at] *= 1 + state.bounty / 20;
   }
+  // A hut scores its level, each 5 seconds held in domination and once taken in a raid, so a level 3 is worth three level 1s.
+  if (mode === 'domination') {
+    for (const at of huts.keys()) if (theirs(at) && !isTower(huts[at])) worth[at] *= huts[at].level;
+  }
+  if (mode === 'raid') {
+    for (const at of huts.keys()) if (theirs(at) && huts[at].owner !== null && !isTower(huts[at])) worth[at] *= 1 + huts[at].level;
+  }
   if (mode === 'egg') {
     for (const unit of state.units) {
       if (!unit.egg || unit.seat === seat) continue;
@@ -4060,7 +4118,9 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   };
 
   let bought = false;
-  const buy = (at: number, margin: number, hut = true) => {
+  // In a famine a hut's level is worth nothing once nothing breeds.
+  const grows = map.rules.mode !== 'famine' || !starved(map, tick);
+  const buy = (at: number, margin: number, hut = grows) => {
     const speedFirst = army.speed < army.strength || (army.speed === army.strength && !temper.strong);
     const order: Upgrade[] = speedFirst ? ['hut', 'speed', 'strength'] : ['hut', 'strength', 'speed'];
     if (armed(map) && shellUp(state, map, seat)) order.splice(1, 0, 'carapace');
@@ -4081,7 +4141,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     if (!front.includes(at)) {
       // A builder grows the huts behind its front when it can pay for it, and otherwise does what the others do: a builder that sat
       // saving up for the next level won 79 of 195 games against one that did not, and 95 of 195 once it stopped.
-      if (temper.builder && hut.level < MAX_HUT_LEVEL && free(at) >= tunedCost(map, HUT_COST[hut.level - 1]) + 4) {
+      if (temper.builder && grows && hut.level < MAX_HUT_LEVEL && free(at) >= tunedCost(map, HUT_COST[hut.level - 1]) + 4) {
         if (!bought) buy(at, 4);
       } else {
         const upgraded = !bought && buy(at, 4, false);
