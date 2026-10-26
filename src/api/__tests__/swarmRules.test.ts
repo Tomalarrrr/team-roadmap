@@ -225,7 +225,11 @@ describe('the swarm rules: who sits where', () => {
   });
 
   it('holds the twists to one letter each in their order', () => {
-    expect(allowed(db(waitingRoom()), `${M}/twists`, 'fopgzcbqa')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'fopgzcbqaw')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'w')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'bw')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'wb')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/twists`, 'ww')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/twists`, 'a')).toBe(true);
     expect(allowed(db(waitingRoom()), `${M}/twists`, 'af')).toBe(false);
     expect(allowed(db(waitingRoom()), `${M}/twists`, 'fq')).toBe(true);

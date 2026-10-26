@@ -30,6 +30,7 @@ import {
   SIZE_IDS,
   START_IDS,
   TWISTS,
+  WALLS_MOST,
   WORLDS,
   advance,
   buildMap,
@@ -330,6 +331,12 @@ function checkState(state: SwarmState, map: SwarmMap): void {
   }
   if (state.tolls.length !== map.paths.length || state.tolls.some((toll) => toll < 0)) bad(`tolls ${state.tolls}`);
   if (state.closed.length !== map.paths.length || state.closed.some((until) => until < 0 || until > CLOSED_FOREVER)) bad(`closed ${state.closed}`);
+  for (const wall of state.walls) {
+    if (!map.rules.twists.includes('walls') || !map.paths[wall.path] || !map.sides.includes(wall.seat) || wall.hp < 1 || wall.hp > map.rules.tune.wallHp) bad(`wall ${JSON.stringify(wall)}`);
+    if (state.walls.filter((one) => one.path === wall.path).length > 1) bad(`two walls on path ${wall.path}`);
+    if (state.closed[wall.path] >= state.tick) bad(`wall on closed path ${wall.path}`);
+  }
+  for (const seat of SEATS) if (state.walls.filter((wall) => wall.seat === seat).length > WALLS_MOST) bad(`${seat} has more than ${WALLS_MOST} walls`);
   if (new Set(state.yielded).size !== state.yielded.length || state.yielded.some((seat) => !map.sides.includes(seat))) bad(`yielded ${state.yielded}`);
   for (const seat of state.yielded) if (state.huts.some((hut) => hut.owner === seat)) bad(`${seat} gave up and holds a hut`);
   if (state.winner !== null && state.winner !== 'draw' && !map.sides.includes(state.winner)) bad(`won by ${state.winner}, not a side`);
@@ -420,6 +427,11 @@ function fuzzOrder(rand: () => number, map: SwarmMap, state: SwarmState, seat: S
   if (kind === 'burn' && bridges.length > 0 && rand() < 0.8) {
     const bridge = pick(rand, bridges);
     [from, to] = rand() < 0.5 ? [bridge.a, bridge.b] : [bridge.b, bridge.a];
+  }
+  // A cut or a wall goes on a path off a hut the seat holds, or it is only ever refused.
+  if ((kind === 'cut' || kind === 'wall') && held.length > 0 && rand() < 0.8) {
+    from = pick(rand, held);
+    if (map.links[from].length > 0) to = pick(rand, map.links[from]);
   }
   return { tick, kind, from, to, ...(rand() < 0.3 && { risky: true }) };
 }
@@ -739,13 +751,14 @@ function nameOf({ kind, setup }: Game): string {
 
 describe('swarm fuzz: orders on the wire', () => {
   it('has every kind of order the code knows', () => {
-    expect(KIND_LIST).toEqual(expect.arrayContaining(['half', 'all', 'hut', 'speed', 'strength', 'flag', 'nest', 'burn', 'rain', 'call', 'decoy', 'range', 'rate', 'armour', 'mortar', 'ballista', 'web', 'tower', 'carapace']));
+    expect(KIND_LIST).toEqual(expect.arrayContaining(['half', 'all', 'hut', 'speed', 'strength', 'flag', 'nest', 'burn', 'rain', 'call', 'decoy', 'range', 'rate', 'armour', 'mortar', 'ballista', 'web', 'tower', 'carapace', 'cut', 'wall']));
+
     for (const kind of KIND_LIST) expect(decodeOrders(encodeOrders([{ tick: 1, kind, from: 0, to: 0 }]))[0].kind).toBe(kind);
   });
 
   it('gives every kind a letter of its own', () => {
     // Two kinds on one letter decode as whichever was written last, so the other drops out of the list.
-    expect(KIND_LIST).toHaveLength(19);
+    expect(KIND_LIST).toHaveLength(21);
     expect(new Set(KIND_LIST).size).toBe(KIND_LIST.length);
   });
 
