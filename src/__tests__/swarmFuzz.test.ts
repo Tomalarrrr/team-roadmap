@@ -84,8 +84,8 @@ const ordersCap = /length <= (\d+)/.exec(ORDERS_RULE);
 if (!ordersShape || !ordersCap) throw new Error(`The rule for a seat's orders has changed shape: ${ORDERS_RULE}`);
 const ORDERS_SHAPE = new RegExp(ordersShape[1]);
 const ORDERS_CAP = Number(ordersCap[1]);
-/** One base-36 character per hut in an order: a hut past this cannot be named. */
-const MOST_SITES = 36;
+/** One character of 0-9, a-z and A-Z per hut in an order: a hut past this cannot be named. */
+const MOST_SITES = 62;
 const LAST_TICK = 36 ** 4 - 1;
 
 // Read back off the letters rather than listed, so a kind added later is

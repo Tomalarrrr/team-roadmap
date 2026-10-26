@@ -296,9 +296,14 @@ function standingBox(site: Site, level: number, grow: number): Box {
   };
 }
 
-/** How finely, in token radii, the ground round a hut is searched for somewhere to put its tokens, and how far out. */
+/**
+ * How finely, in token radii, the ground round a hut is searched for somewhere to put its tokens, and how far out.
+ * Out to seven radii, 17 of 960 boards (every map and side count on the large and huge grounds, seeds 1 to 40) had
+ * a hut with no clear ground, most often a home on the bottom edge with a hut beside it; out to twelve, none did. A
+ * search that finds nothing clear near takes 0.18ms, against 0.07 at seven.
+ */
 const SPOT_STEP = 0.5;
-const SPOT_REACH = 14;
+const SPOT_REACH = 24;
 
 /**
  * Where the upgrade tokens of the hut in hand sit. Under it in rows of three

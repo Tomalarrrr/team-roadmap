@@ -55,12 +55,16 @@ export function tuneSummary(tune: Tune): string {
 }
 
 /**
- * What going back to the menu costs, asked before it is done, or null when it
- * costs nothing: outside a game the seat is only given up. In a game of two
- * sides the other wins (see vacateSeat); in one of more the computer plays on.
+ * What giving a game up costs, asked before it is done, or null outside a
+ * game, where Menu costs nothing. In a room the seat is kept either way (see
+ * resignSeat): in a game of two the other side wins; in one of more the
+ * computer plays on, unless nobody else is left playing, when it ends.
+ * `others` is how many other people are still playing.
  */
-export function leaveWarning(playing: boolean, solo: boolean, sides: number): string | null {
+export function leaveWarning(playing: boolean, solo: boolean, sides: number, others: number): string | null {
   if (!playing) return null;
   if (solo) return 'Leave this game? It ends here and is not kept.';
-  return sides === 2 ? 'Leave this game? The other side wins it.' : 'Leave this game? The computer plays your side to the end.';
+  if (sides === 2) return 'Leave this game? The other side wins it. You stay in the room.';
+  if (others === 0) return 'Leave this game? Nobody else is playing it, so it ends and the room goes back to the lobby.';
+  return 'Leave this game? The computer plays your side to the end. You watch, and are in the next game.';
 }

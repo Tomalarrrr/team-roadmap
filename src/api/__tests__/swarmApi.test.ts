@@ -34,8 +34,27 @@ vi.mock('../dbProxy', () => ({
   },
 }));
 
-import { applyRoomEvent, createRoom, getRoom, hostOf, joinRoom, putSeat, recordResult, setComputer, setKind, setNest, setRules, startMatch, vacateSeat } from '../swarmApi';
+import {
+  applyRoomEvent,
+  backToLobby,
+  createRoom,
+  drawHere,
+  editPlan,
+  getRoom,
+  hostOf,
+  joinRoom,
+  putSeat,
+  recordResult,
+  resignSeat,
+  setComputer,
+  setKind,
+  setNest,
+  setRules,
+  startMatch,
+  vacateSeat,
+} from '../swarmApi';
 import { COUNTDOWN_MS, type SwarmMatch } from '../../swarmGameLogic';
+import { drawPath, eraseAt, placePiece } from '../../swarmPlan';
 
 beforeEach(() => {
   db.now = 50_000;
@@ -250,6 +269,71 @@ describe('choosing the rules', () => {
     await setRules(code, 's-ann', { mode: 'classic', start: 'home', twists: '', tune: 'cap=50' });
     await setRules(code, 's-ann', { mode: 'classic', start: 'home', twists: '', tune: '' });
     expect(await matchOf(code)).not.toHaveProperty('tune');
+  });
+});
+
+describe('drawing the map together', () => {
+  const hut = (c: number, r: number) => (items: Parameters<typeof placePiece>[0], count: number) => placePiece(items, count, 'hut', { c, r });
+  const road = (c: number, r: number, d: number, s: number) => (items: Parameters<typeof drawPath>[0], count: number) =>
+    drawPath(items, count, 'road', { c, r }, { c: d, r: s });
+
+  it('lets anyone seated draw, each edit landing on the drawing as the room has it', async () => {
+    const code = await seated();
+    await drawHere(code, 's-bob', true);
+    expect((await matchOf(code)).plan).toBe('');
+    await editPlan(code, 's-ann', hut(2, 2));
+    await editPlan(code, 's-bob', road(0, 2, 2, 2));
+    expect((await matchOf(code)).plan).toBe('h22h02pr0222');
+    await drawHere(code, 's-ann', true);
+    expect((await matchOf(code)).plan).toBe('h22h02pr0222');
+    await editPlan(code, 's-bob', (items, count) => eraseAt(items, count, 2, 2));
+    expect((await matchOf(code)).plan).toBe('h02');
+  });
+
+  it('passes on what an edit refuses, and leaves the drawing as it was', async () => {
+    const code = await seated();
+    await drawHere(code, 's-ann', true);
+    await expect(editPlan(code, 's-ann', road(0, 2, 2, 2))).rejects.toThrow('A path joins two huts.');
+    await expect(editPlan(code, 's-ann', hut(0, 2))).rejects.toThrow('A side starts there.');
+    await editPlan(code, 's-ann', (items, count) => eraseAt(items, count, 3, 3));
+    await expect(editPlan(code, 's-eve', hut(2, 2))).rejects.toThrow('Room not found');
+    expect((await matchOf(code)).plan).toBe('');
+  });
+
+  it('throws the drawing away when the room picks a map again, and draws nothing until it is asked to', async () => {
+    const code = await seated();
+    await expect(editPlan(code, 's-ann', hut(2, 2))).rejects.toThrow('The room is not drawing its map.');
+    await drawHere(code, 's-ann', true);
+    await editPlan(code, 's-ann', hut(2, 2));
+    await drawHere(code, 's-bob', false);
+    expect(await matchOf(code)).not.toHaveProperty('plan');
+  });
+
+  it('plays the drawing, keeps it for the next game and the lobby after, and holds it while a game is on', async () => {
+    const code = await seated();
+    await drawHere(code, 's-ann', true);
+    await editPlan(code, 's-ann', hut(2, 2));
+    await editPlan(code, 's-ann', road(0, 2, 2, 2));
+    await editPlan(code, 's-ann', road(2, 2, 6, 2));
+    await startMatch(code, 60_000, 'crossroads', null);
+    expect(await matchOf(code)).toMatchObject({ status: 'playing', map: 'drawn', plan: 'h22h02pr0222pr2262' });
+    await expect(editPlan(code, 's-ann', hut(2, 0))).rejects.toThrow('The map is drawn before a game starts.');
+    await expect(drawHere(code, 's-ann', false)).rejects.toThrow('The map is drawn before a game starts.');
+    await recordResult(code, 1, 'a');
+    await startMatch(code, 70_000, null, null);
+    expect(await matchOf(code)).toMatchObject({ game: 2, map: 'drawn', plan: 'h22h02pr0222pr2262' });
+    await recordResult(code, 2, 'b');
+    await backToLobby(code, 's-bob');
+    expect(await matchOf(code)).toMatchObject({ status: 'waiting', plan: 'h22h02pr0222pr2262' });
+    await editPlan(code, 's-bob', hut(2, 0));
+    expect((await matchOf(code)).plan).toBe('h22h02pr0222pr2262h20');
+  });
+
+  it('will not start a drawing that cannot be played, and says why', async () => {
+    const code = await seated();
+    await drawHere(code, 's-ann', true);
+    await expect(startMatch(code, 60_000, null, null)).rejects.toThrow('There is no way between the homes yet.');
+    expect((await matchOf(code)).status).toBe('waiting');
   });
 });
 
@@ -545,6 +629,103 @@ describe('a seat', () => {
     await setComputer(code, 'b', true);
     await vacateSeat(code, 'a', 0);
     expect(await getRoom(code)).toBeNull();
+  });
+});
+
+describe('giving a game up and staying in the room', () => {
+  async function three(): Promise<string> {
+    const code = await seated();
+    await setComputer(code, 'c', true);
+    await joinRoom(code, 's-dan', 'Dan');
+    await startMatch(code, 60_000, null, null);
+    return code;
+  }
+
+  it('in a game of two gives it to the other side and keeps the seat', async () => {
+    const code = await seated();
+    await startMatch(code, 60_000, null, null);
+    await resignSeat(code, 'a', 40);
+    const m = await matchOf(code);
+    expect(m).toMatchObject({ status: 'finished', winner: 'b', gone: 'a' });
+    expect(m.players.a?.sessionId).toBe('s-ann');
+  });
+
+  it('in a game of more hands the seat to the computer, and the person is in the next game', async () => {
+    const code = await three();
+    await resignSeat(code, 'b', 120);
+    expect(await matchOf(code)).toMatchObject({ status: 'playing', out: { b: 120 } });
+    await recordResult(code, 1, 'a');
+    await joinRoom(code, 's-bob', 'Bob');
+    await startMatch(code, 70_000, null, null);
+    const m = await matchOf(code);
+    expect(Object.keys(m.players)).toEqual(['a', 'b', 'd']);
+    expect(m).not.toHaveProperty('out');
+  });
+
+  it('by the last person playing sends the room back to waiting with everyone still in it', async () => {
+    const code = await three();
+    await vacateSeat(code, 'd', 30);
+    await resignSeat(code, 'b', 10);
+    await resignSeat(code, 'a', 20);
+    const m = await matchOf(code);
+    expect(m.status).toBe('waiting');
+    expect(Object.keys(m.players)).toEqual(['a', 'b', 'd']);
+    expect(m.cpu).toBe('c');
+    expect(m).not.toHaveProperty('out');
+    expect(m).not.toHaveProperty('winner');
+    expect(m.game).toBe(1);
+  });
+
+  it('does nothing once the game is over', async () => {
+    const code = await seated();
+    await startMatch(code, 60_000, null, null);
+    await recordResult(code, 1, 'b');
+    await resignSeat(code, 'a', 0);
+    const m = await matchOf(code);
+    expect(m).toMatchObject({ status: 'finished', winner: 'b' });
+    expect(Object.keys(m.players)).toEqual(['a', 'b']);
+  });
+});
+
+describe('going back to the lobby after a game', () => {
+  it('takes everyone back to waiting, seated, with the result cleared and the choices kept', async () => {
+    const code = await seated();
+    await setComputer(code, 'c', true);
+    await setRules(code, 's-ann', { mode: 'blitz', start: 'home', twists: 'f', tune: '' });
+    await startMatch(code, 60_000, 'crossroads', null);
+    await recordResult(code, 1, 'a');
+    await backToLobby(code, 's-bob');
+    const m = await matchOf(code);
+    expect(m.status).toBe('waiting');
+    expect(Object.keys(m.players)).toEqual(['a', 'b']);
+    expect(m).toMatchObject({ cpu: 'c', mode: 'blitz', twists: 'f', game: 1 });
+    expect(m).not.toHaveProperty('winner');
+    expect(m).not.toHaveProperty('gone');
+  });
+
+  it('lets go of whoever left the game and has not come back, but not the one who asks', async () => {
+    const code = await seated();
+    await joinRoom(code, 's-dan', 'Dan');
+    await joinRoom(code, 's-eve', 'Eve');
+    await startMatch(code, 60_000, null, null);
+    await vacateSeat(code, 'c', 0);
+    await resignSeat(code, 'd', 0);
+    await recordResult(code, 1, 'a');
+    await backToLobby(code, 's-eve');
+    const m = await matchOf(code);
+    expect(Object.keys(m.players)).toEqual(['a', 'b', 'd']);
+    expect(m).not.toHaveProperty('out');
+  });
+
+  it('is refused during a game, ignored in the lobby, and refused a session with no seat', async () => {
+    const code = await seated();
+    await backToLobby(code, 's-ann');
+    expect((await matchOf(code)).status).toBe('waiting');
+    await startMatch(code, 60_000, null, null);
+    await expect(backToLobby(code, 's-ann')).rejects.toThrow('The game is still being played.');
+    await recordResult(code, 1, 'a');
+    await expect(backToLobby(code, 's-zed')).rejects.toThrow('Room not found');
+    expect((await matchOf(code)).status).toBe('finished');
   });
 });
 

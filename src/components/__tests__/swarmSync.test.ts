@@ -452,6 +452,12 @@ describe('sound', () => {
     expect(sound(state({ orders: encodeOrders([{ tick: buildMap(SEED).ticks + 4, kind: 'strength', from: 35, to: 0, risky: true }]) }))).toBe(true);
   });
 
+  it('passes orders naming the huts past z, which the biggest maps have', () => {
+    const orders = encodeOrders([{ tick: 9, kind: 'half', from: 61, to: 36 }]);
+    expect(orders).toBe('9:hZA');
+    expect(sound(state({ orders }))).toBe(true);
+  });
+
   it.each([',', '5:', '5:h01,', '5:h0', ':h01', '5:h012', '5;h01'])('refuses orders %j, which the decoder cannot be trusted with', (orders) => {
     expect(sound(state({ orders }))).toBe(false);
   });

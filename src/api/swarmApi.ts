@@ -9,6 +9,7 @@
 import {
   COUNTDOWN_MS,
   SEATS,
+  rulesOf,
   sidesOf,
   type Kind,
   type MapId,
@@ -20,6 +21,7 @@ import {
   type SwarmMatch,
   type SwarmSeatState,
 } from '../swarmGameLogic';
+import { parsePlan, encodePlan, problemOf, type PlanEdit, type PlanItem } from '../swarmPlan';
 import { generateGameCode } from '../utils/gameUtils';
 import { bust, getServerTimestamp, proxyGet, proxyPut, proxyRemove, proxyTransaction } from './dbProxy';
 
@@ -305,6 +307,54 @@ export async function setRules(code: string, sessionId: string, rules: { mode: M
 }
 
 /**
+ * Play the room's own drawing (see swarmPlan) or stop. Anyone seated, in the
+ * lobby. Turning it on keeps a drawing already there; turning it off throws
+ * the drawing away.
+ */
+export async function drawHere(code: string, sessionId: string, on: boolean): Promise<void> {
+  let refusal = '';
+  const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    refusal = 'Room not found';
+    if (!current || !seatOf(current, sessionId)) return undefined;
+    if (current.status !== 'waiting') {
+      refusal = 'The map is drawn before a game starts.';
+      return undefined;
+    }
+    if (on) return current.plan === undefined ? { ...current, plan: '' } : current;
+    const rest = { ...current };
+    delete rest.plan;
+    return rest;
+  });
+  if (!result.committed) throw new Error(refusal);
+}
+
+/**
+ * Change the room's drawing: `edit` is one of swarmPlan's, given the drawing
+ * as it stands in the database and the count of sides, so two people drawing
+ * at once both land. Anyone seated, in the lobby. Throws the edit's refusal.
+ */
+export async function editPlan(code: string, sessionId: string, edit: (items: PlanItem[], count: number) => PlanEdit | PlanItem[] | null): Promise<void> {
+  let refusal = '';
+  const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    refusal = 'Room not found';
+    if (!current || !seatOf(current, sessionId)) return undefined;
+    if (current.status !== 'waiting' || current.plan === undefined) {
+      refusal = current.plan === undefined ? 'The room is not drawing its map.' : 'The map is drawn before a game starts.';
+      return undefined;
+    }
+    const done = edit(parsePlan(current.plan), Math.max(2, sidesOf(current).length));
+    refusal = '';
+    if (done === null) return undefined;
+    if ('refusal' in done) {
+      refusal = done.refusal;
+      return undefined;
+    }
+    return { ...current, plan: encodePlan(Array.isArray(done) ? done : done.items) };
+  });
+  if (!result.committed && refusal) throw new Error(refusal);
+}
+
+/**
  * Put the computer in an open seat, or take it out again. Only between games,
  * and never in a seat a person sits in.
  */
@@ -323,11 +373,14 @@ export async function setComputer(code: string, seat: Seat, on: boolean): Promis
  * people or the computer. `map` and `size` are the ones chosen, or null to
  * leave the map to the seed and the size to the map. The mode, start,
  * twists and settings are the room's own (see setRules), so a rematch plays by them too;
- * one that is the default is not stored.
+ * one that is the default is not stored. A room drawing its map plays the
+ * drawing whatever `map` says, and is refused, with the reason, one that cannot be played.
  */
 export async function startMatch(code: string, serverNow: number, map: MapId | null, size: SizeId | null): Promise<void> {
   const seed = newSeed();
-  await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+  let refusal = '';
+  const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    refusal = '';
     if (!current || current.status === 'playing') return undefined;
     // Whoever left the last game partway through, and has not come back, is not in this one.
     const players: SwarmMatch['players'] = {};
@@ -336,7 +389,13 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
       if (player && current.out?.[seat] === undefined) players[seat] = player;
     }
     if (sidesOf({ players, cpu: current.cpu }).length < 2) return undefined;
-    const { mode, start, twists, tune } = current;
+    const { mode, start, twists, tune, plan } = current;
+    // Checked here as well as in the lobby: an edit can land between the press and the start.
+    const problem = plan === undefined ? null : problemOf(plan, sidesOf({ players, cpu: current.cpu }), size ?? undefined, rulesOf({ ...current, players }));
+    if (problem) {
+      refusal = problem;
+      return undefined;
+    }
     // Rebuilt rather than spread: the last game's result must not carry over.
     return {
       status: 'playing',
@@ -345,7 +404,7 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
       players,
       game: current.game + 1,
       startAt: Math.round(serverNow + COUNTDOWN_MS),
-      ...(map && { map }),
+      ...(plan !== undefined ? { map: 'drawn', plan } : map && { map }),
       ...(size && { size }),
       ...(current.cpu && { cpu: current.cpu }),
       ...(mode && mode !== 'classic' && { mode }),
@@ -354,6 +413,7 @@ export async function startMatch(code: string, serverNow: number, map: MapId | n
       ...(tune && { tune }),
     };
   });
+  if (!result.committed && refusal) throw new Error(refusal);
 }
 
 /**
@@ -385,9 +445,23 @@ const VACATE_TRIES = 3;
  * goes.
  */
 export async function vacateSeat(code: string, seat: Seat, k: number): Promise<void> {
+  await tried(() => vacateOnce(code, seat, k, false));
+}
+
+/**
+ * Give a game up and stay in the room: the game goes as it would for a seat
+ * that left (see vacateSeat), but the seat is kept, so its person watches the
+ * rest and is in the next one. When that leaves no person playing, nobody is
+ * left to finish it and the room goes back to waiting, everyone still seated.
+ */
+export async function resignSeat(code: string, seat: Seat, k: number): Promise<void> {
+  await tried(() => vacateOnce(code, seat, k, true));
+}
+
+async function tried(once: () => Promise<void>): Promise<void> {
   for (let attempt = 1; ; attempt++) {
     try {
-      await vacateOnce(code, seat, k);
+      await once();
       return;
     } catch (err) {
       if (attempt === VACATE_TRIES) throw err;
@@ -395,7 +469,7 @@ export async function vacateSeat(code: string, seat: Seat, k: number): Promise<v
   }
 }
 
-async function vacateOnce(code: string, seat: Seat, k: number): Promise<void> {
+async function vacateOnce(code: string, seat: Seat, k: number, stay: boolean): Promise<void> {
   const stored = await proxyGet<SwarmSeatState>(`swarm/${code}/s/${seat}`, LIVE_TIMEOUT_MS);
   let empty = false;
   await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
@@ -412,6 +486,8 @@ async function vacateOnce(code: string, seat: Seat, k: number): Promise<void> {
       empty = !SEATS.some((each) => current.players[each] && out[each] === undefined);
       return { ...current, out };
     }
+    // A game that ended before the seat could give it up leaves it nothing to do.
+    if (stay) return undefined;
     // Back to waiting, where nobody is out: whoever left the last game partway through and has not come back goes too.
     const players = { ...current.players };
     for (const each of SEATS) if (each === seat || current.out?.[each] !== undefined) delete players[each];
@@ -419,12 +495,51 @@ async function vacateOnce(code: string, seat: Seat, k: number): Promise<void> {
       empty = true;
       return undefined;
     }
-    const rest = { ...current };
-    delete rest.winner;
-    delete rest.gone;
-    delete rest.out;
-    return { ...rest, status: 'waiting', players };
+    return { ...waiting(current), players };
   });
+  if (!empty) return;
   // proxyTransaction reads a null return as an abort, so emptying is its own step.
-  if (empty) await proxyRemove(`swarm/${code}`);
+  if (!stay) {
+    await proxyRemove(`swarm/${code}`);
+    return;
+  }
+  // Everyone in it is out and some of them are watching, so nobody is dropped:
+  // whoever has really gone falls silent in the lobby and is let go from there.
+  await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    if (!current || current.status !== 'playing' || SEATS.some((each) => current.players[each] && current.out?.[each] === undefined)) return undefined;
+    return waiting(current);
+  });
+}
+
+/** The room as it waits for the next game: no result, and nobody out. */
+function waiting(match: SwarmMatch): SwarmMatch {
+  const rest = { ...match };
+  delete rest.winner;
+  delete rest.gone;
+  delete rest.out;
+  return { ...rest, status: 'waiting' };
+}
+
+/**
+ * From the end of a game back to the room's lobby, for everyone in it, to
+ * change the map, the rules or the sides before the next. Whoever left the
+ * game partway through and has not come back is let go, as on leaving (one
+ * taken out who is still here has rejoined by now: see SwarmGame), but never
+ * the person asking.
+ */
+export async function backToLobby(code: string, sessionId: string): Promise<void> {
+  let refusal = '';
+  const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
+    refusal = 'Room not found';
+    const mine = current && seatOf(current, sessionId);
+    if (!current || !mine) return undefined;
+    if (current.status !== 'finished') {
+      refusal = current.status === 'playing' ? 'The game is still being played.' : '';
+      return undefined;
+    }
+    const players = { ...current.players };
+    for (const each of SEATS) if (each !== mine && current.out?.[each] !== undefined) delete players[each];
+    return { ...waiting(current), players };
+  });
+  if (!result.committed && refusal) throw new Error(refusal);
 }

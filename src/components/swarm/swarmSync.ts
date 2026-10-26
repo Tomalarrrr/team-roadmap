@@ -93,7 +93,7 @@ export function pace(playing: boolean, hidden: boolean, synced: boolean): { poll
 // The same shape the database rules hold a seat's orders to. decodeOrders
 // reads a character at a fixed place after the colon and throws when it is not
 // there, and it is called every frame.
-const ORDERS_SHAPE = /^([0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z](,[0-9a-z]{1,4}:[a-zA-Z][0-9a-z][0-9a-z])*)?$/;
+const ORDERS_SHAPE = /^([0-9a-z]{1,4}:[a-zA-Z][0-9a-zA-Z][0-9a-zA-Z](,[0-9a-z]{1,4}:[a-zA-Z][0-9a-zA-Z][0-9a-zA-Z])*)?$/;
 
 /** Whether a seat's state as read from the room is one a game can be run on. Anyone can write there. */
 export function sound(state: SwarmSeatState): boolean {

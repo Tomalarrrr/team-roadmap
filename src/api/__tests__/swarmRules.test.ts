@@ -264,6 +264,22 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), `${M}/tune`, Array.from({ length: 41 }, () => 'speed=100').join(';'))).toBe(false);
   });
 
+  it('takes a map drawing of whole pieces, paths and rivers, and only up to its length', () => {
+    expect(allowed(db(waitingRoom()), `${M}/plan`, '')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h22h02pr0222r3032')).toBe(true);
+    expect(allowed(db(waitingRoom()), M, waitingRoom({ map: 'drawn', plan: 'f42pu0242' }))).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h12m22f32t42o52b62w72l82g13x23k33y43e53a63v73u83')).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'z22')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h9')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h92')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h25')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'px0222')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'r3036')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 22)).toBe(false);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'pr0222'.repeat(100))).toBe(true);
+    expect(allowed(db(waitingRoom()), `${M}/plan`, 'pr0222'.repeat(100) + 'h22')).toBe(false);
+  });
+
   it('takes a nest of big or many on a player', () => {
     expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'many')).toBe(true);
     expect(allowed(db(waitingRoom()), `${M}/players/a/nest`, 'big')).toBe(true);
@@ -299,7 +315,7 @@ describe('the swarm rules: starting and playing', () => {
     expect(allowed(before, M, playingRoom({ players: swapped }))).toBe(false);
   });
 
-  it('fixes the mode, the start, the twists and every nest for the length of a game', () => {
+  it('fixes the mode, the start, the twists, the drawing and every nest for the length of a game', () => {
     const chosen = { mode: 'blitz', start: 'nests', twists: 'fo', tune: 'len=20', players: { a: person('sa', 'Ann', { nest: 'many' }), b: person('sb', 'Bo'), c: person('sc', 'Cy') } };
     const before = db(playingRoom(chosen));
     expect(allowed(before, M, playingRoom(chosen))).toBe(true);
@@ -308,6 +324,10 @@ describe('the swarm rules: starting and playing', () => {
     expect(allowed(before, M, playingRoom({ ...chosen, start: 'home' }))).toBe(false);
     expect(allowed(before, M, playingRoom({ ...chosen, twists: 'f' }))).toBe(false);
     expect(allowed(before, M, playingRoom({ ...chosen, tune: 'len=2' }))).toBe(false);
+    const drawn = db(playingRoom({ ...chosen, map: 'drawn', plan: 'h22' }));
+    expect(allowed(drawn, `${M}/plan`, 'h21')).toBe(false);
+    expect(allowed(drawn, `${M}/plan`, null)).toBe(false);
+    expect(allowed(before, `${M}/plan`, 'h22')).toBe(false);
     expect(allowed(before, `${M}/twists`, 'fop')).toBe(false);
     expect(allowed(before, `${M}/players/a/nest`, 'big')).toBe(false);
     expect(allowed(before, `${M}/players/b/nest`, 'many')).toBe(false);
@@ -364,6 +384,33 @@ describe('the swarm rules: a seat that leaves a game of more than two', () => {
   });
 });
 
+describe('the swarm rules: a game nobody is left playing', () => {
+  const backToWaiting = (extra: Tree = {}) => {
+    const room = playingRoom(extra);
+    delete room.out;
+    return { ...room, status: 'waiting' };
+  };
+
+  it('goes back to waiting once every person in it is out, and not before', () => {
+    expect(allowed(db(playingRoom({ out: { a: 120, b: 0, c: 90 } })), M, backToWaiting())).toBe(true);
+    expect(allowed(db(playingRoom({ out: { a: 120, c: 90 } })), M, backToWaiting())).toBe(false);
+    expect(allowed(db(playingRoom()), M, backToWaiting())).toBe(false);
+  });
+
+  it('keeps the game number, and goes back with nobody marked out', () => {
+    const allOut = db(playingRoom({ out: { a: 120, b: 0, c: 90 } }));
+    expect(allowed(allOut, M, backToWaiting({ game: 3 }))).toBe(false);
+    expect(allowed(allOut, M, { ...backToWaiting(), out: { a: 120 } })).toBe(false);
+  });
+
+  it('leaves a finished game free to go back to waiting, as it was', () => {
+    const finished = playingRoom({ status: 'finished', winner: 'a' });
+    const room: Tree = { ...finished, status: 'waiting' };
+    delete room.winner;
+    expect(allowed(db(finished), M, room)).toBe(true);
+  });
+});
+
 describe('the swarm rules: what a seat writes', () => {
   const S = `swarm/${CODE}/s`;
   const before = db(playingRoom(), { a: seatState(2, 120, { orders: '1a:M01' }), c: seatState(2, 90) });
@@ -387,6 +434,12 @@ describe('the swarm rules: what a seat writes', () => {
     expect(atCap.length).toBe(ORDERS_MAX);
     expect(allowed(before, `${S}/a`, write({ orders: atCap }))).toBe(true);
     expect(allowed(before, `${S}/a`, write({ orders: `${atCap},1:h01` }))).toBe(false);
+  });
+
+  it('takes a hut named by a capital, as a map of more than 36 huts names it, and nothing else in its place', () => {
+    expect(allowed(before, `${S}/a`, write({ orders: '1a:M01,2b:M02,2c:hAZ' }))).toBe(true);
+    expect(allowed(before, `${S}/a`, write({ orders: '1a:M01,2b:M02,2c:hA_' }))).toBe(false);
+    expect(allowed(before, `${S}/a`, write({ orders: '1a:M01,2b:M02,2c:h-1' }))).toBe(false);
   });
 });
 

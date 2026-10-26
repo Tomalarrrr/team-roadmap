@@ -239,8 +239,10 @@ describe('the nests start', () => {
         expect(extras.length, label).toBeLessThanOrEqual(3);
         if (extras.length < 3) {
           short++;
-          // Four corner islands on the archipelago hold too few huts for a third.
-          expect(['guns', 'crossroads', 'archipelago'], label).toContain(map.id);
+          // Four corner islands on the archipelago hold too few huts for a third, and down the lanes on the small
+          // ground, or the medium with four sides, the only other hut near enough is a tower.
+          const lanes = map.id === 'lanes' && (map.size === 'small' || (map.size === 'medium' && map.sides.length === 4));
+          expect(['guns', 'crossroads', 'archipelago'].includes(map.id) || lanes, label).toBe(true);
         }
         expect(map.sites[map.homes[k]], label).toMatchObject({ level: 1 });
         for (const at of extras) {

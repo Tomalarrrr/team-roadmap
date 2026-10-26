@@ -98,7 +98,13 @@ describe('the rules picker', () => {
     act(() => root!.render(<RulesPicker choice={choice} onChoice={onChoice} idle="Idle words" nest={nest} surprise={surprise} />));
     return container;
   }
-  const pill = (name: string) => [...container!.querySelectorAll<HTMLButtonElement>('[aria-label="Twists"] button')].find((b) => b.textContent === name)!;
+  const twistsBtn = () => [...container!.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')][0];
+  // The twists sit in a list the button opens, so each lookup opens it first.
+  const box = (name: string) => {
+    if (twistsBtn().getAttribute('aria-expanded') === 'false') act(() => twistsBtn().click());
+    const item = [...container!.querySelectorAll('[aria-label="Twists"] label')].find((l) => l.querySelector('span span')?.textContent === name)!;
+    return { input: item.querySelector('input')!, about: item.querySelectorAll('span span')[1].textContent };
+  };
   const select = (label: string) => [...container!.querySelectorAll('label')].find((l) => l.textContent?.startsWith(label))?.querySelector('select') ?? null;
   const line = () => container!.querySelector('[aria-live="polite"]')!.textContent;
   const button = (name: string) => [...container!.querySelectorAll('button')].find((b) => b.textContent === name) ?? null;
@@ -108,35 +114,36 @@ describe('the rules picker', () => {
       el.dispatchEvent(new Event('change', { bubbles: true }));
     });
 
-  it('turns a twist on and off through the choice, and says what it does', () => {
+  it('names the twists that are on in its button, and keeps the list shut until pressed', () => {
+    mount({ ...PLAIN, twists: ['flood', 'fog'] }, vi.fn());
+    expect(twistsBtn().textContent).toBe('Flood, Fog');
+    expect(container!.querySelector('[aria-label="Twists"]')).toBe(null);
+    act(() => root!.unmount());
+    root = null;
+    mount(PLAIN, vi.fn());
+    expect(twistsBtn().textContent).toBe('None');
+  });
+
+  it('turns a twist on and off through the choice, with what it does beside it', () => {
     const onChoice = vi.fn();
     mount({ ...PLAIN, twists: ['fog'] }, onChoice);
-    expect(pill('Fog').getAttribute('aria-pressed')).toBe('true');
-    expect(pill('Flood').getAttribute('aria-pressed')).toBe('false');
-    expect(line()).toBe('Idle words');
-    act(() => pill('Flood').click());
+    expect(box('Fog').input.checked).toBe(true);
+    expect(box('Flood').input.checked).toBe(false);
+    expect(box('Flood').about).toMatch(/^After 40% of the clock/);
+    act(() => box('Flood').input.click());
     expect(onChoice).toHaveBeenLastCalledWith({ mode: 'classic', start: 'home', twists: ['fog', 'flood'] });
-    expect(line()).toMatch(/^After 40% of the clock/);
-    act(() => pill('Fog').click());
+    act(() => box('Fog').input.click());
     expect(onChoice).toHaveBeenLastCalledWith({ mode: 'classic', start: 'home', twists: [] });
   });
 
-  it('reads a twist out on focus and goes back to the idle words on blur', () => {
-    mount(PLAIN, vi.fn());
-    act(() => pill('Comeback').focus());
-    expect(line()).toBe('A side 2 or more huts behind the leader breeds 25% faster.');
-    act(() => pill('Comeback').blur());
-    expect(line()).toBe('Idle words');
-  });
-
-  it('holds a clashing twist off, and says why instead of what it does', () => {
+  it('holds a clashing twist off, and says why in place of what it does', () => {
     const onChoice = vi.fn();
     mount({ mode: 'regicide', start: 'home', twists: [] }, onChoice);
-    expect(pill('Queens').getAttribute('aria-disabled')).toBe('true');
-    expect(pill('Fog').getAttribute('aria-disabled')).toBe('false');
-    act(() => pill('Queens').click());
+    expect(box('Queens').input.disabled).toBe(true);
+    expect(box('Fog').input.disabled).toBe(false);
+    expect(box('Queens').about).toMatch(/^Queens does nothing in Regicide/);
+    act(() => box('Queens').input.click());
     expect(onChoice).not.toHaveBeenCalled();
-    expect(line()).toMatch(/^Queens does nothing in Regicide/);
   });
 
   it('lets go of a twist the new mode has no use for, and keeps the rest', () => {
@@ -154,20 +161,22 @@ describe('the rules picker', () => {
     expect(select('Mode')!.value).toBe('hill');
     expect(select('Start')!.disabled).toBe(true);
     expect(button('Surprise')).toBe(null);
-    expect(pill('Golden hut').getAttribute('aria-pressed')).toBe('true');
-    expect(pill('Fog').getAttribute('aria-disabled')).toBe('true');
-    act(() => pill('Fog').click());
-    expect(pill('Fog').getAttribute('aria-pressed')).toBe('false');
-    expect(line()).toMatch(/^You see only near your own huts/);
+    expect(container!.textContent).toContain('Idle words');
+    expect(box('Golden hut').input.checked).toBe(true);
+    expect(box('Fog').input.disabled).toBe(true);
+    expect(box('Fog').about).toMatch(/^You see only near your own huts/);
+    act(() => box('Fog').input.click());
+    expect(box('Fog').input.checked).toBe(false);
   });
 
   it('makes each Surprise press the next draw from the seed, with the modes the sides can play', () => {
     const onChoice = vi.fn();
     mount(PLAIN, onChoice);
+    expect(line()).toBe('Idle words');
     act(() => button('Surprise')!.click());
     act(() => button('Surprise')!.click());
     expect(onChoice.mock.calls.map(([choice]) => choice)).toEqual([surpriseOf(4242, 0, surprise.fits), surpriseOf(4242, 1, surprise.fits)]);
-    expect(line()).toMatch(/^Draws a mode, a start and 2 twists/);
+    expect(line()).toMatch(/^Drawn: a mode, a start and 2 twists/);
   });
 
   it('offers the nest only with the nests start and somewhere to put it', () => {
@@ -216,8 +225,34 @@ describe('the lobby against the computer', () => {
     });
     expect(play().disabled).toBe(true);
     expect(container.textContent).toContain('Teams needs 4 sides; there are 2.');
-    act(() => [...container!.querySelectorAll('button')].find((b) => b.textContent === '3 computers')!.click());
+    const computers = [...container.querySelectorAll('label')].find((l) => l.textContent?.startsWith('Computers'))!.querySelector('select')!;
+    act(() => {
+      computers.value = '3';
+      computers.dispatchEvent(new Event('change', { bubbles: true }));
+    });
     expect(play().disabled).toBe(false);
     expect(container.textContent).not.toContain('Teams needs 4 sides');
+  });
+
+  it('greys out each size the picked map is not played on for the sides there are', () => {
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    act(() => root!.render(<SwarmGame onClose={() => {}} isSearchOpen={false} />));
+    const field = (name: string) => [...container!.querySelectorAll('label')].find((l) => l.textContent?.startsWith(name))!.querySelector('select')!;
+    const choose = (name: string, value: string) =>
+      act(() => {
+        field(name).value = value;
+        field(name).dispatchEvent(new Event('change', { bubbles: true }));
+      });
+    const greyed = () => [...field('Size').options].filter((option) => option.disabled).map((option) => option.value);
+    choose('Map', 'villages');
+    expect(greyed()).toEqual([]);
+    choose('Computers', '2');
+    expect(greyed()).toEqual(['small', 'medium']);
+    choose('Map', 'maze');
+    expect(greyed()).toEqual(['huge']);
+    choose('Computers', '3');
+    expect(greyed()).toEqual(['small', 'medium']);
   });
 });

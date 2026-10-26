@@ -421,6 +421,8 @@ export interface SwarmMatch {
   twists?: string;
   /** The knobs off standard, as encodeTune writes them. Without it, standard. */
   tune?: string;
+  /** The map the room draws itself, as encodePlan writes it, when it plays one: then the map is `drawn`. */
+  plan?: string;
   /**
    * For each seat whose person left a game of three or more sides, the last
    * tick of theirs: the computer plays the seat after it.
@@ -529,12 +531,18 @@ const CHAR_KIND = Object.fromEntries(Object.entries(KIND_CHAR).map(([kind, char]
  */
 export const ORDERS_MAX = 200_000;
 
-/** Tick in base 36, a kind letter, then one base-36 character per hut. The letter is a capital for a risky order. */
+/**
+ * The character an order names each hut by. The first 36 are base 36, as every
+ * order was written before maps held more huts, so an old string reads the same.
+ */
+const HUT_CHARS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+/** Tick in base 36, a kind letter, then one character of HUT_CHARS per hut. The letter is a capital for a risky order. */
 export function encodeOrders(orders: Order[]): string {
   return orders
     .map((o) => {
       const kind = o.risky ? KIND_CHAR[o.kind].toUpperCase() : KIND_CHAR[o.kind];
-      return `${o.tick.toString(36)}:${kind}${o.from.toString(36)}${o.to.toString(36)}`;
+      return `${o.tick.toString(36)}:${kind}${HUT_CHARS[o.from]}${HUT_CHARS[o.to]}`;
     })
     .join(',');
 }
@@ -547,8 +555,8 @@ export function decodeOrders(text: string): Order[] {
     return {
       tick: parseInt(part.slice(0, colon), 36),
       kind: CHAR_KIND[kind],
-      from: parseInt(part[colon + 2], 36),
-      to: parseInt(part[colon + 3], 36),
+      from: HUT_CHARS.indexOf(part[colon + 2]),
+      to: HUT_CHARS.indexOf(part[colon + 3]),
       ...(kind !== part[colon + 1] && { risky: true }),
     };
   });
@@ -586,8 +594,9 @@ export type Building = 'trap' | 'barracks' | 'granary' | 'beacon' | 'hall' | 'wa
 export const BUILDINGS: readonly Building[] = ['trap', 'barracks', 'granary', 'beacon', 'hall', 'watch', 'burrow'];
 
 /** The designed places a game can be played on. Each has one rule of its own. */
-export type MapId = 'meadow' | 'thorns' | 'bridges' | 'guns' | 'hill' | 'crossroads' | 'warren' | 'archipelago' | 'ring' | 'canyon';
-export const MAP_IDS: readonly MapId[] = ['meadow', 'thorns', 'bridges', 'guns', 'hill', 'crossroads', 'warren', 'archipelago', 'ring', 'canyon'];
+/** `drawn` is the one the players of a room draw themselves (see swarmPlan): never shuffled to. */
+export type MapId = 'meadow' | 'thorns' | 'bridges' | 'guns' | 'hill' | 'crossroads' | 'warren' | 'archipelago' | 'ring' | 'canyon' | 'lanes' | 'maze' | 'villages' | 'drawn';
+export const MAP_IDS: readonly MapId[] = ['meadow', 'thorns', 'bridges', 'guns', 'hill', 'crossroads', 'warren', 'archipelago', 'ring', 'canyon', 'lanes', 'maze', 'villages'];
 
 /** How much ground a game is played over. Every one is the shape of the board. */
 export type SizeId = 'small' | 'medium' | 'large' | 'huge';
@@ -599,12 +608,22 @@ export const WORLDS: Record<SizeId, { w: number; h: number }> = {
   huge: { w: 2300, h: 1518 },
 };
 /** The ground each map is drawn for, and played on when no other is chosen. */
-const OWN_SIZE: Record<MapId, SizeId> = { meadow: 'medium', thorns: 'small', bridges: 'small', guns: 'small', hill: 'small', crossroads: 'medium', warren: 'medium', archipelago: 'medium', ring: 'medium', canyon: 'medium' };
+const OWN_SIZE: Record<MapId, SizeId> = { meadow: 'medium', thorns: 'small', bridges: 'small', guns: 'small', hill: 'small', crossroads: 'medium', warren: 'medium', archipelago: 'medium', ring: 'medium', canyon: 'medium', lanes: 'large', maze: 'large', villages: 'large', drawn: 'medium' };
 
 /** The ground a map is played on: the one chosen, or its own. Four corners need more room than the small one has. */
 export function sizeOf(id: MapId, sides: number, size?: SizeId): SizeId {
   const chosen = size ?? OWN_SIZE[id];
-  return sides === 4 && chosen === 'small' ? 'medium' : chosen;
+  // Three sides' villages on the smaller grounds lie in one line with the third in the middle, between the other
+  // two, and it won 12 and 2 of 40 games between computers there.
+  if (id === 'villages' && sides === 3 && (chosen === 'small' || chosen === 'medium')) return 'large';
+  // And on the huge ground's maze two starts are in far corners and the third in the middle of it all, and the third
+  // won 26 of 40 there.
+  if (id === 'maze' && sides === 3 && chosen === 'huge') return 'large';
+  // Four sides' maze and villages on the medium ground hold 21 and 17 huts, four or five to a side, too few for a
+  // nest of many to find the three it takes.
+  if ((id === 'maze' || id === 'villages') && sides === 4 && (chosen === 'small' || chosen === 'medium')) return 'large';
+  // A drawn map's grid is laid for the medium ground: on the small one its huts would stand closer than any map's.
+  return (sides === 4 || id === 'drawn') && chosen === 'small' ? 'medium' : chosen;
 }
 
 /** What the ground, the huts and the life on the map are drawn as. */
@@ -936,22 +955,23 @@ function lay(layout: Layout, rnd: () => number, fort: boolean, w: number, h: num
   return { sites, paths, rivers: layout.river ? [[...near, ...far]] : [] };
 }
 
-type Drawn = { sites: Site[]; paths: Path[]; rivers: SwarmMap['rivers'] };
+/** The huts, paths and rivers of a map, before the sides and rules are put on it. */
+export type Drawn = { sites: Site[]; paths: Path[]; rivers: SwarmMap['rivers'] };
 
-/** The most huts a map can hold: an order names each in one base-36 character. */
-const MOST_SITES = 36;
+/** The most huts a map can hold: an order names each in one character of HUT_CHARS. */
+export const MOST_SITES = HUT_CHARS.length;
 /** About how many huts the seed grows on each ground. */
-const GROWN: Record<SizeId, number> = { small: 20, medium: 28, large: 34, huge: 32 };
+const GROWN: Record<SizeId, number> = { small: 20, medium: 28, large: 40, huge: 44 };
 /** How many of the neutral huts grown on each ground are big ones, worth going out of the way for. */
 const BIG: Record<SizeId, number> = { small: 1, medium: 2, large: 3, huge: 3 };
 /**
- * How far apart huts stand on each ground. The huge one spreads the huts of a
- * large one out rather than adding to them, so its marches are longer and a
- * hut on a phone is as far from the next as on the large ground.
+ * How far apart huts stand on each ground. The huge one spreads its huts
+ * wider than the large one, so its marches are longer and a hut on a phone is
+ * as far from the next as on the large ground.
  */
 export const HUT_GAP: Record<SizeId, number> = { small: 150, medium: 150, large: 150, huge: 192 };
 /** The most huts the maps and the ground added with the modes grow to: a mode may add one in the middle, and an order still has to name it. */
-const ROOM = 34;
+const ROOM = MOST_SITES - 2;
 /** On the huge ground a road at least this long is a wide one, so that crossing it does not drag. */
 export const HUGE_WIDE_FROM = 340;
 /** How far apart the huts along a ring or a canyon stand, on each ground. */
@@ -1008,6 +1028,12 @@ const TUNNEL_SPAN: Record<SizeId, number> = { small: 360, medium: 500, large: 64
  *              each joined to the middle by one bridge, a side's own by a ford as well
  *  ring        a loop of wide roads round the middle, so a hut on it can be come at either way
  *  canyon      three long corridors that wind into each other, and one climb across them at the middle
+ *  lanes       two wide lanes round the edges and a road through the middle, a tower on each side's
+ *              half of each, and a big hut in the wilds between them that slow tracks reach
+ *  maze        a hut on every point of a grid, joined as a tree so there is one way between any two,
+ *              and a few slow tracks through its walls where the way round is longest
+ *  villages    a big hut in the middle with four round it, and clusters of three huts elsewhere,
+ *              joined to their neighbours by one long wide road each
  */
 function grow(rnd: () => number, id: MapId, count: number, size: SizeId, crowned: boolean): Drawn {
   for (let attempt = 0; attempt < 60; attempt++) {
@@ -1017,7 +1043,9 @@ function grow(rnd: () => number, id: MapId, count: number, size: SizeId, crowned
   throw new Error(`No ${size} ${id} map for ${count} sides grew from this seed`);
 }
 
-type Point = { x: number; y: number };
+export type Point = { x: number; y: number };
+/** The twelve hours of a clock face as unit steps, from three o'clock round towards six, to the unit on every machine. */
+const CLOCK = [[1, 0], [0.866, 0.5], [0.5, 0.866], [0, 1], [-0.5, 0.866], [-0.866, 0.5], [-1, 0], [-0.866, -0.5], [-0.5, -0.866], [0, -1], [0.5, -0.866], [0.866, -0.5]] as const;
 const far = (p: Point, q: Point, gap: number) => (p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y) >= gap * gap;
 const span = (p: Point, q: Point) => Math.floor(Math.sqrt((p.x - q.x) * (p.x - q.x) + (p.y - q.y) * (p.y - q.y)));
 // A hut may stand nearer a tower than another hut, but never under its fire, nor straight above or below it, where the tower is drawn.
@@ -1025,12 +1053,12 @@ const apart = (p: Site, q: Site, gap = MIN_GAP) =>
   !p.tower === !q.tower
     ? far(p, q, gap)
     : far(p, q, TOWER_RANGE) && (Math.abs(p.x - q.x) >= TOWER_SHADE_X || Math.abs(p.y - q.y) >= TOWER_SHADE_Y);
-const sideOf = (p: Point, q: Point, r: Point) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+export const sideOf = (p: Point, q: Point, r: Point) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
 /** How many stretches of a river's line the segment from p to q meets, touching counted, as the drawing's own check counts them. */
-const meetsOf = (p: Point, q: Point, line: Point[]) =>
+export const meetsOf = (p: Point, q: Point, line: Point[]) =>
   line.slice(1).filter((s, k) => sideOf(p, q, line[k]) * sideOf(p, q, s) <= 0 && sideOf(line[k], s, p) * sideOf(line[k], s, q) <= 0).length;
 /** The square of how near p comes to the segment from u to v. */
-const nearOf = (p: Point, u: Point, v: Point) => {
+export const nearOf = (p: Point, u: Point, v: Point) => {
   const dx = v.x - u.x;
   const dy = v.y - u.y;
   const length = dx * dx + dy * dy;
@@ -1038,7 +1066,7 @@ const nearOf = (p: Point, u: Point, v: Point) => {
   return (u.x + t * dx - p.x) ** 2 + (u.y + t * dy - p.y) ** 2;
 };
 /** The square of how near the segment from p to q comes to a line it does not meet. */
-const gapTo = (p: Point, q: Point, line: Point[]) => {
+export const gapTo = (p: Point, q: Point, line: Point[]) => {
   let least = Infinity;
   for (let k = 1; k < line.length; k++) least = Math.min(least, nearOf(p, line[k - 1], line[k]), nearOf(q, line[k - 1], line[k]), nearOf(line[k - 1], p, q), nearOf(line[k], p, q));
   return least;
@@ -1060,9 +1088,9 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
   const gap = HUT_GAP[size];
   const elbow = size === 'huge' ? HUGE_ELBOW : ELBOW;
   const spread = size === 'huge' ? 200 : 160;
-  // The ring and the canyon lay their huts and paths to a plan; every other map throws huts down and joins neighbours.
-  const planned = id === 'ring' || id === 'canyon';
-  const most = planned || id === 'archipelago' || size === 'huge' ? ROOM : MOST_SITES;
+  // The ring, the canyon, the lanes and the maze lay their huts and paths to a plan; every other map throws huts down and joins neighbours.
+  const planned = id === 'ring' || id === 'canyon' || id === 'lanes' || id === 'maze';
+  const most = ROOM;
   // The archipelago's rivers, laid before any hut but the starts, as huts have to keep out of them.
   const waters: Point[][] = [];
   // An island is the land a channel cuts off: a point is on it when the way from it to the middle crosses that channel an odd number of times.
@@ -1095,10 +1123,21 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
     waters.every((water) => gapTo({ x, y }, { x, y }, water) >= BANK * BANK);
   const TOWER = { owner: null, n: TOWER_START, level: 1, tower: true };
 
-  // Two sides start on the ring on its long axis, in the canyon at the head of the top corridor, and on the archipelago in the corners as four do.
-  const start = four || id === 'archipelago'
+  // The maze's grid: as many columns and rows as stand a start's elbow apart, an odd count of each so that one
+  // stands through the middle. The k-th of n is placed from its own end of the board, so it is the image of the
+  // (n - k)-th to the unit.
+  const spans = (from: number, to: number) => 2 * Math.floor((to - from) / elbow / 2);
+  const [across, down] = [spans(left + 10, w - left - 10), spans(top + 10, bottom - 10)];
+  const line = (k: number, n: number, from: number, to: number) => (2 * k <= n ? Math.round(from + (k * (to - from)) / n) : from + to - Math.round(from + ((n - k) * (to - from)) / n));
+  // Kept in from the edges by as much as a hut is jogged, so none is jogged off the board.
+  const cell = (c: number, r: number): Point => ({ x: line(c, across, left + 10, w - left - 10), y: line(r, down, top + 10, bottom - 10) });
+
+  // Two sides start on the ring and the lanes on the long axis, in the maze in its corner, in the canyon at the head of the top corridor, and on the archipelago in the corners as four do.
+  const start = id === 'maze'
+    ? put(cell(0, 0).x + int(21) - 10, cell(0, 0).y + int(21) - 10, { owner: null, n: START_UNITS, level: 1 }, SEATS)
+    : four || id === 'archipelago'
     ? put(left + 15 + int(60), top + 10 + int(50), { owner: null, n: START_UNITS, level: 1 }, SEATS)
-    : id === 'ring'
+    : id === 'ring' || id === 'lanes'
       ? put(left + 15 + int(40), cy, { owner: null, n: START_UNITS, level: 1 }, SEATS)
       : id === 'canyon'
         ? put(left + 15 + int(40), top + 20 + int(20), { owner: null, n: START_UNITS, level: 1 }, SEATS)
@@ -1111,7 +1150,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
   else if (id === 'hill') put(cx, cy, { owner: null, n: 14 + int(5), level: 2, fort: true });
   else if (id === 'bridges') put(cx, cy, { owner: null, n: 16 + int(8), level: 2 });
   else if (id === 'crossroads') put(cx, cy, { owner: null, n: 16 + int(6), level: 2, fort: true });
-  else if (id === 'warren' || planned || id === 'archipelago') put(cx, cy, { owner: null, n: 16 + int(8), level: 2 });
+  else if (id === 'warren' || planned || id === 'archipelago' || id === 'villages') put(cx, cy, { owner: null, n: 16 + int(8), level: 2 });
   else if (crowned) put(cx, cy, { owner: null, n: CROWN_UNITS, level: 2 });
   const middle = sites.findIndex((p) => p.x === cx && p.y === cy);
 
@@ -1186,7 +1225,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
     if (!sites.some((p) => p.tower)) return null;
   }
 
-  for (let tries = 0, made = planned ? 2 : 0; made < 2 && tries < 80; tries++) {
+  for (let tries = 0, made = planned || id === 'villages' ? 2 : 0; made < 2 && tries < 80; tries++) {
     const x = home.x + int(2 * spread + 1) - spread;
     const y = home.y + int(2 * spread + 1) - spread;
     if (!far(home, { x, y }, elbow) || far(home, { x, y }, elbow + 105) || x > cx || (four && y > cy) || !allowed(x, y)) continue;
@@ -1203,17 +1242,29 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
   const worth = (x: number, y: number) => ({ owner: null, n: 5 + Math.floor((8 * Math.min(reach, ...starts.map((s) => span(sites[s], { x, y })))) / reach) + int(4), level: 1 });
   /** The paths of the ring or the canyon, each laid later with its images. */
   const plan: [number, number, PathKind][] = [];
-  /** Puts down huts at the points in turn, from one already standing, and plans a path from each to the next. Returns the last, or -1 when one did not fit. */
-  const run = (from: number, points: Point[], kind: PathKind): number => {
+  /**
+   * Puts down huts at the points in turn, from one already standing, and plans a path from each to the next, a
+   * point with a site of its own standing as that. Returns the last, or -1 when one did not fit. With `into` the
+   * huts are listed there as well.
+   */
+  const run = (from: number, points: (Point & { site?: Omit<Site, 'x' | 'y'> })[], kind: PathKind, into: number[] = []): number => {
     let last = from;
     for (const p of points) {
       const standing = sites.findIndex((q) => q.x === p.x && q.y === p.y);
-      const next = standing >= 0 ? standing : put(p.x, p.y, worth(p.x, p.y));
+      const next = standing >= 0 ? standing : put(p.x, p.y, p.site ?? worth(p.x, p.y));
       if (next < 0) return -1;
       plan.push([last, next, kind]);
+      into.push(next);
       last = next;
     }
     return last;
+  };
+  /** Evenly spaced points after p up to q, about a stride apart and none nearer the next than `least`. */
+  const along = (p: Point, q: Point, least: number): Point[] => {
+    const length = Math.sqrt(spanSquared(p, q));
+    let count = Math.max(1, Math.round(length / STRIDE[size]));
+    while (count > 1 && length / count < least) count--;
+    return Array.from({ length: count }, (_, k) => ({ x: Math.round(p.x + ((k + 1) * (q.x - p.x)) / count), y: Math.round(p.y + ((k + 1) * (q.y - p.y)) / count) }));
   };
   /** Evenly spaced stops after `from` up to `to`, about a stride apart and none nearer the next than `least`. */
   const stops = (from: number, to: number, least: number) => {
@@ -1302,6 +1353,99 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
     if (run(end, [...xs.slice(0, -1).map((x) => ({ x, y: cy })), centre], 'road') < 0) return null;
     plan.push([crest, middle, 'climb']);
   }
+  // The lanes: three from each start, two round the edges of the board on wide road and one through the middle on
+  // a plain one, so that all three take about as long. Each has a neutral tower on each side's half of it, which has
+  // to be broken to push down that lane, or on four sides one between each two corners. Between the lanes lie the
+  // wilds, a big hut in each that slow tracks reach from the lanes either side, the one way from lane to lane short
+  // of a start or the middle.
+  const lanes: number[][] = [];
+  const camps: number[] = [];
+  if (id === 'lanes') {
+    const jog = (p: Point) => ({ x: Math.max(left, Math.min(w - left, p.x + int(25) - 12)), y: Math.max(top, Math.min(bottom, p.y + int(25) - 12)) });
+    // On two sides an edge lane runs out to the top or bottom edge, where a tower holds the corner, and along it to
+    // the middle, where it meets the other side's. On four it runs along the edge to the middle of it.
+    const edges = four ? [[{ x: cx, y: home.y }], [{ x: home.x, y: cy }]] : [top, bottom].map((y) => [{ x: home.x, y }, { x: cx, y }]);
+    for (const turns of edges) {
+      const points: (Point & { site?: Omit<Site, 'x' | 'y'> })[] = [];
+      turns.reduce((from, to, k) => {
+        const leg = along(from, to, gap + 10);
+        points.push(...leg.slice(0, -1).map(jog), k === 0 && !four ? { ...to, site: TOWER } : to);
+        return to;
+      }, home as Point);
+      // On four sides the tower stands where the lane meets the next corner's, and the two sides there share it.
+      if (four) points[points.length - 1].site = TOWER;
+      const lane: number[] = [];
+      if (run(start, points, 'wide', lane) < 0) return null;
+      lanes.push(lane);
+    }
+    // On four sides the first hut in from the corner stands far enough out not to crowd the edge lanes' first ones.
+    const inward = along(home, centre, four ? 2 * gap + 30 : gap + 10).map((p, k, all) => (k === all.length - 1 ? p : jog(p)));
+    // The tower is short of the hut next to the middle. With three sides the middle lanes lead to the third side's
+    // base and have none: with towers there the third side won 35, 30 and 29 of 40 games between computers on the
+    // medium, large and huge grounds, and without them, and with its roads out to the edge lanes, 6, 10 and 14.
+    const tower = count === 3 ? -1 : Math.floor((inward.length - 2) / 2);
+    const middleLane: number[] = [];
+    if (inward.length < 2 || run(start, inward.map((p, k) => (k === tower ? { ...p, site: TOWER } : p)), 'road', middleLane) < 0) return null;
+    lanes.push(middleLane);
+    // The third side's base has roads of its own out to where the edge lanes meet.
+    if (count === 3 && run(middle, along(centre, { x: cx, y: top }, gap + 10), 'road') < 0) return null;
+    // A wild lies in the middle of the ground between each edge lane and the middle one.
+    for (const turns of edges) {
+      const corners = [home, ...turns, centre];
+      const x = Math.round(corners.reduce((sum, p) => sum + p.x, 0) / corners.length) + int(41) - 20;
+      const y = Math.round(corners.reduce((sum, p) => sum + p.y, 0) / corners.length) + int(41) - 20;
+      const camp = put(x, y, { owner: null, n: 14 + int(6), level: 2 });
+      if (camp >= 0) camps.push(camp);
+    }
+  }
+
+  // The maze: a hut on every point of the grid, its paths laid below once the huts all stand.
+  if (id === 'maze') {
+    for (let c = 0; c <= across; c++) {
+      for (let r = 0; r <= down; r++) {
+        const p = cell(c, r);
+        if (sites.some((q) => !far(q, p, 40))) continue;
+        // A hut on a line of the symmetry stays on it, or it would crowd its own image.
+        const x = p.x === cx ? cx : p.x + int(21) - 10;
+        const y = p.y === cy ? cy : p.y + int(21) - 10;
+        if (put(x, y, worth(x, y)) < 0) return null;
+      }
+    }
+  }
+
+  // The villages: three huts close together, each a road from the other two, and between the villages long wide
+  // roads, laid below. A side's own village is its start and the two cheap huts, and the middle one a big hut with
+  // four round it.
+  const villages: Point[] = [];
+  if (id === 'villages') {
+    // A village's three huts stand on a circle about its middle, its side at least a start's elbow.
+    const r = Math.ceil(elbow / Math.sqrt(3)) + 4;
+    const at = (c: Point, [dx, dy]: readonly [number, number]) => ({ x: Math.round(c.x + r * dx), y: Math.round(c.y + r * dy) });
+    // The two cheap huts stand at the other corners of a triangle with the start, turned in towards the middle.
+    const own = four ? at(home, [0.707, 0.707]) : at(home, [1, 0]);
+    const cheap = four ? [at(own, [0.966, -0.259]), at(own, [-0.259, 0.966])] : [at(own, [0.5, -0.866]), at(own, [0.5, 0.866])];
+    for (const p of cheap) if (put(p.x, p.y, { owner: null, n: 4 + int(4), level: 1 }) < 0) return null;
+    villages.push(...images(own.x, own.y), centre);
+    const arm = Math.round(r * Math.sqrt(3));
+    // An arm that would crowd a side's own village is left off, as on the small ground.
+    for (const p of [{ x: cx - arm, y: cy }, { x: cx, y: cy - arm }]) put(p.x, p.y, worth(p.x, p.y));
+    // Thrown villages keep over three times that apart, their images too, each turned by a twelfth of a turn or more.
+    const apartOf = Math.round(3.3 * r);
+    for (let tries = 0; tries < 400 && sites.length < target; tries++) {
+      const c = { x: left + r + int(cx - left - r + 1), y: top + r + int((four ? cy : bottom - r) - top - r + 1) };
+      const all = images(c.x, c.y);
+      if (all.length < moves.length || sites.length + 3 * all.length > most) continue;
+      if (!all.every((p, k) => [...villages, ...all.slice(0, k)].every((q) => far(p, q, apartOf)))) continue;
+      const turn = int(4);
+      const huts = [0, 4, 8].map((k) => at(c, CLOCK[(turn + k) % 12]));
+      const every = huts.flatMap((p) => images(p.x, p.y));
+      const fits = every.every((q, k) => allowed(q.x, q.y) && q.x >= left && q.x <= w - left && q.y >= top && q.y <= bottom && [...sites, ...every.slice(0, k)].every((s) => far(s, q, gap)));
+      if (!fits) continue;
+      for (const p of huts) if (put(p.x, p.y, worth(p.x, p.y)) < 0) return null;
+      villages.push(...all);
+    }
+  }
+
   // Every island has a hut on it before the rest are thrown down, as one too small to be hit by chance still needs its bridge.
   waters.forEach((water, k) => {
     // An island lies inside the box its channel's line spans.
@@ -1325,7 +1469,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
       if (allowed(cx, y)) put(cx, y, worth(cx, y));
     }
   });
-  for (let tries = 0; tries < 900 && sites.length < target; tries++) {
+  for (let tries = 0; tries < 900 && sites.length < target && id !== 'villages'; tries++) {
     let x = left + int(cx - left + 1);
     let y = top + int((four ? cy : bottom) - top + 1);
     // A hut this near a line of the symmetry would crowd its own image, so it is put on the line.
@@ -1352,6 +1496,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
     if (id === 'bridges') return p.x < river ? 0 : p.x > w - river ? 2 : 1;
     if (id === 'archipelago') return islandOf(p);
     if (id === 'guns') return p.x === cx ? 4 : (p.x < cx ? 0 : 1) + (four && p.y > cy ? 2 : 0);
+    if (id === 'villages') return villages.reduce((best, c, k) => (spanSquared(p, c) < spanSquared(p, villages[best]) ? k : best), 0);
     return 0;
   };
   // A road on the archipelago keeps off the water, far enough that the bend it is drawn with does not take it in.
@@ -1511,6 +1656,85 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
     return { walk, next };
   };
 
+  // Each wild's big hut has a slow track to the nearest hut or tower on the lane either side of it that it can reach.
+  for (const camp of camps) {
+    for (const lane of [lanes[camps.indexOf(camp)], lanes[2]]) {
+      const near = lane.filter((at) => !sites[at].owner && at !== middle && clearOf(camp, at)).sort((p, q) => spanSquared(sites[p], sites[camp]) - spanSquared(sites[q], sites[camp]));
+      if (!near.some((at) => join(camp, at, 'narrow'))) return null;
+    }
+  }
+
+  // The maze's paths: a tree through the grid, grown at random a path and its images at a time and no hut joined
+  // to itself the long way, so that from any hut there is one way to any other. The start's two ways out go in first,
+  // and the middle's left and right. A few slow tracks then cut through the walls where the way round is longest.
+  if (id === 'maze') {
+    const grid = (c: number, r: number) => sites.findIndex((p) => !far(p, cell(c, r), 40));
+    const walls: [number, number][] = [];
+    for (let c = 0; c <= across; c++) {
+      for (let r = 0; r <= down; r++) {
+        if (c < across) walls.push([grid(c, r), grid(c + 1, r)]);
+        if (r < down) walls.push([grid(c, r), grid(c, r + 1)]);
+      }
+    }
+    for (let k = walls.length - 1; k > 0; k--) {
+      const j = int(k + 1);
+      [walls[k], walls[j]] = [walls[j], walls[k]];
+    }
+    const first = [[start, grid(1, 0)], [start, grid(0, 1)], [middle, grid(across / 2 - 1, down / 2)]] as [number, number][];
+    const group = sites.map((_, k) => k);
+    const find = (k: number): number => (group[k] === k ? k : (group[k] = find(group[k])));
+    const orbitOf = ([a, b]: [number, number]) => twins.map((twin) => [twin[a], twin[b]]).filter(([p, q], k, all) => all.findIndex(([r, s]) => key(r, s) === key(p, q)) === k);
+    // A strict pass makes a tree where the symmetry allows one; a second joins what the first left apart.
+    for (const strict of [true, false]) {
+      for (const wall of [...first, ...walls]) {
+        if (links.has(key(wall[0], wall[1]))) continue;
+        const trial = [...group];
+        const at = (k: number): number => (trial[k] === k ? k : at(trial[k]));
+        let merged = 0;
+        let looped = false;
+        for (const [p, q] of orbitOf(wall)) {
+          const [u, v] = [at(p), at(q)];
+          if (u === v) looped = true;
+          else (trial[u] = v), merged++;
+        }
+        if (merged === 0 || (strict && looped) || !join(wall[0], wall[1], 'road')) continue;
+        for (const [p, q] of orbitOf(wall)) group[find(p)] = find(q);
+      }
+    }
+    for (let cuts = Math.round(sites.length / 9); cuts > 0; ) {
+      const { walk } = walks();
+      const best = walls.filter(([a, b]) => !links.has(key(a, b)) && a !== middle && b !== middle).sort(([a, b], [c, d]) => walk[c][d] / span(sites[c], sites[d]) - walk[a][b] / span(sites[a], sites[b]))[0];
+      if (!best || walk[best[0]][best[1]] < 3 * span(sites[best[0]], sites[best[1]]) || !join(best[0], best[1], 'narrow')) break;
+      cuts -= orbitOf(best).length;
+    }
+  }
+
+  // Villages that are neighbours, with no third village inside the circle on the two as a diameter, have one wide
+  // road between them, from the nearest pair of their huts it can run between.
+  if (id === 'villages') {
+    const between = (i: number, j: number, k: number) =>
+      (villages[i].x - villages[k].x) * (villages[j].x - villages[k].x) + (villages[i].y - villages[k].y) * (villages[j].y - villages[k].y) < 0;
+    const neighbours = (i: number, j: number) => i !== j && !villages.some((_, k) => k !== i && k !== j && between(i, j, k));
+    // With three sides the third starts in the middle village, which would otherwise have a road from every village
+    // round it where the other two have two or three. It keeps the nearest two, a village and its image.
+    const middleVillage = villages.indexOf(centre);
+    const nearMiddle = villages
+      .map((_, k) => k)
+      .filter((k) => neighbours(k, middleVillage))
+      .sort((a, b) => spanSquared(villages[a], centre) - spanSquared(villages[b], centre))
+      .slice(0, 2);
+    for (let i = 0; i < villages.length; i++) {
+      for (let j = i + 1; j < villages.length; j++) {
+        if (!neighbours(i, j)) continue;
+        if (count === 3 && (i === middleVillage || j === middleVillage) && !nearMiddle.includes(i + j - middleVillage)) continue;
+        if ([...links.values()].some((path) => (region[path.a] === i && region[path.b] === j) || (region[path.a] === j && region[path.b] === i))) continue;
+        const pairs = sites.flatMap((_, a) => (region[a] === i ? sites.flatMap((_, b) => (region[b] === j && clearOf(a, b) ? [[a, b]] : [])) : []));
+        pairs.sort(([a, b], [c, d]) => spanSquared(sites[a], sites[b]) - spanSquared(sites[c], sites[d]));
+        pairs.some(([a, b]) => join(a, b, 'wide'));
+      }
+    }
+  }
+
   // On the wider grounds a stretch of spikes cuts across a long way round, somewhere besides the middle.
   if (id === 'thorns' && size !== 'small') {
     const { walk } = walks();
@@ -1592,8 +1816,9 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
     }
   }
 
-  // On the huge ground the long roads are wide ones, so the wider board is not slower to cross.
-  if (size === 'huge') for (const path of links.values()) if (path.kind === 'road' && span(sites[path.a], sites[path.b]) >= HUGE_WIDE_FROM) path.kind = 'wide';
+  // On the huge ground the long roads are wide ones, so the wider board is not slower to cross. In the maze and the
+  // villages the wide roads are only the ones laid as such: between villages, and none in the maze.
+  if (size === 'huge' && id !== 'maze' && id !== 'villages') for (const path of links.values()) if (path.kind === 'road' && span(sites[path.a], sites[path.b]) >= HUGE_WIDE_FROM) path.kind = 'wide';
   const paths = [...links.values()].sort((p, q) => p.a - q.a || p.b - q.b);
   // Every hut can be reached without paying a toll, and every side has two ways out of its first hut.
   const reached = new Set([0]);
@@ -1647,7 +1872,7 @@ function tryGrow(rnd: () => number, id: MapId, count: number, size: SizeId, crow
   return { sites, paths, rivers };
 }
 
-const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', bridges: 'valley', guns: 'ice', hill: 'terrace', crossroads: 'valley', warren: 'meadow', archipelago: 'valley', ring: 'meadow', canyon: 'scrub' };
+const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', bridges: 'valley', guns: 'ice', hill: 'terrace', crossroads: 'valley', warren: 'meadow', archipelago: 'valley', ring: 'meadow', canyon: 'scrub', lanes: 'terrace', maze: 'ice', villages: 'meadow', drawn: 'meadow' };
 
 /**
  * The map for a seed, the place, the sides playing it and the ground: without
@@ -1665,16 +1890,27 @@ const SCENES: Record<MapId, SceneId> = { meadow: 'meadow', thorns: 'scrub', brid
  *  archipelago islands joined to the middle by one bridge each, a side's own by a ford too
  *  ring        a loop round the middle that can be taken either way
  *  canyon      long winding corridors, cut short by one climb at the middle
+ *  lanes       three lanes from each start, a tower on each, and slow tracks across the wilds between
+ *  maze        a grid of huts with one way between any two, and a few slow tracks through its walls
+ *  villages    clusters of three huts, with long wide roads between neighbouring clusters
  *
  * With the buildings twist a few neutral huts are built as something else
  * (see Building and placeBuildings).
  *
- * The last four are always grown. On its own ground and for two or three sides each of the first five is the
+ * The last seven are always grown. On its own ground and for two or three sides each of the first five is the
  * map drawn for it. With three the third side starts in the middle, the one
  * place as far from each seat as from the other, and starts with more
  * there (see startThree): in the middle both seats come at it at once.
  */
-export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length], sides: readonly Seat[] = ['a', 'b'], size?: SizeId, rules: Rules = CLASSIC): SwarmMap {
+export function buildMap(
+  seed: number,
+  id: MapId = MAP_IDS[(seed >>> 0) % MAP_IDS.length],
+  sides: readonly Seat[] = ['a', 'b'],
+  size?: SizeId,
+  rules: Rules = CLASSIC,
+  /** The drawn map's own huts, paths and rivers (see buildDrawn), laid for these sides on this ground. */
+  layout?: Drawn,
+): SwarmMap {
   const rnd = mulberry32(seed);
   const ground = sizeOf(id, sides.length, size);
   const { w, h } = WORLDS[ground];
@@ -1685,8 +1921,10 @@ export function buildMap(seed: number, id: MapId = MAP_IDS[(seed >>> 0) % MAP_ID
   // through it, so a bridges map played for the middle is grown.
   const crowned = !third && (rules.mode === 'hill' || rules.mode === 'egg');
   const drawable = id === 'thorns' || id === 'bridges' || id === 'hill' ? LAYOUTS[id].filter((layout) => !crowned || layout.centre) : [];
-  const drawn =
-    sides.length === 4 || ground !== OWN_SIZE[id] || id === 'crossroads' || id === 'warren' || id === 'archipelago' || id === 'ring' || id === 'canyon' || (crowned && id === 'bridges')
+  if (id === 'drawn' && !layout) throw new Error('A drawn map is built from its drawing');
+  const drawn = layout
+    ? { sites: layout.sites.map((site) => ({ ...site })), paths: layout.paths, rivers: layout.rivers }
+    : sides.length === 4 || ground !== OWN_SIZE[id] || id === 'crossroads' || id === 'warren' || id === 'archipelago' || id === 'ring' || id === 'canyon' || id === 'lanes' || id === 'maze' || id === 'villages' || (crowned && id === 'bridges')
       ? grow(rnd, id, sides.length, ground, crowned)
       : id === 'meadow' || id === 'guns'
         ? { ...scatter(rnd, id === 'guns', w, h, SCATTER_PAIRS[id], third || crowned), rivers: [] }

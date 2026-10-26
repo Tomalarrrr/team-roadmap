@@ -7,6 +7,7 @@ import {
   HUGE_EXTRA_TICKS,
   LUCK_DEN,
   MAP_IDS,
+  MOST_SITES,
   MATCH_TICKS,
   OVERTIME_TICKS,
   SEATS,
@@ -171,7 +172,7 @@ describe.each(MAP_IDS)('the %s map', (id) => {
   it('keeps its huts 150 apart, on whole numbers, clear of the edges, and few enough for an order to name', () => {
     for (const seed of MAP_SEEDS) {
       const { sites, w, h } = buildMap(seed, id);
-      expect(sites.length).toBeLessThanOrEqual(36);
+      expect(sites.length).toBeLessThanOrEqual(MOST_SITES - 2);
       sites.forEach((p, i) => {
         expect(Number.isInteger(p.x) && Number.isInteger(p.y)).toBe(true);
         expect(p.x).toBeGreaterThanOrEqual(60);
@@ -187,7 +188,7 @@ describe.each(MAP_IDS)('the %s map', (id) => {
   });
 
   it('lies in a world of the one shape, sized as asked, and its own size when not', () => {
-    const own = ['meadow', 'crossroads', 'warren', 'archipelago', 'ring', 'canyon'].includes(id) ? 'medium' : 'small';
+    const own = ['lanes', 'maze', 'villages'].includes(id) ? 'large' : ['meadow', 'crossroads', 'warren', 'archipelago', 'ring', 'canyon'].includes(id) ? 'medium' : 'small';
     expect(buildMap(1, id).size).toBe(own);
     for (const size of SIZE_IDS) {
       const { w, h, size: got } = buildMap(1, id, ['a', 'b'], size);
@@ -229,7 +230,7 @@ describe('the places', () => {
     expect(MAP_SEEDS.map((seed) => buildMap(seed).id)).toEqual(MAP_SEEDS.map((seed) => MAP_IDS[seed % MAP_IDS.length]));
     expect(buildMap(0xdeadbeef).id).toBe(MAP_IDS[0xdeadbeef % MAP_IDS.length]);
     expect(buildMap(12)).toEqual(buildMap(12, MAP_IDS[12 % MAP_IDS.length]));
-    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace', 'valley', 'meadow', 'valley', 'meadow', 'scrub']);
+    expect(MAP_IDS.map((id) => buildMap(1, id).scene)).toEqual(['meadow', 'scrub', 'valley', 'ice', 'terrace', 'valley', 'meadow', 'valley', 'meadow', 'scrub', 'terrace', 'ice', 'meadow']);
   });
 
   it.each<MapId>(['thorns', 'bridges', 'hill'])('%s is drawn three ways, each of them both ways up', (id) => {
@@ -322,7 +323,7 @@ describe('the places', () => {
     }
   });
 
-  it('guns stands a column of two to four neutral towers before each side, and no other place has a tower', () => {
+  it('guns stands a column of two to four neutral towers before each side, and no place but those built round towers has one', () => {
     expect(TOWER_SEEDS.map((seed) => towersOf(buildMap(seed, 'guns')).length)).toEqual([4, 6, 8]);
     const byCount = [0, 0, 0, 0, 0];
     for (let seed = 1; seed <= 400; seed++) {
@@ -334,7 +335,7 @@ describe('the places', () => {
     expect(byCount.slice(0, 2)).toEqual([0, 0]);
     for (const count of byCount.slice(2)) expect(count).toBeGreaterThan(100);
     for (const id of MAP_IDS) {
-      if (id !== 'guns' && id !== 'crossroads') expect(MAP_SEEDS.flatMap((seed) => towersOf(buildMap(seed, id)))).toEqual([]);
+      if (id !== 'guns' && id !== 'crossroads' && id !== 'lanes') expect(MAP_SEEDS.flatMap((seed) => towersOf(buildMap(seed, id)))).toEqual([]);
     }
   });
 
@@ -411,7 +412,7 @@ describe('the places', () => {
 describe('the maps grown for any number of sides, at any size', () => {
   const SIDES = [SEATS.slice(0, 2), SEATS.slice(0, 3), SEATS];
   const GROUNDS: (SizeId | undefined)[] = [undefined, ...SIZE_IDS];
-  const NEW: MapId[] = ['archipelago', 'ring', 'canyon'];
+  const NEW: MapId[] = ['archipelago', 'ring', 'canyon', 'lanes', 'maze', 'villages'];
   const DEALS = Array.from({ length: 10 }, (_, i) => i * 7919 + 5);
   /** Every way each map can be dealt: its places, the sides and the grounds. */
   const dealsOf = (ids: readonly MapId[], grounds = GROUNDS) => ids.flatMap((id) => SIDES.flatMap((sides) => grounds.map((size) => ({ id, sides, size }))));
@@ -441,17 +442,17 @@ describe('the maps grown for any number of sides, at any size', () => {
     return found;
   };
 
-  it('never holds more huts than an order can name, nor the new maps and the huge ground more than leave room for one more', () => {
+  it('never holds more huts than leave an order room to name one a mode adds, and grows past the old single-character limit', () => {
     let most = 0;
     for (const { id, sides, size } of dealsOf(MAP_IDS)) {
       for (const seed of [...DEALS, ...DEALS.map((seed) => seed + 1)]) {
         const map = buildMap(seed, id, sides, size);
-        expect(map.sites.length, `${id} for ${sides.length} at ${map.size}, seed ${seed}`).toBeLessThanOrEqual(NEW.includes(id) || map.size === 'huge' ? 34 : 36);
+        expect(map.sites.length, `${id} for ${sides.length} at ${map.size}, seed ${seed}`).toBeLessThanOrEqual(MOST_SITES - 2);
         most = Math.max(most, map.sites.length);
       }
     }
-    // The large maps were among those dealt.
-    expect(most).toBeGreaterThanOrEqual(35);
+    // Orders once named a hut in one of 36 characters, and the maze on its own ground holds more.
+    expect(most).toBeGreaterThan(36);
   }, 60000);
 
   it('is the same board from every start, huts, paths and rivers', () => {
@@ -566,6 +567,85 @@ describe('the maps grown for any number of sides, at any size', () => {
     }
   }, 60000);
 
+  it('lays three lanes from each start, the edge ones wide and each held by a cannon, and camps off them reached by narrow tracks', () => {
+    for (const { sides, size } of dealsOf(['lanes'])) {
+      for (const seed of DEALS) {
+        const map = buildMap(seed, 'lanes', sides, size);
+        const kindsAt = (hut: number) => map.paths.filter((path) => path.a === hut || path.b === hut).map((path) => path.kind);
+        // Two cannons on each start's edge lanes, shared between corners with four sides, and one on each middle lane but
+        // the third side's.
+        expect(towersOf(map).length).toBe({ 2: 6, 3: 4, 4: 8 }[sides.length]);
+        for (const tower of towersOf(map)) expect(kindsAt(tower).filter((kind) => kind === 'wide').length === 2 || kindsAt(tower).includes('road')).toBe(true);
+        for (const home of map.homes) {
+          if (map.sites[home].owner === 'c' && sides.length === 3) continue;
+          expect(kindsAt(home).length).toBe(3);
+          expect(kindsAt(home).filter((kind) => kind === 'wide').length).toBeGreaterThanOrEqual(2);
+        }
+        // Each camp is a big hut off the lanes, and the only way in is two narrow tracks.
+        const camps = map.sites.flatMap((site, hut) => (kindsAt(hut).includes('narrow') && site.level === 2 && !site.tower ? [hut] : []));
+        for (const camp of camps) expect(kindsAt(camp)).toEqual(['narrow', 'narrow']);
+        const narrow = map.paths.filter((path) => path.kind === 'narrow');
+        expect(narrow.length).toBe(2 * camps.length);
+        for (const path of narrow) expect(camps.includes(path.a) || camps.includes(path.b)).toBe(true);
+        // The large ground and up have room for a camp between each start's lanes, and the third side's middle start has none.
+        if (size === undefined || size === 'large' || size === 'huge') expect(camps.length).toBe({ 2: 4, 3: 4, 4: 8 }[sides.length]);
+      }
+    }
+  }, 60000);
+
+  it('lays the maze as a tree of roads over the grid, with a few narrow cuts through its walls', () => {
+    for (const { sides, size } of dealsOf(['maze'])) {
+      for (const seed of DEALS) {
+        const map = buildMap(seed, 'maze', sides, size);
+        const roads = map.paths.filter((path) => path.kind === 'road');
+        const cuts = map.paths.filter((path) => path.kind === 'narrow');
+        expect(roads.length + cuts.length).toBe(map.paths.length);
+        // A tree: one road fewer than huts, and every hut reached by road alone.
+        expect(roads.length).toBe(map.sites.length - 1);
+        const seen = new Set([0]);
+        for (const hut of seen) for (const path of roads) if (path.a === hut || path.b === hut) seen.add(path.a === hut ? path.b : path.a);
+        expect(seen.size).toBe(map.sites.length);
+        expect(cuts.length).toBeGreaterThan(0);
+        expect(cuts.length).toBeLessThanOrEqual(Math.round(map.sites.length / 9) + 3);
+      }
+    }
+    // With three sides it is never played huge.
+    expect(buildMap(5, 'maze', SEATS.slice(0, 3), 'huge').w).toBe(WORLDS.large.w);
+    expect(buildMap(5, 'maze', SEATS.slice(0, 2), 'huge').w).toBe(WORLDS.huge.w);
+    // With four, never smaller than large.
+    expect(buildMap(5, 'maze', SEATS, 'medium').w).toBe(WORLDS.large.w);
+    expect(buildMap(5, 'maze', SEATS.slice(0, 2), 'medium').w).toBe(WORLDS.medium.w);
+  }, 60000);
+
+  it('lays the villages as triangles of road, joined only by wide roads, one between any two', () => {
+    for (const { sides, size } of dealsOf(['villages'])) {
+      for (const seed of DEALS) {
+        const map = buildMap(seed, 'villages', sides, size);
+        const middle = centreHut(map);
+        const group = map.sites.map((_, hut) => hut);
+        const find = (hut: number): number => (group[hut] === hut ? hut : (group[hut] = find(group[hut])));
+        for (const path of map.paths) if (path.kind === 'road') group[find(path.a)] = find(path.b);
+        const villages = new Map<number, number[]>();
+        map.sites.forEach((_, hut) => villages.set(find(hut), [...(villages.get(find(hut)) ?? []), hut]));
+        for (const huts of villages.values()) {
+          // The middle is a big hut with up to four round it.
+          if (huts.includes(middle)) expect([3, 5]).toContain(huts.length);
+          else expect(huts.length).toBe(3);
+        }
+        expect(map.paths.every((path) => path.kind === 'road' || path.kind === 'wide')).toBe(true);
+        const between = map.paths.filter((path) => path.kind === 'wide').map((path) => [find(path.a), find(path.b)].sort((p, q) => p - q).join());
+        for (const pair of between) expect(pair.split(',')[0]).not.toBe(pair.split(',')[1]);
+        expect(new Set(between).size).toBe(between.length);
+        // With three sides the middle village, the third side's, has two wide roads out, as the other two have.
+        if (sides.length === 3) expect(between.filter((pair) => pair.split(',').includes(String(find(middle)))).length).toBe(2);
+      }
+    }
+    // With three or four sides it is never played smaller than large.
+    expect(buildMap(5, 'villages', SEATS.slice(0, 3), 'medium').w).toBe(WORLDS.large.w);
+    expect(buildMap(5, 'villages', SEATS, 'small').w).toBe(WORLDS.large.w);
+    expect(buildMap(5, 'villages', SEATS.slice(0, 2), 'medium').w).toBe(WORLDS.medium.w);
+  }, 60000);
+
   it('gives every island of the archipelago one bridge to the land in the middle, and a side its own a ford as well', () => {
     for (const { sides, size } of dealsOf(['archipelago'])) {
       for (const seed of DEALS) {
@@ -620,6 +700,16 @@ describe('orders on the wire', () => {
       { tick: 4, kind: 'half', from: 0, to: 3 },
       { tick: 5999, kind: 'hut', from: 7, to: 7 },
     ]);
+  });
+
+  it('name a hut past the 36th by a capital, up to as many as a map holds', () => {
+    const orders: Order[] = [
+      { tick: 9, kind: 'half', from: 36, to: 35 },
+      { tick: 9, kind: 'all', from: MOST_SITES - 1, to: 37, risky: true },
+    ];
+    expect(MOST_SITES).toBe(62);
+    expect(encodeOrders(orders)).toBe('9:hAz,9:AZB');
+    expect(decodeOrders(encodeOrders(orders))).toStrictEqual(orders);
   });
 });
 
@@ -1965,8 +2055,9 @@ describe.each(MAP_IDS)('a scrambled game on the %s map', (id) => {
     for (const seed of [1, 2, 3]) {
       let nextId = 1;
       let stood = new Map<number, Stand>();
-      // On the archipelago the sides meet only once they are over the water, which takes them longer.
-      play(seed, id === 'archipelago' ? 1200 : 600, (state, map) => {
+      // On the archipelago the sides meet only once they are over the water, and in the maze only once they have
+      // found the way through, which takes them longer.
+      play(seed, id === 'archipelago' || id === 'maze' ? 1200 : 600, (state, map) => {
         expect(faults(state, map, nextId)).toEqual([]);
         nextId = state.nextId;
         const stand = standing(state, map);
@@ -2128,7 +2219,8 @@ describe('neither seat has the better end', () => {
       const state = newState(map);
       const orders = none();
       const rnd = mulberry32(seed * 31 + 7);
-      while (state.tick < 900 && state.winner === null) {
+      // Down the lanes each side breaks a tower before it meets the other, and in 900 ticks none had.
+      while (state.tick < (id === 'lanes' ? 1800 : 900) && state.winner === null) {
         const mine = scramble(state, map, 'a', rnd, 0.15);
         orders.a.push(...mine);
         orders.b.push(...mine.map((order) => ({ ...order, from: twin[order.from], to: twin[order.to] })));

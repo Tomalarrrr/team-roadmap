@@ -12,6 +12,8 @@ import { SwarmGame, TunePanel } from '../swarm/SwarmGame';
 const api = vi.hoisted(() => ({
   room: null as SwarmRoom | null,
   vacateSeat: vi.fn(async () => {}),
+  resignSeat: vi.fn(async () => {}),
+  backToLobby: vi.fn(async () => {}),
   setRules: vi.fn(async () => {}),
 }));
 
@@ -28,6 +30,8 @@ vi.mock('../../api/swarmApi', async (importOriginal) => {
     putSeat: vi.fn(async () => {}),
     recordResult: vi.fn(async () => {}),
     vacateSeat: api.vacateSeat,
+    resignSeat: api.resignSeat,
+    backToLobby: api.backToLobby,
     setRules: api.setRules,
   };
 });
@@ -43,14 +47,15 @@ describe('what the settings say', () => {
 
 describe('what leaving costs', () => {
   it('asks nothing outside a game', () => {
-    expect(leaveWarning(false, false, 2)).toBe(null);
-    expect(leaveWarning(false, true, 4)).toBe(null);
+    expect(leaveWarning(false, false, 2, 1)).toBe(null);
+    expect(leaveWarning(false, true, 4, 0)).toBe(null);
   });
 
   it('says what happens to the seat in a game', () => {
-    expect(leaveWarning(true, true, 2)).toBe('Leave this game? It ends here and is not kept.');
-    expect(leaveWarning(true, false, 2)).toBe('Leave this game? The other side wins it.');
-    expect(leaveWarning(true, false, 3)).toBe('Leave this game? The computer plays your side to the end.');
+    expect(leaveWarning(true, true, 2, 0)).toBe('Leave this game? It ends here and is not kept.');
+    expect(leaveWarning(true, false, 2, 1)).toBe('Leave this game? The other side wins it. You stay in the room.');
+    expect(leaveWarning(true, false, 3, 1)).toBe('Leave this game? The computer plays your side to the end. You watch, and are in the next game.');
+    expect(leaveWarning(true, false, 3, 0)).toBe('Leave this game? Nobody else is playing it, so it ends and the room goes back to the lobby.');
   });
 });
 
@@ -173,6 +178,8 @@ describe('the Menu', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query }));
     sessionStorage.setItem('roadmap-user-id', 's-ann');
     api.vacateSeat.mockClear();
+    api.resignSeat.mockClear();
+    api.backToLobby.mockClear();
     api.setRules.mockClear();
   });
   afterEach(() => {
@@ -190,7 +197,7 @@ describe('the Menu', () => {
 
   it('folds the map and rules away while the settings are open, and brings them back on Done', () => {
     mount(<SwarmGame onClose={() => {}} isSearchOpen={false} />);
-    const shown = () => ({ rules: container!.querySelector('[aria-label="Twists"]') !== null, settings: field('Match length') !== null });
+    const shown = () => ({ rules: [...container!.querySelectorAll('label')].some((l) => l.textContent?.startsWith('Mode')), settings: field('Match length') !== null });
     expect(shown()).toEqual({ rules: true, settings: false });
     act(() => button('Settings')!.click());
     expect(shown()).toEqual({ rules: false, settings: true });
@@ -205,34 +212,50 @@ describe('the Menu', () => {
     expect(button('Menu')).toBe(null);
   });
 
-  it('gives up the seat in a waiting room at once, and goes back to the start screen', async () => {
+  it('is Leave in the room\'s own lobby: it gives up the seat at once and goes back to the start screen', async () => {
     await inRoom(roomOf({}));
     expect(button('Start game')).not.toBe(null);
-    act(() => button('Menu')!.click());
+    expect(button('Menu')).toBe(null);
+    act(() => button('Leave')!.click());
     expect(api.vacateSeat).toHaveBeenCalledWith('ROOM', 'a', 0);
     expect(button('Create a room')).not.toBe(null);
     expect(sessionStorage.getItem('swarm-room')).toBe(null);
   });
 
-  it('asks first in a game, and keeps the player in it when they say no', async () => {
+  it('asks first in a game, and on yes gives the game up but keeps the seat and the room', async () => {
     await inRoom(roomOf({ status: 'playing', game: 1, startAt: performance.now() + 60_000 }));
-    act(() => button('Menu')!.click());
-    expect(container!.querySelector('[role="alertdialog"]')!.textContent).toContain('Leave this game? The other side wins it.');
+    act(() => button('Lobby')!.click());
+    expect(container!.querySelector('[role="alertdialog"]')!.textContent).toContain('Leave this game? The other side wins it. You stay in the room.');
     act(() => button('Keep playing')!.click());
     expect(container!.querySelector('[role="alertdialog"]')).toBe(null);
-    expect(container!.querySelector('canvas')).not.toBe(null);
-    expect(api.vacateSeat).not.toHaveBeenCalledWith('ROOM', 'a', 0);
-    act(() => button('Menu')!.click());
+    expect(api.resignSeat).not.toHaveBeenCalled();
+    act(() => button('Lobby')!.click());
     act(() => button('Leave game')!.click());
-    expect(api.vacateSeat).toHaveBeenCalledWith('ROOM', 'a', 0);
-    expect(button('Create a room')).not.toBe(null);
+    expect(api.resignSeat).toHaveBeenCalledWith('ROOM', 'a', 0);
+    expect(api.vacateSeat).not.toHaveBeenCalled();
+    expect(container!.querySelector('[role="alertdialog"]')).toBe(null);
+    expect(container!.querySelector('canvas')).not.toBe(null);
+    expect(sessionStorage.getItem('swarm-room')).toBe('ROOM');
   });
 
-  it('leaves the results without asking', async () => {
+  it('is Leave while watching a game already given up, as there is no game of one\'s own to leave', async () => {
+    await inRoom(roomOf({ status: 'playing', game: 1, startAt: performance.now() + 60_000, cpu: 'c', out: { a: 0 } }));
+    expect(button('Lobby')).toBe(null);
+    act(() => button('Leave')!.click());
+    expect(container!.querySelector('[role="alertdialog"]')).toBe(null);
+    expect(api.vacateSeat).toHaveBeenCalledWith('ROOM', 'a', 0);
+  });
+
+  it('takes the room back to its lobby after a game, without asking and keeping the seat', async () => {
     await inRoom(roomOf({ status: 'finished', game: 1, winner: 'b' }));
     expect(button('Play again')).not.toBe(null);
-    act(() => button('Menu')!.click());
+    act(() => button('Lobby')!.click());
     expect(container!.querySelector('[role="alertdialog"]')).toBe(null);
+    expect(api.backToLobby).toHaveBeenCalledWith('ROOM', 's-ann');
+    expect(api.vacateSeat).not.toHaveBeenCalled();
+    act(() => button('Back to lobby')!.click());
+    expect(api.backToLobby).toHaveBeenCalledTimes(2);
+    act(() => button('Leave room')!.click());
     expect(api.vacateSeat).toHaveBeenCalledWith('ROOM', 'a', 0);
     expect(button('Create a room')).not.toBe(null);
   });

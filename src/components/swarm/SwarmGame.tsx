@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createServerClock } from '../../api/snakeApi';
 import {
+  backToLobby,
   createRoom,
+  drawHere,
+  editPlan,
   followRoom,
   getRoom,
   hostOf,
   joinRoom,
   putSeat,
   recordResult,
+  resignSeat,
   seatOf,
   setComputer,
   setKind,
@@ -55,6 +59,7 @@ import {
   type Nest,
   type OrderKind,
   type Power,
+  type Rules,
   type Seat,
   type MapId,
   type SizeId,
@@ -80,6 +85,8 @@ import { fitsOrders, newLockstep, orderTick, pace, restingReport, sending, settl
 import { siegeBeat, siegeOf, threatsOf, type ThreatView } from './swarmThreat';
 import { clockOf, newTally, tallyStep, type Tally } from './swarmTally';
 import { SwarmSummary } from './SwarmSummary';
+import { buildDrawn, encodePlan, parsePlan, problemOf } from '../../swarmPlan';
+import { MapDrawer, type PlanEditFn } from './SwarmMapDrawer';
 import styles from './SwarmGame.module.css';
 
 const SIZE_NAME: Record<SizeId, string> = { small: 'Small', medium: 'Medium', large: 'Large', huge: 'Huge' };
@@ -96,6 +103,10 @@ const MAPS: Record<MapId, { name: string; about: string }> = {
   archipelago: { name: 'Archipelago', about: 'The corner starts are islands, each reached by a ford and a bridge. Every other island has one bridge to the land in the middle: hold its far end and the island is yours.' },
   ring: { name: 'The Ring', about: 'A fast road loops round the map through the corner starts, so you can attack either way round. The big hut in the middle has roads out to the loop.' },
   canyon: { name: 'Canyon', about: 'Long corridors that meet only at their ends, and one climb in the middle that links them. Whoever holds the top of it takes the short way.' },
+  lanes: { name: 'Three Lanes', about: 'Three lanes from each start: fast ones round the edges and one through the middle. A cannon holds each, but with three sides the middle lanes have none. Slow tracks cross the wilds between them through a big hut.' },
+  maze: { name: 'The Maze', about: 'A grid of huts with one way between any two. A few slow tracks cut through the walls where the way round is longest. With three sides it is played no bigger than large, and with four no smaller.' },
+  villages: { name: 'Villages', about: 'Clusters of three huts close together. Long fast roads join neighbouring clusters, and there is no other way out. With three or four sides it is played large or huge.' },
+  drawn: { name: 'Draw your own', about: 'Everything put down is copied for each side, so the map stays fair.' },
 };
 
 /** The layout each map shows in the lobby. Any seed would do; one keeps the picture still between visits. */
@@ -116,23 +127,47 @@ function MapThumb({ id, seats, size }: { id: MapId; seats: string; size: SizeId 
     const sides = SEATS.filter((seat) => seats.includes(seat));
     drawThumb(ref.current!, buildMap(THUMB_SEED, id, sides, size ?? undefined), THUMB_SEED);
   }, [id, seats, size]);
-  return <canvas ref={ref} className={styles.mapThumb} />;
+  return <canvas ref={ref} className={styles.mapPreview} />;
 }
 
 // Shown before a game and never during one: the board is left to itself.
 const HOW_TO =
   'Every hut you hold breeds units. Drag from your hut to any other to send half of it. Rest on the target for a moment, or hold Shift, to send all of it. Sweep over more of your huts on the way to send from them too, or over spikes or a ford to take that short cut. Units fight one for one. Tap a hut to upgrade it. Take every hut to win, or hold the most when the clock runs out. Level on huts then, play goes on for up to a minute until a hut changes hands.';
 
-/** The shuffle tile: every map's picture in a strip, since any of them may come up. */
+/** Shuffle's picture: every map's in a strip, since any of them may come up. */
 function ShuffleThumb({ seats, size }: { seats: string; size: SizeId | null }) {
   return (
-    <span className={`${styles.mapThumb} ${styles.shuffleThumb}`}>
+    <span className={`${styles.mapPreview} ${styles.shuffleThumb}`}>
       {MAP_IDS.map((id) => (
         <span key={id}>
           <MapThumb id={id} seats={seats} size={size} />
         </span>
       ))}
     </span>
+  );
+}
+
+/**
+ * One row of the lobby's form: its name in the first column, the control and
+ * anything beside it in the second. The label holds the control, so a press
+ * on the name opens it.
+ */
+/** Folded away: the lobby is for choosing, and the rules are there for whoever wants them. */
+function HowTo() {
+  return (
+    <details className={styles.howTo}>
+      <summary>How to play</summary>
+      <p className={styles.rules}>{HOW_TO}</p>
+    </details>
+  );
+}
+
+function Field({ name, children }: { name: string; children: React.ReactNode }) {
+  return (
+    <label className={styles.field}>
+      <span className={styles.fieldName}>{name}</span>
+      <span className={styles.fieldControl}>{children}</span>
+    </label>
   );
 }
 
@@ -143,45 +178,52 @@ interface MapPickerProps {
   onSize: (size: SizeId | null) => void;
   /** The seats the game would be played from. */
   sides: readonly Seat[];
+  /** The board the map is drawn on, shown in place of the map's picture when the pick is `drawn`. */
+  drawer: React.ReactNode;
 }
 
-function MapPicker({ pick, onPick, size, onSize, sides }: MapPickerProps) {
+/** Every map the lobby offers by name: the designed ones, then the room's own drawing. Never shuffled to. */
+const PICKS: MapId[] = [...MAP_IDS, 'drawn'];
+
+function MapPicker({ pick, onPick, size, onSize, sides, drawer }: MapPickerProps) {
   const seats = thumbSeats(sides);
-  const four = sides.length === 4;
-  // The size the game would be played at: as sizeOf has it, four sides are never played small.
-  const shown = size === null ? pick && sizeOf(pick, sides.length) : four && size === 'small' ? 'medium' : size;
+  // The ground a size is played on, as sizeOf has it. With the map left to the seed, only what holds for every map
+  // applies, and the meadow has no rule of its own.
+  const played = (each: SizeId) => sizeOf(pick ?? 'meadow', sides.length, each);
+  const shown = size === null ? pick && sizeOf(pick, sides.length) : played(size);
   return (
     <>
-      <div className={styles.mapRow} role="radiogroup" aria-label="Map">
-        {[null, ...MAP_IDS].map((id) => (
-          <button
-            key={id ?? 'shuffle'}
-            className={`${styles.mapBtn} ${id === pick ? styles.mapBtnOn : ''}`}
-            role="radio"
-            aria-checked={id === pick}
-            onClick={() => onPick(id)}
-          >
-            {id ? <MapThumb id={id} seats={seats} size={size} /> : <ShuffleThumb seats={seats} size={size} />}
-            {id ? MAPS[id].name : 'Shuffle'}
-          </button>
-        ))}
-      </div>
-      <span className={styles.rules}>{pick ? MAPS[pick].about : 'A different map each game.'}</span>
-      <div className={`${styles.choiceRow} ${styles.sizeRow}`} role="radiogroup" aria-label="Size">
+      {pick === 'drawn' ? (
+        drawer
+      ) : (
+        <span className={styles.formWide}>
+          {pick ? <MapThumb id={pick} seats={seats} size={size} /> : <ShuffleThumb seats={seats} size={size} />}
+        </span>
+      )}
+      <Field name="Map">
+        <select className={styles.pick} value={pick ?? ''} onChange={(e) => onPick(PICKS.find((id) => id === e.target.value) ?? null)}>
+          <option value="">Shuffle</option>
+          {PICKS.map((id) => (
+            <option key={id} value={id}>{MAPS[id].name}</option>
+          ))}
+        </select>
+      </Field>
+      <span className={`${styles.formWide} ${styles.note}`}>{pick ? MAPS[pick].about : 'A different map each game.'}</span>
+      <Field name="Size">
         {/* With the map left to the seed, there is no one size that is the map's own to show. */}
-        {(pick ? SIZE_IDS : [null, ...SIZE_IDS]).map((each) => (
-          <button
-            key={each ?? 'own'}
-            className={`${styles.choiceBtn} ${each === shown ? styles.choiceBtnOn : ''}`}
-            role="radio"
-            aria-checked={each === shown}
-            disabled={four && each === 'small'}
-            onClick={() => onSize(each)}
-          >
-            {each ? SIZE_NAME[each] : 'Own size'}
-          </button>
-        ))}
-      </div>
+        <select
+          className={styles.pick}
+          value={shown ?? ''}
+          onChange={(e) => onSize(SIZE_IDS.find((id) => id === e.target.value) ?? null)}
+        >
+          {!pick && <option value="">Own size</option>}
+          {SIZE_IDS.map((each) => (
+            <option key={each} value={each} disabled={played(each) !== each}>
+              {SIZE_NAME[each]}
+            </option>
+          ))}
+        </select>
+      </Field>
     </>
   );
 }
@@ -218,19 +260,19 @@ const TWISTS: Record<Twist, { name: string; about: string }> = {
   golden: { name: 'Golden hut', about: '3 minutes in (30% of the clock in blitz) the middle hut turns gold: it breeds 3 times as fast and holds half as much again.' },
   frenzy: { name: 'Frenzy', about: 'In the last minute every hut breeds twice as fast and towers fire every 0.3 seconds.' },
   comeback: { name: 'Comeback', about: 'A side 2 or more huts behind the leader breeds 25% faster.' },
-  buildings: { name: 'Buildings', about: 'A few neutral huts are built as a trap, a barracks, a granary or a beacon, and a bridge can be burnt for 10 units.' },
+  buildings: { name: 'Buildings', about: 'Up to 4 sets of neutral huts are built as a trap, barracks, granary, beacon, hall, watchtower or burrow, and a bridge can be burnt for 10 units.' },
   queens: { name: 'Queens', about: 'Lose your home hut and your other huts stop breeding until you take it back.' },
   armoury: { name: 'Armoury', about: 'Kit out towers, refit them, build them.' },
   walls: { name: 'Walls', about: 'Cut a path next to your hut for 15 units: 5 seconds later it closes for 30 seconds, killing everything on it. Or build a wall across its middle for 10: it kills the next 15 enemy units that reach it. Up to 3 walls each.' },
 };
 
-const TWISTS_ABOUT = 'Any number of twists can be played at once.';
+const TWISTS_ABOUT = 'Any number of twists can be played at once, or press Surprise for a draw.';
 const TUNE_ABOUT = 'Every setting is at standard. Pick one to read what it does.';
 
 const NEST_IDS: readonly Nest[] = ['big', 'many'];
 const NEST_NAME: Record<Nest, string> = { big: 'Big', many: 'Many' };
 
-const SURPRISE_ABOUT = 'Draws a mode, a start and 2 twists that the sides here can play. Press again for another draw.';
+const SURPRISE_ABOUT = 'Drawn: a mode, a start and 2 twists the sides here can play. Press again for another draw.';
 
 interface RulesPickerProps {
   choice: RulesChoice;
@@ -245,115 +287,110 @@ interface RulesPickerProps {
 }
 
 export function RulesPicker({ choice, onChoice, idle, nest, surprise }: RulesPickerProps) {
-  // What the shared line is about: a twist or Surprise pointed at, focused or last tapped, since a phone has no hover.
-  const [shown, setShown] = useState<Twist | 'surprise' | null>(null);
+  const [open, setOpen] = useState(false);
   // Each press draws again; a draw is saved as the choice, so nobody else needs to make it.
   const [rolls, setRolls] = useState(0);
+  const [drawn, setDrawn] = useState(false);
   const toggle = (twist: Twist) => {
-    setShown(twist);
-    if (clashOf(twist, choice.mode)) return;
+    if (!onChoice || clashOf(twist, choice.mode)) return;
     const twists = choice.twists.includes(twist) ? choice.twists.filter((each) => each !== twist) : [...choice.twists, twist];
-    onChoice?.({ ...choice, twists });
+    setDrawn(false);
+    onChoice({ ...choice, twists });
   };
-  const read = (what: Twist | 'surprise') => ({
-    onPointerEnter: (e: React.PointerEvent) => {
-      if (e.pointerType === 'mouse') setShown(what);
-    },
-    onPointerLeave: (e: React.PointerEvent) => {
-      if (e.pointerType === 'mouse') setShown(null);
-    },
-    onFocus: () => setShown(what),
-    onBlur: () => setShown(null),
-  });
-  const about = shown === 'surprise' ? SURPRISE_ABOUT : shown ? (clashOf(shown, choice.mode) ?? TWISTS[shown].about) : idle;
+  const named = TWIST_IDS.filter((twist) => choice.twists.includes(twist)).map((twist) => TWISTS[twist].name);
   return (
-    <div className={styles.ruleSet}>
-      <div className={styles.pickRow}>
-        <label className={styles.pickLabel}>
-          Mode
+    <>
+      <Field name="Mode">
+        <select
+          className={styles.pick}
+          value={choice.mode}
+          disabled={!onChoice}
+          onChange={(e) => {
+            const mode = MODE_IDS.find((id) => id === e.target.value);
+            setDrawn(false);
+            // A twist with nothing to do in the new mode is let go of rather than kept switched on and idle.
+            if (mode) onChoice?.({ ...choice, mode, twists: choice.twists.filter((twist) => !clashOf(twist, mode)) });
+          }}
+        >
+          {MODE_IDS.map((id) => (
+            <option key={id} value={id}>{MODES[id].name}</option>
+          ))}
+        </select>
+      </Field>
+      <Field name="Start">
+        <select
+          className={styles.pick}
+          value={choice.start}
+          disabled={!onChoice}
+          onChange={(e) => {
+            const start = START_IDS.find((id) => id === e.target.value);
+            setDrawn(false);
+            if (start) onChoice?.({ ...choice, start });
+          }}
+        >
+          {START_IDS.map((id) => (
+            <option key={id} value={id}>{STARTS[id].name}</option>
+          ))}
+        </select>
+      </Field>
+      {nest && choice.start === 'nests' && (
+        <Field name="Nest">
           <select
-            className={styles.kindPick}
-            value={choice.mode}
-            disabled={!onChoice}
+            className={styles.pick}
+            value={nest.pick}
             onChange={(e) => {
-              const mode = MODE_IDS.find((id) => id === e.target.value);
-              // A twist with nothing to do in the new mode is let go of rather than kept switched on and idle.
-              if (mode) onChoice?.({ ...choice, mode, twists: choice.twists.filter((twist) => !clashOf(twist, mode)) });
+              const pick = NEST_IDS.find((id) => id === e.target.value);
+              if (pick) nest.onPick(pick);
             }}
           >
-            {MODE_IDS.map((id) => (
-              <option key={id} value={id}>{MODES[id].name}</option>
+            {NEST_IDS.map((id) => (
+              <option key={id} value={id}>{NEST_NAME[id]}</option>
             ))}
           </select>
-        </label>
-        <label className={styles.pickLabel}>
-          Start
-          <select
-            className={styles.kindPick}
-            value={choice.start}
-            disabled={!onChoice}
-            onChange={(e) => {
-              const start = START_IDS.find((id) => id === e.target.value);
-              if (start) onChoice?.({ ...choice, start });
-            }}
-          >
-            {START_IDS.map((id) => (
-              <option key={id} value={id}>{STARTS[id].name}</option>
-            ))}
-          </select>
-        </label>
-        {nest && choice.start === 'nests' && (
-          <label className={styles.pickLabel}>
-            Nest
-            <select
-              className={styles.kindPick}
-              value={nest.pick}
-              onChange={(e) => {
-                const pick = NEST_IDS.find((id) => id === e.target.value);
-                if (pick) nest.onPick(pick);
-              }}
-            >
-              {NEST_IDS.map((id) => (
-                <option key={id} value={id}>{NEST_NAME[id]}</option>
-              ))}
-            </select>
-          </label>
-        )}
-        {onChoice && (
+        </Field>
+      )}
+      <span className={`${styles.formWide} ${styles.note}`}>
+        {MODES[choice.mode].about} {STARTS[choice.start].about}
+      </span>
+      <span className={styles.fieldName}>Twists</span>
+      <button className={styles.dropBtn} aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className={styles.dropText}>{named.length > 0 ? named.join(', ') : 'None'}</span>
+        <span aria-hidden className={styles.caret} />
+      </button>
+      {open && (
+        <div className={`${styles.formWide} ${styles.dropList}`} role="group" aria-label="Twists">
+          {TWIST_IDS.map((twist) => {
+            const clash = clashOf(twist, choice.mode);
+            return (
+              <label key={twist} className={`${styles.dropItem} ${clash ? styles.dropItemOff : ''}`}>
+                <input type="checkbox" checked={choice.twists.includes(twist)} disabled={!onChoice || clash !== null} onChange={() => toggle(twist)} />
+                <span>
+                  <span className={styles.dropName}>{TWISTS[twist].name}</span>
+                  <span className={styles.dropAbout}>{clash ?? TWISTS[twist].about}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      {onChoice ? (
+        <span className={`${styles.formWide} ${styles.surpriseRow}`}>
           <button
             className={styles.choiceBtn}
             onClick={() => {
-              setShown('surprise');
               onChoice(surpriseOf(surprise.seed, rolls, surprise.fits));
               setRolls(rolls + 1);
+              setDrawn(true);
             }}
-            {...read('surprise')}
           >
             Surprise
           </button>
-        )}
-      </div>
-      <span className={styles.rules}>{MODES[choice.mode].about} {STARTS[choice.start].about}</span>
-      <div className={`${styles.choiceRow} ${styles.twistRow}`} role="group" aria-label="Twists">
-        {TWIST_IDS.map((twist) => {
-          const on = choice.twists.includes(twist);
-          return (
-            <button
-              key={twist}
-              className={`${styles.choiceBtn} ${on ? styles.choiceBtnOn : ''}`}
-              aria-pressed={on}
-              // Not disabled: a guest can still point at a twist to read what it does, and anyone at one that clashes to read why.
-              aria-disabled={!onChoice || clashOf(twist, choice.mode) !== null}
-              onClick={() => toggle(twist)}
-              {...read(twist)}
-            >
-              {TWISTS[twist].name}
-            </button>
-          );
-        })}
-      </div>
-      <span className={styles.rules} aria-live="polite">{about}</span>
-    </div>
+          <span className={styles.note} aria-live="polite">{drawn ? SURPRISE_ABOUT : idle}</span>
+        </span>
+      ) : (
+        <span className={`${styles.formWide} ${styles.note}`}>{idle}</span>
+      )}
+    </>
   );
 }
 
@@ -648,6 +685,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   const [mapPick, setMapPick] = useState<MapId | null>(null);
   // null plays the map at its own size.
   const [sizePick, setSizePick] = useState<SizeId | null>(null);
+  /** The map drawn for a game against the computer, as encodePlan writes it. A room's is the room's own (`m.plan`). */
+  const [soloPlan, setSoloPlan] = useState('');
   const [computers, setComputers] = useState(1);
   // Against the computer the rules are this client's own; a room keeps them on its match (see setRules).
   const [rulesPick, setRulesPick] = useState<RulesChoice>(CLASSIC);
@@ -704,7 +743,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       players: { a: { sessionId, name: userName, ...(rulesPick.start === 'nests' && { nest: nestPick }) } },
       game: (soloRef.current?.game ?? 0) + 1,
       startAt: performance.now() + COUNTDOWN_MS,
-      ...(mapPick && { map: mapPick }),
+      ...(mapPick === 'drawn' ? { map: mapPick, plan: soloPlan } : mapPick && { map: mapPick }),
       ...(sizePick && { size: sizePick }),
       cpu: SEATS.slice(1, 1 + computers).join(''),
       ...(rulesPick.mode !== CLASSIC.mode && { mode: rulesPick.mode }),
@@ -718,7 +757,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     setMatch(next);
     setTuning(false);
     setSolo(true);
-  }, [sessionId, userName, mapPick, sizePick, computers, rulesPick, nestPick, tunePick]);
+  }, [sessionId, userName, mapPick, soloPlan, sizePick, computers, rulesPick, nestPick, tunePick]);
 
   // An invite link (?swarm=CODE) joins straight away. The parameter is taken
   // off the URL first, so a reload or a second mount does not join again.
@@ -1001,7 +1040,12 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
       // A finished game stays on the board until the next one starts.
       if (playing && game?.game !== m.game) {
-        const map = buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), SIZE_IDS.find((id) => id === m.size), rulesOf(m));
+        const ground = SIZE_IDS.find((id) => id === m.size);
+        // A drawn map that came without its drawing is left to buildMap, which refuses it by name.
+        const map =
+          m.map === 'drawn' && m.plan !== undefined
+            ? buildDrawn(m.seed, m.plan, sidesOf(m), ground, rulesOf(m))
+            : buildMap(m.seed, MAP_IDS.find((id) => id === m.map), sidesOf(m), ground, rulesOf(m));
         game = { ...newLockstep(m.game, map), scene: newScene(map, m.seed, kindsOf(m, map.sides), seat), fxTick: 0, tally: newTally(map, newState(map)) };
         threat = null;
         threatTick = -1;
@@ -1445,8 +1489,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
   const playing = match?.status === 'playing';
 
-  // Back to the start screen, which is Swarm's menu: the seat is given up as
-  // on closing, but the popup stays open. In a game this is asked first (see leaveWarning).
+  // Out of the room to the start screen: the seat is given up as on closing, but the popup stays open.
   const toMenu = useCallback(() => {
     if (code && mySeat) {
       rememberRoom(null);
@@ -1462,6 +1505,19 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     setHud(HUD_IDLE);
     setError('');
   }, [code, mySeat]);
+
+  // Menu in a room keeps the seat. In a game it gives the game up, asked first
+  // (see leaveWarning); after one it takes the whole room back to its lobby.
+  const resign = useCallback(() => {
+    setLeaving(false);
+    if (!code || !mySeat) return;
+    resignSeat(code, mySeat, 0).catch((err: Error) => setError(err.message));
+  }, [code, mySeat]);
+
+  const toLobby = useCallback(() => {
+    if (!code) return;
+    backToLobby(code, sessionId).catch((err: Error) => setError(err.message));
+  }, [code, sessionId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1538,13 +1594,31 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     if (solo) return startSolo();
     const now = clock.now();
     if (!code || now === null) return;
-    startMatch(code, now, mapPick, sizePick).catch((err: Error) => setError(err.message));
+    startMatch(code, now, mapPick === 'drawn' ? null : mapPick, sizePick).catch((err: Error) => setError(err.message));
   };
 
   const pickMap = (id: MapId | null) => {
     setMapPick(id);
     // A size picked for one map is not carried to the next: each is drawn for its own.
     setSizePick(null);
+  };
+
+  // A room's drawing is shared, so drawing one, or leaving it for another map, is the room's to know.
+  const pickRoomMap = (id: MapId | null) => {
+    if (!code || !match) return;
+    const drawn = match.plan !== undefined;
+    if (id === 'drawn') return drawHere(code, sessionId, true).then(() => pickMap(id), (err: Error) => setError(err.message));
+    if (drawn && match.plan !== '' && !window.confirm('Throw away the map drawn here for everyone?')) return;
+    if (!drawn) return pickMap(id);
+    drawHere(code, sessionId, false).then(() => pickMap(id), (err: Error) => setError(err.message));
+  };
+
+  const editDrawing = async (edit: PlanEditFn) => {
+    if (code) return editPlan(code, sessionId, edit);
+    const done = edit(parsePlan(soloPlan), 1 + computers);
+    if (done === null) return;
+    if ('refusal' in done) throw new Error(done.refusal);
+    setSoloPlan(encodePlan(Array.isArray(done) ? done : done.items));
   };
 
   const pickKind = (value: string) => {
@@ -1654,11 +1728,37 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   // Like the rules: a room's are on its match, and against the computer they are this client's own.
   const tune = match ? rulesOf(match).tune : tunePick;
   const tuned = tuneSummary(tune);
-  const warning = leaveWarning(playing, solo, sides.length);
-  const pressMenu = () => (warning ? setLeaving(true) : toMenu());
+  const watching = Boolean(match && mySeat && match.out?.[mySeat] !== undefined);
+  const others = match ? SEATS.filter((seat) => seat !== mySeat && match.players[seat] && match.out?.[seat] === undefined).length : 0;
+  const warning = leaveWarning(playing && !watching, solo, sides.length, others);
+  // Solo, Menu is the start screen. In a room it stays in the room, except from the room's own lobby
+  // or from watching a game already given up, where there is nothing to go back to but leaving.
+  const menu: { label: string; title: string; press: () => void } =
+    solo || !code
+      ? { label: 'Menu', title: 'Back to the Swarm menu', press: () => (warning ? setLeaving(true) : toMenu()) }
+      : match?.status === 'finished'
+        ? { label: 'Lobby', title: 'Back to the room, to change the map or the rules', press: toLobby }
+        : match?.status === 'playing' && !watching
+          ? { label: 'Lobby', title: 'Give this game up and stay in the room', press: () => setLeaving(true) }
+          : { label: 'Leave', title: 'Leave the room: give up your seat and go back to the Swarm menu', press: toMenu };
   const computerSides = nextSides.filter((seat) => match?.cpu?.includes(seat)).length;
   const unfitFor = (mode: ModeId) => (code ? unfit(mode, nextSides.length - computerSides, computerSides) : unfit(mode, 1, computers));
-  const unfitReason = unfitFor(rules.mode);
+  // The drawing being played, the room's or this client's own against the computer, and why it cannot be yet.
+  const drawing = code && match ? match.plan : mapPick === 'drawn' ? soloPlan : undefined;
+  const drawSides = code ? (nextSides.length >= 2 ? nextSides : SEATS.slice(0, 2)) : SEATS.slice(0, 1 + computers);
+  // The rules the drawing is built under, as startSolo's match would give rulesOf against the computer.
+  const playRules: Rules =
+    code && match
+      ? rulesOf(match)
+      : {
+          ...rulesPick,
+          nests: rulesPick.start === 'nests' ? { a: nestPick } : {},
+          tune: tunePick,
+          ...(rulesPick.mode === 'survival' && { computer: SEATS.slice(1, 1 + computers) }),
+        };
+  const unfitReason = unfitFor(rules.mode) ?? (drawing === undefined ? null : problemOf(drawing, drawSides, sizePick ?? undefined, playRules));
+  const shownPick = code && match ? (match.plan !== undefined ? 'drawn' : mapPick === 'drawn' ? null : mapPick) : mapPick;
+  const drawer = drawing !== undefined && <MapDrawer plan={drawing} sides={drawSides} size={sizePick} shared={Boolean(code)} onEdit={editDrawing} />;
   // A room draws from its own seed; against the computer, from one drawn when the lobby opened.
   const surprise = { seed: code && match ? match.seed : lobbySeed, fits: (mode: ModeId) => unfitFor(mode) === null };
   const canStart = !unfitReason && (solo || (nextSides.length >= 2 && synced));
@@ -1680,8 +1780,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
     >
       {(code || solo) && (
         <div className={`${styles.corner} ${styles.cornerStart} ${playing ? styles.cornerQuiet : ''}`}>
-          <button className={`${styles.cornerBtn} ${styles.cornerMenu}`} onClick={pressMenu} title="Back to the Swarm menu">
-            Menu
+          <button className={`${styles.cornerBtn} ${styles.cornerMenu}`} onClick={menu.press} title={menu.title}>
+            {menu.label}
           </button>
         </div>
       )}
@@ -1739,31 +1839,26 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               Join
             </button>
           </form>
+          <span className={styles.sectionName}>Play the computer</span>
           {!tuning && (
-            <>
-              <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={SEATS.slice(0, 1 + computers)} />
-              <div className={styles.choiceRow} role="radiogroup" aria-label="Computer sides">
-                {[1, 2, 3].map((n) => (
-                  <button
-                    key={n}
-                    className={`${styles.choiceBtn} ${n === computers ? styles.choiceBtnOn : ''}`}
-                    role="radio"
-                    aria-checked={n === computers}
-                    onClick={() => setComputers(n)}
-                  >
-                    {n === 1 ? '1 computer' : `${n} computers`}
-                  </button>
-                ))}
-              </div>
+            <div className={styles.form}>
+              <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={SEATS.slice(0, 1 + computers)} drawer={drawer} />
+              <Field name="Computers">
+                <select className={styles.pick} value={computers} onChange={(e) => setComputers(Number(e.target.value))}>
+                  {[1, 2, 3].map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </Field>
               <RulesPicker choice={rulesPick} onChoice={setRulesPick} idle={TWISTS_ABOUT} nest={{ pick: nestPick, onPick: setNestPick }} surprise={surprise} />
-            </>
+            </div>
           )}
           <TunePanel tune={tunePick} rules={rulesPick} onTune={setTunePick} idle={TUNE_ABOUT} open={tuning} onOpen={setTuning} />
           {unfitReason && <span className={styles.rules}>{unfitReason}</span>}
-          <button className={styles.secondaryBtn} onClick={startSolo} disabled={busy || unfitReason !== null}>
+          <button className={styles.primaryBtn} onClick={startSolo} disabled={busy || unfitReason !== null}>
             Play the computer
           </button>
-          {!tuning && <span className={styles.rules}>{HOW_TO}</span>}
+          {!tuning && <HowTo />}
           {error && <span className={styles.errorText} role="alert">{error}</span>}
         </div>
       )}
@@ -1819,15 +1914,15 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
             })}
           </div>
           {!tuning && (
-            <>
-              <MapPicker pick={mapPick} onPick={pickMap} size={sizePick} onSize={setSizePick} sides={sides} />
+            <div className={styles.form}>
+              <MapPicker pick={shownPick} onPick={pickRoomMap} size={sizePick} onSize={setSizePick} sides={sides} drawer={drawer} />
               <RulesPicker
                 choice={rules}
                 onChoice={host === mySeat ? (choice) => pickRules(choice, tune) : undefined}
                 idle={host && host !== mySeat ? `${nameOf(host)} chooses the mode, start and twists.` : TWISTS_ABOUT}
                 surprise={surprise}
               />
-            </>
+            </div>
           )}
           <TunePanel
             tune={tune}
@@ -1846,7 +1941,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
               Start game
             </button>
           </div>
-          {!tuning && <span className={styles.rules}>{HOW_TO}</span>}
+          {!tuning && <HowTo />}
           {error && <span className={styles.errorText} role="alert">{error}</span>}
         </div>
       )}
@@ -1940,9 +2035,20 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                   <button className={styles.primaryBtn} onClick={handleStart} disabled={!canStart}>
                     Play again
                   </button>
-                  <button className={styles.secondaryBtn} onClick={handleClose}>
-                    Leave
-                  </button>
+                  {code ? (
+                    <>
+                      <button className={styles.secondaryBtn} onClick={toLobby} title="Everyone goes back to the room, to change the map or the rules">
+                        Back to lobby
+                      </button>
+                      <button className={styles.secondaryBtn} onClick={toMenu}>
+                        Leave room
+                      </button>
+                    </>
+                  ) : (
+                    <button className={styles.secondaryBtn} onClick={toMenu}>
+                      Menu
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -1953,7 +2059,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
                   <button className={styles.secondaryBtn} onClick={() => setLeaving(false)}>
                     Keep playing
                   </button>
-                  <button className={styles.primaryBtn} onClick={toMenu}>
+                  <button className={styles.primaryBtn} onClick={code ? resign : toMenu}>
                     Leave game
                   </button>
                 </div>
