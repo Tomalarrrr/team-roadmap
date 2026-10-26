@@ -119,6 +119,22 @@ export const BURN_TICKS = 300;
 export const BURN_FUSE = 50;
 /** The fewest units of other sides, less its own, the computer expects to be on a bridge when it goes down, for it to set fire to it. */
 export const BURN_AT = 8;
+/**
+ * With the walls twist, units a side pays, from the hut at its end, to cut any
+ * path. Dearer than a bridge's fire: any path will do, so a cut can shut the
+ * only way into a hut. The cut takes BURN_FUSE ticks, like a bridge's fire.
+ */
+export const CUT_COST = 15;
+/** Ticks a cut path stays closed, and once it is open again, ticks before it can be cut again. */
+export const CUT_TICKS = 300;
+/**
+ * A wall's price, from the hut it is built from, and the units of other sides
+ * it stops before it falls: one each, whatever their strength.
+ */
+export const WALL_COST = 10;
+export const WALL_HP = 15;
+/** The most walls of one side standing at once. */
+export const WALLS_MOST = 3;
 /** A trap kills one in this many of the column that takes it. */
 export const TRAP_EVERY = 2;
 /** How much more, in hundredths of its cap, a hut next to its owner's granary breeds up to. */
@@ -174,6 +190,10 @@ export const KNOBS = [
   { id: 'draftTicks', on: 'draft', label: 'Draft', unit: ' tenths', min: 30, max: 150, standard: 60, about: 'Tenths of a second to pick a hut to start from. The computer picks half way.' },
   { id: 'kitCost', on: 'armoury', label: 'Kit cost', unit: '', min: 5, max: 30, standard: 10, about: 'Units a tower\'s first level of range, rate or armour costs. The second costs twice that.' },
   { id: 'refitCost', on: 'armoury', label: 'Refit cost', unit: '', min: 10, max: 40, standard: 20, about: 'Units it costs to refit a tower as a mortar, a ballista or a web.' },
+  { id: 'cutCost', on: 'walls', label: 'Cut cost', unit: '', min: 5, max: 40, standard: CUT_COST, about: 'Units it costs to cut a path next to one of your huts. It closes 5 seconds later.' },
+  { id: 'cutTicks', on: 'walls', label: 'Cut for', unit: ' tenths', min: 100, max: 900, standard: CUT_TICKS, about: 'Tenths of a second a cut path stays closed, and then before it can be cut again.' },
+  { id: 'wallCost', on: 'walls', label: 'Wall cost', unit: '', min: 5, max: 40, standard: WALL_COST, about: 'Units a wall costs, from the hut it is built next to.' },
+  { id: 'wallHp', on: 'walls', label: 'Wall strength', unit: '', min: 5, max: 40, standard: WALL_HP, about: 'Units of other sides a wall stops, one each, before it falls.' },
 ] as const;
 
 export type KnobId = (typeof KNOBS)[number]['id'];
@@ -302,9 +322,9 @@ export const MODE_IDS: readonly ModeId[] = ['classic', 'blitz', 'hill', 'regicid
 export type StartId = 'home' | 'close' | 'scattered' | 'draft' | 'nests';
 export const START_IDS: readonly StartId[] = ['home', 'close', 'scattered', 'draft', 'nests'];
 /** Rules laid over any mode, any number of them at once. */
-export type Twist = 'flood' | 'fog' | 'powers' | 'golden' | 'frenzy' | 'comeback' | 'buildings' | 'queens' | 'armoury';
+export type Twist = 'flood' | 'fog' | 'powers' | 'golden' | 'frenzy' | 'comeback' | 'buildings' | 'queens' | 'armoury' | 'walls';
 /** A match stores its twists as one letter each, in this order, which is the order the lobby lists them in. */
-export const TWIST_CHAR: Record<Twist, string> = { flood: 'f', fog: 'o', powers: 'p', golden: 'g', frenzy: 'z', comeback: 'c', buildings: 'b', queens: 'q', armoury: 'a' };
+export const TWIST_CHAR: Record<Twist, string> = { flood: 'f', fog: 'o', powers: 'p', golden: 'g', frenzy: 'z', comeback: 'c', buildings: 'b', queens: 'q', armoury: 'a', walls: 'w' };
 export const TWISTS = Object.keys(TWIST_CHAR) as Twist[];
 /** With the nests start: one big hut, or several small ones. */
 export type Nest = 'big' | 'many';
@@ -444,6 +464,8 @@ export interface SwarmSeatState {
  * rain   rain over the board, from any hut of the side's
  * call   every hut of the side's sends half to `to`
  * decoy  a column that costs nothing, from `from` to `to`
+ * cut    with the walls twist, cut the path from `from` to `to`
+ * wall   with the walls twist, a wall across the middle of the path from `from` to `to`
  *
  * The armoury, each paid from the garrison of `from` (see armouryCost):
  * range, rate, armour  a level of the tower's kit
@@ -451,7 +473,7 @@ export interface SwarmSeatState {
  * tower  a level-3 hut built up into a tower
  * carapace  every unit of the side shrugs off its first tower hit
  */
-export type OrderKind = 'half' | 'all' | 'hut' | 'speed' | 'strength' | 'flag' | 'nest' | 'burn' | 'rain' | 'call' | 'decoy' | ArmouryKind;
+export type OrderKind = 'half' | 'all' | 'hut' | 'speed' | 'strength' | 'flag' | 'nest' | 'burn' | 'rain' | 'call' | 'decoy' | 'cut' | 'wall' | ArmouryKind;
 
 /** With the powers twist each side can use each of these once. */
 export type Power = 'rain' | 'call' | 'decoy';
@@ -468,7 +490,7 @@ export interface Order {
   risky?: boolean;
 }
 
-const KIND_CHAR: Record<OrderKind, string> = { half: 'h', all: 'a', hut: 'u', speed: 'v', strength: 'p', flag: 'w', nest: 'n', burn: 'x', rain: 'r', call: 'c', decoy: 'y', range: 'l', rate: 'f', armour: 'd', mortar: 'm', ballista: 'b', web: 'e', tower: 't', carapace: 'k' };
+const KIND_CHAR: Record<OrderKind, string> = { half: 'h', all: 'a', hut: 'u', speed: 'v', strength: 'p', flag: 'w', nest: 'n', burn: 'x', rain: 'r', call: 'c', decoy: 'y', range: 'l', rate: 'f', armour: 'd', mortar: 'm', ballista: 'b', web: 'e', tower: 't', carapace: 'k', cut: 'j', wall: 'q' };
 const CHAR_KIND = Object.fromEntries(Object.entries(KIND_CHAR).map(([kind, char]) => [char, kind])) as Record<string, OrderKind>;
 
 /**
@@ -2063,12 +2085,16 @@ export type SwarmEvent =
   | { kind: 'rally'; seat: Seat; huts: number[] }
   /** `seat` took the trap at `hut`, and one in TRAP_EVERY of its column there died: `dead` of them. */
   | { kind: 'trap'; hut: number; seat: Seat; dead: number }
-  /** `seat` set fire to the bridge that is the map's path `path`, from its hut `from`. */
-  | { kind: 'light'; path: number; from: number; seat: Seat }
-  /** The fire `seat` set on the bridge `path` went out, because the hut it was lit from was taken. */
-  | { kind: 'doused'; path: number; seat: Seat }
-  /** The bridge `path` that `seat` set fire to went down, and the `dead` units on it with it. */
-  | { kind: 'burn'; path: number; seat: Seat; dead: number }
+  /** `seat` set fire to the bridge that is the map's path `path`, from its hut `from`, or with `cut` started cutting the path. */
+  | { kind: 'light'; path: number; from: number; seat: Seat; cut?: true }
+  /** The fire `seat` set on the bridge `path`, or its cut, stopped, because the hut it was started from was taken. */
+  | { kind: 'doused'; path: number; seat: Seat; cut?: true }
+  /** The bridge `path` that `seat` set fire to, or the path it cut, went down, and the `dead` units on it with it. */
+  | { kind: 'burn'; path: number; seat: Seat; dead: number; cut?: true }
+  /** `seat` built a wall across the middle of `path`. */
+  | { kind: 'wall'; path: number; seat: Seat }
+  /** A unit of `seat` walked into the wall on `path` and died, and the wall has `hp` left. */
+  | { kind: 'wallHit'; path: number; seat: Seat; hp: number }
   /** `huts` went under the flood. */
   | { kind: 'flood'; huts: number[] }
   /** `seat` used a power: rain from the hut in `from`, a call answered by the huts in `from`, or a decoy from `from` at `to`. */
@@ -2078,12 +2104,23 @@ export type SwarmEvent =
   /** A ballista's bolt flew from the tower out to x, y. */
   | { kind: 'bolt'; hut: number; x: number; y: number };
 
-/** A bridge on fire: `seat` lit it from its hut `from`, and it goes down on tick `burns` unless that hut is lost first. */
+/**
+ * A bridge on fire, or with `cut` any path being cut: `seat` started it from
+ * its hut `from`, and it goes down on tick `burns` unless that hut is lost first.
+ */
 export interface Fuse {
   path: number;
   from: number;
   seat: Seat;
   burns: number;
+  cut?: true;
+}
+
+/** A wall `seat` built across the middle of `path`, which stops `hp` more units of other sides. */
+export interface Wall {
+  path: number;
+  seat: Seat;
+  hp: number;
 }
 
 /** A tower killed a unit of `seat` standing at x, y. */
@@ -2134,8 +2171,10 @@ export interface SwarmState {
   egg: number;
   /** Regicide: the tick each side's queen fell on, 0 while she stands. */
   fallen: Record<Seat, number>;
-  /** The bridges on fire, in the order they were lit. */
+  /** The bridges on fire and the paths being cut, in the order they were started. */
   fuses: Fuse[];
+  /** With the walls twist, the walls standing, in the order they were built. */
+  walls: Wall[];
   /** With the powers twist, the powers each side has used. */
   powers: Record<Seat, Power[]>;
   /** The last tick rain falls on, or 0 when none has been called. */
@@ -2178,6 +2217,7 @@ export function newState(map: SwarmMap): SwarmState {
     egg: map.rules.mode === 'egg' ? middleOf(map) : -1,
     fallen: { a: 0, b: 0, c: 0, d: 0 },
     fuses: [],
+    walls: [],
     powers: { a: [], b: [], c: [], d: [] },
     rain: 0,
     decoys: [],
@@ -2206,6 +2246,7 @@ export function cloneState(state: SwarmState): SwarmState {
     egg: state.egg,
     fallen: { ...state.fallen },
     fuses: state.fuses.map((fuse) => ({ ...fuse })),
+    walls: state.walls.map((wall) => ({ ...wall })),
     powers: { a: state.powers.a.slice(), b: state.powers.b.slice(), c: state.powers.c.slice(), d: state.powers.d.slice() },
     rain: state.rain,
     decoys: state.decoys.map((decoy) => ({ ...decoy })),
@@ -2316,7 +2357,8 @@ function applyOrder(state: SwarmState, map: SwarmMap, seat: Seat, order: Order, 
   if (order.kind === 'nest') return;
   const hut = state.huts[order.from];
   if (!hut || hut.owner !== seat || (isArmoury(order.kind) && !armed(map))) return;
-  if (order.kind === 'burn') return burnBridge(state, map, seat, order);
+  if (order.kind === 'burn' || order.kind === 'cut') return light(state, map, seat, order);
+  if (order.kind === 'wall') return buildWall(state, map, seat, order);
   if (order.kind === 'half' || order.kind === 'all') {
     if (!state.huts[order.to]) return;
     // No hop also covers a send to the hut itself.
@@ -2369,44 +2411,115 @@ export function burnCost(state: SwarmState, map: SwarmMap, from: number, to: num
   return until === 0 || state.tick > until + BURN_TICKS ? map.rules.tune.burnCost : null;
 }
 
-function burnBridge(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
+/**
+ * What cutting the path between `from` and `to` costs, or null when paths are
+ * not cut in this match, no path joins them, nobody holds `from`, or the path
+ * is being cut or burnt, is closed, or opened again less than the tuned
+ * cutTicks ago. A path closed for good never opens. Any path will do, a
+ * bridge too, whose fire with the buildings twist is a thing apart.
+ */
+export function cutCost(state: SwarmState, map: SwarmMap, from: number, to: number): number | null {
+  const at = pathIndex(map, from, to);
+  if (!map.rules.twists.includes('walls') || at < 0 || !state.huts[from].owner) return null;
+  if (state.fuses.some((fuse) => fuse.path === at)) return null;
+  const until = state.closed[at];
+  return until === 0 || state.tick > until + map.rules.tune.cutTicks ? map.rules.tune.cutCost : null;
+}
+
+/** A bridge set on fire, or with a cut order any path started cutting. */
+function light(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
   if (!state.huts[order.to]) return;
   const hut = state.huts[order.from];
-  const cost = burnCost(state, map, order.from, order.to);
+  const cut = order.kind === 'cut';
+  const cost = cut ? cutCost(state, map, order.from, order.to) : burnCost(state, map, order.from, order.to);
   if (cost === null || hut.n - queued(hut) < cost) return;
   hut.n -= cost;
   const path = pathIndex(map, order.from, order.to);
-  state.fuses.push({ path, from: order.from, seat, burns: state.tick + BURN_FUSE });
-  state.events.push({ kind: 'light', path, from: order.from, seat });
+  state.fuses.push({ path, from: order.from, seat, burns: state.tick + BURN_FUSE, ...(cut && { cut: true as const }) });
+  state.events.push({ kind: 'light', path, from: order.from, seat, ...(cut && { cut: true as const }) });
 }
 
 /**
- * A fire whose hut has been taken goes out. One that has burnt its count
- * takes the bridge down for BURN_TICKS from this tick on, and everything on
- * it dies, whoever's it is. Says whether a bridge went down.
+ * A fire or a cut whose hut has been taken stops. One that has run its count
+ * takes the path down, a bridge for BURN_TICKS and a cut path for the tuned
+ * cutTicks from this tick on, and everything on it dies, whoever's it is, and
+ * any wall on it falls. Says whether a path went down.
  */
 function burnFuses(state: SwarmState, map: SwarmMap): boolean {
   if (state.fuses.length === 0) return false;
   const { index } = lanesOf(map);
   let burnt = false;
   state.fuses = state.fuses.filter((fuse) => {
+    const cut = fuse.cut && { cut: true as const };
     if (state.huts[fuse.from].owner !== fuse.seat) {
-      state.events.push({ kind: 'doused', path: fuse.path, seat: fuse.seat });
+      state.events.push({ kind: 'doused', path: fuse.path, seat: fuse.seat, ...cut });
       return false;
     }
     if (state.tick < fuse.burns) return true;
-    state.closed[fuse.path] = state.tick + BURN_TICKS - 1;
+    state.closed[fuse.path] = state.tick + (fuse.cut ? map.rules.tune.cutTicks : BURN_TICKS) - 1;
     const before = state.units.length;
     state.units = state.units.filter((unit) => index[unit.from][unit.to] !== fuse.path);
-    state.events.push({ kind: 'burn', path: fuse.path, seat: fuse.seat, dead: before - state.units.length });
+    state.walls = state.walls.filter((wall) => wall.path !== fuse.path);
+    state.events.push({ kind: 'burn', path: fuse.path, seat: fuse.seat, dead: before - state.units.length, ...cut });
     burnt = true;
     return false;
   });
   return burnt;
 }
 
+/**
+ * What a wall across the path between `from` and `to` costs, or null when
+ * walls are not built in this match, no path joins them, nobody holds `from`,
+ * the path is closed or has a wall on it already, or the side has WALLS_MOST
+ * standing.
+ */
+export function wallCost(state: SwarmState, map: SwarmMap, from: number, to: number): number | null {
+  const at = pathIndex(map, from, to);
+  const owner = state.huts[from].owner;
+  // A path that was never closed reads 0, which on the first tick is not "closed now".
+  if (!map.rules.twists.includes('walls') || at < 0 || !owner || (state.closed[at] > 0 && state.closed[at] >= state.tick)) return null;
+  if (state.walls.some((wall) => wall.path === at) || state.walls.filter((wall) => wall.seat === owner).length >= WALLS_MOST) return null;
+  return map.rules.tune.wallCost;
+}
+
+function buildWall(state: SwarmState, map: SwarmMap, seat: Seat, order: Order): void {
+  if (!state.huts[order.to]) return;
+  const hut = state.huts[order.from];
+  const cost = wallCost(state, map, order.from, order.to);
+  if (cost === null || hut.n - queued(hut) < cost) return;
+  hut.n -= cost;
+  const path = pathIndex(map, order.from, order.to);
+  state.walls.push({ path, seat, hp: map.rules.tune.wallHp });
+  state.events.push({ kind: 'wall', path, seat });
+}
+
+/**
+ * A unit of another side than the wall's that walked over the middle of its
+ * path this tick dies there and takes one off it, whichever way it walks; at
+ * none left the wall is gone, and what crosses after it walks on. Like a toll,
+ * after the fights on the path, so only what lived walks into it.
+ */
+function hitWalls(state: SwarmState, map: SwarmMap): void {
+  if (state.walls.length === 0) return;
+  const { index, length } = lanesOf(map);
+  const walking: Unit[] = [];
+  for (const unit of state.units) {
+    const at = index[unit.from][unit.to];
+    const wall = state.walls.find((one) => one.path === at && one.hp > 0);
+    const before = unit.d - walked.get(unit)!;
+    if (wall && !allied(map, wall.seat, unit.seat) && 2 * before < length[at] && 2 * unit.d >= length[at]) {
+      wall.hp--;
+      state.events.push({ kind: 'wallHit', path: at, seat: unit.seat, hp: wall.hp });
+      continue;
+    }
+    walking.push(unit);
+  }
+  state.units = walking;
+  state.walls = state.walls.filter((wall) => wall.hp > 0);
+}
+
 /** Columns queued to leave over a path that has closed since go another way, or stay home when there is none. */
-/** Every hut of a side goes neutral, and its units leave the board. */
+/** Every hut of a side goes neutral, and its units and walls leave the board. */
 function vacate(state: SwarmState, seat: Seat): void {
   for (const hut of state.huts) {
     if (hut.owner !== seat) continue;
@@ -2415,6 +2528,7 @@ function vacate(state: SwarmState, seat: Seat): void {
     hut.out = [];
   }
   state.units = state.units.filter((unit) => unit.seat !== seat);
+  state.walls = state.walls.filter((wall) => wall.seat !== seat);
 }
 
 function reroute(map: SwarmMap, hut: Hut, at: number, closed: Closed): void {
@@ -3048,6 +3162,8 @@ function flood(state: SwarmState, map: SwarmMap): void {
   const paths = new Set(ring.paths);
   const { index } = lanesOf(map);
   state.units = state.units.filter((unit) => !paths.has(index[unit.from][unit.to]));
+  // A wall under water would count against its side's WALLS_MOST for the rest of the game.
+  state.walls = state.walls.filter((wall) => !paths.has(wall.path));
   for (const hut of state.huts) hut.out = hut.out.filter((line) => !sunk.has(line.dest));
   state.decoys = state.decoys.filter((decoy) => !sunk.has(decoy.dest));
   state.events.push({ kind: 'flood', huts: ring.huts });
@@ -3534,8 +3650,10 @@ export function step(state: SwarmState, map: SwarmMap, orders: Partial<Record<Se
   walk(state, map);
   clashOnPaths(state, map);
   takeTolls(state, map);
+  hitWalls(state, map);
 
   const { index, length } = lanesOf(map);
+
   const arriving = state.units.filter((unit) => unit.d >= length[index[unit.from][unit.to]]);
   if (arriving.length > 0) {
     const dead = clashAtDoors(state, map, arriving);
@@ -3972,6 +4090,7 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
   const theirs = huts.flatMap((hut, at) => (hut.owner !== seat && allied(map, hut.owner, seat) ? [at] : []));
   /** What this side and its allies have on the way to a hut. */
   const ours = (at: number) => SEATS.reduce((sum, side, k) => (allied(map, side, seat) ? sum + bound[at][k] : sum), 0);
+  let walls = WALLS_MOST - state.walls.filter((wall) => wall.seat === seat).length;
   for (const at of [...mine, ...theirs]) {
     if (sinking.has(at)) continue;
     let attackers = 0;
@@ -3983,7 +4102,13 @@ export function cpuOrders(state: SwarmState, map: SwarmMap, seat: Seat): Order[]
     });
     if (attackers === 0) continue;
     const hut = huts[at];
-    const short = attackers + 1 - lives(hut) - ours(at) - (isTower(hut) ? 0 : Math.floor(soonest / (breed(seat, hut) ?? Infinity)));
+    const wall = hut.owner === seat && walls > 0 ? wallOf(state, map, seat, at, tick) : null;
+    if (wall) {
+      orders.push(wall.order);
+      used.add(at);
+      walls--;
+    }
+    const short = attackers + 1 - lives(hut) - ours(at) - (isTower(hut) ? 0 : Math.floor(soonest / (breed(seat, hut) ?? Infinity))) - (wall?.gain ?? 0);
     if (short <= 0) continue;
     const help = muster(at, () => short, soonest);
     if (help) march(at, help);
@@ -4232,22 +4357,30 @@ function builtWorth(state: SwarmState, map: SwarmMap, at: number, seat: Seat): n
 }
 
 /**
- * The bridges the computer sets fire to. It reckons where everything will be
- * when the count has run: who is still on the bridge then, of the columns on
- * it and of those still to leave the far end, and who has reached the door of
- * the hut it lit from. It lights when BURN_AT more of other sides than of its
- * own will go down with the bridge and the hut can pay and still outlast what
- * gets there first, so the fire is not put out.
+ * The bridges the computer sets fire to, and with the walls twist the paths it
+ * cuts. It reckons where everything will be when the count has run: who is
+ * still on the path then, of the columns on it and of those still to leave the
+ * far end, and who has reached the door of the hut it lit from. It lights when
+ * BURN_AT more of other sides than of its own will go down with the path and
+ * the hut can pay and still outlast what gets there first, so the fire is not
+ * put out. A bridge it can burn it burns, which is cheaper. Any other path it
+ * cuts only when what is coming over it would take the hut were it left open:
+ * a cut shuts the way out as well as in.
  */
 function burnsOf(state: SwarmState, map: SwarmMap, seat: Seat, tick: number): Order[] {
   const { index, length } = lanesOf(map);
+  const cutting = map.rules.twists.includes('walls');
   const orders: Order[] = [];
   map.paths.forEach((path, at) => {
-    if (path.kind !== 'bridge') return;
+    if (path.kind !== 'bridge' && !cutting) return;
     for (const [from, to] of [[path.a, path.b], [path.b, path.a]]) {
       const hut = state.huts[from];
-      const spare = hut.n - queued(hut) - map.rules.tune.burnCost;
-      if (hut.owner !== seat || spare < 0 || burnCost(state, map, from, to) === null) continue;
+      if (hut.owner !== seat) continue;
+      const burn = path.kind === 'bridge' ? burnCost(state, map, from, to) : null;
+      const cost = burn ?? cutCost(state, map, from, to);
+      if (cost === null) continue;
+      const spare = hut.n - queued(hut) - cost;
+      if (spare < 0) continue;
       let caught = 0;
       let first = 0;
       for (const unit of state.units) {
@@ -4268,11 +4401,50 @@ function burnsOf(state: SwarmState, map: SwarmMap, seat: Seat, tick: number): Or
           caught += owner === seat ? -late(line.n) : late(line.n);
         }
       }
-      if (caught >= BURN_AT && first < spare) orders.push({ tick, kind: 'burn', from, to });
+      if (caught < BURN_AT || first >= spare) continue;
+      if (burn !== null) orders.push({ tick, kind: 'burn', from, to });
+      else if (first + caught > spare) orders.push({ tick, kind: 'cut', from, to });
     }
   });
   return orders;
 }
+
+/**
+ * Least a wall must stop beyond its price for the computer to build it: the
+ * units of other sides it reckons will walk into it, short of WALL_GAIN more
+ * than the wall costs, are not worth the units it takes out of the hut.
+ */
+const WALL_GAIN = 3;
+
+/**
+ * A wall the computer builds on the path into its hut `at` that most of
+ * another side is marching over, and how many more units that wall stops than
+ * it costs. Only what has not reached the middle by the time the wall is up
+ * counts, and what is still to leave the hut at the far end.
+ */
+function wallOf(state: SwarmState, map: SwarmMap, seat: Seat, at: number, tick: number): { order: Order; gain: number } | null {
+  if (!map.rules.twists.includes('walls')) return null;
+  const hut = state.huts[at];
+  const { index, length } = lanesOf(map);
+  let best: { order: Order; gain: number } | null = null;
+  for (const to of map.links[at]) {
+    const cost = wallCost(state, map, at, to);
+    if (cost === null || hut.n - queued(hut) < cost) continue;
+    const path = index[at][to];
+    let ahead = 0;
+    for (const unit of state.units) {
+      if (index[unit.from][unit.to] !== path || unit.to !== at || allied(map, unit.seat, seat)) continue;
+      // Built on the coming tick, the wall stands before this one's walk: what is a stride short of the middle now walks into it.
+      if (2 * (unit.d + paceOn(map, unit.from, unit.to, unitSpeed(state, unit))) < length[path]) ahead++;
+    }
+    const far = state.huts[to];
+    if (far.owner && !allied(map, far.owner, seat)) for (const line of far.out) if (line.to === at) ahead += line.n;
+    const gain = Math.min(map.rules.tune.wallHp, ahead) - cost;
+    if (gain >= WALL_GAIN && (!best || gain > best.gain)) best = { order: { tick, kind: 'wall', from: at, to }, gain };
+  }
+  return best;
+}
+
 
 /** For each path, the towers on the board as it stands now that can shoot a unit somewhere on it, each at its own reach. */
 function armouryCover(state: SwarmState, map: SwarmMap): number[][] {

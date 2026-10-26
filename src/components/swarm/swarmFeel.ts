@@ -71,6 +71,7 @@ export type CalloutKey =
   | 'bridgeHeld'
   | 'backFromOne'
   | 'bridgeAlight'
+  | 'pathCut'
   | 'overtime'
   | 'allyOut'
   | 'waveSoon'
@@ -92,6 +93,7 @@ export const CALLOUT_ORDER: readonly CalloutKey[] = [
   'enemyAtGate',
   'allyOut',
   'bridgeAlight',
+  'pathCut',
   'towerLost',
   'fortLost',
   'hillLost',
@@ -122,6 +124,7 @@ export const CALLOUT_TEXT: Record<CalloutKey, string> = {
   allyOut: 'Ally out so your huts rally',
   waveSoon: 'Wave coming',
   bridgeAlight: 'Bridge alight',
+  pathCut: 'Path being cut',
   backFromOne: 'Back from one hut',
   overtime: 'Overtime',
   // Said with their numbers in (see swarmMomentum): these are only what the banner falls back on.
@@ -190,7 +193,11 @@ export function calloutsFor(before: SwarmState, after: SwarmState, map: SwarmMap
   if (after.events.some((event) => event.kind === 'rally' && event.seat === seat)) due.add('allyOut');
   if (map.rules.mode === 'survival' && after.tick + WAVE_WARN_TICKS < map.ticks && Math.floor((after.tick + WAVE_WARN_TICKS) / map.rules.tune.waveTicks) > Math.floor((before.tick + WAVE_WARN_TICKS) / map.rules.tune.waveTicks)) due.add('waveSoon');
   // Lit by another side: there are seconds to get across it, or to take the hut it was lit from.
-  if (after.fuses.some((fuse) => fuse.seat !== seat && !before.fuses.some((was) => was.path === fuse.path))) due.add('bridgeAlight');
+  // A cut bridge is drawn on fire like a burning one, so it is called the same.
+  for (const fuse of after.fuses) {
+    if (fuse.seat === seat || before.fuses.some((was) => was.path === fuse.path)) continue;
+    due.add(map.paths[fuse.path].kind === 'bridge' ? 'bridgeAlight' : 'pathCut');
+  }
 
   const home = homeOf(map, after, seat);
   if (
@@ -235,6 +242,8 @@ export const CALLOUT_AGAIN_MS: Record<CalloutKey, number> = {
   fortTaken: 6000,
   bridgeHeld: 20000,
   bridgeAlight: 6000,
+  pathCut: 6000,
+
   backFromOne: 20000,
   overtime: 60000,
   run: 3000,

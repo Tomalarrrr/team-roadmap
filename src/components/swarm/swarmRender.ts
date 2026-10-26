@@ -36,7 +36,8 @@ import { REFUSED_MS, aimOf, drawAimOver, drawAimUnder, easeOut, standingOf, type
 import { drawPicks } from './swarmDraft';
 import { SHOT_LAND_MS, drawOver, drawUnder, feelStep, newFeel, type Feel } from './swarmFeel';
 import { drawThreats, type ThreatView } from './swarmThreat';
-import { builtEvents, burnSpots, drawBuiltOver, drawBuiltUnder, flameIcon, newBuilt, tunnelSight, type Built } from './swarmSceneBuilt';
+import { builtEvents, drawBuiltOver, drawBuiltUnder, flameIcon, newBuilt, tunnelSight, type Built } from './swarmSceneBuilt';
+import { drawWallsOver, drawWallsUnder, newWalled, pathSpots, spadeIcon, walledEvents, wallIcon, type PathOrder, type Walled } from './swarmSceneWalls';
 import { ageOf, drawMist, fogOf, newFog, newMist, type Fog, type Mist, type Sight } from './swarmFog';
 import { drawDrowned, drawFlood } from './swarmFloodFx';
 import { addPowerFx, drawCalls, drawRain, type CallFx } from './swarmPowerFx';
@@ -163,6 +164,7 @@ export interface Scene {
   glints: Glint[];
   feel: Feel;
   built: Built;
+  walled: Walled;
   /** With the fog twist, what the viewer has seen, and the mist over the rest. */
   fog: Fog | null;
   mist: Mist | null;
@@ -219,6 +221,7 @@ export function newScene(map: SwarmMap, seed: number, kinds: Record<Seat, Kind>,
     glints: glintsOf(map, seed, rivers),
     feel: newFeel(map, seed, kinds),
     built: newBuilt(map, rivers),
+    walled: newWalled(),
     fog: newFog(map, seat),
     mist: null,
     calls: [],
@@ -356,6 +359,7 @@ export function addEvents(scene: Scene, state: SwarmState, events: SwarmEvent[],
   }
   feelStep(scene.feel, scene.map, state, seat, now);
   builtEvents(scene.built, state, events, now, seat);
+  walledEvents(scene.walled, events, now);
   for (const shot of state.shots) {
     // A mortar's or a ballista's kill is drawn by swarmArmoury as its shell or its bolt.
     if (shot.type) continue;
@@ -930,9 +934,9 @@ function strengthIcon(ctx: CanvasRenderingContext2D) {
   ctx.fill();
 }
 
-const TOKEN_ICON: Record<Upgrade | 'burn', (ctx: CanvasRenderingContext2D) => void> = { hut: hutIcon, speed: speedIcon, strength: strengthIcon, burn: flameIcon, ...ARMOURY_ICON };
+const TOKEN_ICON: Record<Upgrade | PathOrder, (ctx: CanvasRenderingContext2D) => void> = { hut: hutIcon, speed: speedIcon, strength: strengthIcon, burn: flameIcon, cut: spadeIcon, wall: wallIcon, ...ARMOURY_ICON };
 
-function drawToken(ctx: CanvasRenderingContext2D, kind: Upgrade | 'burn', x: number, y: number, grow: number, cost: number, affordable: boolean) {
+function drawToken(ctx: CanvasRenderingContext2D, kind: Upgrade | PathOrder, x: number, y: number, grow: number, cost: number, affordable: boolean) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(grow, grow);
@@ -1403,6 +1407,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   // World units to a CSS pixel: a finger is the same size on every board.
   const px = window.devicePixelRatio / scale;
   drawBuiltUnder(ctx, map, state, scene.built, view.seat, view.now, view.alpha, px);
+  drawWallsUnder(ctx, map, state, scene.walled, view.now, view.alpha);
   const aim = aimOf(map, state, view, px);
   if (view.drag) drawRanges(ctx, map, state, view);
   drawAimUnder(ctx, map, state, view, scene.standing.legs, aim);
@@ -1416,6 +1421,7 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
   drawRain(ctx, map, state, state.tick + view.alpha, view.now);
   drawCounts(ctx, scene, state, view, scale, px);
   drawBuiltOver(ctx, map, state, scene.built, view.drag ? null : view.selected, view.now, px);
+  drawWallsOver(ctx, map, state, view.alpha, growOf(10, 9, px));
 
   if (view.selected !== null && !view.drag) {
     const hut = state.huts[view.selected];
@@ -1424,7 +1430,8 @@ export function drawScene(canvas: HTMLCanvasElement, scene: Scene, state: SwarmS
       const cost = upgradeCost(map, state, view.selected, spot.kind);
       if (cost !== null) drawToken(ctx, spot.kind, spot.x, spot.y, grow, cost, sendSize(hut, 'all') >= cost);
     }
-    for (const spot of burnSpots(map, state, view.selected)) drawToken(ctx, 'burn', spot.x, spot.y, grow, spot.cost, sendSize(hut, 'all') >= spot.cost);
+    for (const spot of pathSpots(map, state, view.selected, TOKEN_R * grow)) drawToken(ctx, spot.kind, spot.x, spot.y, grow, spot.cost, sendSize(hut, 'all') >= spot.cost);
+
   }
   if (view.threat) drawThreats(ctx, map, state, view.threat, view.now, px);
   drawOver(ctx, scene.feel, map, state, view.now, px);

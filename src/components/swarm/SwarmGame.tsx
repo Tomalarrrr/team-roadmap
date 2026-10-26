@@ -67,7 +67,7 @@ import {
 import { KIND_NAME } from './swarmFeel';
 import { BADGE } from './swarmSceneKit';
 import { modeNotes, modeStory, type ModeNote } from './swarmModes';
-import { burnSpots } from './swarmSceneBuilt';
+import { pathSpots } from './swarmSceneWalls';
 import { TOKEN_R, addEvents, drawScene, drawThumb, hutAt, newScene, pathPoint, tokenGrow, upgradeSpots, watchBoard, type Scene, type View } from './swarmRender';
 import { carriedOf } from './swarmAim';
 import { notesOf } from './swarmArmoury';
@@ -218,6 +218,7 @@ const TWISTS: Record<Twist, { name: string; about: string }> = {
   buildings: { name: 'Buildings', about: 'A few neutral huts are built as a trap, a barracks, a granary or a beacon, and a bridge can be burnt for 10 units.' },
   queens: { name: 'Queens', about: 'Lose your home hut and your other huts stop breeding until you take it back.' },
   armoury: { name: 'Armoury', about: 'Kit out towers, refit them, build them.' },
+  walls: { name: 'Walls', about: 'Cut a path next to your hut for 15 units: 5 seconds later it closes for 30 seconds, killing everything on it. Or build a wall across its middle for 10: it kills the next 15 enemy units that reach it. Up to 3 walls each.' },
 };
 
 const TWISTS_ABOUT = 'Any number of twists can be played at once.';
@@ -1156,7 +1157,7 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         const cost = upgradeCost(g.map, g.shown, hut, spot.kind);
         return cost === null ? [] : [{ ...spot, cost, to: hut }];
       });
-      spots.push(...burnSpots(g.map, g.shown, hut));
+      spots.push(...pathSpots(g.map, g.shown, hut, TOKEN_R * tokenGrow(p.px)));
       const reach = hutAt(g.map, g.shown, p.x, p.y) === null ? Math.max(disc, p.reach) : disc;
       const spot = nearest(spots, p.x, p.y, reach, null);
       return spot === null ? null : { hut, ...spots[spot] };
@@ -1243,6 +1244,9 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
             if (order.tick <= game.shown.tick || order.from !== token.hut) continue;
             if (isUpgrade(order.kind)) owed += upgradeCost(game.map, game.shown, token.hut, order.kind) ?? 0;
             if (order.kind === 'burn') owed += game.map.rules.tune.burnCost;
+            if (order.kind === 'cut') owed += game.map.rules.tune.cutCost;
+            if (order.kind === 'wall') owed += game.map.rules.tune.wallCost;
+
           }
           if (sendSize(game.shown.huts[token.hut], 'all') - owed < token.cost) return refuse(token.hut);
           issue(token.kind, token.hut, token.to);

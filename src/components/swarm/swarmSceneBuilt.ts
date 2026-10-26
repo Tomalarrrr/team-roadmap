@@ -2,7 +2,7 @@
 // The engine keeps one state for every side. What a side cannot see here,
 // a column underground or a trap, is hidden from the eye and nothing else.
 
-import { BURN_FUSE, CLOSED_FOREVER, burnCost, pathLength, pathOf, type Building, type Seat, type SwarmEvent, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
+import { BURN_FUSE, CLOSED_FOREVER, pathLength, pathOf, type Building, type Seat, type SwarmEvent, type SwarmMap, type SwarmState, type Unit } from '../../swarmGameLogic';
 import { TUNNEL_MOUTH } from './swarmSceneGround';
 import { BADGE, PALETTE, PATH_W, crossingsOf, ellipse, fontOf, growOf, pathPoint, siteRadius, type Crossing, type Ctx, type River } from './swarmSceneKit';
 
@@ -142,7 +142,7 @@ function flame(ctx: Ctx, x: number, y: number, h: number, sway: number) {
 }
 
 /** A count in a dark pill, the way prices are shown. */
-function pill(ctx: Ctx, text: string, x: number, y: number, grow: number) {
+export function pill(ctx: Ctx, text: string, x: number, y: number, grow: number) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(grow, grow);
@@ -391,15 +391,4 @@ export function drawBuiltOver(ctx: Ctx, map: SwarmMap, state: SwarmState, built:
   drawLine(ctx, map, state, built, selected, now, grow);
 }
 
-/** How far along a bridge from the hut in hand its burn token sits. */
-const BURN_REACH = 70;
 
-/** A token for each bridge from `hut` that its side may set on fire, out on the bridge. */
-export function burnSpots(map: SwarmMap, state: SwarmState, hut: number): { kind: 'burn'; to: number; x: number; y: number; cost: number }[] {
-  return map.links[hut].flatMap((to) => {
-    const cost = burnCost(state, map, hut, to);
-    if (cost === null) return [];
-    const p = pathPoint(map, hut, to, Math.min(0.4, BURN_REACH / pathLength(map, hut, to)));
-    return [{ kind: 'burn' as const, to, x: p.x, y: p.y, cost }];
-  });
-}
