@@ -1364,6 +1364,11 @@ export function watchBoard(canvas: HTMLCanvasElement): () => void {
   };
 }
 
+/** Sets the size, in device pixels, of a board that is not on the page, such as a picture drawn once to be copied from. */
+export function sizeBoard(canvas: HTMLCanvasElement, w: number, h: number): void {
+  boxes.set(canvas, { w, h });
+}
+
 /** A board that is changing size is drawn from the ground it has, stretched, until it has kept one size this long: a ground takes several frames to paint, and a window being dragged changes size on every one. */
 const SETTLE_MS = 140;
 

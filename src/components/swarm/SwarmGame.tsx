@@ -9,6 +9,7 @@ import {
   getRoom,
   hostOf,
   joinRoom,
+  putPointer,
   putSeat,
   recordResult,
   resignSeat,
@@ -85,8 +86,8 @@ import { fitsOrders, newLockstep, orderTick, pace, restingReport, sending, settl
 import { siegeBeat, siegeOf, threatsOf, type ThreatView } from './swarmThreat';
 import { clockOf, newTally, tallyStep, type Tally } from './swarmTally';
 import { SwarmSummary } from './SwarmSummary';
-import { buildDrawn, encodePlan, parsePlan, problemOf } from '../../swarmPlan';
-import { MapDrawer, type PlanEditFn } from './SwarmMapDrawer';
+import { buildDrawn, encodePlan, parsePlan, parsePointer, problemOf } from '../../swarmPlan';
+import { MapDrawer, type OtherPointer, type PlanEditFn } from './SwarmMapDrawer';
 import styles from './SwarmGame.module.css';
 
 const SIZE_NAME: Record<SizeId, string> = { small: 'Small', medium: 'Medium', large: 'Large', huge: 'Huge' };
@@ -106,7 +107,7 @@ const MAPS: Record<MapId, { name: string; about: string }> = {
   lanes: { name: 'Three Lanes', about: 'Three lanes from each start: fast ones round the edges and one through the middle. A cannon holds each, but with three sides the middle lanes have none. Slow tracks cross the wilds between them through a big hut.' },
   maze: { name: 'The Maze', about: 'A grid of huts with one way between any two. A few slow tracks cut through the walls where the way round is longest. With three sides it is played no bigger than large, and with four no smaller.' },
   villages: { name: 'Villages', about: 'Clusters of three huts close together. Long fast roads join neighbouring clusters, and there is no other way out. With three or four sides it is played large or huge.' },
-  drawn: { name: 'Draw your own', about: 'Everything put down is copied for each side, so the map stays fair.' },
+  drawn: { name: 'Draw your own', about: 'Drag pieces from the shelf onto the board. Everyone in the room can place and move them.' },
 };
 
 /** The layout each map shows in the lobby. Any seed would do; one keeps the picture still between visits. */
@@ -687,6 +688,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   const [sizePick, setSizePick] = useState<SizeId | null>(null);
   /** The map drawn for a game against the computer, as encodePlan writes it. A room's is the room's own (`m.plan`). */
   const [soloPlan, setSoloPlan] = useState('');
+  /** Where each seat in the room points on the map being drawn, as the room has it. */
+  const [pointers, setPointers] = useState<Partial<Record<Seat, string>>>({});
   const [computers, setComputers] = useState(1);
   // Against the computer the rules are this client's own; a room keeps them on its match (see setRules).
   const [rulesPick, setRulesPick] = useState<RulesChoice>(CLASSIC);
@@ -919,6 +922,8 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
       }
       room = next;
       setMatch((prev) => (JSON.stringify(prev) === JSON.stringify(next.m) ? prev : next.m));
+      const pointing = next.c ?? {};
+      setPointers((prev) => (JSON.stringify(prev) === JSON.stringify(pointing) ? prev : pointing));
 
       const mine = next.s?.[seat];
       if (mine) clock.seen(mine.seq, mine.at);
@@ -1556,14 +1561,27 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
 
   // The popup widens for the board, and the window can narrow under it (a
   // phone turned on its side): centre it again instead of leaving it off the edge.
+  // It also grows taller when a map is drawn, and is moved up so its foot, with the start button, stays in the window.
   useLayoutEffect(() => {
-    const centre = () => {
-      const width = popupRef.current?.offsetWidth;
-      if (width) setPosition((p) => ({ x: Math.max(8, (window.innerWidth - width) / 2), y: p.y }));
+    const popup = popupRef.current!;
+    let width = 0;
+    const fit = () => {
+      const recentre = popup.offsetWidth !== width;
+      width = popup.offsetWidth;
+      const height = popup.offsetHeight;
+      setPosition((p) => ({
+        x: recentre ? Math.max(8, (window.innerWidth - width) / 2) : p.x,
+        y: Math.max(8, Math.min(p.y, window.innerHeight - height - 8)),
+      }));
     };
-    centre();
-    window.addEventListener('resize', centre);
-    return () => window.removeEventListener('resize', centre);
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(popup);
+    window.addEventListener('resize', fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', fit);
+    };
   }, [wide]);
 
   const handleDragMove = (e: React.PointerEvent) => {
@@ -1616,9 +1634,15 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   const editDrawing = async (edit: PlanEditFn) => {
     if (code) return editPlan(code, sessionId, edit);
     const done = edit(parsePlan(soloPlan), 1 + computers);
-    if (done === null) return;
+    if (done === null) return null;
     if ('refusal' in done) throw new Error(done.refusal);
-    setSoloPlan(encodePlan(Array.isArray(done) ? done : done.items));
+    const written = encodePlan(done.plan);
+    setSoloPlan(written);
+    return written;
+  };
+
+  const pointDrawing = (pointer: string | null) => {
+    if (code && mySeat) putPointer(code, mySeat, pointer).catch((err) => console.warn('[Swarm] Could not show where you point:', err));
   };
 
   const pickKind = (value: string) => {
@@ -1758,7 +1782,22 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
         };
   const unfitReason = unfitFor(rules.mode) ?? (drawing === undefined ? null : problemOf(drawing, drawSides, sizePick ?? undefined, playRules));
   const shownPick = code && match ? (match.plan !== undefined ? 'drawn' : mapPick === 'drawn' ? null : mapPick) : mapPick;
-  const drawer = drawing !== undefined && <MapDrawer plan={drawing} sides={drawSides} size={sizePick} shared={Boolean(code)} onEdit={editDrawing} />;
+  const pointing: OtherPointer[] = SEATS.flatMap((seat) => {
+    const read = seat !== mySeat && pointers[seat] !== undefined ? parsePointer(pointers[seat]) : null;
+    return read && match?.players[seat] ? [{ seat, name: match.players[seat].name, ...read }] : [];
+  });
+  const drawer = drawing !== undefined && (
+    <MapDrawer
+      plan={drawing}
+      sides={drawSides}
+      size={sizePick}
+      shared={Boolean(code)}
+      kinds={kindsOf(match ?? { players: {} }, drawSides)}
+      others={pointing}
+      onEdit={editDrawing}
+      onPointer={pointDrawing}
+    />
+  );
   // A room draws from its own seed; against the computer, from one drawn when the lobby opened.
   const surprise = { seed: code && match ? match.seed : lobbySeed, fits: (mode: ModeId) => unfitFor(mode) === null };
   const canStart = !unfitReason && (solo || (nextSides.length >= 2 && synced));
@@ -1766,11 +1805,13 @@ export function SwarmGame({ onClose, isSearchOpen }: SwarmGameProps) {
   return (
     <div
       ref={popupRef}
-      className={`${styles.popup} ${wide ? '' : styles.popupCompact} ${full && wide ? styles.popupFull : ''}`}
+      className={`${styles.popup} ${wide ? '' : styles.popupCompact} ${!wide && drawing !== undefined ? styles.popupDrawing : ''} ${full && wide ? styles.popupFull : ''}`}
       style={full && wide ? undefined : { left: position.x, top: position.y }}
       // With no title bar, the popup is moved by any part of it that is not a control or the board.
       onPointerDown={(e) => {
         if (full || (e.target as HTMLElement).closest('button, input, select, label, canvas')) return;
+        // A press on the popup's own scrollbar scrolls it.
+        if (e.clientX >= e.currentTarget.getBoundingClientRect().left + e.currentTarget.clientWidth) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         dragRef.current = { dx: e.clientX - position.x, dy: e.clientY - position.y };
       }}

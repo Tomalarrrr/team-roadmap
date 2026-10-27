@@ -3,6 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { KNOBS, ORDERS_MAX, encodeTune, type Tune } from '../../swarmGameLogic';
+import { PLAN_PATHS, PLAN_PIECES, PLAN_SPAN, encodePlan, encodePointer } from '../../swarmPlan';
 
 // The swarm rules run here against a small stand-in for the database's own
 // evaluator, because the fake proxy the API tests use does not read them and
@@ -264,20 +265,38 @@ describe('the swarm rules: who sits where', () => {
     expect(allowed(db(waitingRoom()), `${M}/tune`, Array.from({ length: 41 }, () => 'speed=100').join(';'))).toBe(false);
   });
 
-  it('takes a map drawing of whole pieces, paths and rivers, and only up to its length', () => {
-    expect(allowed(db(waitingRoom()), `${M}/plan`, '')).toBe(true);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h22h02pr0222r3032')).toBe(true);
-    expect(allowed(db(waitingRoom()), M, waitingRoom({ map: 'drawn', plan: 'f42pu0242' }))).toBe(true);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h12m22f32t42o52b62w72l82g13x23k33y43e53a63v73u83')).toBe(true);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'z22')).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h9')).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h92')).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'h25')).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'px0222')).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'r3036')).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 22)).toBe(false);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'pr0222'.repeat(100))).toBe(true);
-    expect(allowed(db(waitingRoom()), `${M}/plan`, 'pr0222'.repeat(100) + 'h22')).toBe(false);
+  it('takes a map drawing of whole pieces, homes, paths and rivers, and only up to its length', () => {
+    const takes = (plan: unknown) => allowed(db(waitingRoom()), `${M}/plan`, plan);
+    expect(takes('')).toBe(true);
+    expect(takes('M')).toBe(true);
+    expect(takes('h43049s00010pr040pf143r30003098')).toBe(true);
+    expect(takes('Mh43049pr043')).toBe(true);
+    expect(allowed(db(waitingRoom()), M, waitingRoom({ map: 'drawn', plan: 'f42030pu042' }))).toBe(true);
+    // Every piece's letter, as the drawing writes it.
+    const every = encodePlan({ mirror: true, items: PLAN_PIECES.map((piece, k) => ({ is: 'piece', piece, id: '456789abcdefghijk'[k], at: { x: k * 5, y: 98 } })) });
+    expect(takes(every)).toBe(true);
+    for (const bad of ['z43049', 'h03049', 'h4304', 'h4304x', 's43049', 'px040', 'pr044', 'r3000309', 'MM', 'h43049M', 'pr0-0']) expect(takes(bad), bad).toBe(false);
+    expect(takes(22)).toBe(false);
+    expect(takes('pr040'.repeat(300))).toBe(true);
+    expect(takes('pr040'.repeat(301))).toBe(false);
+  });
+
+  it('takes where each seat points on the board being drawn, only in the lobby, and lets it be taken away at any time', () => {
+    const C = `swarm/${CODE}/c`;
+    for (const carry of [null, ...PLAN_PIECES, ...PLAN_PATHS, 'river' as const]) {
+      for (const [x, y] of [[-30, -30], [0, 0], [PLAN_SPAN + 30, PLAN_SPAN + 30], [3.4, 1.6]]) {
+        expect(allowed(db(waitingRoom()), `${C}/b`, encodePointer({ x, y }, carry))).toBe(true);
+      }
+    }
+    expect(allowed(db(waitingRoom()), `${C}/e`, '10 10')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${C}/a`, '10 10 Hut')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${C}/a`, '10,10')).toBe(false);
+    expect(allowed(db(waitingRoom()), `${C}/a`, 1010)).toBe(false);
+    expect(allowed(db(waitingRoom()), `${C}/a`, { x: 1 })).toBe(false);
+    expect(allowed(db(playingRoom()), `${C}/a`, '10 10')).toBe(false);
+    const left = db(playingRoom());
+    ((left.swarm as Tree)[CODE] as Tree).c = { a: '10 10' };
+    expect(allowed(left, `${C}/a`, null)).toBe(true);
   });
 
   it('takes a nest of big or many on a player', () => {
@@ -324,10 +343,10 @@ describe('the swarm rules: starting and playing', () => {
     expect(allowed(before, M, playingRoom({ ...chosen, start: 'home' }))).toBe(false);
     expect(allowed(before, M, playingRoom({ ...chosen, twists: 'f' }))).toBe(false);
     expect(allowed(before, M, playingRoom({ ...chosen, tune: 'len=2' }))).toBe(false);
-    const drawn = db(playingRoom({ ...chosen, map: 'drawn', plan: 'h22' }));
-    expect(allowed(drawn, `${M}/plan`, 'h21')).toBe(false);
+    const drawn = db(playingRoom({ ...chosen, map: 'drawn', plan: 'h43049' }));
+    expect(allowed(drawn, `${M}/plan`, 'h43048')).toBe(false);
     expect(allowed(drawn, `${M}/plan`, null)).toBe(false);
-    expect(allowed(before, `${M}/plan`, 'h22')).toBe(false);
+    expect(allowed(before, `${M}/plan`, 'h43049')).toBe(false);
     expect(allowed(before, `${M}/twists`, 'fop')).toBe(false);
     expect(allowed(before, `${M}/players/a/nest`, 'big')).toBe(false);
     expect(allowed(before, `${M}/players/b/nest`, 'many')).toBe(false);

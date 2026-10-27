@@ -273,38 +273,37 @@ describe('choosing the rules', () => {
 });
 
 describe('drawing the map together', () => {
-  const hut = (c: number, r: number) => (items: Parameters<typeof placePiece>[0], count: number) => placePiece(items, count, 'hut', { c, r });
-  const road = (c: number, r: number, d: number, s: number) => (items: Parameters<typeof drawPath>[0], count: number) =>
-    drawPath(items, count, 'road', { c, r }, { c: d, r: s });
+  const hut = (x: number, y: number) => (plan: Parameters<typeof placePiece>[0], count: number) => placePiece(plan, count, 'hut', { x, y });
+  // Homes are huts 0 and 1; the first hut drawn is 4, the next 5.
+  const road = (a: string, b: string) => (plan: Parameters<typeof drawPath>[0], count: number) => drawPath(plan, count, 'road', { id: a, copy: 0 }, { id: b, copy: 0 });
 
   it('lets anyone seated draw, each edit landing on the drawing as the room has it', async () => {
     const code = await seated();
     await drawHere(code, 's-bob', true);
     expect((await matchOf(code)).plan).toBe('');
-    await editPlan(code, 's-ann', hut(2, 2));
-    await editPlan(code, 's-bob', road(0, 2, 2, 2));
-    expect((await matchOf(code)).plan).toBe('h22h02pr0222');
+    expect(await editPlan(code, 's-ann', hut(30, 49))).toBe('h43049');
+    expect(await editPlan(code, 's-bob', road('0', '4'))).toBe('h43049pr040');
     await drawHere(code, 's-ann', true);
-    expect((await matchOf(code)).plan).toBe('h22h02pr0222');
-    await editPlan(code, 's-bob', (items, count) => eraseAt(items, count, 2, 2));
-    expect((await matchOf(code)).plan).toBe('h02');
+    expect((await matchOf(code)).plan).toBe('h43049pr040');
+    await editPlan(code, 's-bob', (plan, count) => eraseAt(plan, count, { x: 30, y: 49 }));
+    expect((await matchOf(code)).plan).toBe('');
   });
 
   it('passes on what an edit refuses, and leaves the drawing as it was', async () => {
     const code = await seated();
     await drawHere(code, 's-ann', true);
-    await expect(editPlan(code, 's-ann', road(0, 2, 2, 2))).rejects.toThrow('A path joins two huts.');
-    await expect(editPlan(code, 's-ann', hut(0, 2))).rejects.toThrow('A side starts there.');
-    await editPlan(code, 's-ann', (items, count) => eraseAt(items, count, 3, 3));
-    await expect(editPlan(code, 's-eve', hut(2, 2))).rejects.toThrow('Room not found');
+    await expect(editPlan(code, 's-ann', road('0', '4'))).rejects.toThrow('A path joins two huts.');
+    await expect(editPlan(code, 's-ann', hut(2, 49))).rejects.toThrow('That is too close to another hut.');
+    expect(await editPlan(code, 's-ann', (plan, count) => eraseAt(plan, count, { x: 40, y: 20 }))).toBe(null);
+    await expect(editPlan(code, 's-eve', hut(30, 49))).rejects.toThrow('Room not found');
     expect((await matchOf(code)).plan).toBe('');
   });
 
   it('throws the drawing away when the room picks a map again, and draws nothing until it is asked to', async () => {
     const code = await seated();
-    await expect(editPlan(code, 's-ann', hut(2, 2))).rejects.toThrow('The room is not drawing its map.');
+    await expect(editPlan(code, 's-ann', hut(30, 49))).rejects.toThrow('The room is not drawing its map.');
     await drawHere(code, 's-ann', true);
-    await editPlan(code, 's-ann', hut(2, 2));
+    await editPlan(code, 's-ann', hut(30, 49));
     await drawHere(code, 's-bob', false);
     expect(await matchOf(code)).not.toHaveProperty('plan');
   });
@@ -312,21 +311,21 @@ describe('drawing the map together', () => {
   it('plays the drawing, keeps it for the next game and the lobby after, and holds it while a game is on', async () => {
     const code = await seated();
     await drawHere(code, 's-ann', true);
-    await editPlan(code, 's-ann', hut(2, 2));
-    await editPlan(code, 's-ann', road(0, 2, 2, 2));
-    await editPlan(code, 's-ann', road(2, 2, 6, 2));
+    await editPlan(code, 's-ann', hut(30, 49));
+    await editPlan(code, 's-ann', road('0', '4'));
+    await editPlan(code, 's-ann', road('4', '1'));
     await startMatch(code, 60_000, 'crossroads', null);
-    expect(await matchOf(code)).toMatchObject({ status: 'playing', map: 'drawn', plan: 'h22h02pr0222pr2262' });
-    await expect(editPlan(code, 's-ann', hut(2, 0))).rejects.toThrow('The map is drawn before a game starts.');
+    expect(await matchOf(code)).toMatchObject({ status: 'playing', map: 'drawn', plan: 'h43049pr040pr140' });
+    await expect(editPlan(code, 's-ann', hut(30, 20))).rejects.toThrow('The map is drawn before a game starts.');
     await expect(drawHere(code, 's-ann', false)).rejects.toThrow('The map is drawn before a game starts.');
     await recordResult(code, 1, 'a');
     await startMatch(code, 70_000, null, null);
-    expect(await matchOf(code)).toMatchObject({ game: 2, map: 'drawn', plan: 'h22h02pr0222pr2262' });
+    expect(await matchOf(code)).toMatchObject({ game: 2, map: 'drawn', plan: 'h43049pr040pr140' });
     await recordResult(code, 2, 'b');
     await backToLobby(code, 's-bob');
-    expect(await matchOf(code)).toMatchObject({ status: 'waiting', plan: 'h22h02pr0222pr2262' });
-    await editPlan(code, 's-bob', hut(2, 0));
-    expect((await matchOf(code)).plan).toBe('h22h02pr0222pr2262h20');
+    expect(await matchOf(code)).toMatchObject({ status: 'waiting', plan: 'h43049pr040pr140' });
+    await editPlan(code, 's-bob', hut(30, 10));
+    expect((await matchOf(code)).plan).toBe('h43049pr040pr140h53010');
   });
 
   it('will not start a drawing that cannot be played, and says why', async () => {

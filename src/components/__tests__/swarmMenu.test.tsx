@@ -8,6 +8,15 @@ import { SwarmGame, TunePanel } from '../swarm/SwarmGame';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// jsdom has no ResizeObserver; the lobby popup keeps itself on screen with one.
+if (!('ResizeObserver' in globalThis)) {
+  (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 // The room the stream and the reads deliver, and the writes the component makes.
 const api = vi.hoisted(() => ({
   room: null as SwarmRoom | null,

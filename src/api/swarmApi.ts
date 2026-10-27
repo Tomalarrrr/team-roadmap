@@ -5,6 +5,8 @@
 //   s/{seat}   one player's orders. Written by its own client, which can be
 //              two tabs or a page and its reload, so a write names the one
 //              it replaces and the rules refuse it when that has moved on.
+//   c/{seat}   where a player points on the map being drawn in the lobby
+//              (see encodePointer), so the others see it. Nothing depends on it.
 
 import {
   COUNTDOWN_MS,
@@ -21,13 +23,14 @@ import {
   type SwarmMatch,
   type SwarmSeatState,
 } from '../swarmGameLogic';
-import { parsePlan, encodePlan, problemOf, type PlanEdit, type PlanItem } from '../swarmPlan';
+import { parsePlan, encodePlan, problemOf, type Plan, type PlanEdit } from '../swarmPlan';
 import { generateGameCode } from '../utils/gameUtils';
 import { bust, getServerTimestamp, proxyGet, proxyPut, proxyRemove, proxyTransaction } from './dbProxy';
 
 export interface SwarmRoom {
   m: SwarmMatch;
   s?: Partial<Record<Seat, SwarmSeatState>>;
+  c?: Partial<Record<Seat, string>>;
 }
 
 const STALE_ROOM_AGE_MS = 24 * 60 * 60 * 1000;
@@ -332,8 +335,9 @@ export async function drawHere(code: string, sessionId: string, on: boolean): Pr
  * Change the room's drawing: `edit` is one of swarmPlan's, given the drawing
  * as it stands in the database and the count of sides, so two people drawing
  * at once both land. Anyone seated, in the lobby. Throws the edit's refusal.
+ * Returns the drawing as written, or null when the edit changed nothing.
  */
-export async function editPlan(code: string, sessionId: string, edit: (items: PlanItem[], count: number) => PlanEdit | PlanItem[] | null): Promise<void> {
+export async function editPlan(code: string, sessionId: string, edit: (plan: Plan, count: number) => PlanEdit | null): Promise<string | null> {
   let refusal = '';
   const result = await proxyTransaction<SwarmMatch>(matchPath(code), (current) => {
     refusal = 'Room not found';
@@ -349,9 +353,16 @@ export async function editPlan(code: string, sessionId: string, edit: (items: Pl
       refusal = done.refusal;
       return undefined;
     }
-    return { ...current, plan: encodePlan(Array.isArray(done) ? done : done.items) };
+    return { ...current, plan: encodePlan(done.plan) };
   });
   if (!result.committed && refusal) throw new Error(refusal);
+  return result.committed ? result.snapshot!.plan! : null;
+}
+
+/** Show the others where this seat points on the drawing, or that it has left the board (null). Only in the lobby. */
+export function putPointer(code: string, seat: Seat, pointer: string | null): Promise<void> {
+  const path = `swarm/${code}/c/${seat}`;
+  return pointer === null ? proxyRemove(path) : proxyPut(path, pointer, LIVE_TIMEOUT_MS);
 }
 
 /**

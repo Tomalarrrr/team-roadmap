@@ -26,8 +26,18 @@
 /* The lobby and waiting room: wide enough for four maps a row and a rule in a line or two, so all of it fits one window. */
 .popupCompact {
   width: min(94vw, 600px);
+  /* Never taller than the window: what does not fit scrolls, so the start button can always be reached. */
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   border-radius: var(--radius-xl);
 }
+
+.popupCompact > * { flex-shrink: 0; }
+
+/* Wide enough for the board being drawn and the shelf of pieces beside it. */
+.popupDrawing { width: min(96vw, 980px); }
 
 .popup :focus-visible {
   outline: 2px solid var(--text-primary);
@@ -309,14 +319,124 @@
   background: var(--bg-tertiary);
 }
 
-/* A tap on the board puts a piece down, so it must not wait to see if it was a double tap. */
-.drawBoard {
-  cursor: pointer;
-  touch-action: manipulation;
+/* The board and the shelf, wider than the form round them, side by side or the shelf under the board on a narrow window. */
+.drawer {
+  justify-self: center;
+  width: min(calc(96vw - 48px), 932px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 244px;
+  align-items: start;
+  gap: 14px;
 }
 
-/* A path or river can be dragged from end to end, which a finger can only do if the board does not scroll under it. */
-.drawBoardDrag { touch-action: none; }
+.drawMain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.drawStage { position: relative; }
+
+/* Everything on the board is dragged, which a finger can only do if the board does not scroll under it. */
+.drawBoard {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  cursor: pointer;
+  touch-action: none;
+}
+
+/* What is being dragged and where the others point, drawn over the board without repainting it. */
+.drawOver {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
+.drawRow { flex-wrap: wrap; }
+
+.drawCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.drawStart {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.drawStart .pick { flex: none; }
+
+.shelf {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shelfName {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.shelfItems {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+/* Dragged onto the board, so a finger on one must not scroll the popup. */
+.shelfItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: grab;
+  touch-action: none;
+}
+
+.shelfItem:hover { background: var(--bg-tertiary); }
+
+.shelfItemOn,
+.shelfItemOn:hover {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+}
+
+.shelfIcon {
+  width: 100%;
+  max-width: 52px;
+  aspect-ratio: 1;
+}
+
+.shelfLabel {
+  font-size: 0.65rem;
+  line-height: 1.2;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .drawer { grid-template-columns: minmax(0, 1fr); }
+  .shelfItems { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+}
 
 .sectionName {
   margin-top: 8px;

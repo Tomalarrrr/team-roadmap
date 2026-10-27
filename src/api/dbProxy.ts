@@ -62,7 +62,7 @@ export async function proxyGetWithEtag<T = unknown>(path: string): Promise<{ val
 }
 
 /** Unconditional overwrite, for a node only one client ever writes. */
-export async function proxyPut(path: string, value: object, timeoutMs = REQUEST_TIMEOUT_MS): Promise<void> {
+export async function proxyPut(path: string, value: object | string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<void> {
   const res = await fetchWithTimeout(`${PROXY_BASE}/${path}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
