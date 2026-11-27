@@ -311,13 +311,13 @@ export function setComputer(code: string, sessionId: string, seat: Seat, on: boo
 }
 
 /**
- * Start a game, or a fresh one in a finished room: a new seed and the next
- * game number, so every client starts the same new game and no seat's inputs
- * from the last one count. Only the host, once every other person is ready.
- * Whoever left the last game partway and has not come back is not in this one.
+ * Start a game, or a fresh one in a finished room: the given new seed (see
+ * nextSeed) and the next game number, so every client starts the same new game
+ * and no seat's inputs from the last one count. Only the host, once every other
+ * person is ready. Whoever left the last game partway and has not come back is
+ * not in this one.
  */
-export async function startMatch(code: string, sessionId: string): Promise<void> {
-  const seed = newSeed();
+export async function startMatch(code: string, sessionId: string, seed: number): Promise<void> {
   let refusal = '';
   // The game before the one just ended is kept until now so that a client
   // still playing the end of it could read it; the one before that is let go.

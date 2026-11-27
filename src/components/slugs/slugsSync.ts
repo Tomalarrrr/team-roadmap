@@ -124,6 +124,20 @@ export function mapOf(settings: Settings, seed: number): MapDesignId {
   return MAP_DESIGN_IDS[(h >>> 0) % MAP_DESIGN_IDS.length];
 }
 
+/**
+ * The seed for a room's next game. On Random the host draws again until the
+ * design differs from the one the last seed gave, so a room never plays the
+ * same map twice running; every client still reads the design from the seed
+ * alone, so the rules and older clients need nothing new.
+ */
+export function nextSeed(settings: Settings, last: number): number {
+  const lastMap = mapOf(settings, last);
+  for (;;) {
+    const seed = crypto.getRandomValues(new Uint32Array(1))[0];
+    if (settings.map !== RANDOM_MAP || mapOf(settings, seed) !== lastMap) return seed;
+  }
+}
+
 export function optionsOf(settings: Settings, seed: number): SlugsOptions {
   return {
     ...DEFAULT_OPTIONS,

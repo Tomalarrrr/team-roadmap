@@ -30,7 +30,7 @@ import type { OnlineDriver } from './onlineDriver';
 import { THEME_IDS, THEMES } from './slugThemes';
 import type { ThemeId } from './slugThemes';
 import {
-  choicesOf, decodeSettings, encodeSettings, KNOBS, MAP_GROUND, optionsOf, RANDOM_MAP, restingReport, settingsOf, setupsOf, themeOf,
+  choicesOf, decodeSettings, encodeSettings, KNOBS, MAP_GROUND, nextSeed, optionsOf, RANDOM_MAP, restingReport, settingsOf, setupsOf, themeOf,
 } from './slugsSync';
 import type { Knob, MatchChoices, Settings } from './slugsSync';
 import styles from './SlugsLobby.module.css';
@@ -397,7 +397,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
           {copied ? 'Link copied' : 'Copy invite link'}
         </button>
         {isHost ? (
-          <button className={styles.primaryBtn} onClick={() => act(startMatch(code, me.sessionId))} disabled={!canStart}>
+          <button className={styles.primaryBtn} onClick={() => act(startMatch(code, me.sessionId, nextSeed(settings!, match.seed)))} disabled={!canStart}>
             {match.status === 'finished' ? 'Play again' : 'Start'}
           </button>
         ) : (

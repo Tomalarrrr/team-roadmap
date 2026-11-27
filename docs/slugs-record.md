@@ -21,8 +21,12 @@ damage, with a slug thrown by a blast hurt on landing too; wind and air steering
 their own slugs; easier menus with a random map by default. The rules changes split any match in
 progress at the time until every player refreshed.
 
-Sent for the next push: blasts throw a standing slug out of its crater rather than back into it (a
-rules change, so it splits running matches the same way), and the sky's hairline fix below.
+Live by 24a767e: blasts throw a standing slug out of its crater rather than back into it (a rules
+change, so it split running matches the same way), and the sky's hairline fix below.
+
+Sent for the next push: online Random no longer deals a room the design it just played. The host
+draws seeds until the design differs from the last game's (`nextSeed`); every client still reads
+the design from the seed alone, so the database rules and older clients need nothing new.
 
 ## Architecture
 
@@ -51,6 +55,7 @@ rules change, so it splits running matches the same way), and the sky's hairline
 | 2026-11-27 | Teams told apart by a team-colour neck band, hat and label; one natural slug colour | Visual critique C3: with the team only in the label colour, teams could not be read at overview or against red and blue skies |
 | 2026-11-27 | Fall damage at the source's setting 2 (`FALL_COEF` 100) | TPS: "Fall damage needs to be inc". At 1, a 300 px drop cost 12 hp |
 | 2026-11-27 | Random map by default | TPS: "make the menus easier, random maps by default" |
+| 2026-11-27 | Random never repeats the last design, online by the host redrawing the seed | One design in 12 came up twice running; a seed redraw needs no database or rules change |
 
 Fall damage by drop, before and after: 150 px 2 to 3, 200 px 5 to 10, 300 px 12 to 23,
 400 px 17 to 33, 600 px 25 to 50, at the speed cap 67 to 134.
@@ -73,6 +78,9 @@ mechanic is worth having it gets an original name and look (seedpod, jar, snail,
 | 2026-11-27 | All 11 slug test files, one at a time, on live commit 7a2ed25 in a clean worktree | Each `Test Files 1 passed (1)`; slugsMaps alone takes 181 s |
 | 2026-11-27 | Sky hairline: a pixel detector on the game canvas, frames sampled every 0.3 s from match start | Before rounding the layer offsets, 35 of 43 frames had the line; after, 0 of 100 |
 | 2026-11-27 | tsc and all slug test files on the working tree with the knockback and sky changes | tsc clean; `Test Files 11 passed (11)` |
+| 2026-11-27 | slugsSync + slugsApi tests with `nextSeed`, tsc | tsc clean; `Tests 46 passed (46)` |
+| 2026-11-27 | Mutation: mapOf without the hash mix | "draws every design" failed on seeds that are multiples of the design count, as it should |
+| 2026-11-27 | Mutation: nextSeed without the redraw | "never deals a room the design it just played" failed, as it should |
 
 ## Next task
 

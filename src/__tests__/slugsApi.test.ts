@@ -57,7 +57,7 @@ async function seated(): Promise<string> {
 async function playing(): Promise<string> {
   const code = await seated();
   await setReady(code, 's-bob', true);
-  await startMatch(code, 's-ann');
+  await startMatch(code, 's-ann', 1);
   return code;
 }
 
@@ -111,21 +111,20 @@ describe('slugs rooms', () => {
 describe('slugs starting a game', () => {
   it('starts only from the host, once the guest is ready, with two teams', async () => {
     const alone = await createRoom('s-ann', 'Ann');
-    await expect(startMatch(alone, 's-ann')).rejects.toThrow('two teams');
+    await expect(startMatch(alone, 's-ann', 1)).rejects.toThrow('two teams');
     await setComputer(alone, 's-ann', 'b', true);
-    await startMatch(alone, 's-ann');
+    await startMatch(alone, 's-ann', 1);
     expect((await matchOf(alone)).status).toBe('playing');
 
     const code = await seated();
-    await expect(startMatch(code, 's-ann')).rejects.toThrow('ready');
+    await expect(startMatch(code, 's-ann', 1)).rejects.toThrow('ready');
     await setReady(code, 's-bob', true);
-    await expect(startMatch(code, 's-bob')).rejects.toThrow('Only the host');
-    const before = await matchOf(code);
-    await startMatch(code, 's-ann');
+    await expect(startMatch(code, 's-bob', 1)).rejects.toThrow('Only the host');
+    await startMatch(code, 's-ann', 0xbeef);
     const m = await matchOf(code);
     expect(m.status).toBe('playing');
     expect(m.game).toBe(1);
-    expect(m.seed).not.toBe(before.seed);
+    expect(m.seed).toBe(0xbeef);
     expect(m.players.b).toEqual({ sessionId: 's-bob', name: 'Bob' });
     await expect(setSettings(code, 's-ann', 'perTeam=2')).rejects.toThrow('being played');
     await expect(joinRoom(code, 's-cat', 'Cat')).rejects.toThrow('in a game');
@@ -133,22 +132,21 @@ describe('slugs starting a game', () => {
 
   it('starts a rematch with a new seed and no result, and lets go of the inputs from two games back', async () => {
     const code = await playing();
-    const first = await matchOf(code);
     await putChunk(code, 1, 'a', 0, '3K1');
     await recordResult(code, 1, 'a');
     await setReady(code, 's-bob', true);
-    await startMatch(code, 's-ann');
+    await startMatch(code, 's-ann', 0xcafe);
     await putChunk(code, 2, 'a', 0, '5K2');
     let m: SlugsMatch = await matchOf(code);
     expect(m.game).toBe(2);
-    expect(m.seed).not.toBe(first.seed);
+    expect(m.seed).toBe(0xcafe);
     expect(m.winner).toBeUndefined();
     // Kept through game two, for a client still playing out the end of game one.
     expect(await getChunks(code, 1, 'a')).toEqual({ c0: '3K1' });
 
     await recordResult(code, 2, 'b');
     await setReady(code, 's-bob', true);
-    await startMatch(code, 's-ann');
+    await startMatch(code, 's-ann', 1);
     m = await matchOf(code);
     expect(m.game).toBe(3);
     expect(await getChunks(code, 1, 'a')).toEqual({});
@@ -191,7 +189,7 @@ describe('slugs leaving', () => {
     const code = await seated();
     await setComputer(code, 's-ann', 'c', true);
     await setReady(code, 's-bob', true);
-    await startMatch(code, 's-ann');
+    await startMatch(code, 's-ann', 1);
     await putSeat(code, 'b', { seq: 1, game: 1, k: 900, n: 0, in: '' });
     await vacateSeat(code, 'b', 300);
     const m = await matchOf(code);
@@ -209,7 +207,7 @@ describe('slugs leaving', () => {
     const code = await seated();
     await setComputer(code, 's-ann', 'c', true);
     await setReady(code, 's-bob', true);
-    await startMatch(code, 's-ann');
+    await startMatch(code, 's-ann', 1);
     await vacateSeat(code, 'b', 10);
     await recordResult(code, 1, 'a');
     expect(await joinRoom(code, 's-bob', 'Bob')).toBe('b');

@@ -24,6 +24,7 @@ import {
   mapOf,
   myTurn,
   newLockstep,
+  nextSeed,
   normalAct,
   optionsOf,
   parseInputs,
@@ -505,8 +506,28 @@ describe('slugs settings', () => {
     }
     // Seeds close together, as a counter would give, still land on more than one design.
     expect(new Set([1, 2, 3, 4].map((seed) => mapOf(fresh, seed))).size).toBeGreaterThan(1);
+    // So do seeds that share their low bits: unmixed, every one of these would give the same design.
+    const apart = [1, 2, 3, 4, 5, 6].map((k) => k * MAP_DESIGN_IDS.length);
+    expect(new Set(apart.map((seed) => mapOf(fresh, seed))).size).toBeGreaterThan(1);
     const fixed = { ...fresh, map: MAP_DESIGN_IDS.indexOf('canyon') };
     expect(new Set([1, 2, 3, 99, 0xffffffff].map((seed) => mapOf(fixed, seed)))).toEqual(new Set(['canyon']));
+  });
+
+  it('never deals a room the design it just played on Random, and still reaches every design', () => {
+    const fresh = settingsOf(FIRST);
+    const seen = new Set<string>();
+    let seed = 1;
+    for (let game = 0; game < 400; game++) {
+      const next = nextSeed(fresh, seed);
+      expect(mapOf(fresh, next)).not.toBe(mapOf(fresh, seed));
+      seen.add(mapOf(fresh, next));
+      seed = next;
+    }
+    expect([...seen].sort()).toEqual([...MAP_DESIGN_IDS].sort());
+    // A fixed design has nothing to avoid, so its seeds still change from game to game.
+    const fixed = { ...fresh, map: MAP_DESIGN_IDS.indexOf('canyon') };
+    expect(mapOf(fixed, nextSeed(fixed, seed))).toBe('canyon');
+    expect(new Set([1, 2, 3, 4, 5].map(() => nextSeed(fixed, seed))).size).toBeGreaterThan(1);
   });
 
   it('keeps Random and the map ground out of the old list places, so a client from before them refuses the room', () => {
