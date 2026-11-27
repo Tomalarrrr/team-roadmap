@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { drawProjectile, edgeDistance, hash3, paintTerrain, repaintArea, terrainPixels, valueNoise } from '../components/slugs/slugArt';
+import { chamfer, drawJetpack, drawProjectile, drawSlug, hash3, paintTerrain, repaintArea, terrainPixels, valueNoise } from '../components/slugs/slugArt';
 import { THEME_IDS } from '../components/slugs/slugThemes';
 import { buildTerrain, H, W, type ProjKind } from '../slugsGameLogic';
 
@@ -34,45 +34,41 @@ describe('noise', () => {
   });
 });
 
-describe('edgeDistance', () => {
-  // A 30-wide, 7-tall strip of land in the middle of a 40×20 map.
-  const w = 40;
-  const h = 20;
-  const mask = new Uint8Array(w * h);
-  for (let y = 6; y < 13; y++) for (let x = 5; x < 35; x++) mask[y * w + x] = 1;
+describe('chamfer', () => {
+  // As the painter sets it up: land at the cap, air 0, inside a ring that is never written, so it reads as air.
+  const grid = (w: number, h: number, land: (x: number, y: number) => boolean) => {
+    const g = new Uint8Array(w * h);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) if (land(x, y)) g[y * w + x] = 33;
+    chamfer(g, w, h);
+    return g;
+  };
 
   it('is 0 in air, 3 on the edge and grows by 3 per pixel inward', () => {
-    const d = edgeDistance(mask, w, h, 0, 0, w, h);
-    expect(d[0]).toBe(0);
-    expect(d[5 * w + 20]).toBe(0);
-    expect(d[6 * w + 20]).toBe(3);
-    expect(d[7 * w + 20]).toBe(6);
-    expect(d[9 * w + 20]).toBe(12);
-    expect(d[12 * w + 20]).toBe(3);
-    expect(d[7 * w + 6]).toBe(6);
+    // A 30-wide, 7-tall strip of land in the middle of a 40×20 grid.
+    const w = 40;
+    const g = grid(w, 20, (x, y) => y >= 6 && y < 13 && x >= 5 && x < 35);
+    expect(g[1 * w + 1]).toBe(0);
+    expect(g[5 * w + 20]).toBe(0);
+    expect(g[6 * w + 20]).toBe(3);
+    expect(g[7 * w + 20]).toBe(6);
+    expect(g[9 * w + 20]).toBe(12);
+    expect(g[12 * w + 20]).toBe(3);
+    expect(g[7 * w + 6]).toBe(6);
   });
 
   it('charges 4 for a diagonal step to air', () => {
-    const m = new Uint8Array(60 * 60).fill(1);
-    m[30 * 60 + 30] = 0;
-    const d = edgeDistance(m, 60, 60, 0, 0, 60, 60);
-    expect(d[30 * 60 + 31]).toBe(3);
-    expect(d[31 * 60 + 31]).toBe(4);
-    expect(d[32 * 60 + 32]).toBe(8);
+    const g = grid(60, 60, (x, y) => !(x === 30 && y === 30));
+    expect(g[30 * 60 + 31]).toBe(3);
+    expect(g[31 * 60 + 31]).toBe(4);
+    expect(g[32 * 60 + 32]).toBe(8);
   });
 
-  it('caps at 33 and treats off-map as air', () => {
-    const full = new Uint8Array(60 * 60).fill(1);
-    const d = edgeDistance(full, 60, 60, 0, 0, 60, 60);
-    expect(d[0]).toBe(3);
-    expect(d[10 * 60 + 10]).toBe(33);
-    expect(d[30 * 60 + 30]).toBe(33);
-  });
-
-  it('gives the same values for a sub-rectangle as for the whole map', () => {
-    const whole = edgeDistance(mask, w, h, 0, 0, w, h);
-    const part = edgeDistance(mask, w, h, 10, 4, 25, 15);
-    for (let y = 4; y < 15; y++) for (let x = 10; x < 25; x++) expect(part[(y - 4) * 15 + x - 10]).toBe(whole[y * w + x]);
+  it('stops at the cap, and counts the unwritten ring as air', () => {
+    const g = grid(60, 60, () => true);
+    expect(g[0]).toBe(0);
+    expect(g[1 * 60 + 1]).toBe(3);
+    expect(g[11 * 60 + 11]).toBe(33);
+    expect(g[30 * 60 + 30]).toBe(33);
   });
 });
 
@@ -336,6 +332,12 @@ function recorder(): { ctx: CanvasRenderingContext2D; log: string[] } {
   const ctx = new Proxy(target, {
     get(_, key: string) {
       if (key in target) return target[key];
+      if (key.endsWith('Gradient')) {
+        return (...args: unknown[]) => {
+          record(key, args);
+          return { addColorStop: (...stop: unknown[]) => record('addColorStop', stop) };
+        };
+      }
       return (...args: unknown[]) => record(key, args);
     },
     set(_, key: string, value) {
@@ -370,5 +372,36 @@ describe('drawProjectile', () => {
       seen.add(d);
     }
     expect(seen.size).toBe(Object.keys(PROJ_KINDS).length + 1);
+  });
+});
+
+describe('drawSlug team band', () => {
+  const BAND = '#3b6fd6';
+  const drawn = (anim: 'idle' | 'fall' | 'dead', band?: string) => {
+    const r = recorder();
+    (r.ctx as unknown as { getTransform: () => { a: number; b: number } }).getTransform = () => ({ a: 4, b: 0 });
+    drawSlug(r.ctx, { facing: 1, aim: 0, t: 0, anim, crawl: 0, band });
+    return r.log;
+  };
+
+  it('wears the team colour upright, curled up and dead, and only when given one', () => {
+    for (const anim of ['idle', 'fall', 'dead'] as const) {
+      expect(drawn(anim, BAND), anim).toContain(`fillStyle=${BAND}`);
+      expect(drawn(anim).join(';'), anim).not.toContain(BAND);
+    }
+  });
+});
+
+describe('drawJetpack', () => {
+  const drawn = (up: boolean, side: boolean) => {
+    const r = recorder();
+    drawJetpack(r.ctx, 1, up, side, 300);
+    return r.log.join(';');
+  };
+
+  it('draws a different flame for each pair of thrusters burning, and none when idle', () => {
+    const seen = new Set([drawn(false, false), drawn(true, false), drawn(false, true), drawn(true, true)]);
+    expect(seen.size).toBe(4);
+    expect(drawn(false, false).length).toBeLessThan(drawn(true, false).length);
   });
 });

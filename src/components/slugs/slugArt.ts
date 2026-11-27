@@ -143,8 +143,9 @@ function paletteOf(id: ThemeId): Palette {
   return p;
 }
 
-/** Girders and anything else the rules add to the land are steel, whatever the theme. */
-const STEEL = { body: rgb('#7f878e'), light: rgb('#adb4ba'), dark: rgb('#4b5157'), outline: rgb('#1f2226') };
+/** Girders and anything else the rules add to the land are steel, whatever the theme. The menus' wrecks are painted in it too. */
+export const STEEL_BODY = '#7f878e';
+const STEEL = { body: rgb(STEEL_BODY), light: rgb('#adb4ba'), dark: rgb('#4b5157'), outline: rgb('#1f2226') };
 
 // Edge distance
 
@@ -154,7 +155,7 @@ const CAP = 33;
 const MARGIN = 12;
 
 /** Two-pass 3-4 chamfer, in place: solid cells start at the cap, air at 0, and the grid's outer ring is never written. */
-function chamfer(g: Uint8Array, gw: number, gh: number): void {
+export function chamfer(g: Uint8Array, gw: number, gh: number): void {
   for (let gy = 1; gy < gh - 1; gy++) {
     for (let gx = 1; gx < gw - 1; gx++) {
       const i = gy * gw + gx;
@@ -173,38 +174,6 @@ function chamfer(g: Uint8Array, gw: number, gh: number): void {
       g[i] = v;
     }
   }
-}
-
-/**
- * Distance from each solid pixel of the rectangle to the nearest air, in thirds
- * of a pixel (3 = touching air), capped at 33. Air is 0. Off the map counts as air.
- * Pixels further than MARGIN outside the rectangle are not read, so values are
- * exact only for distances under MARGIN.
- */
-export function edgeDistance(mask: Uint8Array, w: number, h: number, x0: number, y0: number, x1: number, y1: number): Uint8Array {
-  const ex0 = Math.max(0, x0 - MARGIN);
-  const ey0 = Math.max(0, y0 - MARGIN);
-  const ex1 = Math.min(w, x1 + MARGIN);
-  const ey1 = Math.min(h, y1 + MARGIN);
-  const gw = ex1 - ex0 + 2;
-  const gh = ey1 - ey0 + 2;
-  const g = new Uint8Array(gw * gh);
-  for (let gy = 0; gy < gh; gy++) {
-    const y = ey0 + gy - 1;
-    if (y < 0 || y >= h) continue;
-    for (let gx = 0; gx < gw; gx++) {
-      const x = ex0 + gx - 1;
-      if (x >= 0 && x < w && mask[y * w + x] !== 0) g[gy * gw + gx] = CAP;
-    }
-  }
-  chamfer(g, gw, gh);
-  const rw = x1 - x0;
-  const out = new Uint8Array(rw * (y1 - y0));
-  for (let y = y0; y < y1; y++) {
-    const row = (y - ey0 + 1) * gw + (x0 - ex0 + 1);
-    out.set(g.subarray(row, row + rw), (y - y0) * rw);
-  }
-  return out;
 }
 
 // Buried details
@@ -1648,18 +1617,21 @@ function drawUpright(ctx: CanvasRenderingContext2D, pose: SlugPose, f: Form): vo
   const tl = f.tail;
   const lift = f.lift;
 
+  // One line from the tail tip up the back and over the head, then a chest that bellies a little and a foot that
+  // spreads where it meets the ground: a straight back and a straight front made it read as a boot.
   const body = new Path2D();
-  body.moveTo(-tl * f.sx, 7.4 - lift);
-  body.quadraticCurveTo(-tl * 0.45 * f.sx, 5.1 - lift * 0.6, ...P(-3.4, 3.8));
-  body.bezierCurveTo(...P(-4.1, -1.5), ...P(-2.7, -6.5), ...P(0.6, -6.7));
-  body.bezierCurveTo(...P(2.8, -6.9), ...P(4.6, -5.3), ...P(4.7, -3.2));
-  body.bezierCurveTo(...P(4.9, -0.8), ...P(4.1, 4.0), 4.6 * f.sx, 8);
+  body.moveTo(-tl * f.sx, 7.5 - lift);
+  body.bezierCurveTo(-tl * 0.7 * f.sx, 7.2 - lift * 0.8, ...P(-6.2, 6.3), ...P(-4.9, 3.9));
+  body.bezierCurveTo(...P(-4.1, 2.3), ...P(-4.7, -4.4), ...P(-2.2, -6.2));
+  body.bezierCurveTo(...P(-0.4, -7.5), ...P(3.4, -7.4), ...P(4.6, -4.6));
+  body.bezierCurveTo(...P(5.3, -3.0), ...P(5.2, 0.8), ...P(4.8, 3.4));
+  body.bezierCurveTo(...P(4.6, 5.0), ...P(4.8, 7.0), 5.2 * f.sx, 8);
   body.lineTo(-tl * 0.55 * f.sx, 8);
-  body.quadraticCurveTo(-tl * 0.95 * f.sx, 8, -tl * f.sx, 7.4 - lift);
+  body.quadraticCurveTo(-tl * 0.95 * f.sx, 8, -tl * f.sx, 7.5 - lift);
   body.closePath();
 
-  const frontBase = P(1.9, -6.3);
-  const backBase = P(0.2, -6.4);
+  const frontBase = P(1.9, -6.5);
+  const backBase = P(0.2, -6.6);
 
   drawStalk(ctx, backBase[0], backBase[1], f.backA, f, true);
 
@@ -1671,6 +1643,67 @@ function drawUpright(ctx: CanvasRenderingContext2D, pose: SlugPose, f: Form): vo
   ctx.fillStyle = C.body;
   ctx.fill(body);
   ctx.translate(-0.75, 0.65);
+  // Roundness: light pooling where the head turns to the light, and the underside dimming toward the ground.
+  const [lx, ly] = P(2.4, -4.4);
+  const glow = ctx.createRadialGradient(lx, ly, 0, lx, ly, 7.5);
+  glow.addColorStop(0, 'rgba(255,236,176,0.6)');
+  glow.addColorStop(1, 'rgba(255,236,176,0)');
+  ctx.fillStyle = glow;
+  ctx.fillRect(-tl - 2, -10, tl + 10, 20);
+  const under = ctx.createLinearGradient(0, 3, 0, 8);
+  under.addColorStop(0, 'rgba(58,40,20,0)');
+  under.addColorStop(1, 'rgba(58,40,20,0.22)');
+  ctx.fillStyle = under;
+  ctx.fillRect(-tl - 2, 3, tl + 10, 5);
+  ctx.fillStyle = C.speck;
+  ctx.globalAlpha = 0.55;
+  for (const [sx, sy, sr] of SPECKS) {
+    const [x, y] = P(sx * (sx < -3 ? tl / 9.5 : 1), sy);
+    ctx.beginPath();
+    ctx.ellipse(x, y, sr * f.sx, sr * f.sy, 0, 0, TAU);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Mantle: the saddle over the back behind the head. Cut by the body's own outline, it lies on the back
+  // rather than sitting on the side as a shield.
+  const [mx, my] = P(-3.4, -2.4);
+  const mantle = new Path2D();
+  mantle.ellipse(mx, my, 3.7 * f.sx, 4.0 * f.sy, -0.2, 0, TAU);
+  ctx.save();
+  ctx.clip(mantle);
+  ctx.fillStyle = C.mantleShade;
+  ctx.fill(mantle);
+  ctx.fillStyle = C.mantle;
+  ctx.beginPath();
+  ctx.ellipse(mx + 0.55, my - 0.5, 3.7 * f.sx, 4.0 * f.sy, -0.2, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = glow;
+  ctx.fillRect(mx - 4, my - 5, 8, 10);
+  // One fine ridge following the front edge, as a real mantle has: more of them made it a snail's shell.
+  ctx.strokeStyle = C.mantleShade;
+  ctx.lineWidth = 0.3;
+  ctx.globalAlpha = 0.45;
+  ctx.beginPath();
+  ctx.ellipse(mx + 0.2, my, 3.7 * 0.7 * f.sx, 4.0 * 0.7 * f.sy, -0.2, -1.2, 1.1);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  // A fold of skin, not a separate part: a lighter line than the body's.
+  ctx.strokeStyle = C.outline;
+  ctx.globalAlpha = 0.75;
+  ctx.lineWidth = LINE * 0.45;
+  ctx.stroke(mantle);
+  ctx.globalAlpha = 1;
+  // The breathing pore sits on the mantle's rim, as a slug's does: inside it, it read as a third eye.
+  const pore = 0.2 + 0.22 * f.breath;
+  ctx.fillStyle = C.outline;
+  ctx.globalAlpha = 0.7;
+  ctx.beginPath();
+  ctx.ellipse(mx + 2.7 * f.sx, my + 2.5 * f.sy, pore, pore * 0.75, 0, 0, TAU);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
   ctx.fillStyle = C.fringe;
   ctx.fillRect(-tl - 2, 8 - 1.15 * Math.min(1, f.sy + 0.2), tl + 9, 2);
   ctx.strokeStyle = C.shade;
@@ -1678,19 +1711,12 @@ function drawUpright(ctx: CanvasRenderingContext2D, pose: SlugPose, f: Form): vo
   ctx.lineWidth = 0.3;
   const ripple = pose.anim === 'crawl' ? (pose.crawl / 18) * 1.4 : 0;
   ctx.beginPath();
-  for (let x = -tl + ((ripple % 1.4) + 1.4) % 1.4; x < 5; x += 1.4) {
+  for (let x = -tl + ((ripple % 1.4) + 1.4) % 1.4; x < 6; x += 1.4) {
     ctx.moveTo(x, 7.05);
     ctx.lineTo(x - 0.3, 8);
   }
   ctx.stroke();
   ctx.globalAlpha = 1;
-  ctx.fillStyle = C.speck;
-  for (const [sx, sy, sr] of SPECKS) {
-    const [x, y] = P(sx * (sx < -3 ? tl / 9.5 : 1), sy);
-    ctx.beginPath();
-    ctx.ellipse(x, y, sr * f.sx, sr * f.sy, 0, 0, TAU);
-    ctx.fill();
-  }
   if (pose.band) {
     // Below the mouth and feelers, dipping a little toward the back as a collar round a rounded neck would.
     const band = new Path2D();
@@ -1715,49 +1741,34 @@ function drawUpright(ctx: CanvasRenderingContext2D, pose: SlugPose, f: Form): vo
   ctx.strokeStyle = 'rgba(255,250,235,0.7)';
   ctx.lineWidth = 0.75;
   ctx.beginPath();
-  ctx.moveTo(...P(0.4, -5.7));
-  ctx.quadraticCurveTo(...P(3.2, -6.1), ...P(3.9, -3.9));
-  ctx.moveTo(-tl * 0.72 * f.sx, 6.5 - lift * 0.8);
-  ctx.quadraticCurveTo(-tl * 0.45 * f.sx, 5.5 - lift * 0.6, ...P(-3.3, 4.6));
+  ctx.moveTo(-tl * 0.72 * f.sx, 6.6 - lift * 0.8);
+  ctx.bezierCurveTo(-tl * 0.5 * f.sx, 6.1 - lift * 0.6, ...P(-4.9, 4.7), ...P(-4.0, 3.2));
+  ctx.stroke();
+  // Wet skin: a hard highlight on the crown where the light catches it, and a thinner one down the chest.
+  ctx.fillStyle = 'rgba(255,253,245,0.9)';
+  const [gx, gy] = P(3.55, -4.55);
+  ctx.beginPath();
+  ctx.ellipse(gx, gy, 0.95 * f.sx, 0.45 * f.sy, 1.05, 0, TAU);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(...P(4.05, -3.1), 0.24, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,253,245,0.5)';
+  ctx.lineWidth = 0.4;
+  ctx.beginPath();
+  ctx.moveTo(...P(4.15, -1.9));
+  ctx.quadraticCurveTo(...P(4.4, -0.3), ...P(4.0, 1.2));
   ctx.stroke();
   ctx.restore();
   ctx.strokeStyle = C.outline;
   ctx.lineWidth = LINE;
   ctx.stroke(body);
 
-  // Mantle: the saddle on the back, standing a little proud of the body line.
-  const [mx, my] = P(-1.0, -2.0);
-  const mantle = new Path2D();
-  mantle.ellipse(mx, my, 2.5 * f.sx, 3.0 * f.sy, -0.25, 0, TAU);
-  ctx.fillStyle = C.mantleShade;
-  ctx.fill(mantle);
-  ctx.save();
-  ctx.clip(mantle);
-  ctx.fillStyle = C.mantle;
-  ctx.beginPath();
-  ctx.ellipse(mx + 0.5, my - 0.45, 2.5 * f.sx, 3.0 * f.sy, -0.25, 0, TAU);
-  ctx.fill();
-  ctx.strokeStyle = C.mantleShade;
-  ctx.lineWidth = 0.4;
-  ctx.globalAlpha = 0.8;
-  ctx.beginPath();
-  ctx.ellipse(mx + 0.2, my - 0.2, 1.4 * f.sx, 1.9 * f.sy, -0.25, -2.2, 1.2);
-  ctx.stroke();
-  ctx.globalAlpha = 1;
-  ctx.restore();
-  ctx.strokeStyle = C.outline;
-  ctx.lineWidth = LINE * 0.65;
-  ctx.stroke(mantle);
-  const pore = 0.28 + 0.3 * f.breath;
-  ctx.fillStyle = C.outline;
-  ctx.beginPath();
-  ctx.ellipse(mx - 0.9 * f.sx, my + 1.7 * f.sy, pore, pore * 0.8, 0, 0, TAU);
-  ctx.fill();
-
-  drawMouth(ctx, ...P(3.7, -0.9), f.mouth);
+  drawMouth(ctx, ...P(3.8, 0.3), f.mouth);
   if (!holding(pose)) {
-    drawFeeler(ctx, ...P(4.3, -2.7), ...P(5.9, -2.9));
-    drawFeeler(ctx, ...P(4.2, -1.9), ...P(5.5, -1.3));
+    // Short and pointing down at the ground, as a slug's lower feelers do: level, they read as a beak.
+    drawFeeler(ctx, ...P(4.8, -2.7), ...P(6.5, -2.1));
+    drawFeeler(ctx, ...P(4.7, -1.9), ...P(6.1, -1.0));
   }
   if (pose.hat) {
     const [hx, hy] = P(0.3, -6.7);
@@ -1780,6 +1791,11 @@ function drawCurled(ctx: CanvasRenderingContext2D, pose: SlugPose, f: Form): voi
   ctx.beginPath();
   ctx.arc(0.7, -0.7, 5.3, 0, TAU);
   ctx.fill();
+  const glow = ctx.createRadialGradient(1.6, -2.4, 0, 1.6, -2.4, 4.6);
+  glow.addColorStop(0, 'rgba(255,236,176,0.6)');
+  glow.addColorStop(1, 'rgba(255,236,176,0)');
+  ctx.fillStyle = glow;
+  ctx.fill(ball);
   ctx.restore();
   ctx.strokeStyle = C.outline;
   ctx.lineWidth = LINE;
@@ -1814,17 +1830,36 @@ function drawCurled(ctx: CanvasRenderingContext2D, pose: SlugPose, f: Form): voi
     ctx.restore();
   }
 
+  // Drawn as the upright mantle is: shaded under a lit offset, and outlined lighter than the body.
   const mantle = new Path2D();
   mantle.ellipse(-1.8, -1.5, 2.6, 2.3, -0.4, 0, TAU);
-  ctx.fillStyle = C.mantle;
+  ctx.fillStyle = C.mantleShade;
   ctx.fill(mantle);
+  ctx.save();
+  ctx.clip(mantle);
+  ctx.fillStyle = C.mantle;
+  ctx.beginPath();
+  ctx.ellipse(-1.4, -1.9, 2.6, 2.3, -0.4, 0, TAU);
+  ctx.fill();
+  ctx.fillStyle = glow;
+  ctx.fill(mantle);
+  ctx.restore();
+  ctx.strokeStyle = C.outline;
+  ctx.globalAlpha = 0.75;
+  ctx.lineWidth = LINE * 0.45;
   ctx.stroke(mantle);
   ctx.fillStyle = C.speck;
+  ctx.globalAlpha = 0.55;
   for (const [sx, sy, sr] of [[2.2, -2.6, 0.4], [-3.6, 1.2, 0.36], [3.4, -0.4, 0.34]] as const) {
     ctx.beginPath();
     ctx.arc(sx, sy, sr, 0, TAU);
     ctx.fill();
   }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = 'rgba(255,253,245,0.9)';
+  ctx.beginPath();
+  ctx.ellipse(2.6, -3.9, 0.95, 0.42, 0.7, 0, TAU);
+  ctx.fill();
   drawMouth(ctx, 3.0, 0.4, f.mouth);
   if (pose.hat) drawHat(ctx, pose.hat, 0.6, -5.1, 0.2, pose.t);
   drawStalk(ctx, 1.4, -4.3, 0.7, f, false);
