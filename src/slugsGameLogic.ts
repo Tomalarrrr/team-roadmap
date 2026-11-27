@@ -2295,7 +2295,8 @@ function stepSlug(state: SlugsState, slug: Slug): void {
     }
     case 'air': {
       slug.still = 0;
-      slug.vy = Math.min(SPEED_CAP, slug.vy + gravity(state));
+      // Capped both ways: knocks from one cluster or barrel chain add up, and an uncapped throw could outlast the settle.
+      slug.vy = Math.max(-SPEED_CAP, Math.min(SPEED_CAP, slug.vy + gravity(state)));
       slug.vx = Math.max(-SPEED_CAP, Math.min(SPEED_CAP, slug.vx));
       const impact = moveSlug(state, slug);
       if (impact >= 0) land(state, slug, impact);
@@ -4102,6 +4103,9 @@ export function advance(state: SlugsState, input: Input): void {
       state.objs.some((o) => !o.rest || o.fuse > 0 || (o.kind === 'barrel' && o.hp <= 0));
     state.quiet = busy ? 0 : state.quiet + 1;
     if (state.quiet >= QUIET_TICKS || state.phaseT > SETTLE_MOST) {
+      // A slide over a pit narrower than dropAt's span can rock for ever (seed 1014, forts),
+      // and deaths sends any slug not standing back here, so the turn would never end.
+      if (state.phaseT > SETTLE_MOST) for (const s of state.slugs) if (s.alive && s.mode === 'slide') standStill(s);
       state.phase = 'tally';
       state.phaseT = 0;
     }
