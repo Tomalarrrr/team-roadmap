@@ -1,7 +1,6 @@
 // The wind made visible on the battlefield: bits of the land's crust (grass,
 // sand, snow, ash, moss) carried across the view at the wind's speed, more of
-// them the stronger it blows and none in a calm, and the speed the cloud layer
-// drifts at. The rules' wind is a step from -10 to 10 that changes each turn;
+// them the stronger it blows and none in a calm. The rules' wind is a step from -10 to 10 that changes each turn;
 // what is drawn eases to a new step over a second or so rather than jumping.
 
 import { WIND_MOST } from '../../slugsGameLogic';
@@ -40,7 +39,7 @@ export function easeWind(shown: number, wind: number, dt: number): number {
 
 /** How many motes a drawn wind of `wind` steps keeps on screen. */
 export function moteCount(wind: number): number {
-  return Math.round((Math.min(WIND_MOST, Math.abs(wind)) / WIND_MOST) * MOTES_AT_FULL);
+  return Math.round((Math.min(WIND_MOST, wind) / WIND_MOST) * MOTES_AT_FULL);
 }
 
 function spawn(view: View, rand: () => number, x?: number): Mote {
@@ -85,20 +84,25 @@ export interface MotePen {
 /**
  * Each mote as a short dash along the wind, longer the harder it blows, with a
  * small flutter up and down. `unit` is world px per screen px, so a mote keeps
- * its size on screen at any zoom.
+ * its size on screen at any zoom. One where `open` says the land is skips its
+ * frame, so the wind seems to pass behind a hill rather than over it.
  */
-export function drawMotes(pen: MotePen, motes: readonly Mote[], wind: number, colour: number, unit: number): void {
+export function drawMotes(
+  pen: MotePen,
+  motes: readonly Mote[],
+  wind: number,
+  colour: number,
+  unit: number,
+  open: (x: number, y: number) => boolean,
+): void {
   pen.clear();
   const dir = Math.sign(wind);
   const len = (2 + Math.abs(wind) * 0.5) * unit;
   for (const m of motes) {
     const alpha = 0.6 * Math.min(1, m.age / FADE_IN_S);
-    if (alpha <= 0) continue;
+    if (alpha <= 0 || !open(m.x, m.y)) continue;
     const lift = Math.sin(m.phase) * 3 * unit;
     pen.lineStyle(1.5 * unit, colour, alpha);
     pen.lineBetween(m.x, m.y + lift, m.x - dir * len * m.pace, m.y + lift - Math.cos(m.phase) * unit);
   }
 }
-
-/** Screen widths a second the cloud layer drifts per wind step. */
-export const CLOUD_PER_STEP = 0.0015;

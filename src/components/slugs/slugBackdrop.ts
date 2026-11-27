@@ -3459,9 +3459,13 @@ function roofed(th: Theme, sky: CanvasRenderingContext2D, layers: HTMLCanvasElem
   return layers;
 }
 
-/** View widths per ms the sky layer drifts by, for the screen to add to its tile offset; 0 under a cave roof. */
-export function skyDrift(theme: ThemeId): number {
-  return THEMES[theme].cloud ? 0.0000025 : 0;
+/**
+ * View widths per ms the cloud layer drifts by on a drawn wind of `wind` steps, positive
+ * downwind (to the right), for the screen to take off its tile offset; 0 under a cave roof.
+ * At full strength it crosses a view in about a minute, slow enough to read as weather.
+ */
+export function skyDrift(theme: ThemeId, wind: number): number {
+  return THEMES[theme].cloud ? wind * 0.0000015 : 0;
 }
 
 // Water

@@ -27,6 +27,8 @@ import { REPLAY_RATE, noteFrame, planReplay, startLog, stepReplay } from './slug
 import type { Replay, TurnLog } from './slugsReplay';
 import { THEMES } from './slugThemes';
 import type { ThemeId } from './slugThemes';
+import { drawMotes, easeWind, stepMotes } from './slugWind';
+import type { Mote } from './slugWind';
 
 export interface SceneHooks {
   driver: GameDriver;
@@ -186,6 +188,10 @@ class SlugsScene extends Phaser.Scene {
   private waterBack!: Phaser.GameObjects.Graphics;
   private waterFront!: Phaser.GameObjects.Graphics;
   private waterShown = 0;
+  private windShown = 0;
+  private cloudShift = 0;
+  private motes: Mote[] = [];
+  private motePen!: Phaser.GameObjects.Graphics;
   private look: WaterLook;
   private overlay!: Phaser.GameObjects.Graphics;
   private ropeSegs: Phaser.GameObjects.TileSprite[] = [];
@@ -253,6 +259,9 @@ class SlugsScene extends Phaser.Scene {
     this.waterFront = this.world(this.add.graphics().setDepth(60));
     this.waterShown = this.state.water;
     this.overlay = this.world(this.add.graphics().setDepth(70));
+    // Over the slugs and the water's face, under the aim and labels.
+    this.motePen = this.world(this.add.graphics().setDepth(65));
+    this.windShown = this.windNow();
     this.fx = new SlugFx({
       scene: this, theme: this.hooks.theme, world: (obj) => this.world(obj), reduced: this.reduced,
       shake: (ms, intensity) => this.worldCam.shake(ms, intensity, true),
@@ -656,7 +665,8 @@ class SlugsScene extends Phaser.Scene {
     // Before the effects, so trails are laid where the shell is drawn rather than a tick ahead of it.
     this.glideProjectiles(time);
     this.fx.update(s, time, delta);
-    if (!this.lean) this.drawSky(time);
+    this.drawWind(delta);
+    if (!this.lean) this.drawSky();
     this.drawWater(time, delta);
     this.drawSlugs(time, delta);
     this.drawGraves(time, delta);
@@ -863,9 +873,40 @@ class SlugsScene extends Phaser.Scene {
 
   // --- Sky and water ---
 
-  private drawSky(now: number) {
+  /** The wind in steps as it acts on a shell, after the room's wind setting. */
+  private windNow() {
+    return (this.state.wind * this.state.opts.windScale) / 100;
+  }
+
+  private drawWind(dt: number) {
+    this.windShown = easeWind(this.windShown, this.windNow(), dt);
+    if (this.reduced) {
+      this.motePen.clear();
+      return;
+    }
+    this.cloudShift -= skyDrift(this.hooks.theme, this.windShown) * dt * this.scale.width;
+    if (this.lean) {
+      this.motePen.clear();
+      return;
+    }
+    const halfW = this.scale.width / this.zoom / 2;
+    const halfH = this.scale.height / this.zoom / 2;
+    const view = {
+      x0: this.cx - halfW, x1: this.cx + halfW,
+      y0: this.cy - halfH, y1: Math.min(this.cy + halfH, this.waterShown),
+    };
+    if (view.y1 <= view.y0) {
+      this.motePen.clear();
+      return;
+    }
+    stepMotes(this.motes, this.windShown, view, dt, Math.random);
+    const t = this.state.terrain;
+    drawMotes(this.motePen, this.motes, this.windShown, hex(THEMES[this.hooks.theme].crustLight), this.dpr / this.zoom,
+      (x, y) => !solidAt(t, Math.round(x), Math.round(y)));
+  }
+
+  private drawSky() {
     const n = this.bgLayers.length;
-    const drift = this.reduced ? 0 : now * skyDrift(this.hooks.theme) * this.scale.width;
     // Far layers barely move, near ones more: the sense of depth comes from how the camera has moved across the map.
     const along = (this.cx - W / 2) / W;
     const up = (this.cy - H / 2) / H;
@@ -873,7 +914,7 @@ class SlugsScene extends Phaser.Scene {
       const depth = n === 1 ? 0 : i / (n - 1);
       // Sideways the layer wraps. Up and down it only ever sits lower than its
       // place, so its see-through top shows and its bottom never lifts off the screen's.
-      layer.tilePositionX = along * this.scale.width * 0.12 * depth + (i === 0 ? drift : 0);
+      layer.tilePositionX = along * this.scale.width * 0.12 * depth + (i === 0 ? this.cloudShift : 0);
       layer.y = Math.max(0, (0.5 - up) * this.scale.height * 0.1 * depth);
     });
   }

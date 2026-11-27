@@ -146,9 +146,12 @@ describe('noise and skylines', () => {
     expect(l.ys[100]).toBeCloseTo(140, 4);
   });
 
-  it('drifts clouds only where the theme has clouds', () => {
-    expect(skyDrift('caves')).toBe(0);
-    expect(skyDrift('tropical')).toBeGreaterThan(0);
+  it('drifts clouds with the wind, and not at all under a cave roof', () => {
+    expect(skyDrift('caves', 10)).toBe(0);
+    expect(skyDrift('tropical', 0)).toBe(0);
+    expect(skyDrift('tropical', 4)).toBeGreaterThan(0);
+    expect(skyDrift('tropical', -4)).toBe(-skyDrift('tropical', 4));
+    expect(skyDrift('tropical', 10)).toBeCloseTo(2.5 * skyDrift('tropical', 4), 12);
   });
 });
 
