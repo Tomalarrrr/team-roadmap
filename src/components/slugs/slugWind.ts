@@ -39,7 +39,7 @@ export function easeWind(shown: number, wind: number, dt: number): number {
 
 /** How many motes a drawn wind of `wind` steps keeps on screen. */
 export function moteCount(wind: number): number {
-  return Math.round((Math.min(WIND_MOST, wind) / WIND_MOST) * MOTES_AT_FULL);
+  return Math.round((Math.min(WIND_MOST, Math.abs(wind)) / WIND_MOST) * MOTES_AT_FULL);
 }
 
 function spawn(view: View, rand: () => number, x?: number): Mote {
