@@ -22,11 +22,17 @@ export function localDriver(seed: number, setups: TeamSetup[], perTeam: number, 
   const acts: Act[] = [];
   // `newGame` already raised the first turn's events.
   let pending: SlugEvent[] = state.events;
+  let held = false;
 
   return {
     mine,
     tick(now: number, input: Input): SlugsState {
       if (input.act) acts.push(input.act);
+      if (held) {
+        // Drawn already: handed back again, they would be drawn twice.
+        state.events = [];
+        return state;
+      }
       if (clock === null) clock = now;
       let due = Math.floor((now - clock) / TICK_MS);
       if (due > CATCH_UP_MOST) {
@@ -45,6 +51,11 @@ export function localDriver(seed: number, setups: TeamSetup[], perTeam: number, 
       // carves the picture of the ground.
       state.events = events;
       return state;
+    },
+    hold(on: boolean) {
+      held = on;
+      // Picked up from the next call's time, so the held seconds are not caught up afterwards.
+      if (!on) clock = null;
     },
     // Nothing outside this closure to let go of: no timers, no connection.
     dispose() {},

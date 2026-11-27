@@ -582,6 +582,11 @@ function Battle({
     if (leaving && over) onLeave();
   }, [leaving, over, onLeave]);
 
+  // Asked whether to leave, a player at this machine should not lose turn time deciding.
+  useEffect(() => {
+    match.driver.hold?.(leaving);
+  }, [match.driver, leaving]);
+
   const act = useCallback((a: Act) => controls.current.acts.push(a), []);
 
   // The scene reads how much of the canvas the HUD strips cover every frame; measured

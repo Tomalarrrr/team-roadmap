@@ -13,5 +13,10 @@ export interface GameDriver {
   tick(now: number, input: Input): SlugsState;
   /** Team indices this machine's player controls. */
   readonly mine: readonly number[];
+  /**
+   * Stop the match where it is, or let it go on from there. Only a match on
+   * this machine has one: online, the others' clocks would run on regardless.
+   */
+  hold?(on: boolean): void;
   dispose(): void;
 }
