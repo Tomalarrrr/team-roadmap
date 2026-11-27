@@ -76,6 +76,15 @@ const KEY_BITS: Record<string, number> = {
 /** The one key the game lets through to the page: Cmd+K (Ctrl+K) opens search on top of it. */
 const opensSearch = (e: KeyboardEvent) => (e.metaKey || e.ctrlKey) && e.key === 'k';
 
+/**
+ * A team's colour is its place in the list, so a team still called by a colour is renamed
+ * to its new place's colour when one before it goes; a name someone typed is kept.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- for the setup tests, as hudOf is for the HUD ones
+export function withoutTeam(names: string[], gone: number): string[] {
+  return names.filter((_, k) => k !== gone).map((name, k) => (DEFAULT_NAMES.includes(name.trim()) ? DEFAULT_NAMES[k] : name));
+}
+
 const newSeed = () => (Math.random() * 0x100000000) >>> 0;
 
 function setupsOf(settings: Settings): TeamSetup[] {
@@ -589,7 +598,10 @@ function Battle({
   }, [net?.next, onLobby]);
 
   const forfeit = net?.result?.forfeit ? net.result : null;
-  const over = Boolean(hud?.over || forfeit);
+  // Played here against two or more computers, a player whose teams are all out would otherwise
+  // watch the computers finish it with nothing to do; online, the match is everyone's and plays on.
+  const knockedOut = Boolean(!match.online && hud && !hud.over && match.driver.mine.length > 0 && match.driver.mine.every((i) => hud.teams[i].out));
+  const over = Boolean(hud?.over || forfeit || knockedOut);
   const note = net && hud && onlineNote(net, hud.teams.length);
 
   // Said once at the top when it changes, then gone: the slug's own label and the aim line carry the rest.
@@ -742,24 +754,26 @@ function Battle({
   // Keys: captured before the roadmap's own shortcuts see them, and stopped there.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const c = controls.current;
+      const bit = KEY_BITS[e.key];
+      // A key let go anywhere is let go: one held as Cmd+K moved focus to search would otherwise stay held.
+      if (e.type === 'keyup' && bit) c.held &= ~bit;
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
       if (opensSearch(e)) return;
       e.stopPropagation();
-      const c = controls.current;
-      const bit = KEY_BITS[e.key];
-      if (e.type === 'keyup') {
-        if (bit) c.held &= ~bit;
-        return;
-      }
+      if (e.type === 'keyup') return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       // A question on screen takes the keyboard: its buttons answer Enter and Space, and nothing moves behind it.
       if (leaving) {
         if (e.key === 'Escape') onKeepPlaying();
         return;
       }
-      // So does the end card: Rematch and the way out answer Enter, Space and Tab as on any page.
-      if (over) return;
+      // So does the end card: Rematch and the way out answer Enter, Space and Tab as on any page, and Esc goes back to setup.
+      if (over) {
+        if (e.key === 'Escape' && e.type === 'keydown' && !match.online) onSetup();
+        return;
+      }
       if (weaponsOpen && e.key.startsWith('Arrow')) {
         e.preventDefault();
         const h = hudRef.current;
@@ -822,7 +836,7 @@ function Battle({
       window.removeEventListener('keyup', onKey, true);
       window.removeEventListener('blur', onBlur);
     };
-  }, [act, jumpKey, pick, cursor, leaving, over, weaponsOpen, helpOpen, toggleWeapons, toggleHelp, onAskLeave, onKeepPlaying]);
+  }, [act, jumpKey, pick, cursor, leaving, over, weaponsOpen, helpOpen, toggleWeapons, toggleHelp, onAskLeave, onKeepPlaying, onSetup, match.online]);
 
   const hold = (bit: number) => ({
     onPointerDown: (e: React.PointerEvent) => {
@@ -861,6 +875,7 @@ function Battle({
   if (hud && over) {
     endTitle = forfeit
       ? `${net!.others.filter((o) => o.state === 'left').map((o) => o.name).join(' and ')} left the match${forfeit.mine ? ': you win' : ''}`
+      : knockedOut ? (match.driver.mine.length > 1 ? 'Your teams are out' : 'Your team is out')
       : hud.winner ? `${hud.winner} wins` : 'Nobody is left: a draw';
   }
 
@@ -1129,7 +1144,7 @@ function Setup({
                         type="button"
                         className={styles.removeBtn}
                         aria-label={`Remove ${name || DEFAULT_NAMES[i]}`}
-                        onClick={() => set({ names: settings.names.filter((_, k) => k !== i) })}
+                        onClick={() => set({ names: withoutTeam(settings.names, i) })}
                       >
                         <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
                           <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

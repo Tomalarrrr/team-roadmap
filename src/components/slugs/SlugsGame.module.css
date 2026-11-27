@@ -792,6 +792,20 @@ button.note:hover { background: var(--plate-hover); }
   }
 }
 
+/* A phone held upright has no room for both pads side by side (210 px and up to 322 px), so
+   each takes a row; the actions wrap from the right on the narrowest screens. */
+@media (pointer: coarse) and (max-width: 600px) {
+  .bottomBar {
+    grid-template-areas:
+      'clock teams wind'
+      'pad pad pad'
+      'act act act';
+  }
+
+  .touchPad[data-area='pad'] { justify-self: start; }
+  .touchPad[data-area='act'] { flex-wrap: wrap; justify-content: flex-end; }
+}
+
 @media (max-width: 480px) {
   .teamRow { grid-template-columns: 56px minmax(60px, 104px); }
 }

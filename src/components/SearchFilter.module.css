@@ -39,7 +39,8 @@
   align-items: flex-start;
   justify-content: center;
   padding-top: 15vh;
-  z-index: 1000;
+  /* Over the games (11000): each lets Cmd+K through to open search on top of it. */
+  z-index: 11500;
   animation: fadeIn 0.15s ease;
 }
 

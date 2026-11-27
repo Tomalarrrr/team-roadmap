@@ -12,6 +12,9 @@ vi.mock('../components/slugs/menuArt', async (actual) => ({
   paintMapThumb: () => {},
 }));
 
+// Setup starts loading the engine early, and Phaser probes a 2D canvas as it loads, which jsdom lacks.
+vi.mock('../components/slugs/slugsScene', () => ({}));
+
 const { SlugsGame } = await import('../components/slugs/SlugsGame');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
