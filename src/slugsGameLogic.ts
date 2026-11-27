@@ -116,6 +116,8 @@ export interface SlugsOptions {
   map: MapDesignId;
   /** 'players': before the first turn each team picks where its slugs start, one slug at a time (Worms' manual placement). */
   placing: 'auto' | 'players';
+  /** Crates parachute in between turns: a weapon, 25 hp, or a utility, for whoever touches one first. */
+  crates: boolean;
 }
 
 export const DEFAULT_OPTIONS: SlugsOptions = {
@@ -129,6 +131,7 @@ export const DEFAULT_OPTIONS: SlugsOptions = {
   waterRise: WATER_RISE,
   map: 'classic',
   placing: 'auto',
+  crates: true,
 };
 
 // --- Fixed-point trig: sin of 0..90 degrees, times ONE. ---
@@ -183,7 +186,8 @@ export type WeaponId =
   | 'dynamite' | 'mine' | 'snail' | 'airstrike' | 'millstone'
   | 'shotgun' | 'handgun' | 'machinegun' | 'minigun' | 'longshot'
   | 'uppercut' | 'spade' | 'prod'
-  | 'rope' | 'jetpack' | 'parachute' | 'teleport' | 'girder' | 'blowtorch' | 'drill';
+  | 'rope' | 'jetpack' | 'parachute' | 'teleport' | 'girder' | 'blowtorch' | 'drill'
+  | 'lowgrav' | 'fastwalk' | 'laser' | 'double';
 
 export const WEAPONS: readonly WeaponId[] = [
   'bazooka', 'homing', 'mortar', 'grenade', 'cluster', 'seedpod', 'jar', 'borer',
@@ -191,9 +195,12 @@ export const WEAPONS: readonly WeaponId[] = [
   'shotgun', 'handgun', 'machinegun', 'minigun', 'longshot',
   'uppercut', 'spade', 'prod',
   'rope', 'jetpack', 'parachute', 'teleport', 'girder', 'blowtorch', 'drill',
+  // Appended, not grouped with the tools: an online input names a weapon by its place in this list.
+  'lowgrav', 'fastwalk', 'laser', 'double',
 ];
 
-export type WeaponCategory = 'explosive' | 'special' | 'firearm' | 'melee' | 'tool';
+/** 'utility': switched on for the rest of the turn, and does not use up the turn's attack. */
+export type WeaponCategory = 'explosive' | 'special' | 'firearm' | 'melee' | 'tool' | 'utility';
 
 /**
  * How a weapon is set off:
@@ -213,7 +220,7 @@ export interface WeaponSpec {
   desc: string;
   category: WeaponCategory;
   use: WeaponUse;
-  /** Starting stock per team; -1 is unlimited. Stocks are ours. */
+  /** Starting stock per team; -1 is unlimited, 0 only ever found in crates. Stocks are ours. */
   ammo: number;
   /** The fuse can be set (`{ t: 'fuse', n }`, 1 to 5 s). */
   fuse: boolean;
@@ -256,14 +263,26 @@ export const WEAPON: Record<WeaponId, WeaponSpec> = {
   uppercut: { name: 'Uppercut', desc: 'Leap up punching: 30 damage, and a slug just in front is thrown upward.', category: 'melee', use: 'shot', ammo: -1, fuse: false, wind: false, aims: false, ends: true, damage: 30, crater: 0, bias: 0, retreat: RETREAT_TICKS, classic: false },
   spade: { name: 'Spade', desc: 'Swing along the aim: 30 damage, and a slug just in front is thrown far.', category: 'melee', use: 'shot', ammo: 1, fuse: false, wind: false, aims: true, ends: true, damage: 30, crater: 0, bias: 0, retreat: RETREAT_TICKS, classic: false },
   prod: { name: 'Prod', desc: 'Nudge a slug just in front. No damage: a fall or the water does the rest.', category: 'melee', use: 'shot', ammo: -1, fuse: false, wind: false, aims: false, ends: true, damage: 0, crater: 0, bias: 0, retreat: RETREAT_TICKS, classic: false },
-  rope: { name: 'Grapple', desc: 'Fire a rope upward along the aim to swing on. Up and down climb, left and right swing, fire lets go.', category: 'tool', use: 'shot', ammo: -1, fuse: false, wind: false, aims: true, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
-  jetpack: { name: 'Jetpack', desc: 'Fly on 5 s of thrust: up, left and right. Fire again to switch it off.', category: 'tool', use: 'shot', ammo: 2, fuse: false, wind: false, aims: false, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
+  rope: { name: 'Grapple', desc: 'Fire a rope upward along the aim to swing on. Up and down climb, left and right swing, fire lets go.', category: 'tool', use: 'shot', ammo: -1, fuse: false, wind: false, aims: true, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: true },
+  jetpack: { name: 'Jetpack', desc: 'Fly on 5 s of thrust: up, left and right. Pick a weapon in flight and fire it from the air; fire with the jetpack still picked switches it off.', category: 'tool', use: 'shot', ammo: 2, fuse: false, wind: false, aims: false, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: true },
   parachute: { name: 'Parachute', desc: 'Open while falling: drifts with the wind and lands without fall damage.', category: 'tool', use: 'shot', ammo: 2, fuse: false, wind: true, aims: false, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
   teleport: { name: 'Teleport', desc: 'Pick any clear spot and move there. Ends the turn.', category: 'tool', use: 'target', ammo: 2, fuse: false, wind: false, aims: false, ends: true, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
   girder: { name: 'Girder', desc: 'Pick a spot within 200 px for a 64 px beam; turn it first with the girder control.', category: 'tool', use: 'target', ammo: 3, fuse: false, wind: false, aims: false, ends: true, damage: 0, crater: 0, bias: 0, retreat: RETREAT_TICKS, classic: false },
   blowtorch: { name: 'Blowtorch', desc: 'Burn a tunnel forward for up to 5 s: level, or angled up or down by the aim.', category: 'tool', use: 'shot', ammo: 2, fuse: false, wind: false, aims: true, ends: true, damage: 15, crater: 0, bias: 0, retreat: RETREAT_TICKS, classic: false },
   drill: { name: 'Drill', desc: 'Dig straight down for up to 5 s.', category: 'tool', use: 'shot', ammo: 2, fuse: false, wind: false, aims: false, ends: true, damage: 15, crater: 0, bias: 0, retreat: RETREAT_TICKS, classic: false },
+  lowgrav: { name: 'Low gravity', desc: 'Halves gravity until the next turn, for slugs and everything thrown or fired. Keeps the turn going.', category: 'utility', use: 'shot', ammo: 0, fuse: false, wind: false, aims: false, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
+  fastwalk: { name: 'Fast walk', desc: 'Walk at twice the speed for the rest of the turn. Keeps the turn going.', category: 'utility', use: 'shot', ammo: 0, fuse: false, wind: false, aims: false, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
+  laser: { name: 'Laser sight', desc: 'A line shows where a gun shot will hit, for the rest of the turn. Keeps the turn going.', category: 'utility', use: 'shot', ammo: 0, fuse: false, wind: false, aims: false, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
+  double: { name: 'Double damage', desc: 'This turn\u2019s attack does twice the damage with twice the blast. Keeps the turn going.', category: 'utility', use: 'shot', ammo: 0, fuse: false, wind: false, aims: false, ends: false, damage: 0, crater: 0, bias: 0, retreat: 0, classic: false },
 };
+
+/** What each utility switches on, as a bit of `SlugsState.boost`. */
+export const BOOST = { lowgrav: 1, fastwalk: 2, laser: 4, double: 8 } as const;
+export type BoostId = keyof typeof BOOST;
+export const isBoost = (w: WeaponId): w is BoostId => w in BOOST;
+
+/** Gravity this tick: halved while a low gravity is on, for everything that falls. */
+export const gravity = (state: SlugsState) => (state.boost & BOOST.lowgrav ? GRAVITY >> 1 : GRAVITY);
 
 const CLUSTER_BITS = 5;
 /** Mortar bomblets: about 19 hp and 35 px craters each (worms2d.info). How many there are is ours. */
@@ -353,12 +372,43 @@ const MINE_HALF = { w: 4, h: 2 };
 const BARREL_HP = 40;
 const BARREL_HALF = { w: 6, h: 8 };
 const BARREL_BLAST = { damage: 50, crater: 40, bias: 50 };
+/**
+ * Crates. From the source: at most 5 on the map, none dropped within 64 px (diamond) of another
+ * object, 25 hp in a health crate, weights weapon 20, health 10, utility 10 (Intermediate scheme),
+ * utility contents by its weights limited to the utilities Slugs has, no infinite-ammo weapon in a
+ * weapon crate, no health crates in sudden death. Ours: a crate on half the turns as a fresh roll
+ * (the source draws from a bag whose total it does not give), the 12 px box, the drop height,
+ * equal weights within a weapon crate, and a broken weapon crate going off like a slug popping.
+ */
+const CRATE_MOST = 5;
+const CRATE_GAP = 64;
+export const CRATE_HEALTH = 25;
+const CRATE_CHANCE = 50;
+const CRATE_HALF = { w: 6, h: 6 };
+/** Dropped this far above where it lands, so it comes down in view in about 2 s rather than from the top of the map. */
+const CRATE_DROP = 160;
+export type CrateKind = 'weapon' | 'health' | 'utility';
+const CRATE_KINDS: readonly (readonly [CrateKind, number])[] = [['weapon', 20], ['health', 10], ['utility', 10]];
+const UTILITY_GIFTS: readonly (readonly [WeaponId, number])[] = [['fastwalk', 20], ['laser', 10], ['double', 15], ['lowgrav', 10], ['jetpack', 10]];
+const WEAPON_GIFTS = WEAPONS.filter((w) => WEAPON[w].ammo > 0 && !UTILITY_GIFTS.some(([u]) => u === w));
+export const crateKind = (gift: Gift): CrateKind =>
+  gift === 'health' ? 'health' : UTILITY_GIFTS.some(([u]) => u === gift) ? 'utility' : 'weapon';
+export const objHalf = (kind: ObjKind) => (kind === 'mine' ? MINE_HALF : kind === 'crate' ? CRATE_HALF : BARREL_HALF);
 /** A grenade keeps 96% of its speed along the ground, and 60% (high bounce) or 30% (low) of it off the ground. */
 const BOUNCE_ALONG = 62915;
 const BOUNCE_HIGH = 39322;
 const BOUNCE_LOW = 19661;
 /** A thrown thing this slow, with ground under it, stops. Ours. */
 const REST_SPEED = Math.trunc(0.6 * ONE);
+/**
+ * Ground steeper than 1 in 2 (about 27°) does not hold what slides or rolls on it: a thrown slug,
+ * a grenade or a mine goes on down it. A slug standing on it stays put. Ours: the source gives none.
+ */
+const HOLD_SLOPE = ONE / 2;
+/** A thrown slug coming down keeps this much of its speed into the ground, back off it. Ours. */
+const SLUG_BOUNCE = 19661;
+/** It flies on off a bounce only if that leaves it at least this fast off the ground; slower, it slides. Ours. */
+const SLUG_HOP = ONE;
 /** Slug death: a small burst of up to 25 hp. */
 const POP_DAMAGE = 25;
 const POP_CRATER = 20;
@@ -400,9 +450,12 @@ export interface Proj {
   hops: number;
 }
 
-export type ObjKind = 'mine' | 'barrel';
+export type ObjKind = 'mine' | 'barrel' | 'crate';
 
-/** Things lying on the land between turns: mines and barrels. */
+/** What a crate holds: a weapon or utility for the team that picks it up, or health for the slug. */
+export type Gift = WeaponId | 'health';
+
+/** Things lying on the land between turns: mines, barrels and crates. */
 export interface Obj {
   id: number;
   kind: ObjKind;
@@ -419,8 +472,14 @@ export interface Obj {
   dud: boolean;
   /** Mine: ticks before a slug can trip it, so whoever drops it has the retreat to get clear. */
   arm: number;
-  /** Barrel: damage it takes before it bursts. */
+  /** Barrel: damage it takes before it bursts. Crate: 1, and 0 once a blast has broken it. */
   hp: number;
+  /** Crate: what is in it; null for anything else. */
+  gift: Gift | null;
+  /** Crate: still under its parachute, until it first lands or a blast knocks it. */
+  chute: boolean;
+  /** Mine: laid as this turn's attack, so a double damage switched on this turn counts for it. */
+  laid: boolean;
 }
 
 /** A rope from its first anchor, bent round corners: the slug swings on the last point. */
@@ -473,8 +532,8 @@ export interface Slug {
   y: number;
   vx: number;
   vy: number;
-  /** 'rope' swinging, 'jet' on a jetpack, 'chute' under a parachute. */
-  mode: 'stand' | 'air' | 'slide' | 'rope' | 'jet' | 'chute';
+  /** 'rope' swinging, 'jet' on a jetpack, 'chute' under a parachute, 'zip' hanging from a zip line. */
+  mode: 'stand' | 'air' | 'slide' | 'rope' | 'jet' | 'chute' | 'zip';
   /** Thrown by a blast or a blow: it cannot steer, and skids where it lands. */
   blown: boolean;
   /** Jetpack thrusters burning this tick, as KEY bits (up, left, right); 0 or absent when none. */
@@ -491,7 +550,7 @@ export interface Slug {
   still: number;
 }
 
-/** What set off a blast: a projectile, a weapon fired straight, a barrel, a mine, or a slug popping. */
+/** What set off a blast: a projectile, a weapon fired straight, a barrel, a mine, a weapon crate, or a slug popping. */
 export type BoomSource = ProjKind | WeaponId | ObjKind | 'pop';
 
 export type Phase = 'place' | 'ready' | 'turn' | 'retreat' | 'settle' | 'tally' | 'deaths' | 'over';
@@ -525,7 +584,17 @@ export type SlugEvent =
   /** A close-combat blow landed on slug `id`. */
   | { k: 'blow'; w: WeaponId; id: number }
   | { k: 'jet'; id: number; on: boolean }
-  | { k: 'chute'; id: number; open: boolean };
+  | { k: 'chute'; id: number; open: boolean }
+  /** A crate starts its drop at x. */
+  | { k: 'crate'; x: number }
+  /** Slug `id` picked up a crate at (x, y). */
+  | { k: 'gift'; id: number; what: Gift; x: number; y: number }
+  /** Slug `id` switched on a utility. */
+  | { k: 'boost'; id: number; w: WeaponId }
+  /** Slug `id` caught zip line `line`, or came off it. */
+  | { k: 'zip'; id: number; line: number; on: boolean }
+  /** Zip line `line` was cut, or lost a post, at (x, y). */
+  | { k: 'zipcut'; line: number; x: number; y: number };
 
 /** Where the computer's turn has got to: searching shots, looking for a place to move to, moving, trying out the shot, aiming it. */
 export type CpuStage = 'shots' | 'moves' | 'move' | 'check' | 'aim';
@@ -610,7 +679,13 @@ export interface SlugsState {
   remote: number;
   rope: Rope | null;
   ropeShots: number;
+  /** Zip lines strung when the map was made, by id. */
+  zips: Zip[];
+  /** The slug hanging from a zip line, if one is. */
+  ride: Ride | null;
   jetFuel: number;
+  /** Utilities on until the next turn begins, as BOOST bits. */
+  boost: number;
   /** Mine triggers still to draw before the bag is refilled; 1 is a dud. */
   dudBag: number[];
   /** Slugs still to be placed by their teams, the one being placed first; it stands hidden at its automatic seat meanwhile. */
@@ -833,6 +908,46 @@ function reflect(b: { vx: number; vy: number }, nx: number, ny: number, along: n
   b.vx = Math.trunc((tvx * along) / ONE) - Math.trunc((nvx * off) / ONE);
   b.vy = Math.trunc((tvy * along) / ONE) - Math.trunc((nvy * off) / ONE);
   return Math.trunc(-vn / isqrt(nn));
+}
+
+/** The top of the land in column x near row y: the first land row, looked for at most 8 px up or down. */
+function surfaceAt(t: Uint8Array, x: number, y: number): number {
+  if (solidAt(t, x, y)) {
+    for (let d = 0; d < 8 && solidAt(t, x, y - 1); d++) y--;
+  } else {
+    for (let d = 0; d < 8 && !solidAt(t, x, y); d++) y++;
+  }
+  return y;
+}
+
+/**
+ * How far the land at (x, y) drops from 4 px left of it to 4 px right, positive when it is lower to
+ * the right. Measured from heights because the 4 px surface normal cannot tell 20° from 30° (it reads
+ * a 30° slope anywhere from 0.29 to 0.71).
+ */
+const dropAt = (t: Uint8Array, x: number, y: number) => surfaceAt(t, x + 4, y) - surfaceAt(t, x - 4, y);
+
+/** Whether land dropping `drop` px over 8 is gentle enough to hold what comes to rest on it. */
+const holds = (drop: number) => Math.abs(drop) * ONE < 8 * HOLD_SLOPE;
+
+/** Gravity's sideways pull on something on land dropping `drop` px over 8: g sin θ cos θ, positive to the right. */
+const downhill = (state: SlugsState, drop: number) => Math.trunc((gravity(state) * 8 * drop) / (64 + drop * drop));
+
+/**
+ * Whether a shot that bounced off land facing `nx` goes on down it. The heights alone call the
+ * lip of a cliff steep, where the land it sits on is flat: a bounce there goes straight back up, and it
+ * would bounce on the spot for ever, never held.
+ */
+const rollsOn = (drop: number, nx: number) => !holds(drop) && Math.sign(nx) === Math.sign(drop);
+
+/**
+ * Something moving along steep land catches on each pixel step of it, and bouncing there would
+ * leave it hanging mid-slope with its speed but never moving. Under 1 px/frame into the land it
+ * rides over the step instead: this is the pixel to shift by, off the land along the way it faces most.
+ */
+function rideOver(b: { vx: number; vy: number }, n: { nx: number; ny: number }): { dx: number; dy: number } | undefined {
+  if (-(b.vx * n.nx + b.vy * n.ny) >= ONE * isqrt(n.nx * n.nx + n.ny * n.ny)) return undefined;
+  return Math.abs(n.nx) > -n.ny ? { dx: Math.sign(n.nx), dy: 0 } : { dx: 0, dy: -1 };
 }
 
 /** A unit vector (times ONE) from (x0, y0) to (x1, y1) in px; straight up when they are the same point. */
@@ -1187,7 +1302,9 @@ function placeTick(state: SlugsState, input: Input): void {
 
 /** Scatter mines and barrels on free standing spots well clear of the slugs and of each other. */
 function placeObjects(state: SlugsState, mines: number, barrels: number): void {
-  const spots = standingSpots(state.terrain, state.water);
+  // Only on ground that holds: a mine set down on a hillside slides off it before anyone has moved.
+  const spots = standingSpots(state.terrain, state.water).filter((s) => holds(dropAt(state.terrain, s.x, s.y + SLUG_HALF_H)));
+  if (spots.length === 0) return;
   const kinds: ObjKind[] = [...Array<ObjKind>(mines).fill('mine'), ...Array<ObjKind>(barrels).fill('barrel')];
   for (const kind of kinds) {
     for (let tries = 0; tries < 60; tries++) {
@@ -1205,7 +1322,7 @@ function placeObjects(state: SlugsState, mines: number, barrels: number): void {
 function newObj(state: SlugsState, kind: ObjKind, x: number, y: number, delay: number): Obj {
   return {
     id: state.nextId++, kind, x: x * ONE, y: y * ONE, vx: 0, vy: 0, rest: false, fuse: -1, delay, dud: false, arm: 0,
-    hp: kind === 'barrel' ? BARREL_HP : 0,
+    hp: kind === 'barrel' ? BARREL_HP : kind === 'crate' ? 1 : 0, gift: null, chute: false, laid: false,
   };
 }
 
@@ -1251,7 +1368,10 @@ export function newGame(seed: number, setups: TeamSetup[], perTeam: number, opti
     remote: -1,
     rope: null,
     ropeShots: ROPE_SHOTS,
+    zips: [],
+    ride: null,
     jetFuel: 0,
+    boost: 0,
     dudBag: [],
     placing: [],
     seats: [],
@@ -1289,6 +1409,7 @@ export function newGame(seed: number, setups: TeamSetup[], perTeam: number, opti
   // A land too broken to seat everyone is swapped for the next seed's.
   for (let land = 1; !placeSlugs(state); land++) state.terrain = buildMap(opts.map, (seed + land * 7919) >>> 0);
   placeObjects(state, opts.mines, opts.barrels);
+  state.zips = stringZips(state.terrain, state.water, seed);
   // Placement still seats everyone first: it proves the land has room, and is where a slug no seat is free for stays.
   if (opts.placing === 'players') {
     beginPlacing(state);
@@ -1312,6 +1433,8 @@ export function cloneState(s: SlugsState): SlugsState {
     mark: s.mark && { ...s.mark },
     using: s.using && { ...s.using, hit: s.using.hit.slice() },
     rope: s.rope && { ...s.rope, pts: s.rope.pts.map((q) => ({ ...q })) },
+    zips: s.zips.map((z) => ({ ...z })),
+    ride: s.ride && { ...s.ride },
     dudBag: s.dudBag.slice(),
     placing: s.placing.slice(),
     // Spots are never changed, only the list replaced, so copies share them.
@@ -1366,6 +1489,8 @@ function beginTurn(state: SlugsState, teamIndex: number): void {
   state.plan = null;
   state.mark = null;
   state.ropeShots = ROPE_SHOTS;
+  state.boost = 0;
+  for (const o of state.objs) o.laid = false;
   const team = state.teams[teamIndex];
   state.weapon = team.ammo[team.weapon] === 0 ? 'bazooka' : team.weapon;
   state.fuse = team.fuse;
@@ -1418,7 +1543,57 @@ function finishTurn(state: SlugsState): void {
     next = (next + 1) % state.teams.length;
     if (!state.teams[next].out) break;
   }
+  dropCrate(state);
   beginTurn(state, next);
+}
+
+/** Draw from weighted items. */
+function pickWeighted<T>(state: SlugsState, items: readonly (readonly [T, number])[]): T {
+  let i = 0;
+  for (let r = randInt(state, items.reduce((sum, [, w]) => sum + w, 0)); r >= items[i][1]; i++) r -= items[i][1];
+  return items[i][0];
+}
+
+/**
+ * Maybe start a crate down on its parachute over a column with land above the water, clear of
+ * everything else on the map. A column is scanned a row at a time, not with standingSpots,
+ * because the computer's rehearsals can run this too.
+ */
+function dropCrate(state: SlugsState): void {
+  if (!state.opts.crates || state.objs.filter((o) => o.kind === 'crate').length >= CRATE_MOST) return;
+  if (randInt(state, 100) >= CRATE_CHANCE) return;
+  const kind = pickWeighted(state, state.sudden ? CRATE_KINDS.filter(([k]) => k !== 'health') : CRATE_KINDS);
+  const gift: Gift =
+    kind === 'health' ? 'health' : kind === 'utility' ? pickWeighted(state, UTILITY_GIFTS) : WEAPON_GIFTS[randInt(state, WEAPON_GIFTS.length)];
+  const { w: hw, h: hh } = CRATE_HALF;
+  for (let tries = 0; tries < 10; tries++) {
+    const x = hw + 8 + randInt(state, W - 2 * (hw + 8));
+    let top = 0;
+    while (top < state.water && !Array.from({ length: 2 * hw + 1 }, (_, i) => solidAt(state.terrain, x - hw + i, top)).some(Boolean)) top++;
+    if (top >= state.water || top < 2 * hh + 2) continue;
+    // boxFree takes in hh rows above the centre and hh - 1 below, so this is the row it comes to rest on.
+    const landY = top - hh;
+    if (state.objs.some((o) => Math.abs(px(o.x) - x) + Math.abs(px(o.y) - landY) < CRATE_GAP)) continue;
+    const crate = newObj(state, 'crate', x, Math.max(hh, landY - CRATE_DROP), 0);
+    crate.gift = gift;
+    crate.chute = true;
+    state.objs.push(crate);
+    state.events.push({ k: 'crate', x });
+    return;
+  }
+}
+
+/** What a slug gets from a crate: health for itself, or one more of the weapon for its team. */
+function openCrate(state: SlugsState, slug: Slug, o: Obj): void {
+  const gift = o.gift as Gift;
+  if (gift === 'health') {
+    slug.hp += CRATE_HEALTH;
+    slug.shown += CRATE_HEALTH;
+  } else {
+    const ammo = state.teams[slug.team].ammo;
+    if (ammo[gift] >= 0) ammo[gift]++;
+  }
+  state.events.push({ k: 'gift', id: slug.id, what: gift, x: px(o.x), y: px(o.y) });
 }
 
 // --- Damage ---
@@ -1472,7 +1647,13 @@ function knock(slug: Slug, vx: number, vy: number, blown: boolean): void {
 }
 
 export function explode(state: SlugsState, x: number, y: number, damage: number, crater: number, bias: number, src?: BoomSource): void {
+  // Double damage is the turn's attack: what lies on the map, or a slug popping, goes off as it always does.
+  if (state.boost & BOOST.double && src !== 'barrel' && src !== 'mine' && src !== 'crate' && src !== 'pop') {
+    damage *= 2;
+    crater *= 2;
+  }
   carve(state.terrain, x, y, crater);
+  cutZips(state, x, y, crater);
   state.events.push({ k: 'boom', x, y, r: crater, ...(src && { src }) });
   const kx = x;
   const ky = y + Math.trunc((crater * bias) / 100);
@@ -1507,10 +1688,14 @@ export function explode(state: SlugsState, x: number, y: number, damage: number,
   };
   for (const p of state.projs) if (p.fuse >= 0) pushBody(p);
   for (const o of state.objs) {
-    // Shoved out to `reach`, but only the crater itself hurts a barrel or trips a mine.
+    // A mine is shoved out to `reach` and a barrel not at all, but only the crater itself hurts a barrel or trips a mine.
     // A barrel is hurt as a slug is, by the blast's distance to its body, so a shot that hits it does full damage.
-    if (pushBody(o) >= crater) continue;
-    if (o.kind === 'barrel') o.hp -= blastDamage(damage, crater, distToBox(px(o.x), px(o.y), BARREL_HALF.w, BARREL_HALF.h, x, y));
+    const d = o.kind === 'barrel' ? unitTo(kx, ky, px(o.x), px(o.y)).d : pushBody(o);
+    // Left open, the chute would ease a shoved crate straight back to drifting with the wind.
+    if (o.kind === 'crate' && d < reach) o.chute = false;
+    if (d >= crater) continue;
+    if (o.kind === 'crate') o.hp = 0;
+    else if (o.kind === 'barrel') o.hp -= blastDamage(damage, crater, distToBox(px(o.x), px(o.y), BARREL_HALF.w, BARREL_HALF.h, x, y));
     else if (!o.dud && o.fuse < 0) {
       // A blast trips a mine whether or not it has armed, and it goes off as a slug would set it off.
       o.fuse = Math.max(1, o.delay);
@@ -1530,8 +1715,9 @@ function slugHitBy(state: SlugsState, p: Proj, x: number, y: number): Slug | und
   );
 }
 
+/** A barrel or crate at (x, y), which a shot stops at. A mine lies too flat to be hit. */
 const barrelAt = (state: SlugsState, x: number, y: number) =>
-  state.objs.find((o) => o.kind === 'barrel' && Math.abs(px(o.x) - x) <= BARREL_HALF.w && Math.abs(px(o.y) - y) <= BARREL_HALF.h);
+  state.objs.find((o) => o.kind !== 'mine' && Math.abs(px(o.x) - x) <= objHalf(o.kind).w && Math.abs(px(o.y) - y) <= objHalf(o.kind).h);
 
 export type ProjFate = 'flying' | 'boom' | 'gone';
 
@@ -1561,7 +1747,7 @@ export function stepProj(state: SlugsState, p: Proj, live: boolean): ProjFate {
     p.vx += Math.trunc((Math.trunc((u.ux * (HOMING_SPEED / ONE))) - p.vx) / HOMING_TURN);
     p.vy += Math.trunc((Math.trunc((u.uy * (HOMING_SPEED / ONE))) - p.vy) / HOMING_TURN);
   } else {
-    p.vy += GRAVITY;
+    p.vy += gravity(state);
     if (p.wind && !(p.kind === 'homing' && p.age >= HOMING_LOCK)) p.vx += windPush(state);
   }
   p.vx = Math.max(-SPEED_CAP, Math.min(SPEED_CAP, p.vx));
@@ -1605,6 +1791,13 @@ export function stepProj(state: SlugsState, p: Proj, live: boolean): ProjFate {
     }
     // Something with a fuse bounces off what it met, from where it was.
     const n = target ? { nx: px(p.x) - px(target.x), ny: px(p.y) - px(target.y) } : normalAt(t, px(p.x), px(p.y));
+    const steep = !target && !barrel && rollsOn(dropAt(t, px(p.x), px(p.y)), n.nx);
+    const lift = steep ? rideOver(p, n) : undefined;
+    if (lift && !projHitsLand(t, ix + lift.dx, iy + lift.dy)) {
+      p.x = nx + lift.dx * ONE;
+      p.y = ny + lift.dy * ONE;
+      continue;
+    }
     let hit = reflect(p, n.nx, n.ny, BOUNCE_ALONG, p.bounce);
     if (hit === 0) {
       // The normal points along the motion (a narrow pit): bounce off whichever way is blocked.
@@ -1619,10 +1812,19 @@ export function stepProj(state: SlugsState, p: Proj, live: boolean): ProjFate {
     if (live && hit > ONE) state.events.push({ k: 'bounce', x: px(p.x), y: px(p.y) });
     // Wedged in a notch, the bounce keeps most of its speed along the land but still points into it,
     // so it cannot take a step: by speed alone it would never come to rest, and a jar never go off.
-    const fall = p.vy + GRAVITY;
+    const fall = p.vy + gravity(state);
     const next = Math.max(1, Math.ceil(Math.max(Math.abs(p.vx), Math.abs(fall)) / ONE));
-    const pinned = projHitsLand(t, px(p.x + Math.trunc(p.vx / next)), px(p.y + Math.trunc(fall / next)));
-    if ((pinned || (Math.abs(p.vx) < REST_SPEED && Math.abs(p.vy) < REST_SPEED)) && projHitsLand(t, px(p.x), px(p.y) + 3)) {
+    const ax = px(p.x + Math.trunc(p.vx / next));
+    const ay = px(p.y + Math.trunc(fall / next));
+    const pinned = projHitsLand(t, ax, ay) || (target !== undefined && slugHitBy(state, p, ax, ay) !== undefined);
+    const slow = Math.abs(p.vx) < REST_SPEED && Math.abs(p.vy) < REST_SPEED;
+    // Steep land holds it only where the way on down is blocked: in a notch, not on a hillside.
+    const down = n.nx > 0 ? 1 : -1;
+    // One that went nowhere this tick is wedged whatever the slope says, as a mine is.
+    const held = !steep || (p.x === x0 && p.y === y0) || (projHitsLand(t, px(p.x) + down, px(p.y)) && projHitsLand(t, px(p.x) + down, px(p.y) + 1));
+    // A slug holds it up as land does: a jar lobbed straight up comes down on its thrower's head and
+    // sits there, and with no rest its fuse never burns its last tick and the turn never ends.
+    if ((pinned || slow) && held && (target || projHitsLand(t, px(p.x), px(p.y) + 3))) {
       p.vx = p.vy = 0;
       p.rest = true;
     }
@@ -1654,7 +1856,7 @@ function stepBorer(state: SlugsState, p: Proj, live: boolean): ProjFate {
 
 /** The millstone falls through everything, bursting wherever it is in land or on a slug. */
 function stepStone(state: SlugsState, p: Proj, live: boolean): ProjFate {
-  p.vy = Math.min(STONE_FALL, p.vy + GRAVITY);
+  p.vy = Math.min(STONE_FALL, p.vy + gravity(state));
   p.y += p.vy;
   const ix = px(p.x);
   const iy = px(p.y);
@@ -1681,7 +1883,7 @@ function stepSnail(state: SlugsState, p: Proj, live: boolean): ProjFate {
     return 'gone';
   }
   if (!p.rest) {
-    p.vy = Math.min(SPEED_CAP, p.vy + GRAVITY);
+    p.vy = Math.min(SPEED_CAP, p.vy + gravity(state));
     const steps = Math.max(1, Math.ceil(Math.max(Math.abs(p.vx), Math.abs(p.vy)) / ONE));
     for (let i = 0; i < steps; i++) {
       const nx = p.x + Math.trunc(p.vx / steps);
@@ -1840,7 +2042,9 @@ function stepObj(state: SlugsState, o: Obj): boolean {
           o.fuse = -1;
           state.events.push({ k: 'dud', x: px(o.x), y: px(o.y) });
         } else {
-          explode(state, px(o.x), px(o.y), WEAPON.mine.damage, WEAPON.mine.crater, WEAPON.mine.bias, 'mine');
+          // explode leaves every mine undoubled, as most lie on the map; one laid this turn is the attack.
+          const twice = o.laid && state.boost & BOOST.double ? 2 : 1;
+          explode(state, px(o.x), px(o.y), twice * WEAPON.mine.damage, twice * WEAPON.mine.crater, WEAPON.mine.bias, 'mine');
           return false;
         }
       }
@@ -1854,13 +2058,45 @@ function stepObj(state: SlugsState, o: Obj): boolean {
       }
     }
   }
-  const half = o.kind === 'mine' ? MINE_HALF : BARREL_HALF;
+  if (o.kind === 'crate') {
+    if (o.hp <= 0) {
+      if (crateKind(o.gift as Gift) === 'weapon') explode(state, px(o.x), px(o.y), POP_DAMAGE, POP_CRATER, 50, 'crate');
+      return false;
+    }
+    const taker = state.slugs.find(
+      (s) => s.alive && s.hp > 0 && Math.abs(px(s.x) - px(o.x)) <= SLUG_HALF_W + CRATE_HALF.w && Math.abs(px(s.y) - px(o.y)) <= SLUG_HALF_H + CRATE_HALF.h
+    );
+    if (taker) {
+      openCrate(state, taker, o);
+      return false;
+    }
+    // Under its parachute it comes down as a slug's does, drifting with the wind, until it first meets something.
+    if (o.chute) {
+      o.vy = Math.min(CHUTE_FALL, o.vy + gravity(state));
+      o.vx += Math.trunc((Math.trunc((state.wind * CHUTE_DRIFT * state.opts.windScale) / 100) - o.vx) / 8);
+      const nx = o.x + o.vx;
+      const ny = o.y + o.vy;
+      if (px(ny) > state.water) {
+        state.events.push({ k: 'splash', x: px(nx), big: false });
+        return false;
+      }
+      if (px(nx) < -40 || px(nx) > W + 40) return false;
+      if (boxFree(t, px(nx), px(ny), CRATE_HALF.w, CRATE_HALF.h)) {
+        o.x = nx;
+        o.y = ny;
+        return true;
+      }
+      o.chute = false;
+      o.vx = o.vy = 0;
+    }
+  }
+  const half = objHalf(o.kind);
   const free = (x: number, y: number) => boxFree(t, x, y, half.w, half.h);
   if (o.rest) {
     if (!free(px(o.x), px(o.y) + 1)) return true;
     o.rest = false;
   }
-  o.vy = Math.min(SPEED_CAP, o.vy + GRAVITY);
+  o.vy = Math.min(SPEED_CAP, o.vy + gravity(state));
   o.vx = Math.max(-SPEED_CAP, Math.min(SPEED_CAP, o.vx));
   const steps = Math.max(1, Math.ceil(Math.max(Math.abs(o.vx), Math.abs(o.vy)) / ONE));
   const x0 = o.x;
@@ -1878,16 +2114,37 @@ function stepObj(state: SlugsState, o: Obj): boolean {
       o.y = ny;
       continue;
     }
-    // Bounce off whichever way is blocked. A surface normal can point along the
-    // motion in a narrow pit, and bouncing off that would leave it stuck falling.
     const off = o.kind === 'mine' ? BOUNCE_HIGH : BOUNCE_LOW;
-    if (free(px(o.x), px(ny))) {
-      o.vx = -Math.trunc((o.vx * off) / ONE);
-    } else {
-      o.vy = -Math.trunc((o.vy * off) / ONE);
-      o.vx = Math.trunc((o.vx * BOUNCE_ALONG) / ONE);
+    // A mine bounces off the slope's own angle, as a grenade does, and so goes on down a hillside.
+    const n = normalAt(t, px(o.x), px(o.y) + half.h);
+    const steep = o.kind === 'mine' && !holds(dropAt(t, px(o.x), px(o.y) + half.h));
+    const lift = steep ? rideOver(o, n) : undefined;
+    if (lift && free(px(nx) + lift.dx, px(ny) + lift.dy)) {
+      o.x = nx + lift.dx * ONE;
+      o.y = ny + lift.dy * ONE;
+      continue;
     }
-    if (Math.abs(o.vx) < REST_SPEED && Math.abs(o.vy) < REST_SPEED && !free(px(o.x), px(o.y) + 1)) {
+    if (o.kind !== 'mine' || reflect(o, n.nx, n.ny, BOUNCE_ALONG, off) === 0) {
+      // Bounce off whichever way is blocked. A surface normal can point along the
+      // motion in a narrow pit, and bouncing off that would leave it stuck falling.
+      if (free(px(o.x), px(ny))) {
+        o.vx = -Math.trunc((o.vx * off) / ONE);
+      } else {
+        o.vy = -Math.trunc((o.vy * off) / ONE);
+        o.vx = Math.trunc((o.vx * BOUNCE_ALONG) / ONE);
+      }
+    }
+    // Wedged in a notch it cannot take a step, however fast the bounce leaves it.
+    const fall = o.vy + gravity(state);
+    const next = Math.max(1, Math.ceil(Math.max(Math.abs(o.vx), Math.abs(fall)) / ONE));
+    const pinned = !free(px(o.x + Math.trunc(o.vx / next)), px(o.y + Math.trunc(fall / next)));
+    const slow = Math.abs(o.vx) < REST_SPEED && Math.abs(o.vy) < REST_SPEED;
+    // Steep land holds a mine only where the way on down is blocked: in a notch, not on a hillside.
+    const down = n.nx > 0 ? 1 : -1;
+    // One that went nowhere this tick is wedged whatever the slope says: its speed can settle into a
+    // loop that the bounce takes off and gravity puts back, and the turn would wait on it for ever.
+    const held = !steep || (o.x === x0 && o.y === y0) || (!free(px(o.x) + down, px(o.y)) && !free(px(o.x) + down, px(o.y) + 1));
+    if ((pinned || slow) && held && !free(px(o.x), px(o.y) + 1)) {
       o.vx = o.vy = 0;
       o.rest = true;
     }
@@ -1936,6 +2193,12 @@ function moveSlug(state: SlugsState, slug: Slug): number {
     if (slug.vy > 0) {
       const impact = slug.vy;
       if (level) slug.x = nx;
+      // A thrown slug bounces off the ground's own slope, so one coming down on a hillside is sent on down it.
+      if (slug.mode === 'air' && slug.blown) {
+        const n = groundUnder(t, slug);
+        reflect(slug, n.nx, n.ny, BOUNCE_ALONG, SLUG_BOUNCE);
+        if (slug.vy < -SLUG_HOP) return impact;
+      }
       slug.vy = 0;
       settleDown(state, slug);
       return impact;
@@ -1965,16 +2228,23 @@ function land(state: SlugsState, slug: Slug, impact: number): void {
     state.events.push({ k: 'fall', id: slug.id, dmg });
     hurt(state, slug, dmg);
   }
+  if (slug.vy < 0) return;
   // Only a slug thrown by a blast or a blow skids on landing; a jump or a drop stops where it lands.
-  const thrown = slug.blown;
-  slug.blown = false;
+  // It stays thrown while it slides, so one that skids off a ledge falls without steering.
   // The slide's own stopping speed, so a slow throw skids a few px rather than stopping dead.
-  if (thrown && Math.abs(slug.vx) >= ONE / 2) {
-    slug.mode = 'slide';
-  } else {
-    slug.vx = 0;
-    slug.mode = 'stand';
-  }
+  if (slug.blown && (Math.abs(slug.vx) >= SLIDE_STOP || !holds(dropAt(state.terrain, px(slug.x), px(slug.y) + SLUG_HALF_H)))) slug.mode = 'slide';
+  else standStill(slug);
+}
+
+const SLIDE_STOP = ONE / 2;
+
+/** Which way the land under a slug's feet faces. */
+const groundUnder = (t: Uint8Array, slug: Slug) => normalAt(t, px(slug.x), px(slug.y) + SLUG_HALF_H);
+
+function standStill(slug: Slug): void {
+  slug.vx = 0;
+  slug.mode = 'stand';
+  slug.blown = false;
 }
 
 function stepSlug(state: SlugsState, slug: Slug): void {
@@ -1995,28 +2265,31 @@ function stepSlug(state: SlugsState, slug: Slug): void {
       }
       return;
     case 'slide': {
-      slug.vx = Math.trunc((slug.vx * FRICTION) / ONE);
-      if (Math.abs(slug.vx) < ONE / 2) {
-        slug.vx = 0;
-        slug.mode = 'stand';
+      const drop = dropAt(t, px(slug.x), px(slug.y) + SLUG_HALF_H);
+      const steep = !holds(drop);
+      slug.vx = Math.trunc((slug.vx * FRICTION) / ONE) + (steep ? downhill(state, drop) : 0);
+      if (!steep && Math.abs(slug.vx) < SLIDE_STOP) {
+        standStill(slug);
         return;
       }
       slug.still = 0;
       const dir = slug.vx > 0 ? 1 : -1;
-      const moves = Math.max(1, Math.ceil(Math.abs(slug.vx) / ONE));
-      for (let i = 0; i < moves; i++) {
+      const to = slug.x + slug.vx;
+      for (let n = Math.abs(px(to) - px(slug.x)); n > 0; n--) {
         if (!stepAlong(state, slug, dir, 1, true)) {
-          slug.vx = 0;
-          slug.mode = 'stand';
+          // A rise steeper than a slide climbs throws it back as a wall does, unless it is nearly stopped.
+          if (Math.abs(slug.vx) < ONE) standStill(slug);
+          else slug.vx = -Math.trunc((slug.vx * WALL_KEEP) / ONE);
           return;
         }
         if (slug.mode !== 'slide') return;
       }
+      slug.x = px(slug.x) * ONE + (to - px(to) * ONE);
       return;
     }
     case 'air': {
       slug.still = 0;
-      slug.vy = Math.min(SPEED_CAP, slug.vy + GRAVITY);
+      slug.vy = Math.min(SPEED_CAP, slug.vy + gravity(state));
       slug.vx = Math.max(-SPEED_CAP, Math.min(SPEED_CAP, slug.vx));
       const impact = moveSlug(state, slug);
       if (impact >= 0) land(state, slug, impact);
@@ -2024,7 +2297,7 @@ function stepSlug(state: SlugsState, slug: Slug): void {
     }
     case 'chute': {
       slug.still = 0;
-      slug.vy = Math.min(CHUTE_FALL, slug.vy + GRAVITY);
+      slug.vy = Math.min(CHUTE_FALL, slug.vy + gravity(state));
       const drift = Math.trunc((state.wind * CHUTE_DRIFT * state.opts.windScale) / 100);
       slug.vx += Math.trunc((drift - slug.vx) / 8);
       if (moveSlug(state, slug) >= 0) {
@@ -2037,7 +2310,7 @@ function stepSlug(state: SlugsState, slug: Slug): void {
     }
     case 'jet': {
       slug.still = 0;
-      slug.vy += GRAVITY;
+      slug.vy += gravity(state);
       slug.vx = Math.max(-JET_CAP, Math.min(JET_CAP, slug.vx));
       slug.vy = Math.max(-JET_CAP, Math.min(JET_CAP, slug.vy));
       const aloft = fits(state.terrain, px(slug.x), px(slug.y) + 1);
@@ -2048,6 +2321,7 @@ function stepSlug(state: SlugsState, slug: Slug): void {
         if (aloft) {
           slug.vy = 0;
           slug.mode = 'stand';
+          slug.blown = false;
           slug.thrust = 0;
           state.events.push({ k: 'jet', id: slug.id, on: false });
           return;
@@ -2062,6 +2336,9 @@ function stepSlug(state: SlugsState, slug: Slug): void {
     }
     case 'rope':
       stepRope(state, slug);
+      return;
+    case 'zip':
+      stepZip(state, slug);
       return;
   }
 }
@@ -2191,6 +2468,31 @@ function letGo(state: SlugsState, slug: Slug): void {
   state.events.push({ k: 'unrope', id: slug.id });
 }
 
+/** How far a slug hangs from a rope point, and the way to it (times 1024). */
+function fromPoint(slug: Slug, at: Spot): { ux: number; uy: number; dist: number } {
+  const dx = slug.x - at.x * ONE;
+  const dy = slug.y - at.y * ONE;
+  const dist = isqrt(Math.trunc(dx / 64) ** 2 + Math.trunc(dy / 64) ** 2) * 64;
+  if (dist === 0) return { ux: 0, uy: 0, dist };
+  return { ux: Math.trunc((dx * 1024) / dist), uy: Math.trunc((dy * 1024) / dist), dist };
+}
+
+/**
+ * Reel the rope to `len`. A taut rope keeps the slug's turning momentum about its point, so
+ * reeling in swings it faster and paying out slows it: speed across the rope times length holds.
+ */
+function reel(slug: Slug, rope: Rope, len: number): void {
+  const { ux, uy, dist } = fromPoint(slug, rope.pts[rope.pts.length - 1]);
+  if (dist > 0 && dist >= rope.len - ONE) {
+    const out = Math.trunc((slug.vx * ux + slug.vy * uy) / 1024);
+    const ox = Math.trunc((out * ux) / 1024);
+    const oy = Math.trunc((out * uy) / 1024);
+    slug.vx = ox + Math.trunc(((slug.vx - ox) * rope.len) / len);
+    slug.vy = oy + Math.trunc(((slug.vy - oy) * rope.len) / len);
+  }
+  rope.len = len;
+}
+
 /** Length of rope already wound round corners, in px. */
 function ropeWound(rope: Rope): number {
   let sum = 0;
@@ -2207,7 +2509,7 @@ function stepRope(state: SlugsState, slug: Slug): void {
   const rope = state.rope as Rope;
   const t = state.terrain;
   slug.still = 0;
-  slug.vy += GRAVITY;
+  slug.vy += gravity(state);
   const speed = isqrt(Math.trunc(slug.vx / 16) ** 2 + Math.trunc(slug.vy / 16) ** 2) * 16;
   if (speed > ROPE_CAP) {
     slug.vx = Math.trunc((slug.vx * (ROPE_CAP / 256)) / (speed / 256));
@@ -2215,12 +2517,8 @@ function stepRope(state: SlugsState, slug: Slug): void {
   }
   moveSlug(state, slug);
   let last = rope.pts[rope.pts.length - 1];
-  const dx = slug.x - last.x * ONE;
-  const dy = slug.y - last.y * ONE;
-  const dist = isqrt(Math.trunc(dx / 64) ** 2 + Math.trunc(dy / 64) ** 2) * 64;
+  const { ux, uy, dist } = fromPoint(slug, last);
   if (dist > rope.len && dist > 0) {
-    const ux = Math.trunc((dx * 1024) / dist);
-    const uy = Math.trunc((dy * 1024) / dist);
     const tx = last.x * ONE + Math.trunc((ux * rope.len) / 1024);
     const ty = last.y * ONE + Math.trunc((uy * rope.len) / 1024);
     if (fits(t, px(tx), px(ty))) {
@@ -2269,6 +2567,329 @@ function offRock(t: Uint8Array, at: Spot): Spot {
     if (!solidAt(t, x, y)) return { x, y };
   }
   return at;
+}
+
+// --- Zip lines ---
+//
+// Ours; the source has none. When the map is made, up to ZIP_MOST cables are strung between
+// two posts across a gap: a cavern, a chasm or open water. The active slug walking past a post
+// towards its cable, or jumping or falling into the cable, hangs from it on a pulley and runs
+// along it. The cable sags, so a rider speeds into the dip and slows climbing out; left and right
+// pull it along hand over hand, and up and down aim. Jump, or fire with a weapon that cannot be
+// used from the air, lets go. A blast across the cable cuts it, and a post whose ground goes falls.
+
+/** Cables strung on one map, at most. */
+const ZIP_MOST = 2;
+/** Across, in px, a cable may span. */
+const ZIP_SPAN_MIN = 120;
+const ZIP_SPAN_MAX = 560;
+/** Height of a post's top above its foot, px. */
+export const ZIP_POST = 24;
+/** The rider's centre below the cable: at a post it hangs 4 px higher than it stands there, clear of the lip. */
+export const ZIP_HANG = 12;
+/** The cable sags a px for every this many px of span, at its middle. */
+const ZIP_SAG_PER = 25;
+/** The steepest a cable runs, as dx per px of rise (4: about 14°). With its sag, a rider can still pull itself up the steepest part. */
+const ZIP_TILT = 4;
+/** Ground this far below a rider's feet, or none, is a gap; most of a cable's span must cross one. */
+const ZIP_GAP = 48;
+/** Fastest along the cable, and fastest hand over hand. */
+const ZIP_TOP = 7 * ONE;
+const ZIP_CRAWL = Math.trunc(1.5 * ONE);
+/** Pull hand over hand, per tick: more than gravity along the steepest part, so a rider never sticks. */
+const ZIP_PULL = Math.trunc(GRAVITY * 0.6);
+/** The pulley loses this part of its speed a tick, as 1/n. */
+const ZIP_DRAG = 160;
+/** Ticks after letting go of a cable before the same one catches its slug again, so a drop is a drop. */
+const ZIP_REGRAB = 50;
+/** Cable points tested against a blast. */
+const ZIP_SAMPLES = 24;
+
+/** A cable between two posts, in px. `a` is the left post's top, `b` the right one's. */
+export interface Zip {
+  id: number;
+  ax: number;
+  ay: number;
+  bx: number;
+  by: number;
+  /** How far the cable hangs below the straight line at its middle, px. */
+  sag: number;
+  /** Where a blast cut it, 0..ONE along from `a`; -1 while whole. */
+  cut: number;
+  /** Posts that have fallen: 1 the left, 2 the right, 3 both. */
+  down: number;
+  /** Tick its rider last let go or got off. */
+  left: number;
+}
+
+/** A slug hanging from a cable: `s` is how far along from `a`, fixed point px, and `v` its speed along. */
+export interface Ride {
+  zip: number;
+  slug: number;
+  s: number;
+  v: number;
+}
+
+export const zipWhole = (z: Zip) => z.cut < 0 && z.down === 0;
+export const zipLength = (z: Zip) => isqrt((z.bx - z.ax) ** 2 + (z.by - z.ay) ** 2);
+
+/** The cable's point `u` of the way from `a` to `b` (0..ONE), fixed point. The sag is a parabola. */
+export function zipPoint(z: Zip, u: number): { x: number; y: number } {
+  return {
+    x: z.ax * ONE + (z.bx - z.ax) * u,
+    y: z.ay * ONE + (z.by - z.ay) * u + Math.trunc((4 * z.sag * u * (ONE - u)) / ONE),
+  };
+}
+
+/** The sine of the cable's slope at `u`, times ONE: positive where it runs downhill towards `b`. */
+function zipSine(z: Zip, u: number): number {
+  const tan = Math.trunc(((z.by - z.ay) * ONE + 4 * z.sag * (ONE - 2 * u)) / (z.bx - z.ax));
+  return Math.trunc((tan * ONE) / isqrt(ONE * ONE + tan * tan));
+}
+
+/** Rock under the foot of a post standing on (x, foot). */
+function zipFooted(t: Uint8Array, x: number, foot: number): boolean {
+  for (let dx = -2; dx <= 2; dx++) for (let dy = 0; dy < 4; dy++) if (solidAt(t, x + dx, foot + dy)) return true;
+  return false;
+}
+
+/** A post's place: a standing spot with its ground ending a few px further towards `dir` above a drop. */
+function zipEdge(t: Uint8Array, s: Spot, dir: 1 | -1): boolean {
+  const foot = s.y + SLUG_HALF_H;
+  for (let k = 8; k <= 20; k++) {
+    const x = s.x + dir * k;
+    let empty = true;
+    for (let y = foot - 6; y <= foot + ZIP_GAP && empty; y++) empty = !solidAt(t, x, y);
+    if (empty) return true;
+  }
+  return false;
+}
+
+/** Whether a rider has room the whole way along, and the cable and pulley are clear of the land. */
+function zipClear(t: Uint8Array, z: Zip, water: number): boolean {
+  const len = zipLength(z);
+  for (let d = 2; d <= len - 2; d += 2) {
+    const p = zipPoint(z, Math.trunc((d * ONE) / len));
+    const x = px(p.x);
+    const y = px(p.y);
+    if (y + ZIP_HANG + SLUG_HALF_H >= water - 8) return false;
+    for (let k = -3; k <= 1; k++) if (solidAt(t, x, y + k)) return false;
+    if (!boxFree(t, x, y + ZIP_HANG, SLUG_HALF_W, SLUG_HALF_H)) return false;
+  }
+  return true;
+}
+
+/** Of the samples across a cable's span, how many (of 100) have no ground within ZIP_GAP below a rider's feet. */
+function zipGapShare(t: Uint8Array, z: Zip): number {
+  let gaps = 0;
+  let n = 0;
+  for (let x = z.ax + 16; x <= z.bx - 16; x += 8) {
+    const p = zipPoint(z, Math.trunc(((x - z.ax) * ONE) / (z.bx - z.ax)));
+    const feet = px(p.y) + ZIP_HANG + SLUG_HALF_H;
+    let empty = true;
+    for (let y = feet; y < feet + ZIP_GAP && empty; y++) empty = !solidAt(t, x, y);
+    if (empty) gaps++;
+    n++;
+  }
+  return n === 0 ? 0 : Math.trunc((gaps * 100) / n);
+}
+
+/**
+ * The cables for a land: pairs of posts facing each other across a gap, longer and more of a gap
+ * first, with a hash of the seed breaking near ties so each seed of a map strings its own. Built
+ * from the terrain and seed alone, so every client strings the same ones without drawing on the
+ * state's generator.
+ */
+export function stringZips(t: Uint8Array, water: number, seed: number): Zip[] {
+  const spots = standingSpots(t, water);
+  const lefts = spots.filter((s) => zipEdge(t, s, 1));
+  const rights = spots.filter((s) => zipEdge(t, s, -1));
+  const tries: { z: Zip; score: number }[] = [];
+  for (const a of lefts) {
+    for (const b of rights) {
+      const dx = b.x - a.x;
+      if (dx < ZIP_SPAN_MIN || dx > ZIP_SPAN_MAX || Math.abs(b.y - a.y) * ZIP_TILT > dx) continue;
+      const z: Zip = {
+        id: 0, ax: a.x, ay: a.y - ZIP_HANG - 4, bx: b.x, by: b.y - ZIP_HANG - 4,
+        sag: Math.trunc(dx / ZIP_SAG_PER), cut: -1, down: 0, left: -ZIP_REGRAB,
+      };
+      if (z.ay < 4 || z.by < 4) continue;
+      const gap = zipGapShare(t, z);
+      if (gap < 60) continue;
+      tries.push({ z, score: gap * 4 + dx - Math.abs(b.y - a.y) * 2 + (hash2(a.x, b.x, seed) % 120) });
+    }
+  }
+  tries.sort((p, q) => q.score - p.score || p.z.ax - q.z.ax || p.z.bx - q.z.bx || p.z.ay - q.z.ay);
+  const chosen: Zip[] = [];
+  const near = (x0: number, y0: number, x1: number, y1: number) => Math.abs(x0 - x1) < 48 && Math.abs(y0 - y1) < 48;
+  for (let i = 0; i < tries.length && i < 400 && chosen.length < ZIP_MOST; i++) {
+    const z = tries[i].z;
+    const crowded = chosen.some(
+      (c) =>
+        near(z.ax, z.ay, c.ax, c.ay) || near(z.ax, z.ay, c.bx, c.by) || near(z.bx, z.by, c.ax, c.ay) || near(z.bx, z.by, c.bx, c.by) ||
+        (z.ax < c.bx && c.ax < z.bx && Math.abs(z.ay + z.by - c.ay - c.by) < 120)
+    );
+    if (crowded || !zipClear(t, z, water)) continue;
+    z.id = chosen.length;
+    chosen.push(z);
+  }
+  return chosen;
+}
+
+/** Hang the active slug from cable `z`, `s` px along from `a`, moving `v` along it; not where it has no room. */
+function catchZip(state: SlugsState, slug: Slug, z: Zip, s: number, v: number): boolean {
+  state.ride = { zip: z.id, slug: slug.id, s, v };
+  if (!placeOnZip(state, slug)) {
+    state.ride = null;
+    return false;
+  }
+  slug.mode = 'zip';
+  slug.blown = false;
+  slug.walk = 0;
+  slug.still = 0;
+  state.events.push({ k: 'zip', id: slug.id, line: z.id, on: true });
+  return true;
+}
+
+/** Put the rider where its pulley is on the cable, and its speed to that step's, for drawing and for letting go. */
+function placeOnZip(state: SlugsState, slug: Slug): boolean {
+  const ride = state.ride as Ride;
+  const z = state.zips[ride.zip];
+  const p = zipPoint(z, Math.trunc(ride.s / zipLength(z)));
+  const y = p.y + ZIP_HANG * ONE;
+  if (!fits(state.terrain, px(p.x), px(y))) return false;
+  slug.vx = p.x - slug.x;
+  slug.vy = y - slug.y;
+  slug.x = p.x;
+  slug.y = y;
+  return true;
+}
+
+/** Off the cable, dropping with the speed it had, or from rest at the post it came to (`stop`). */
+function leaveZip(state: SlugsState, slug: Slug, stop: boolean): void {
+  const ride = state.ride as Ride;
+  state.zips[ride.zip].left = state.tick;
+  state.ride = null;
+  slug.blown = false;
+  if (stop) {
+    slug.vx = 0;
+    slug.vy = 0;
+  }
+  // From the 4 px it hangs above where it stands, it drops onto the post's ground.
+  slug.mode = 'air';
+  state.events.push({ k: 'zip', id: slug.id, line: ride.zip, on: false });
+}
+
+/** The pull a rider gives hand over hand, towards `dir`, up to ZIP_CRAWL. */
+function pullZip(ride: Ride, dir: number): void {
+  if (dir * ride.v >= ZIP_CRAWL) return;
+  ride.v = dir > 0 ? Math.min(ZIP_CRAWL, ride.v + ZIP_PULL) : Math.max(-ZIP_CRAWL, ride.v - ZIP_PULL);
+}
+
+function stepZip(state: SlugsState, slug: Slug): void {
+  const ride = state.ride;
+  if (!ride || ride.slug !== slug.id) {
+    slug.mode = 'air';
+    return;
+  }
+  const z = state.zips[ride.zip];
+  const len = zipLength(z);
+  slug.still = 0;
+  // With nobody at the keys (the turn is over), it pulls itself to the nearer post.
+  if (state.phase !== 'turn' && state.phase !== 'retreat') pullZip(ride, ride.s * 2 < len * ONE ? -1 : 1);
+  ride.v += Math.trunc((gravity(state) * zipSine(z, Math.trunc(ride.s / len))) / ONE);
+  ride.v -= Math.trunc(ride.v / ZIP_DRAG);
+  ride.v = Math.max(-ZIP_TOP, Math.min(ZIP_TOP, ride.v));
+  if (Math.abs(ride.v) >= ONE / 4) slug.facing = ride.v > 0 ? 1 : -1;
+  ride.s += ride.v;
+  if (ride.s <= 0 || ride.s >= len * ONE) {
+    ride.s = ride.s <= 0 ? 0 : len * ONE;
+    placeOnZip(state, slug);
+    leaveZip(state, slug, true);
+    return;
+  }
+  // Land in the way (a girder laid across the cable): it lets go where it is.
+  if (!placeOnZip(state, slug)) leaveZip(state, slug, false);
+}
+
+/** A blast cuts any cable it reaches, and blows away any post it reaches. */
+function cutZips(state: SlugsState, x: number, y: number, r: number): void {
+  for (const z of state.zips) {
+    if (!zipWhole(z)) continue;
+    let best = -1;
+    let bestD = r + 1;
+    for (let i = 1; i < ZIP_SAMPLES; i++) {
+      const u = Math.trunc((i * ONE) / ZIP_SAMPLES);
+      const p = zipPoint(z, u);
+      const d = isqrt((px(p.x) - x) ** 2 + (px(p.y) - y) ** 2);
+      if (d < bestD) {
+        bestD = d;
+        best = u;
+      }
+    }
+    if (distToBox(z.ax, z.ay + ZIP_POST / 2, 1, ZIP_POST / 2, x, y) <= r) z.down |= 1;
+    if (distToBox(z.bx, z.by + ZIP_POST / 2, 1, ZIP_POST / 2, x, y) <= r) z.down |= 2;
+    if (best >= 0 && z.down === 0) z.cut = best;
+    if (zipWhole(z)) continue;
+    const at = z.down === 0 ? zipPoint(z, z.cut) : null;
+    state.events.push({ k: 'zipcut', line: z.id, x: at ? px(at.x) : z.down & 1 ? z.ax : z.bx, y: at ? px(at.y) : z.down & 1 ? z.ay : z.by });
+    if (state.ride && state.ride.zip === z.id) leaveZip(state, state.slugs[state.ride.slug], false);
+  }
+}
+
+/**
+ * Once a tick, after the slugs move: posts whose ground has gone fall; a rider something else
+ * took off its cable (a blast, the water) is let go of; and the active slug catches a cable it
+ * walks onto from a post or jumps or falls into.
+ */
+function zipTick(state: SlugsState): void {
+  const t = state.terrain;
+  for (const z of state.zips) {
+    if (!zipWhole(z)) continue;
+    if (!zipFooted(t, z.ax, z.ay + ZIP_POST)) z.down |= 1;
+    if (!zipFooted(t, z.bx, z.by + ZIP_POST)) z.down |= 2;
+    if (zipWhole(z)) continue;
+    state.events.push({ k: 'zipcut', line: z.id, x: z.down & 1 ? z.ax : z.bx, y: z.down & 1 ? z.ay : z.by });
+    if (state.ride && state.ride.zip === z.id) leaveZip(state, state.slugs[state.ride.slug], false);
+  }
+  if (state.ride && state.slugs[state.ride.slug].mode !== 'zip') {
+    state.zips[state.ride.zip].left = state.tick;
+    state.ride = null;
+  }
+  if (state.ride || (state.phase !== 'turn' && state.phase !== 'retreat')) return;
+  const slug = state.slugs[state.active];
+  if (!slug || !slug.alive || slug.blown) return;
+  const sx = px(slug.x);
+  const sy = px(slug.y);
+  for (const z of state.zips) {
+    if (!zipWhole(z) || state.tick - z.left < ZIP_REGRAB) continue;
+    const len = zipLength(z);
+    if (slug.mode === 'stand' && slug.walk > 0) {
+      // Walking past a post towards its cable.
+      const atA = slug.facing === 1 && Math.abs(sx - z.ax) <= 2 && Math.abs(sy - (z.ay + ZIP_HANG + 4)) <= STEP_PX;
+      const atB = slug.facing === -1 && Math.abs(sx - z.bx) <= 2 && Math.abs(sy - (z.by + ZIP_HANG + 4)) <= STEP_PX;
+      if (atA && catchZip(state, slug, z, 2 * ONE, ONE / 2)) return;
+      if (atB && catchZip(state, slug, z, (len - 2) * ONE, -ONE / 2)) return;
+    } else if (slug.mode === 'air') {
+      // Its pulley point (above its head) crossed the cable since the last tick.
+      const dx = z.bx - z.ax;
+      const x1 = slug.x;
+      const x0 = slug.x - slug.vx;
+      const lo = (z.ax + 8) * ONE;
+      const hi = (z.bx - 8) * ONE;
+      if (x1 < lo || x1 > hi || x0 < lo || x0 > hi) continue;
+      const u1 = Math.trunc((x1 - z.ax * ONE) / dx);
+      const u0 = Math.trunc((x0 - z.ax * ONE) / dx);
+      const above1 = slug.y - ZIP_HANG * ONE - zipPoint(z, u1).y;
+      const above0 = slug.y - slug.vy - ZIP_HANG * ONE - zipPoint(z, u0).y;
+      if (above1 !== 0 && Math.sign(above1) === Math.sign(above0)) continue;
+      // Its speed along the cable is kept, less a fifth for the catch.
+      const sine = zipSine(z, u1);
+      const cosine = isqrt(ONE * ONE - sine * sine);
+      const along = Math.trunc((slug.vx * cosine + slug.vy * sine) / ONE);
+      if (catchZip(state, slug, z, u1 * len, Math.trunc((along * 4) / 5))) return;
+    }
+  }
 }
 
 // --- The active slug's controls ---
@@ -2334,6 +2955,7 @@ function fire(state: SlugsState, slug: Slug): void {
       const dx = boxFree(state.terrain, sx + slug.facing * 8, sy, MINE_HALF.w, MINE_HALF.h) ? slug.facing * 8 : 0;
       const mine = newObj(state, 'mine', sx + dx, sy, MINE_FUSE);
       mine.arm = spec.retreat;
+      mine.laid = true;
       state.objs.push(mine);
       break;
     }
@@ -2371,37 +2993,40 @@ function fire(state: SlugsState, slug: Slug): void {
   attacked(state, w, slug);
 }
 
-/** A straight shot: the first slug, barrel or land on the line takes a small blast. */
-function bullet(state: SlugsState, slug: Slug, aim: number, range: number, w: WeaponId): void {
-  const spec = WEAPON[w];
-  const t = state.terrain;
+/** How far a gun's straight shot reaches, px. */
+export const shotRange = (w: WeaponId) => (w === 'longshot' ? LONG_RANGE : SHOT_RANGE);
+
+/**
+ * Where a straight shot from `slug` along `aim` stops, in px: at the first slug, barrel, crate or land on the
+ * line ('hit'), in the water, or where it leaves the map or runs out of range. The laser sight draws this same line.
+ */
+export function shotEnd(state: SlugsState, slug: Slug, aim: number, range: number) {
   const x0 = px(slug.x);
   const y0 = px(slug.y) - 2;
   const dx = slug.facing * cosDeg(aim);
   const dy = -sinDeg(aim);
-  let hitX = x0;
-  let hitY = y0;
+  let x1 = x0;
+  let y1 = y0;
   for (let d = 6; d < range; d++) {
-    const x = x0 + Math.trunc((dx * d) / ONE);
-    const y = y0 + Math.trunc((dy * d) / ONE);
-    hitX = x;
-    hitY = y;
-    if (y > state.water) {
-      state.events.push({ k: 'shot', id: slug.id, x0, y0, x1: x, y1: y }, { k: 'splash', x, big: false });
-      return;
-    }
-    if (x < -40 || x > W + 40 || y < -400) break;
-    const target = state.slugs.find(
-      (s) => s.alive && s.id !== slug.id && Math.abs(px(s.x) - x) <= SLUG_HALF_W && Math.abs(px(s.y) - y) <= SLUG_HALF_H
+    x1 = x0 + Math.trunc((dx * d) / ONE);
+    y1 = y0 + Math.trunc((dy * d) / ONE);
+    if (y1 > state.water) return { x0, y0, x1, y1, stop: 'water' as const };
+    if (x1 < -40 || x1 > W + 40 || y1 < -400) break;
+    const target = state.slugs.some(
+      (s) => s.alive && s.id !== slug.id && Math.abs(px(s.x) - x1) <= SLUG_HALF_W && Math.abs(px(s.y) - y1) <= SLUG_HALF_H
     );
-    const barrel = barrelAt(state, x, y);
-    if (target || barrel || solidAt(t, x, y)) {
-      state.events.push({ k: 'shot', id: slug.id, x0, y0, x1: x, y1: y });
-      explode(state, x, y, spec.damage, spec.crater, spec.bias, w);
-      return;
-    }
+    if (target || barrelAt(state, x1, y1) || solidAt(state.terrain, x1, y1)) return { x0, y0, x1, y1, stop: 'hit' as const };
   }
-  state.events.push({ k: 'shot', id: slug.id, x0, y0, x1: hitX, y1: hitY });
+  return { x0, y0, x1, y1, stop: 'away' as const };
+}
+
+/** A straight shot: the first slug, barrel or land on the line takes a small blast. */
+function bullet(state: SlugsState, slug: Slug, aim: number, range: number, w: WeaponId): void {
+  const spec = WEAPON[w];
+  const { x0, y0, x1, y1, stop } = shotEnd(state, slug, aim, range);
+  state.events.push({ k: 'shot', id: slug.id, x0, y0, x1, y1 });
+  if (stop === 'water') state.events.push({ k: 'splash', x: x1, big: false });
+  else if (stop === 'hit') explode(state, x1, y1, spec.damage, spec.crater, spec.bias, w);
 }
 
 /** Slugs within reach just in front of `slug`. */
@@ -2428,7 +3053,7 @@ function blow(state: SlugsState, slug: Slug, w: WeaponId): void {
     } else {
       knock(s, slug.facing * PROD_PUSH, -PROD_PUSH, false);
     }
-    hurt(state, s, spec.damage);
+    hurt(state, s, state.boost & BOOST.double ? 2 * spec.damage : spec.damage);
   }
   if (w === 'uppercut') knock(slug, 0, UPPERCUT_SELF, true);
 }
@@ -2485,7 +3110,7 @@ function stepUsing(state: SlugsState, slug: Slug, keys: number, pressed: number)
     if (ahead > 0 && ahead <= SLUG_HALF_H * 2 + 4 && side <= SLUG_HALF_H * 2) {
       using.hit.push(s.id);
       knock(s, using.w === 'drill' ? 0 : slug.facing * ONE * 2, -2 * ONE, true);
-      hurt(state, s, spec.damage);
+      hurt(state, s, state.boost & BOOST.double ? 2 * spec.damage : spec.damage);
     }
   }
   if (blocked || using.left <= 0 || pressed & KEY.fire || slug.y > state.water * ONE) {
@@ -2565,7 +3190,7 @@ function strike(state: SlugsState, slug: Slug, tx: number, ty: number): void {
   let y = -60 * ONE;
   let vy = STRIKE_SPEED;
   while (px(y) < ty) {
-    vy += GRAVITY;
+    vy += gravity(state);
     x += dir * STRIKE_SPEED;
     y += vy;
   }
@@ -2584,6 +3209,9 @@ const firesAloft = (w: WeaponId) => {
   const spec = WEAPON[w];
   return (spec.category === 'explosive' || spec.category === 'special' || spec.category === 'firearm') && spec.use !== 'target';
 };
+
+/** Picked while hanging on a rope or zip line or flying a jetpack, fire uses it rather than letting go. */
+const usableAloft = (w: WeaponId) => firesAloft(w) || isBoost(w);
 
 /**
  * Whether the active team may pick a weapon now, or why not: 'used' once the
@@ -2607,7 +3235,7 @@ function control(state: SlugsState, input: Input): void {
   state.held = keys;
   const act = input.act;
   const canFire = state.phase === 'turn';
-  const aloft = slug.mode === 'rope' || slug.mode === 'jet' || slug.mode === 'chute';
+  const aloft = slug.mode === 'rope' || slug.mode === 'jet' || slug.mode === 'chute' || slug.mode === 'zip';
 
   if (act) {
     if (act.t === 'skip') {
@@ -2624,7 +3252,9 @@ function control(state: SlugsState, input: Input): void {
       return;
     }
     if (act.t === 'weapon' && canPickWeapon(state) === true && team.ammo[act.w] !== 0) {
-      state.weapon = team.weapon = act.w;
+      // A utility is picked only to be used, so the team's weapon for its next turn stays as it was.
+      state.weapon = act.w;
+      if (!isBoost(act.w)) team.weapon = act.w;
       state.mark = null;
     }
     if (act.t === 'fuse' && act.n >= 1 && act.n <= 5) state.fuse = team.fuse = act.n;
@@ -2638,6 +3268,10 @@ function control(state: SlugsState, input: Input): void {
     }
     if (act.t === 'jump' && slug.mode === 'rope') {
       letGo(state, slug);
+      return;
+    }
+    if (act.t === 'jump' && slug.mode === 'zip') {
+      leaveZip(state, slug, false);
       return;
     }
     if ((act.t === 'jump' || act.t === 'flip' || act.t === 'backjump' || act.t === 'hop') && slug.mode === 'stand' && !state.charging && !state.using) {
@@ -2663,13 +3297,13 @@ function control(state: SlugsState, input: Input): void {
 
   if (slug.mode === 'rope') {
     const rope = state.rope as Rope;
-    if (keys & KEY.up) rope.len = Math.max(ROPE_MIN * ONE, rope.len - ROPE_REEL);
-    if (keys & KEY.down) rope.len = Math.min((ROPE_MAX - ropeWound(rope)) * ONE, rope.len + ROPE_REEL);
+    if (keys & KEY.up) reel(slug, rope, Math.max(ROPE_MIN * ONE, rope.len - ROPE_REEL));
+    if (keys & KEY.down) reel(slug, rope, Math.min((ROPE_MAX - ropeWound(rope)) * ONE, rope.len + ROPE_REEL));
     if (keys & KEY.left) slug.vx -= ROPE_PUSH;
     if (keys & KEY.right) slug.vx += ROPE_PUSH;
     if (keys & KEY.left) slug.facing = -1;
     if (keys & KEY.right) slug.facing = 1;
-    if (!state.charging && pressed & KEY.fire && !(canFire && state.weapon !== 'rope' && firesAloft(state.weapon))) {
+    if (!state.charging && pressed & KEY.fire && !(canFire && state.weapon !== 'rope' && usableAloft(state.weapon))) {
       letGo(state, slug);
       return;
     }
@@ -2691,7 +3325,7 @@ function control(state: SlugsState, input: Input): void {
       burn += JET_BURN;
     }
     state.jetFuel = Math.max(0, state.jetFuel - burn);
-    if (pressed & KEY.fire && !(canFire && firesAloft(state.weapon))) {
+    if (pressed & KEY.fire && !(canFire && usableAloft(state.weapon))) {
       slug.mode = 'air';
       slug.thrust = 0;
       slug.blown = false;
@@ -2699,6 +3333,17 @@ function control(state: SlugsState, input: Input): void {
       return;
     }
   } else {
+    if (slug.mode === 'zip') {
+      const ride = state.ride as Ride;
+      if (keys & KEY.left) pullZip(ride, -1);
+      if (keys & KEY.right) pullZip(ride, 1);
+      if (keys & KEY.left) slug.facing = -1;
+      if (keys & KEY.right) slug.facing = 1;
+      if (!state.charging && pressed & KEY.fire && !(canFire && usableAloft(state.weapon))) {
+        leaveZip(state, slug, false);
+        return;
+      }
+    }
     // Aim: a degree a tick, or one every other tick held fine.
     const aimStep = keys & KEY.fine ? (state.tick % 2 === 0 ? 1 : 0) : 1;
     if (keys & KEY.up) slug.aim = Math.min(90, slug.aim + aimStep);
@@ -2708,6 +3353,16 @@ function control(state: SlugsState, input: Input): void {
   const w = state.weapon;
   const spec = WEAPON[w];
   const ready = slug.mode === 'stand' || (aloft && firesAloft(w));
+  // A utility already on is not used up again.
+  if (isBoost(w) && canFire && pressed & KEY.fire && team.ammo[w] !== 0 && !(state.boost & BOOST[w])) {
+    state.boost |= BOOST[w];
+    spend(team, w);
+    state.events.push({ k: 'boost', id: slug.id, w });
+    // The jetpack or rope in use stays in hand with none left, so fire still lets go of it rather than firing a bazooka.
+    const inUse = (team.weapon === 'jetpack' && slug.mode === 'jet') || (team.weapon === 'rope' && slug.mode === 'rope');
+    state.weapon = inUse || team.ammo[team.weapon] !== 0 ? team.weapon : 'bazooka';
+    return;
+  }
   if (w === 'parachute' && pressed & KEY.fire && slug.mode === 'air' && team.ammo.parachute !== 0) {
     fire(state, slug);
     return;
@@ -2716,7 +3371,7 @@ function control(state: SlugsState, input: Input): void {
     fire(state, slug);
     return;
   }
-  if (canFire && spec.use !== 'target' && w !== 'rope' && w !== 'parachute' && team.ammo[w] !== 0) {
+  if (canFire && spec.use !== 'target' && w !== 'rope' && w !== 'parachute' && !isBoost(w) && team.ammo[w] !== 0) {
     if (spec.use === 'charge' || spec.use === 'mark') {
       if (pressed & KEY.fire && ready && (spec.use === 'charge' || state.mark)) {
         state.charging = true;
@@ -2749,7 +3404,7 @@ function control(state: SlugsState, input: Input): void {
     slug.walk = 0;
     return;
   }
-  const quarter = WALK_CYCLE[slug.walk % WALK_CYCLE.length];
+  const quarter = WALK_CYCLE[slug.walk % WALK_CYCLE.length] * (state.boost & BOOST.fastwalk ? 2 : 1);
   slug.walk++;
   slug.still = 0;
   const sub = (slug.x - px(slug.x) * ONE) + Math.trunc((dir * quarter * ONE) / 4);
@@ -3053,7 +3708,7 @@ type StepAhead = 'clear' | 'wall' | 'drop';
 function fallsSafely(state: SlugsState, s: Slug): boolean {
   for (let i = 0; i < 400; i++) {
     if (px(s.y) + SLUG_HALF_H > state.water) return false;
-    s.vy = Math.min(SPEED_CAP, s.vy + GRAVITY);
+    s.vy = Math.min(SPEED_CAP, s.vy + gravity(state));
     s.vx = Math.max(-SPEED_CAP, Math.min(SPEED_CAP, s.vx));
     const impact = moveSlug(state, s);
     if (impact >= 0) return impact <= FALL_SAFE && !nearMine(state, s);
@@ -3418,6 +4073,7 @@ export function advance(state: SlugsState, input: Input): void {
   }
 
   for (const slug of state.slugs) stepSlug(state, slug);
+  zipTick(state);
 
   // A shot leaves the list the moment it ends, before it goes off, and everything else
   // stays in it, so a blast pushes what is later in the list as well as what came before.

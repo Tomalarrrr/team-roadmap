@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { chamfer, drawJetpack, drawProjectile, drawSlug, hash3, paintTerrain, repaintArea, terrainPixels, valueNoise } from '../components/slugs/slugArt';
+import { chamfer, drawJetpack, drawObject, drawProjectile, drawSlug, hash3, mineLit, paintTerrain, repaintArea, terrainPixels, valueNoise } from '../components/slugs/slugArt';
 import { THEME_IDS } from '../components/slugs/slugThemes';
 import { buildTerrain, H, W, type ProjKind } from '../slugsGameLogic';
 
@@ -372,6 +372,50 @@ describe('drawProjectile', () => {
       seen.add(d);
     }
     expect(seen.size).toBe(Object.keys(PROJ_KINDS).length + 1);
+  });
+});
+
+describe('mine lamp', () => {
+  const mine = (o: Partial<{ id: number; fuse: number; dud: boolean; arm: number }> = {}) => ({ id: 3, fuse: -1, dud: false, arm: 0, ...o });
+  const litMs = (o: ReturnType<typeof mine>, from = 0, to = 1000) => {
+    let n = 0;
+    for (let t = from; t < to; t++) if (mineLit(o, t)) n++;
+    return n;
+  };
+
+  it('flashes for 180 ms in every second once armed, and again the next second', () => {
+    expect(litMs(mine())).toBe(180);
+    expect(litMs(mine(), 1000, 2000)).toBe(180);
+  });
+
+  it('is dark while the mine is still arming, and for good once it has fizzled', () => {
+    expect(litMs(mine({ arm: 40 }))).toBe(0);
+    expect(litMs(mine({ dud: true }))).toBe(0);
+  });
+
+  it('blinks on for half of every 300 ms once tripped, arming or not', () => {
+    expect(litMs(mine({ fuse: 90 }), 0, 300)).toBe(150);
+    expect(litMs(mine({ fuse: 90, arm: 40 }), 0, 300)).toBe(150);
+    expect(mineLit(mine({ fuse: 90 }), 0)).toBe(true);
+    expect(mineLit(mine({ fuse: 90 }), 150)).toBe(false);
+  });
+
+  it('flashes neighbouring mines at different moments', () => {
+    const lit = (id: number) => Array.from({ length: 1000 }, (_, t) => mineLit(mine({ id }), t)).join('');
+    expect(lit(1)).not.toBe(lit(2));
+    expect(lit(1)).not.toBe(lit(4));
+  });
+
+  it('draws a glow around the lamp only when lit', () => {
+    const drawn = (lit: boolean) => {
+      const r = recorder();
+      drawObject(r.ctx, 'mine', 0, lit);
+      return r.log.join(';');
+    };
+    expect(drawn(true)).toContain('createRadialGradient');
+    expect(drawn(true)).toContain('fillStyle=#ff3b2a');
+    expect(drawn(false)).not.toContain('createRadialGradient');
+    expect(drawn(false)).toContain('fillStyle=#7a2a20');
   });
 });
 

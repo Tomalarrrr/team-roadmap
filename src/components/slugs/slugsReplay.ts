@@ -82,7 +82,8 @@ export function worthReplay(before: SlugsState, after: SlugsState): boolean {
     if (!was.alive) continue;
     const now = after.slugs[was.id];
     if (!now.alive || now.hp <= 0) return true;
-    lost += was.hp - now.hp;
+    // A health crate taken mid-shot is not damage undone.
+    lost += Math.max(0, was.hp - now.hp);
   }
   return lost * 2 >= after.opts.startHp;
 }

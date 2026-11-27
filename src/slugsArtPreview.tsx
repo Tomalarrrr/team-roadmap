@@ -15,6 +15,7 @@ import {
   drawWeaponIcon,
   HAT_IDS,
   LAND_RES,
+  mineLit,
   paintBackground,
   paintTerrain,
   repaintArea,
@@ -175,7 +176,8 @@ const flying = section('Projectiles (heading turns over time), objects, gravesto
 for (const kind of PROJECTILES) {
   cell(flying, kind, 24, 4, (ctx, t) => drawProjectile(ctx, kind, (t / 20) % 360, t));
 }
-cell(flying, 'mine armed', 24, 4, (ctx, t) => drawObject(ctx, 'mine', t, true));
+cell(flying, 'mine waiting', 24, 4, (ctx, t) => drawObject(ctx, 'mine', 0, mineLit({ id: 0, fuse: -1, dud: false, arm: 0 }, t)));
+cell(flying, 'mine tripped', 24, 4, (ctx, t) => drawObject(ctx, 'mine', t, true));
 cell(flying, 'gravestone', 24, 4, (ctx) => drawGravestone(ctx));
 cell(flying, 'gravestone 1×', 24, 1, (ctx) => drawGravestone(ctx));
 

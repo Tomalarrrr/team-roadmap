@@ -30,6 +30,14 @@ describe('worthReplay', () => {
     }))).toBe(false);
   });
 
+  it('does not let health found in a crate cancel out damage done', () => {
+    const half = Math.ceil(start / 2);
+    expect(worthReplay(before, after((s) => {
+      s.slugs[0].hp -= half;
+      s.slugs[2].hp += 25;
+    }))).toBe(true);
+  });
+
   it('shows any kill, however little health it took', () => {
     const weak = after((s) => { s.slugs[1].hp = 1; });
     expect(worthReplay(weak, after((s) => { s.slugs[1].hp = 0; }))).toBe(true);
@@ -61,7 +69,8 @@ interface Found {
  * queue mirrored, a log per turn, and a replay planned at each turn's first tally.
  */
 function play(seed: number, human: boolean, wanted: (f: Found) => boolean) {
-  const driver = localDriver(seed, [{ name: 'A', control: human ? 'human' : 3 }, { name: 'B', control: 3 }], 2, {});
+  // The presses were chosen against a match without crates: a crate's roll between turns changes every draw after it.
+  const driver = localDriver(seed, [{ name: 'A', control: human ? 'human' : 3 }, { name: 'B', control: 3 }], 2, { crates: false });
   let now = 0;
   let state = driver.tick(now, { keys: 0 });
   let log: TurnLog | null = startLog(state);
@@ -109,10 +118,12 @@ function runOut(r: Replay) {
   return { events, ticks: r.state.tick - start };
 }
 
+// Seed 2 for the person's turns: seed 1's match stopped having one worth a replay when a jar
+// or grenade slowed against a slug began coming to rest on it.
 // Each plays a match of computer turns to find one: seconds, not milliseconds, on a loaded machine.
 describe('the replay', { timeout: 30_000 }, () => {
   it('leaves the match exactly as it was, and shares nothing with it', () => {
-    const { live, log, r } = find(1, true);
+    const { live, log, r } = find(2, true);
     // cloneState, not structuredClone: under jsdom the latter's arrays are another realm's, and toEqual tells them apart.
     const kept = cloneState(live);
     expect(r.state.terrain).not.toBe(live.terrain);
@@ -131,7 +142,7 @@ describe('the replay', { timeout: 30_000 }, () => {
   it('shows the shot again, from before it, to the damage the match took', () => {
     for (const human of [true, false]) {
       // A replay cut short by REPLAY_MOST stops before the tally; this one has to reach it.
-      const { live, log, r } = find(human ? 1 : 8, human, (f) => f.r.end < f.log.pin!.tick + 250);
+      const { live, log, r } = find(human ? 2 : 8, human, (f) => f.r.end < f.log.pin!.tick + 250);
       const pin = log.pin!;
       const { events } = runOut(r);
       expect(r.state.tick).toBe(r.end);
@@ -149,7 +160,7 @@ describe('the replay', { timeout: 30_000 }, () => {
   });
 
   it('starts at least LEAD_IN ticks before the shot, unless the turn began closer to it', () => {
-    const { log, r } = find(1, true);
+    const { log, r } = find(2, true);
     const from = r.state.tick;
     let shotAt = -1;
     while (shotAt < 0 && stepReplay(r)) {
@@ -160,7 +171,7 @@ describe('the replay', { timeout: 30_000 }, () => {
 
   it('is not shown when the recording does not come out where the match did', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { log, live } = find(1, true);
+    const { log, live } = find(2, true);
     const pin = log.pin!;
     // The person's presses on the ticks of the replay, flipped: their shot now goes elsewhere.
     for (let t = pin.tick; t < live.tick; t++) log.inputs[t - log.from] = { keys: KEY.left | KEY.fire };

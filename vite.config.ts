@@ -1,9 +1,10 @@
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import { createHash } from 'crypto'
 import { readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { build as esbuild } from 'esbuild'
+import { build as esbuild, buildSync } from 'esbuild'
 
 // Stamp the service worker with a build-time version so old caches are busted on deploy
 function swVersionPlugin() {
@@ -38,9 +39,13 @@ function phaserParts(): Plugin {
   }
   const tests = new RegExp(`typeof (${Object.keys(flags).join('|')})\\b`, 'g')
   const id = '\0phaser-parts'
+  let building = false
   return {
     name: 'phaser-parts',
     enforce: 'pre',
+    configResolved(config) {
+      building = config.command === 'build'
+    },
     resolveId(source) {
       return source === 'phaser' ? id : null
     },
@@ -54,6 +59,9 @@ function phaserParts(): Plugin {
         // Without its doc comments and indentation the dev module is 5.1 MB, not 15.8; names stay for stack traces.
         minifyWhitespace: true,
         minifySyntax: true,
+        // esbuild names each CommonJS module by its path unless identifiers are minified, and the
+        // final minify cannot drop those names: 787 paths, 46 KB of the shipped chunk.
+        minifyIdentifiers: building,
         write: false,
         plugins: [{
           name: 'phaser-flags',
@@ -70,6 +78,27 @@ function phaserParts(): Plugin {
   }
 }
 
+// Which rules a Slugs client plays by (RULES in slugsSync.ts). A tab left open
+// across a deploy keeps the rules it loaded, and on other rules the same inputs
+// play a different match, so a room carries this number and a client refuses a
+// room with any other. It hashes the online driver and all it imports, minified
+// so that a comment or a reflow leaves it alone, and fits in 1..9999 because the
+// database holds each value in m/set to four digits.
+export function slugsRules(): number {
+  const out = buildSync({
+    entryPoints: [fileURLToPath(new URL('src/components/slugs/onlineDriver.ts', import.meta.url))],
+    absWorkingDir: fileURLToPath(new URL('.', import.meta.url)),
+    bundle: true,
+    format: 'esm',
+    minify: true,
+    legalComments: 'none',
+    packages: 'external',
+    write: false,
+    logLevel: 'silent',
+  })
+  return 1 + createHash('sha256').update(out.outputFiles[0].contents).digest().readUInt32BE(0) % 9999
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // The /api/db proxy (api/db/[...path].ts) only runs on Vercel, not under the
@@ -80,6 +109,7 @@ export default defineConfig(({ mode }) => {
 
   return {
   plugins: [phaserParts(), react(), swVersionPlugin()],
+  define: { __SLUGS_RULES__: String(slugsRules()) },
   server: {
     // Prevent connection resets during development
     hmr: {

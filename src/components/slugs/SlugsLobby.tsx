@@ -30,7 +30,7 @@ import type { OnlineDriver } from './onlineDriver';
 import { THEME_IDS, THEMES } from './slugThemes';
 import type { ThemeId } from './slugThemes';
 import {
-  choicesOf, decodeSettings, encodeSettings, KNOBS, MAP_GROUND, nextSeed, optionsOf, RANDOM_MAP, restingReport, settingsOf, setupsOf, themeOf,
+  choicesOf, decodeSettings, encodeSettings, KNOBS, MAP_GROUND, nextSeed, optionsOf, RANDOM_MAP, restingReport, sameRules, settingsOf, setupsOf, stamped, themeOf,
 } from './slugsSync';
 import type { Knob, MatchChoices, Settings } from './slugsSync';
 import styles from './SlugsLobby.module.css';
@@ -78,9 +78,10 @@ const KNOB_NAME: Record<Knob, string> = {
   roundMinutes: 'Sudden death',
   placing: 'Placing',
   map: 'Map',
+  crates: 'Crates',
 };
 
-const ADVANCED: Knob[] = ['perTeam', 'map', 'ground', 'turnSeconds', 'weapons', 'startHp', 'windScale', 'mines', 'barrels', 'roundMinutes', 'placing'];
+const ADVANCED: Knob[] = ['perTeam', 'map', 'ground', 'turnSeconds', 'weapons', 'startHp', 'windScale', 'mines', 'barrels', 'roundMinutes', 'placing', 'crates'];
 
 const LEVEL_NAME = ['', 'Easy', 'Fair', 'Good', 'Hard', 'Best'];
 
@@ -102,6 +103,8 @@ function choiceName(knob: Knob, value: number): string {
       return value === 0 ? 'Classic' : 'All';
     case 'placing':
       return value === 0 ? 'Automatic' : 'Players';
+    case 'crates':
+      return value === 0 ? 'Off' : 'On';
     default:
       return String(value);
   }
@@ -162,7 +165,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
     createRoom(me.sessionId, name.trim() || 'Player')
       .then((roomCode) => {
         enter(roomCode);
-        return setSettings(roomCode, me.sessionId, encodeSettings(settingsOf(choices)));
+        return setSettings(roomCode, me.sessionId, stamped(encodeSettings(settingsOf(choices))));
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setBusy(false));
@@ -228,6 +231,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
   const mySeat = match ? seatOf(match, me.sessionId) : undefined;
   const host = match ? hostOf(match) : undefined;
   const settings = match ? decodeSettings(match.set) : null;
+  const rulesMatch = match ? sameRules(match.set) : false;
 
   // The room's match has started with this person in it: hand it to the screen.
   useEffect(() => {
@@ -244,6 +248,15 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
     const s = decodeSettings(match.set)!;
     onStart(driver, { setups: setupsOf(match, s.level), perTeam: s.perTeam, theme: themeOf(s, match.seed), seed: match.seed, options: optionsOf(s, match.seed) });
   }, [code, match, mySeat, me.sessionId, onStart]);
+
+  // A host who reloads onto other rules moves the room onto theirs, which asks
+  // everyone else to be ready again. A room just made has no `set` until its
+  // first settings land, and is left to handleCreate.
+  const restamp = match?.set && settings && !rulesMatch && match.status !== 'playing' && mySeat && host === mySeat ? match.set : null;
+  useEffect(() => {
+    if (!code || restamp === null) return;
+    setSettings(code, me.sessionId, stamped(encodeSettings(decodeSettings(restamp)!))).catch((err: Error) => setError(err.message));
+  }, [code, restamp, me.sessionId]);
 
   const act = (work: Promise<void>) => {
     setError('');
@@ -314,14 +327,14 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
   const teams = teamSeats(match);
   const isHost = host === mySeat;
   const waitingOn = SEATS.filter((seat) => seat !== host && match.players[seat] && !match.players[seat]!.ready);
-  const canStart = isHost && waitingOn.length === 0 && teams.length >= 2 && settings !== null && match.status !== 'playing';
+  const canStart = isHost && waitingOn.length === 0 && teams.length >= 2 && settings !== null && rulesMatch && match.status !== 'playing';
   const nameOf = (seat: Seat) => match.players[seat]?.name || `Player ${seat.toUpperCase()}`;
 
   const pick = (knob: Knob, value: number) => {
     if (!code || !settings) return;
     const next = { ...settings, [knob]: value } as Settings;
     onChoices(choicesOf(next));
-    act(setSettings(code, me.sessionId, encodeSettings(next)));
+    act(setSettings(code, me.sessionId, stamped(encodeSettings(next))));
   };
 
   const knobField = (knob: Knob) => (
@@ -347,6 +360,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
 
   let idle = '';
   if (settings === null) idle = 'This room was set up by a newer version of Slugs. Reload the page.';
+  else if (!rulesMatch) idle = isHost ? 'Moving the room to this version of Slugs.' : 'The host has a different version of Slugs. Both of you reload the page.';
   else if (teams.length < 2) idle = isHost ? 'Share the code with one friend, or add the computer.' : 'Waiting for the host to add a team.';
   else if (mySeat && waitingOn.includes(mySeat)) idle = 'Press Ready when the settings suit you.';
   else if (waitingOn.length) idle = `Waiting for ${waitingOn.map(nameOf).join(' and ')} to be ready.`;
@@ -401,7 +415,11 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
             {match.status === 'finished' ? 'Play again' : 'Start'}
           </button>
         ) : (
-          <button className={styles.primaryBtn} onClick={() => act(setReady(code, me.sessionId, !match.players[mySeat!]?.ready))}>
+          <button
+            className={styles.primaryBtn}
+            onClick={() => act(setReady(code, me.sessionId, !match.players[mySeat!]?.ready))}
+            disabled={!rulesMatch && !match.players[mySeat!]?.ready}
+          >
             {match.players[mySeat!]?.ready ? 'Not ready' : 'Ready'}
           </button>
         )}

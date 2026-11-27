@@ -34,6 +34,7 @@
 .popupBattle {
   --plate: rgba(42, 28, 18, 0.72);
   --plate-hover: rgba(42, 28, 18, 0.86);
+  --plate-dense: rgba(42, 28, 18, 0.94);
   --on-plate: #fff;
   --on-plate-soft: rgba(255, 255, 255, 0.72);
   --plate-line: rgba(255, 255, 255, 0.16);
@@ -509,6 +510,10 @@ button.note:hover { background: var(--plate-hover); }
   gap: 8px;
   animation: plateIn 120ms ease-out;
 }
+
+/* Panels hold small type read for seconds at a time; at the strips' 72% the land and slug labels
+   showed through the weapon names. */
+.panel { background: var(--plate-dense); }
 
 .panel[aria-label='Controls'] { width: min(440px, calc(100% - 16px)); }
 

@@ -60,6 +60,7 @@ export const KNOBS = {
   roundMinutes: [5, 10, 15, 20, 30],
   placing: [0, 1],
   map: [RANDOM_MAP, ...MAP_DESIGN_IDS.map((_, i) => i)],
+  crates: [0, 1],
 } as const satisfies Record<string, readonly number[]>;
 
 export type Knob = keyof typeof KNOBS;
@@ -86,6 +87,8 @@ export const DEFAULT_SETTINGS: Settings = {
   roundMinutes: DEFAULT_OPTIONS.roundMinutes,
   placing: PLACINGS.indexOf(DEFAULT_OPTIONS.placing),
   map: MAP_DESIGN_IDS.indexOf(DEFAULT_OPTIONS.map),
+  // Rooms from before crates had none. A room with them on says so, and a client without crates refuses it.
+  crates: 0,
 };
 
 /** `key=value;...` for the settings that differ from the default, which is the shape the rules hold `m/set` to. */
@@ -96,13 +99,35 @@ export function encodeSettings(settings: Settings): string {
     .join(';');
 }
 
+declare const __SLUGS_RULES__: number;
+
+/**
+ * Which rules this client plays by: a hash of this code and the rules', worked
+ * out by vite.config.ts. A tab left open across a deploy keeps the rules it
+ * loaded, and on other rules the same inputs play a different match with
+ * nothing to show it; in room 8WBG one screen ended the game while the other
+ * played on. So a room's `set` carries the number of the client that set it,
+ * and a client plays only a room carrying its own.
+ */
+export const RULES: number = __SLUGS_RULES__;
+
+/** A room's `set` as the host writes it: the encoded settings, and the rules they are played by. */
+export const stamped = (set: string): string => (set ? `${set};rules=${RULES}` : `rules=${RULES}`);
+
+/** Whether a room was set up by a client on this client's rules. One set up before rooms said so was not. */
+export const sameRules = (set: string | undefined): boolean =>
+  Boolean(set?.split(';').includes(`rules=${RULES}`));
+
 /** The settings a room's `set` stands for, or null when it holds one this client does not know. */
 export function decodeSettings(set: string | undefined): Settings | null {
   const settings = { ...DEFAULT_SETTINGS };
   if (!set) return settings;
   for (const pair of set.split(';')) {
     const [knob, value] = pair.split('=');
-    if (!(knob in KNOBS)) return null;
+    // Which rules, not a setting: sameRules reads it.
+    if (knob === 'rules') continue;
+    // Not `in`: that also matches `constructor` and the rest of Object's own names.
+    if (!Object.hasOwn(KNOBS, knob)) return null;
     const n = Number(value);
     if (!(KNOBS[knob as Knob] as readonly number[]).includes(n)) return null;
     settings[knob as Knob] = n;
@@ -150,6 +175,7 @@ export function optionsOf(settings: Settings, seed: number): SlugsOptions {
     roundMinutes: settings.roundMinutes,
     placing: PLACINGS[settings.placing],
     map: mapOf(settings, seed),
+    crates: settings.crates === 1,
   };
 }
 
@@ -157,7 +183,7 @@ export const themeOf = (settings: Settings, seed: number): ThemeId =>
   settings.ground === MAP_GROUND ? MAP_DESIGNS[mapOf(settings, seed)].theme : THEME_IDS[settings.ground];
 
 /** The options a room's knobs can carry; the rest are the rules' own online. */
-type KnobOptions = Pick<SlugsOptions, 'turnSeconds' | 'startHp' | 'windScale' | 'mines' | 'barrels' | 'weapons' | 'roundMinutes' | 'placing'>;
+type KnobOptions = Pick<SlugsOptions, 'turnSeconds' | 'startHp' | 'windScale' | 'mines' | 'barrels' | 'weapons' | 'roundMinutes' | 'placing' | 'crates'>;
 
 /**
  * A match setup in the local setup screen's terms. A room a person makes
@@ -187,6 +213,7 @@ export function settingsOf(choices: MatchChoices): Settings {
     roundMinutes: o.roundMinutes,
     placing: PLACINGS.indexOf(o.placing),
     map: choices.map === 'random' ? RANDOM_MAP : MAP_DESIGN_IDS.indexOf(choices.map),
+    crates: o.crates ? 1 : 0,
   };
   const settings = { ...DEFAULT_SETTINGS };
   for (const knob of Object.keys(KNOBS) as Knob[]) {
@@ -212,6 +239,7 @@ export function choicesOf(settings: Settings): MatchChoices {
       weapons: WEAPON_SETS[settings.weapons],
       roundMinutes: settings.roundMinutes,
       placing: PLACINGS[settings.placing],
+      crates: settings.crates === 1,
     },
   };
 }
@@ -327,23 +355,27 @@ export function encodeFrom(entries: readonly Entry[], after: number): string {
 
 export const encodeInputs = (entries: readonly Entry[]): string => encodeFrom(entries, 0);
 
-const isDigit36 = (c: string) => (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z');
+/**
+ * One entry of INPUT_SHAPE, matched where the last left off. INPUT_SHAPE run
+ * over a whole game's joined chunks overflows the stack at a few million
+ * characters, which anyone can write, so the joined text is read an entry at a time.
+ */
+const ENTRY = /([0-9a-z]{1,5})(K[0-9A-Za-z_-]|[JFRHBSX]|W[0-9a-z]|U[0-9a-z]|G[0-9a-z]|T[0-9a-z]{6})/y;
 
 /** The entries `text` stands for, or null when it is not inputs. Anyone can write a seat, so this is read with care. */
 export function parseInputs(text: string): Entry[] | null {
-  if (text.length > IN_MOST * (CHUNKS_MOST + 1) || !INPUT_SHAPE.test(text)) return null;
+  if (text.length > IN_MOST * (CHUNKS_MOST + 1)) return null;
   const entries: Entry[] = [];
   let tick = 0;
-  let i = 0;
-  while (i < text.length) {
-    let j = i;
-    while (isDigit36(text[j])) j++;
-    tick += parseInt(text.slice(i, j), 36);
-    const kind = text[j];
-    i = j + 1;
+  ENTRY.lastIndex = 0;
+  while (ENTRY.lastIndex < text.length) {
+    const at = ENTRY.exec(text);
+    if (!at) return null;
+    tick += parseInt(at[1], 36);
+    const body = at[2];
+    const kind = body[0];
     if (kind === 'K') {
-      entries.push({ tick, keys: KEY_CHARS.indexOf(text[i]) });
-      i += 1;
+      entries.push({ tick, keys: KEY_CHARS.indexOf(body[1]) });
       continue;
     }
     const simple = ({ J: 'jump', F: 'flip', R: 'backjump', H: 'hop', B: 'bounce', S: 'skip', X: 'surrender' } as const)[kind as 'J'];
@@ -352,12 +384,10 @@ export function parseInputs(text: string): Entry[] | null {
       continue;
     }
     if (kind === 'T') {
-      entries.push({ tick, act: { t: 'target', x: parseInt(text.slice(i, i + 3), 36), y: parseInt(text.slice(i + 3, i + 6), 36) } });
-      i += 6;
+      entries.push({ tick, act: { t: 'target', x: parseInt(body.slice(1, 4), 36), y: parseInt(body.slice(4, 7), 36) } });
       continue;
     }
-    const n = parseInt(text[i], 36);
-    i += 1;
+    const n = parseInt(body[1], 36);
     if (kind === 'W') {
       if (n >= WEAPONS.length) return null;
       entries.push({ tick, act: { t: 'weapon', w: WEAPONS[n] } });
@@ -470,14 +500,17 @@ export interface Lockstep {
   reruns: number;
 }
 
+export const OTHER_RULES = 'This game was set up on a different version of Slugs. Reload the page, and start a new game.';
+
 /**
  * A new game's lockstep, before anything has been heard or sent. Throws on
- * settings this client does not know: the game cannot be run the same as on a
- * client that does.
+ * settings this client does not know, or a room set up on other rules: the
+ * game cannot be run the same as on a client that does.
  */
 export function newLockstep(match: SlugsMatch, seat: Seat): Lockstep {
   const settings = decodeSettings(match.set);
   if (!settings) throw new Error('This room was set up by a newer version of Slugs. Reload the page.');
+  if (!sameRules(match.set)) throw new Error(OTHER_RULES);
   const seats = teamSeats(match);
   const setups = setupsOf(match, settings.level);
   const options = optionsOf(settings, match.seed);

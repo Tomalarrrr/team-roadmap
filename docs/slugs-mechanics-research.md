@@ -563,3 +563,31 @@ Sources: https://worms2d.info/Colour_map, https://worms2d.info/Monochrome_map_(.
 16. Instant replay trigger rule.
 17. Clan Wars class names and water physics.
 18. Intermediate defaults come from a community re-saved .wsc (SchemeEddy marker), not the game binary.
+
+## M10. Physics follow-up (2026-11-27)
+
+Looked up for the physics pass in `docs/slugs-record.md`. The WKB pages for Mine, RubberWorm and
+Game_scheme_file were behind a bot check, so some items below are search snippets or inferences,
+marked as such.
+
+- **Sliding worm:** slowed by 4% each frame. Search snippet of the RubberWorm page, not read
+  directly. Physics_Engine (Wayback): "standard friction = 0.96", "low gravity friction = 0.99",
+  "max pixel climb sliding = 1 pixel".
+- **Worms do not bounce off the ground by default.** Inference from WA 3.8.1.7's help text for
+  RubberWorm bounciness, which "makes worms spring back like a banana … upon any collision"
+  (https://github.com/ConnerPetzold/wormsdb/blob/HEAD/wa/template/DATA/User/Languages/3.8.1.7/English.txt).
+- **Walls rebound, no number:** Bat page, "smack a worm into a wall and he will bounce a fair
+  distance in the opposite direction."
+- **Fall damage** is not applied the first time a worm lands after an explosion
+  (https://worms2d.info/Fall_Damage).
+- **Oil drum:** "can normally only move vertically downwards … and it can't be moved by a worm";
+  only Earthquake moves it sideways (https://worms2d.info/Oil_Drum, Wayback).
+- **Blast push is its own parameter**, separate from damage: Project X `ExplosionPushPower`
+  (https://gitlab.com/Syroot/Worms/-/blob/master/src/library/Syroot.Worms.Armageddon.ProjectX/Styles/LauncherStyle.cs)
+  and wkJellyWorm's `CreateExplosion(posX, posY, pushForce, power, …)`. No formula or push-distance
+  figure found.
+- **Bat launch speed, inferred:** fitting x = vx·t, y = vy·t − g·t(t+1)/2 (g 0.24) to the 45° hit
+  distances on https://worms2d.info/Detailed_Weapon_Settings gives launch speed = damage ÷ 2.4
+  px/frame on every row (643 px → 12.5 px/frame). Not a source figure.
+- **Not found:** whether mines slide on slopes, whether gravity speeds a slide downhill, the speed
+  a slide stops at, rope reel speed and how reeling changes swing speed, the rest threshold.

@@ -6,6 +6,7 @@
 // the same seed gives the same picture on every machine (online players see one
 // battlefield) and the colouring can be tested without a real canvas.
 
+import type { CrateKind, Obj } from '../../slugsGameLogic';
 import { THEMES, type DetailKind, type Theme, type ThemeId } from './slugThemes';
 
 // Noise
@@ -2374,10 +2375,27 @@ function mineArt(ctx: CanvasRenderingContext2D, x: number, y: number, lit: boole
     p.quadraticCurveTo(x, y - 2.8, x + 2.6, y + 0.7);
     p.closePath();
   }, 0.7);
-  ctx.fillStyle = lit ? '#ff5a3a' : '#7a2a20';
+  // Lit, the lamp carries a glow several times its size: the mine itself is a few px across, and the glow is what
+  // finds it on a zoomed-out map.
+  if (lit) {
+    const glow = ctx.createRadialGradient(x, y - 1.1, 0, x, y - 1.1, 5);
+    glow.addColorStop(0, 'rgba(255, 70, 50, 0.6)');
+    glow.addColorStop(1, 'rgba(255, 70, 50, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(x, y - 1.1, 5, 0, TAU);
+    ctx.fill();
+  }
+  ctx.fillStyle = lit ? '#ff3b2a' : '#7a2a20';
   ctx.beginPath();
-  ctx.arc(x, y - 1.1, 0.6, 0, TAU);
+  ctx.arc(x, y - 1.1, 0.8, 0, TAU);
   ctx.fill();
+  if (lit) {
+    ctx.fillStyle = '#ffd0c0';
+    ctx.beginPath();
+    ctx.arc(x - 0.2, y - 1.3, 0.3, 0, TAU);
+    ctx.fill();
+  }
 }
 
 function radioArt(ctx: CanvasRenderingContext2D, body: string, lamp: string): void {
@@ -2678,6 +2696,54 @@ const HELD: Record<string, HeldArt> = {
       ctx.beginPath();
       ctx.arc(4.4, 0.6, 0.7, 0, TAU);
       ctx.stroke();
+    },
+  },
+  // Utilities are held out to be switched on, each as a small thing that says what it does.
+  lowgrav: {
+    grips: [0.2, 2.2],
+    girth: 1.2,
+    draw(ctx) {
+      shape(ctx, '#e9e2d0', (p) => p.ellipse(2.4, 0, 3.6, 1.3, -0.25, 0, TAU), 0.6);
+      ctx.strokeStyle = '#8a8370';
+      ctx.lineWidth = 0.35;
+      ctx.beginPath();
+      ctx.moveTo(-1.6, 1.0);
+      ctx.lineTo(5.8, -0.9);
+      ctx.stroke();
+    },
+  },
+  fastwalk: {
+    grips: [0.2, 2.4],
+    girth: 1.6,
+    draw(ctx) {
+      shape(ctx, '#d9b44a', (p) => p.roundRect(-0.8, -1.6, 4.8, 3.2, 0.8), 0.6);
+      ctx.strokeStyle = C.outline;
+      ctx.lineWidth = 0.55;
+      ctx.beginPath();
+      for (const x of [0.4, 2.0]) {
+        ctx.moveTo(x, -0.9);
+        ctx.lineTo(x + 1.0, 0);
+        ctx.lineTo(x, 0.9);
+      }
+      ctx.stroke();
+    },
+  },
+  laser: {
+    grips: [-0.4, 1.8],
+    girth: 0.9,
+    draw(ctx) {
+      shape(ctx, STEEL_DARK, (p) => p.roundRect(-1.4, -0.8, 5.4, 1.6, 0.6), 0.55);
+      shape(ctx, '#d8433a', (p) => p.arc(4.3, 0, 0.6, 0, TAU), 0.4);
+    },
+  },
+  double: {
+    grips: [0.2, 2.4],
+    girth: 1.8,
+    draw(ctx) {
+      for (const x of [0.4, 2.6]) shape(ctx, '#4b5157', (p) => p.arc(x, 0.2, 1.5, 0, TAU), 0.6);
+      ctx.fillStyle = '#e0b23c';
+      ctx.fillRect(0.1, -1.9, 0.6, 0.8);
+      ctx.fillRect(2.3, -1.9, 0.6, 0.8);
     },
   },
   girder: {
@@ -3000,8 +3066,19 @@ export function drawProjectileBody(ctx: CanvasRenderingContext2D, kind: string, 
 }
 
 /**
+ * Whether a mine's lamp is lit at `now` (ms). Once armed it flashes briefly every second, so a mine can be found on
+ * the map; tripped, it blinks fast until it goes off; a dud is dark. Each mine's flash is offset by its id, so a
+ * field of them does not pulse as one. A mine still arming is dark: the light says it can now be set off.
+ */
+export function mineLit(o: Pick<Obj, 'id' | 'fuse' | 'dud' | 'arm'>, now: number): boolean {
+  if (o.dud) return false;
+  if (o.fuse >= 0) return Math.floor(now / 150) % 2 === 0;
+  return o.arm === 0 && (now + o.id * 337) % 1000 < 180;
+}
+
+/**
  * Mines and barrels lying on the land, base on y = +2. `armed` blinks a mine's
- * lamp once it has been tripped. Any other kind draws as a barrel.
+ * lamp on `t` at the tripped rate. Any other kind draws as a barrel.
  */
 export function drawObject(ctx: CanvasRenderingContext2D, kind: string, t: number, armed: boolean): void {
   ctx.save();
@@ -3031,6 +3108,50 @@ export function drawObject(ctx: CanvasRenderingContext2D, kind: string, t: numbe
     ctx.quadraticCurveTo(1.6, -1.2, 0.6, -0.9);
     ctx.quadraticCurveTo(-0.4, -1.2, 0.6, -2.6);
     ctx.fill();
+  }
+  ctx.restore();
+}
+
+const CRATE_LOOK: Record<CrateKind, { wood: string; edge: string }> = {
+  weapon: { wood: '#a87a45', edge: '#6f4c26' },
+  health: { wood: '#e6e1d4', edge: '#9d978a' },
+  utility: { wood: '#7d8f9e', edge: '#4f5f6c' },
+};
+
+/**
+ * A crate in world px, centred on the box the rules collide with (12 x 12), with
+ * its parachute above while `chute` is open. The mark on the side says what is in it.
+ */
+export function drawCrate(ctx: CanvasRenderingContext2D, kind: CrateKind, chute: boolean, t: number): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  if (chute) drawParachute(ctx, t);
+  const look = CRATE_LOOK[kind];
+  shape(ctx, look.wood, (p) => p.rect(-6, -6, 12, 12), 0.8);
+  ctx.strokeStyle = look.edge;
+  ctx.lineWidth = 1.1;
+  ctx.strokeRect(-5.1, -5.1, 10.2, 10.2);
+  if (kind === 'health') {
+    ctx.fillStyle = '#c4473a';
+    ctx.fillRect(-1.1, -3.6, 2.2, 7.2);
+    ctx.fillRect(-3.6, -1.1, 7.2, 2.2);
+  } else if (kind === 'weapon') {
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(-4.6, 4.6);
+    ctx.lineTo(4.6, -4.6);
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = '#e6e1d4';
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    for (const x of [-2.4, 0.2]) {
+      ctx.moveTo(x, -2.2);
+      ctx.lineTo(x + 2.2, 0);
+      ctx.lineTo(x, 2.2);
+    }
+    ctx.stroke();
   }
   ctx.restore();
 }
@@ -3221,6 +3342,209 @@ export function drawRope(ctx: CanvasRenderingContext2D, x0: number, y0: number, 
     const cy = y0 + uy * d;
     ctx.moveTo(cx - ux * 0.35 - uy * 0.4, cy - uy * 0.35 + ux * 0.4);
     ctx.lineTo(cx + ux * 0.35 + uy * 0.4, cy + uy * 0.35 - ux * 0.4);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Zip lines
+
+const TIMBER = { body: '#8a6236', light: '#a87c4a', dark: '#6b4a28', grain: '#5a3d20' };
+
+/**
+ * A zip line's post, origin at the eye the cable is tied to and its foot on the ground at
+ * y = +24 (the rules' ZIP_POST). `toward` is the way its cable runs. The timber stands just
+ * behind the eye so the cable leaves it clean, and a guy rope runs back to a peg, which is what
+ * keeps a post upright with a cable pulling on it. Lit from the upper left whichever way it faces.
+ */
+export function drawZipPost(ctx: CanvasRenderingContext2D, toward: 1 | -1): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  const px0 = -toward * 2.2;
+  const pegX = px0 - toward * 9.5;
+  ctx.strokeStyle = C.outline;
+  ctx.lineWidth = 1.1;
+  ctx.beginPath();
+  ctx.moveTo(px0 - toward * 1.2, -1.2);
+  ctx.lineTo(pegX, 22.6);
+  ctx.stroke();
+  ctx.strokeStyle = '#b48a4f';
+  ctx.lineWidth = 0.5;
+  ctx.stroke();
+  shape(ctx, TIMBER.body, (p) => {
+    p.moveTo(pegX - 0.7, 21.6);
+    p.lineTo(pegX + 0.7, 21.6);
+    p.lineTo(pegX + 0.5, 24.4);
+    p.lineTo(pegX - 0.5, 24.4);
+    p.closePath();
+  }, 0.5);
+
+  const post = new Path2D();
+  post.moveTo(px0 - 1.5, 24.6);
+  post.lineTo(px0 - 1.5, -2.2);
+  post.lineTo(px0, -3.2);
+  post.lineTo(px0 + 1.5, -2.2);
+  post.lineTo(px0 + 1.5, 24.6);
+  post.closePath();
+  ctx.fillStyle = TIMBER.body;
+  ctx.fill(post);
+  ctx.save();
+  ctx.clip(post);
+  ctx.fillStyle = TIMBER.light;
+  ctx.fillRect(px0 - 1.5, -3.2, 0.8, 28);
+  ctx.beginPath();
+  ctx.moveTo(px0 - 1.5, -2.2);
+  ctx.lineTo(px0, -3.2);
+  ctx.lineTo(px0, -2.2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = TIMBER.dark;
+  ctx.fillRect(px0 + 0.6, -3.2, 0.9, 28);
+  // Grain runs the length of the post and bends round one knot.
+  ctx.strokeStyle = TIMBER.grain;
+  ctx.globalAlpha = 0.6;
+  ctx.lineWidth = 0.25;
+  ctx.beginPath();
+  ctx.moveTo(px0 - 0.4, -1.6);
+  ctx.bezierCurveTo(px0 - 0.5, 6, px0 - 0.9, 10, px0 - 0.6, 14.2);
+  ctx.bezierCurveTo(px0 - 0.3, 18, px0 - 0.4, 21, px0 - 0.5, 24.6);
+  ctx.moveTo(px0 + 0.5, 3);
+  ctx.bezierCurveTo(px0 + 0.3, 9.4, px0 + 0.9, 11, px0 + 0.4, 14.6);
+  ctx.lineTo(px0 + 0.4, 22);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = TIMBER.grain;
+  ctx.beginPath();
+  ctx.ellipse(px0 + 0.05, 12.4, 0.45, 0.8, 0, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+  ctx.strokeStyle = C.outline;
+  ctx.lineWidth = 0.75;
+  ctx.stroke(post);
+
+  // An iron band holds the eye's bracket to the top of the post.
+  shape(ctx, STEEL_DARK, (p) => p.rect(px0 - 1.8, -1.0, 3.6, 1.3), 0.5);
+  ctx.strokeStyle = C.outline;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(0, 0, 0.95, 0, TAU);
+  ctx.stroke();
+  ctx.strokeStyle = '#9aa0a5';
+  ctx.lineWidth = 0.55;
+  ctx.stroke();
+
+  // Two stones packed round the foot.
+  shape(ctx, '#8a8378', (p) => p.ellipse(px0 - 2.4, 24.1, 1.6, 1.1, 0, 0, TAU), 0.5);
+  shape(ctx, '#7a7369', (p) => p.ellipse(px0 + 2.3, 24.4, 1.3, 0.9, 0, 0, TAU), 0.5);
+  ctx.restore();
+}
+
+/**
+ * The pulley a rider hangs from, origin on the cable. `slope` is the cable's angle there
+ * (radians, positive running down to the right) and `spin` the wheel's turn. `blur` drops the
+ * spokes: drawn at speed they strobe against the frame rate and seem to turn backwards. The
+ * strap hangs straight down to y = +10, behind where the slug's head is when this is drawn
+ * first, at ZIP_HANG above its centre.
+ */
+export function drawZipTrolley(ctx: CanvasRenderingContext2D, slope: number, spin: number, blur: boolean): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = C.outline;
+  ctx.lineWidth = 1.7;
+  ctx.beginPath();
+  ctx.moveTo(0, 2.4);
+  ctx.lineTo(0, 10);
+  ctx.stroke();
+  ctx.strokeStyle = '#c9b48a';
+  ctx.lineWidth = 0.9;
+  ctx.stroke();
+  ctx.rotate(slope);
+  shape(ctx, blur ? '#8b9298' : '#6f767c', (p) => p.arc(0, -1.75, 1.8, 0, TAU), 0.6);
+  if (!blur) {
+    ctx.strokeStyle = STEEL_DARK;
+    ctx.lineWidth = 0.35;
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) {
+      const a = spin + (k * TAU) / 3;
+      ctx.moveTo(0, -1.75);
+      ctx.lineTo(Math.cos(a) * 1.45, -1.75 + Math.sin(a) * 1.45);
+    }
+    ctx.stroke();
+  } else {
+    ctx.strokeStyle = 'rgba(42,28,18,0.35)';
+    ctx.lineWidth = 0.3;
+    ctx.beginPath();
+    ctx.arc(0, -1.75, 1.1, 0, TAU);
+    ctx.stroke();
+  }
+  const plate = new Path2D();
+  plate.moveTo(-0.7, -2.3);
+  plate.lineTo(0.7, -2.3);
+  plate.lineTo(0.9, -0.5);
+  plate.lineTo(2.6, -0.5);
+  plate.quadraticCurveTo(2.7, 1.9, 0.8, 2.1);
+  plate.lineTo(-0.8, 2.1);
+  plate.quadraticCurveTo(-2.7, 1.9, -2.6, -0.5);
+  plate.lineTo(-0.9, -0.5);
+  plate.closePath();
+  ctx.fillStyle = STEEL_BODY;
+  ctx.fill(plate);
+  ctx.save();
+  ctx.clip(plate);
+  ctx.fillStyle = '#adb4ba';
+  ctx.fillRect(-2.8, -0.5, 5.6, 0.6);
+  ctx.fillStyle = '#5c6369';
+  ctx.fillRect(-2.8, 1.3, 5.6, 1.0);
+  ctx.restore();
+  ctx.strokeStyle = C.outline;
+  ctx.lineWidth = 0.6;
+  ctx.stroke(plate);
+  ctx.fillStyle = STEEL_DARK;
+  ctx.beginPath();
+  ctx.arc(0, -1.75, 0.5, 0, TAU);
+  ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.strokeStyle = C.outline;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(0, 2.5, 0.6, 0, TAU);
+  ctx.stroke();
+  ctx.strokeStyle = '#9aa0a5';
+  ctx.lineWidth = 0.45;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * One straight run of a zip line's steel cable, like drawRope but finer and grey: thinner than
+ * the rope so the two never read as the same thing, with its lay marked at a fixed pitch.
+ */
+export function drawZipCable(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number): void {
+  const len = Math.hypot(x1 - x0, y1 - y0);
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = C.outline;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(x0, y0);
+  ctx.lineTo(x1, y1);
+  ctx.stroke();
+  ctx.strokeStyle = '#a3aab0';
+  ctx.lineWidth = 0.55;
+  ctx.stroke();
+  const ux = (x1 - x0) / len;
+  const uy = (y1 - y0) / len;
+  ctx.strokeStyle = '#646b71';
+  ctx.lineWidth = 0.18;
+  ctx.beginPath();
+  for (let d = 0.5; d < len; d += 1) {
+    const cx = x0 + ux * d;
+    const cy = y0 + uy * d;
+    ctx.moveTo(cx - ux * 0.2 - uy * 0.26, cy - uy * 0.2 + ux * 0.26);
+    ctx.lineTo(cx + ux * 0.2 + uy * 0.26, cy + uy * 0.2 - ux * 0.26);
   }
   ctx.stroke();
   ctx.restore();

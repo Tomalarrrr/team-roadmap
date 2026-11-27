@@ -4,9 +4,9 @@
 
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  DEFAULT_OPTIONS, KEY, TEAM_COLORS, WEAPON, WEAPONS, WIND_MOST, canPickWeapon, isComputer, secondsLeft, teamHealth,
+  BOOST, CRATE_HEALTH, DEFAULT_OPTIONS, KEY, TEAM_COLORS, WEAPON, WEAPONS, WIND_MOST, canPickWeapon, isComputer, secondsLeft, teamHealth,
 } from '../../slugsGameLogic';
-import type { Act, Control, Input, SlugsOptions, SlugsState, TeamSetup, WeaponCategory, WeaponId } from '../../slugsGameLogic';
+import type { Act, BoostId, Control, Input, SlugsOptions, SlugsState, TeamSetup, WeaponCategory, WeaponId } from '../../slugsGameLogic';
 import { buildMap, MAP_DESIGN_IDS, MAP_DESIGNS } from '../../slugsMaps';
 import type { MapDesignId } from '../../slugsMaps';
 import type { GameDriver } from './driver';
@@ -55,12 +55,14 @@ const CATEGORY_NAME: Record<WeaponCategory, string> = {
   melee: 'Close combat',
   special: 'Specials',
   tool: 'Getting about',
+  utility: 'Utilities',
 };
-const CATEGORY_ORDER: WeaponCategory[] = ['explosive', 'firearm', 'melee', 'special', 'tool'];
+const CATEGORY_ORDER: WeaponCategory[] = ['explosive', 'firearm', 'melee', 'special', 'tool', 'utility'];
 const CLASSIC_COUNT = WEAPONS.filter((w) => WEAPON[w].classic).length;
+const ALL_COUNT = WEAPONS.filter((w) => WEAPON[w].ammo !== 0).length;
 
-/** The weapons a match was stocked with; the rest never appear in its panel. */
-const inSet = (w: WeaponId, set: SlugsOptions['weapons']) => set === 'all' || WEAPON[w].classic;
+/** The weapons a match was stocked with, less those only found in crates. */
+const inSet = (w: WeaponId, set: SlugsOptions['weapons']) => (set === 'all' || WEAPON[w].classic) && WEAPON[w].ammo !== 0;
 
 const KEY_BITS: Record<string, number> = {
   ArrowLeft: KEY.left,
@@ -70,6 +72,9 @@ const KEY_BITS: Record<string, number> = {
   ' ': KEY.fire,
   Shift: KEY.fine,
 };
+
+/** The one key the game lets through to the page: Cmd+K (Ctrl+K) opens search on top of it. */
+const opensSearch = (e: KeyboardEvent) => (e.metaKey || e.ctrlKey) && e.key === 'k';
 
 const newSeed = () => (Math.random() * 0x100000000) >>> 0;
 
@@ -96,7 +101,10 @@ interface Hud {
   teams: TeamBar[];
   most: number;
   clock: number | null;
+  /** As it blows in this match: the Wind setting scales the rolled wind. */
   wind: number;
+  /** The strongest wind this match's setting allows. */
+  windMost: number;
   slug: string;
   team: string;
   colour: string;
@@ -116,8 +124,13 @@ interface Hud {
   /** Slugs are being placed before the first turn. */
   placing: boolean;
   wait: PickWait;
+  /** Whether the rules take a skip or a surrender from this machine now. Placing takes a skip only, and settling neither. */
+  canSkip: boolean;
+  canSurrender: boolean;
   /** Stock of the team the weapons panel shows: the playing team when it is this machine's, else this machine's own. */
   stock: number[];
+  /** Utilities switched on this turn, as BOOST bits. */
+  boost: number;
 }
 
 function pickWait(state: SlugsState, mine: boolean): PickWait {
@@ -126,7 +139,7 @@ function pickWait(state: SlugsState, mine: boolean): PickWait {
   return can === true ? null : can;
 }
 
-function hudOf(state: SlugsState, mine: readonly number[]): Hud {
+export function hudOf(state: SlugsState, mine: readonly number[]): Hud {
   const team = state.teams[state.activeTeam];
   const slug = state.slugs[state.active];
   const spec = WEAPON[state.weapon];
@@ -135,9 +148,11 @@ function hudOf(state: SlugsState, mine: readonly number[]): Hud {
   const own = isMine ? team : state.teams[mine.find((i) => !state.teams[i].out) ?? state.activeTeam];
   return {
     teams: state.teams.map((t) => ({ name: t.name, colour: TEAM_COLORS[t.color], hp: teamHealth(state, t), out: t.out })),
-    most: Math.max(...state.teams.map((t) => t.slugs.length)) * state.opts.startHp,
+    // Health crates can take a team past where it started, and a bar clipped at full would hide its losses.
+    most: Math.max(Math.max(...state.teams.map((t) => t.slugs.length)) * state.opts.startHp, ...state.teams.map((t) => teamHealth(state, t))),
     clock: timed ? secondsLeft(state) : null,
-    wind: state.wind,
+    wind: Math.sign(state.wind) * Math.round((Math.abs(state.wind) * state.opts.windScale) / 100),
+    windMost: Math.round((WIND_MOST * state.opts.windScale) / 100),
     slug: slug?.name ?? '',
     team: team.name,
     colour: TEAM_COLORS[team.color],
@@ -156,8 +171,21 @@ function hudOf(state: SlugsState, mine: readonly number[]): Hud {
     winner: state.phase === 'over' && state.winner !== null ? state.teams[state.winner].name : null,
     placing: state.phase === 'place',
     wait: pickWait(state, isMine),
+    canSkip: isMine && (state.phase === 'place' || state.phase === 'ready' || state.phase === 'turn' || state.phase === 'retreat'),
+    canSurrender: isMine && (state.phase === 'ready' || state.phase === 'turn' || state.phase === 'retreat'),
     stock: WEAPONS.map((w) => own.ammo[w]),
+    boost: state.boost,
   };
+}
+
+const BOOST_IDS = Object.keys(BOOST) as BoostId[];
+const boostNames = (bits: number) => BOOST_IDS.filter((w) => bits & BOOST[w]).map((w) => WEAPON[w].name).join(', ');
+
+/** What the turn's crates gave, said at the top as it happens; null when no crate was opened. */
+function crateNote(state: SlugsState): string | null {
+  const gift = state.events.find((e) => e.k === 'gift');
+  if (!gift || gift.k !== 'gift') return null;
+  return `${state.slugs[gift.id].name} found ${gift.what === 'health' ? `${CRATE_HEALTH} health` : WEAPON[gift.what].name}`;
 }
 
 /**
@@ -228,6 +256,8 @@ function flashFor(prev: Hud | null, next: Hud): string | null {
   if (!prev || prev.slug !== next.slug || prev.team !== next.team) {
     return `${next.slug}, ${next.team}${next.cpu ? ' (computer)' : ''}`;
   }
+  // Using a utility puts the weapon back too; what was switched on is the news.
+  if (next.boost & ~prev.boost) return `${boostNames(next.boost & ~prev.boost)} on`;
   if (prev.weapon !== next.weapon) return `${WEAPON[next.weapon].name}${next.ammo >= 0 ? `, ${next.ammo} left` : ''}`;
   if (prev.fuse !== next.fuse && next.fuse !== null) return `Fuse ${next.fuse} s`;
   if (prev.bounce !== next.bounce && next.bounce) return `Bounce ${next.bounce}`;
@@ -255,11 +285,11 @@ const WIND_SHORTEST = 8;
  * One arrow pointing the way the wind blows, starting from the side it blows from and longer with
  * strength, and the strength as a number: direction, size and the exact figure, read at a glance.
  */
-const Wind = memo(function Wind({ wind }: { wind: number }) {
+const Wind = memo(function Wind({ wind, most }: { wind: number; most: number }) {
   const strength = Math.abs(wind);
-  const label = wind === 0 ? 'No wind' : `Wind ${strength} of ${WIND_MOST}, blowing ${wind < 0 ? 'left' : 'right'}`;
-  const tip = Math.round(WIND_SHORTEST + ((strength - 1) * (WIND_TRACK - WIND_SHORTEST)) / (WIND_MOST - 1));
-  const step = strength <= WIND_MOST * 0.3 ? styles.windSoft : strength >= WIND_MOST * 0.8 ? styles.windHeed : '';
+  const label = wind === 0 ? 'No wind' : `Wind ${strength} of ${most}, blowing ${wind < 0 ? 'left' : 'right'}`;
+  const tip = Math.round(WIND_SHORTEST + ((strength - 1) * (WIND_TRACK - WIND_SHORTEST)) / (most - 1));
+  const step = strength <= most * 0.3 ? styles.windSoft : strength >= most * 0.8 ? styles.windHeed : '';
   return (
     <div className={styles.wind} role="img" aria-label={label} title={label}>
       <svg className={`${styles.windTrack} ${step}`} width={WIND_TRACK} height="12" viewBox={`0 0 ${WIND_TRACK} 12`} aria-hidden>
@@ -297,13 +327,12 @@ interface WeaponGroup {
   list: WeaponId[];
 }
 
-const groupsFor = (set: SlugsOptions['weapons']): WeaponGroup[] =>
+/** The match's weapons, and any other the team has found in a crate and not yet used. */
+const groupsFor = (set: SlugsOptions['weapons'], stock: readonly number[]): WeaponGroup[] =>
   CATEGORY_ORDER.map((category) => ({
     category,
-    list: WEAPONS.filter((w) => WEAPON[w].category === category && inSet(w, set)),
+    list: WEAPONS.filter((w, i) => WEAPON[w].category === category && (inSet(w, set) || stock[i] !== 0)),
   })).filter((g) => g.list.length > 0);
-
-const GROUPS: Record<SlugsOptions['weapons'], WeaponGroup[]> = { classic: groupsFor('classic'), all: groupsFor('all') };
 
 /** Arrow-key moves over the grid: along a row (and on to the next), or up and down a category keeping the column. */
 function moveCursor(groups: WeaponGroup[], from: WeaponId, key: string): WeaponId {
@@ -327,13 +356,15 @@ const WAIT_NOTE: Record<Exclude<PickWait, null>, (team: string) => string> = {
 
 const stockText = (left: number) => (left < 0 ? 'Unlimited' : left === 0 ? 'None left' : `${left} left`);
 
-const WeaponPanel = memo(function WeaponPanel({
-  set, stock, weapon, wait, team, cursor, onCursor, onPick, onSkip, onSurrender,
+export const WeaponPanel = memo(function WeaponPanel({
+  set, stock, weapon, wait, canSkip, canSurrender, team, cursor, onCursor, onPick, onSkip, onSurrender,
 }: {
   set: SlugsOptions['weapons'];
   stock: number[];
   weapon: WeaponId;
   wait: PickWait;
+  canSkip: boolean;
+  canSurrender: boolean;
   team: string;
   cursor: WeaponId;
   onCursor: (w: WeaponId) => void;
@@ -342,6 +373,12 @@ const WeaponPanel = memo(function WeaponPanel({
   onSurrender: () => void;
 }) {
   const [hover, setHover] = useState<WeaponId | null>(null);
+  // The description follows whichever moved last: an arrow press drops the hover until the pointer enters another cell.
+  const [hoverCursor, setHoverCursor] = useState(cursor);
+  if (hoverCursor !== cursor) {
+    setHoverCursor(cursor);
+    setHover(null);
+  }
   const cells = useRef(new Map<WeaponId, HTMLButtonElement>());
   // The arrow keys move a cursor the game's key handler owns; focus follows it so the ring shows where it is.
   useEffect(() => {
@@ -353,7 +390,7 @@ const WeaponPanel = memo(function WeaponPanel({
     <div className={styles.panel} role="dialog" aria-label="Weapons">
       {wait && <p className={styles.panelNote}>{WAIT_NOTE[wait](team)}</p>}
       <div className={styles.weaponRows}>
-        {GROUPS[set].map(({ category, list }) => (
+        {groupsFor(set, stock).map(({ category, list }) => (
           <div key={category} className={styles.weaponRow} role="group" aria-label={CATEGORY_NAME[category]}>
             <span className={styles.groupName}>{CATEGORY_NAME[category]}</span>
             <div className={styles.weaponCells}>
@@ -395,10 +432,10 @@ const WeaponPanel = memo(function WeaponPanel({
       </p>
       <div className={styles.panelFoot}>
         <span className={styles.panelKeys}>Arrows move, Enter picks, Esc closes</span>
-        <button className={styles.textBtn} disabled={wait === 'theirs'} onClick={onSkip} onMouseDown={(e) => e.preventDefault()}>
+        <button className={styles.textBtn} disabled={!canSkip} onClick={onSkip} onMouseDown={(e) => e.preventDefault()}>
           Skip this turn
         </button>
-        <button className={styles.textBtn} disabled={wait === 'theirs'} onClick={onSurrender} onMouseDown={(e) => e.preventDefault()}>
+        <button className={styles.textBtn} disabled={!canSurrender} onClick={onSurrender} onMouseDown={(e) => e.preventDefault()}>
           Surrender
         </button>
       </div>
@@ -646,6 +683,8 @@ function Battle({
               playing: state.activeTeam,
             };
             tallyEvents(tally.current, state);
+            const found = crateNote(state);
+            if (found) setFlash((f) => ({ text: found, n: (f?.n ?? 0) + 1, ms: FLASH_MS }));
             const next = hudOf(state, match.driver.mine);
             const key = JSON.stringify(next);
             if (key !== hudKey.current) {
@@ -704,7 +743,7 @@ function Battle({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (opensSearch(e)) return;
       e.stopPropagation();
       const c = controls.current;
       const bit = KEY_BITS[e.key];
@@ -712,14 +751,18 @@ function Battle({
         if (bit) c.held &= ~bit;
         return;
       }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       // A question on screen takes the keyboard: its buttons answer Enter and Space, and nothing moves behind it.
       if (leaving) {
         if (e.key === 'Escape') onKeepPlaying();
         return;
       }
+      // So does the end card: Rematch and the way out answer Enter, Space and Tab as on any page.
+      if (over) return;
       if (weaponsOpen && e.key.startsWith('Arrow')) {
         e.preventDefault();
-        setCursor((w) => moveCursor(GROUPS[hudRef.current?.set ?? 'all'], w, e.key));
+        const h = hudRef.current;
+        if (h) setCursor((w) => moveCursor(groupsFor(h.set, h.stock), w, e.key));
         return;
       }
       if (weaponsOpen && (e.key === 'Enter' || e.key === ' ')) {
@@ -778,7 +821,7 @@ function Battle({
       window.removeEventListener('keyup', onKey, true);
       window.removeEventListener('blur', onBlur);
     };
-  }, [act, jumpKey, pick, cursor, leaving, weaponsOpen, helpOpen, toggleWeapons, toggleHelp, onAskLeave, onKeepPlaying]);
+  }, [act, jumpKey, pick, cursor, leaving, over, weaponsOpen, helpOpen, toggleWeapons, toggleHelp, onAskLeave, onKeepPlaying]);
 
   const hold = (bit: number) => ({
     onPointerDown: (e: React.PointerEvent) => {
@@ -843,6 +886,7 @@ function Battle({
                 Turn the girder ({hud.girder * 22.5}°, or R)
               </button>
             )}
+            {hud.boost !== 0 && <span className={styles.note}>{boostNames(hud.boost)} on until the next turn</span>}
             {hud.sudden && <span className={styles.note}>Sudden death: the water rises each turn</span>}
             {note && <span className={styles.note} role="status">{note}</span>}
           </>
@@ -854,7 +898,7 @@ function Battle({
           <>
             <div className={styles.clockArea}>{hud.clock !== null && !over && <Clock seconds={hud.clock} />}</div>
             <TeamBars teams={hud.teams} most={hud.most} />
-            <div className={styles.windArea}><Wind wind={hud.wind} /></div>
+            <div className={styles.windArea}><Wind wind={hud.wind} most={hud.windMost} /></div>
             <div className={styles.touchPad} data-area="pad">
               <button className={styles.touchBtn} {...hold(KEY.left)} aria-label="Crawl left">←</button>
               <button className={styles.touchBtn} {...hold(KEY.up)} aria-label="Aim up">↑</button>
@@ -889,6 +933,8 @@ function Battle({
           stock={hud.stock}
           weapon={hud.weapon}
           wait={hud.wait}
+          canSkip={hud.canSkip}
+          canSurrender={hud.canSurrender}
           team={hud.team}
           cursor={cursor}
           onCursor={setCursor}
@@ -998,7 +1044,8 @@ const OFFERED = {
   roundMinutes: [5, 10, 15, 20, 30],
   waterRise: [10, 20, 40],
   placing: ['auto', 'players'],
-} as const satisfies Record<keyof Settings['options'], readonly (string | number)[]>;
+  crates: [true, false],
+} as const satisfies Record<keyof Settings['options'], readonly (string | number | boolean)[]>;
 
 const WIND_NAME: Record<number, string> = { 0: 'None', 50: 'Half', 100: 'Normal', 150: 'Strong' };
 
@@ -1125,8 +1172,15 @@ function Setup({
               <Choice
                 label="Weapons"
                 value={o.weapons}
-                choices={OFFERED.weapons.map((w) => [w, w === 'classic' ? `Classic ${CLASSIC_COUNT}` : `All ${WEAPONS.length}`] as const)}
+                choices={OFFERED.weapons.map((w) => [w, w === 'classic' ? `Classic ${CLASSIC_COUNT}` : `All ${ALL_COUNT}`] as const)}
                 onPick={(weapons) => opt({ weapons })}
+              />
+              <Choice
+                label="Crates"
+                value={o.crates ? 'on' : 'off'}
+                choices={[['on', 'On'], ['off', 'Off']] as const}
+                onPick={(v) => opt({ crates: v === 'on' })}
+                hint={o.crates ? 'Between turns a crate may parachute in: a weapon, 25 health or a utility for whoever reaches it.' : undefined}
               />
               <Choice
                 label="Turn"
@@ -1250,6 +1304,7 @@ const FIRST_SETUP: Settings = {
     roundMinutes: DEFAULT_OPTIONS.roundMinutes,
     waterRise: DEFAULT_OPTIONS.waterRise,
     placing: DEFAULT_OPTIONS.placing,
+    crates: DEFAULT_OPTIONS.crates,
   },
 };
 
@@ -1282,7 +1337,7 @@ function recallSetup(): Settings {
   const kept = { ...FIRST_SETUP.options };
   for (const key of Object.keys(OFFERED) as (keyof Settings['options'])[]) {
     const v = options[key];
-    if (isIn<string | number>(OFFERED[key], v)) Object.assign(kept, { [key]: v });
+    if (isIn<string | number | boolean>(OFFERED[key], v)) Object.assign(kept, { [key]: v });
   }
   const namesOk = Array.isArray(names) && names.length >= 2 && names.length <= MOST_TEAMS
     && names.every((n) => typeof n === 'string' && n.length <= 16);
@@ -1388,14 +1443,17 @@ export function SlugsGame({ onClose, isSearchOpen, inviteCode }: SlugsGameProps)
     if (leaving === 'close') onClose();
   }, [match, leaving, onClose]);
 
-  // On the setup screen Escape closes the popup; in a match the battle asks
-  // first, and the lobby handles its own keys.
+  // Setup and the lobby keep their keys from the roadmap behind, where [ and ] move
+  // a project's dates and Cmd+Backspace deletes it. Escape steps back: from setup
+  // it closes the popup, from the lobby it goes back to setup. In a match the battle takes the keys.
   useEffect(() => {
-    if (match || inLobby) return;
+    if (match) return;
     const onKey = (e: KeyboardEvent) => {
-      if (isSearchOpenRef.current || e.key !== 'Escape') return;
+      if (isSearchOpenRef.current || opensSearch(e)) return;
       e.stopPropagation();
-      onClose();
+      if (e.key !== 'Escape') return;
+      if (inLobby) setInLobby(false);
+      else onClose();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);

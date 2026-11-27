@@ -27,15 +27,19 @@ import {
   nextSeed,
   normalAct,
   optionsOf,
+  OTHER_RULES,
   parseInputs,
   RANDOM_MAP,
   reportDue,
   restingReport,
   resultOf,
+  RULES as MY_RULES,
+  sameRules,
   SEAL_AT,
   sealed,
   sending,
   settingsOf,
+  stamped,
   takeRoom,
   themeOf,
   waitsOn,
@@ -205,7 +209,7 @@ function lobbyMatch(set: Settings): SlugsMatch {
     seed: 0,
     game: 0,
     players: { a: { sessionId: 'session-a', name: 'Ann' }, b: { sessionId: 'session-b', name: 'Bob' } },
-    ...(encodeSettings(set) && { set: encodeSettings(set) }),
+    set: stamped(encodeSettings(set)),
   };
 }
 
@@ -473,12 +477,17 @@ describe('slugs settings', () => {
       weapons: DEFAULT_OPTIONS.weapons,
       roundMinutes: DEFAULT_OPTIONS.roundMinutes,
       placing: DEFAULT_OPTIONS.placing,
+      crates: DEFAULT_OPTIONS.crates,
     },
   };
 
   it('starts a new room on a random design and its own ground, which every seat works out the same from the seed', () => {
     const fresh = settingsOf(FIRST);
-    expect(encodeSettings(fresh)).toBe(`ground=${MAP_GROUND};map=${RANDOM_MAP}`);
+    // Crates are on for a new room but off in DEFAULT_SETTINGS, so the room says so and a client from before crates refuses it.
+    expect(encodeSettings(fresh)).toBe(`ground=${MAP_GROUND};map=${RANDOM_MAP};crates=1`);
+    expect(optionsOf(decodeSettings('crates=1')!, 7).crates).toBe(true);
+    expect(optionsOf(decodeSettings('')!, 7).crates).toBe(false);
+    expect(decodeSettings('crates=2')).toBeNull();
     expect(allowed(null, roomAt(), { m: lobbyMatch(fresh) }, T0)).toBe(true);
     const playing: SlugsMatch = { ...lobbyMatch(fresh), status: 'playing', seed: 0xc0ffee, game: 1 };
     const ann = newLockstep(playing, 'a');
@@ -546,7 +555,7 @@ describe('slugs settings', () => {
       level: 5,
       map: 'canyon',
       ground: THEME_IDS[1],
-      options: { turnSeconds: 20, startHp: 200, windScale: 0, mines: 12, barrels: 12, weapons: 'all', roundMinutes: 30, placing: 'players' },
+      options: { turnSeconds: 20, startHp: 200, windScale: 0, mines: 12, barrels: 12, weapons: 'all', roundMinutes: 30, placing: 'players', crates: false },
     };
     for (const choices of [FIRST, picked]) {
       const settings = settingsOf(choices);
@@ -563,6 +572,47 @@ describe('slugs settings', () => {
     expect(decodeSettings('gravity=2')).toBeNull();
     expect(decodeSettings('turnSeconds=33')).toBeNull();
     expect(() => newLockstep({ ...lobbyMatch(DEFAULT_SETTINGS), status: 'playing', game: 1, set: 'gravity=2' }, 'a')).toThrow(/newer version/);
+  });
+});
+
+// In room 8WBG one tab had been open since before a deploy. On its rules the
+// game ended at tick 25078 with Bob's team the winner; on the other tab's it
+// was Ann's turn, and her team was alive, and play went on.
+describe('slugs rules version', () => {
+  const playing = (set: string | undefined): SlugsMatch => {
+    const m: SlugsMatch = { ...lobbyMatch(DEFAULT_SETTINGS), status: 'playing', seed: 77, game: 1 };
+    if (set === undefined) delete m.set;
+    else m.set = set;
+    return m;
+  };
+  const other = (MY_RULES % 9999) + 1;
+
+  it('is a number the database holds in a room’s set', () => {
+    expect(Number.isInteger(MY_RULES)).toBe(true);
+    expect(MY_RULES).toBeGreaterThanOrEqual(1);
+    expect(MY_RULES).toBeLessThanOrEqual(9999);
+    const every = settingsOf({ ...choicesOf(DEFAULT_SETTINGS), perTeam: 6, map: 'random', ground: 'map' });
+    for (const set of [stamped(''), stamped('perTeam=2'), stamped(encodeSettings(every))]) {
+      expect(set).toMatch(/^[a-z][a-zA-Z]{1,11}=[0-9]{1,4}(;[a-z][a-zA-Z]{1,11}=[0-9]{1,4})*$/);
+    }
+  });
+
+  it('plays a room set up on this client’s rules, with the settings it would have without them', () => {
+    expect(sameRules(stamped('perTeam=2'))).toBe(true);
+    expect(decodeSettings(stamped('perTeam=2'))).toEqual({ ...DEFAULT_SETTINGS, perTeam: 2 });
+    expect(decodeSettings(stamped(''))).toEqual(DEFAULT_SETTINGS);
+    expect(newLockstep(playing(stamped('perTeam=2')), 'a').state.slugs).toHaveLength(4);
+  });
+
+  it('refuses a room on other rules, or from before rooms said which', () => {
+    for (const set of [undefined, '', 'perTeam=2', `perTeam=2;rules=${other}`, `rules=${MY_RULES}0`, `rules=0${MY_RULES}`, `rules=${other};perTeam=2`]) {
+      expect(sameRules(set)).toBe(false);
+      expect(() => newLockstep(playing(set), 'a')).toThrow(OTHER_RULES);
+    }
+  });
+
+  it('still says a setting it does not know is from a newer version', () => {
+    expect(() => newLockstep(playing(stamped('gravity=2')), 'a')).toThrow(/newer version/);
   });
 });
 

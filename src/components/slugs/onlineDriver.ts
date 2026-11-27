@@ -305,7 +305,10 @@ export function onlineDriver(code: string, sessionId: string, match: SlugsMatch)
     async leave() {
       stop();
       rememberRoom(null);
-      await vacateSeat(code, seat, ls.promised);
+      // The room's promise, not ls.promised: that runs ahead of a write still in
+      // flight or refused, and the others would wait on ticks that never come.
+      const stored = room?.s?.[seat];
+      await vacateSeat(code, seat, stored?.game === ls.game ? stored.k : 0);
     },
     // Not a forfeit: the screen disposes on unmount, which a reload or StrictMode also does.
     dispose: stop,

@@ -10,12 +10,13 @@
 
 import * as Phaser from 'phaser';
 import {
-  CHARGE_TICKS, GIRDER_HALF, GIRDER_REACH, H, KEY, ONE, SLUG_HALF_H, TEAM_COLORS, TICK_MS, W, WEAPON, cosDeg, placeSpot, px, sinDeg, solidAt,
+  BOOST, CHARGE_TICKS, GIRDER_HALF, GIRDER_REACH, H, KEY, ONE, SLUG_HALF_H, TEAM_COLORS, TICK_MS, W, WEAPON, cosDeg, crateKind, placeSpot, px,
+  shotEnd, shotRange, sinDeg, solidAt,
 } from '../../slugsGameLogic';
 import type { Act, Input, Slug, SlugEvent, SlugsState } from '../../slugsGameLogic';
 import type { GameDriver } from './driver';
 import {
-  drawGravestone, drawHeldWeapon, dugColours, drawJetpack, drawObject, drawParachute, drawProjectileBody, drawRope, drawSlug, LAND_RES, paintBackground, paintTerrain, repaintArea, rewindTerrain,
+  drawCrate, drawGravestone, drawHeldWeapon, dugColours, drawJetpack, drawObject, drawParachute, mineLit, drawProjectileBody, drawRope, drawSlug, LAND_RES, paintBackground, paintTerrain, repaintArea, rewindTerrain,
   projectileFlickers, projectileSpin,
 } from './slugArt';
 import type { SlugPose } from './slugArt';
@@ -29,6 +30,7 @@ import { THEMES } from './slugThemes';
 import type { ThemeId } from './slugThemes';
 import { drawMotes, easeWind, stepMotes } from './slugWind';
 import type { Mote } from './slugWind';
+import { ZipLayer } from './slugZipLayer';
 
 export interface SceneHooks {
   driver: GameDriver;
@@ -81,6 +83,8 @@ const CAMERA_SETTLE = 0.25;
 const CAMERA_PACE = 1500;
 /** ms a slug takes to turn round, and to spring back from a landing's squash. */
 const TURN_MS = 110;
+/** The laser sight's line. It is drawn over a dark line, which keeps it readable against the red team and red ground. */
+const LASER = 0xd8433a;
 const SQUASH_MS = 180;
 /** A hat per team, in team-colour order, so a team reads by its heads as well as its neck bands. */
 const TEAM_HATS = ['beanie', 'tophat', 'leaf', 'miner', 'bandana', 'acorn'];
@@ -156,6 +160,7 @@ class SlugsScene extends Phaser.Scene {
   private lean = false;
   /** prefers-reduced-motion, read once when the match starts. */
   private reduced = prefersReducedMotion();
+  private zips!: ZipLayer;
   private pace = { from: -1, frames: 0, after: -1, slow: 0 };
   private bgCam!: Phaser.Cameras.Scene2D.Camera;
   private worldCam!: Phaser.Cameras.Scene2D.Camera;
@@ -269,6 +274,11 @@ class SlugsScene extends Phaser.Scene {
       leanOf: (slug) => this.slugs[slug]?.tilt ?? 0,
       res: () => this.wantedRes(),
       projAt: (id) => this.projDrawn(id),
+    });
+    this.zips = new ZipLayer({
+      scene: this, world: (obj) => this.world(obj), paintable: (prefix, w, h) => this.paintable(prefix, w, h),
+      res: () => this.wantedRes(), reduced: this.reduced,
+      drawnAt: (id) => (this.slugs[id] ? { x: this.slugs[id].drawX, y: this.slugs[id].drawY } : null),
     });
 
     this.fitView();
@@ -685,6 +695,8 @@ class SlugsScene extends Phaser.Scene {
     if (!this.lean) this.drawSky();
     this.drawWater(time, delta);
     this.drawSlugs(time, delta);
+    // After the slugs, so a rider's pulley is drawn where its picture glided to this frame.
+    this.zips.draw(s, time, delta);
     this.drawGraves(time, delta);
     this.drawObjects(time);
     this.drawProjectiles(time);
@@ -866,6 +878,7 @@ class SlugsScene extends Phaser.Scene {
           break;
       }
       this.fx.event(e, this.state, now, ground);
+      this.zips.event(e);
     }
     this.land.upload();
   }
@@ -960,7 +973,7 @@ class SlugsScene extends Phaser.Scene {
     const s = this.state;
     let anim: SlugPose['anim'] = 'idle';
     if (s.phase === 'over' && s.winner === slug.team) anim = 'win';
-    else if (slug.mode === 'rope' || slug.mode === 'jet' || slug.mode === 'chute') anim = 'jump';
+    else if (slug.mode === 'rope' || slug.mode === 'zip' || slug.mode === 'jet' || slug.mode === 'chute') anim = 'jump';
     else if (slug.mode === 'air') anim = slug.blown ? 'hurt' : slug.vy < 0 ? 'jump' : 'fall';
     else if (slug.mode === 'slide' || now - view.hurtAt < 700) anim = 'hurt';
     // Out of health and waiting for its turn to pop, after the tally has counted it down.
@@ -1090,7 +1103,7 @@ class SlugsScene extends Phaser.Scene {
       // Capped short of the rules' steepest walkable ground: leaned further, a slug reads as falling over.
       const lean = footed ? Math.max(-LEAN_MOST, Math.min(LEAN_MOST, groundTilt(s.terrain, x, y + SLUG_HALF_H))) : 0;
       // A landing squashes the body into the ground, harder the faster the fall; a jump stretches it up.
-      const aloft = slug.mode === 'air' || slug.mode === 'jet' || slug.mode === 'chute' || slug.mode === 'rope';
+      const aloft = slug.mode === 'air' || slug.mode === 'jet' || slug.mode === 'chute' || slug.mode === 'rope' || slug.mode === 'zip';
       if (footed && view.mode !== slug.mode && (view.mode === 'air' || view.mode === 'chute' || view.mode === 'jet')) {
         view.squash = Math.min(0.3, 0.1 + (view.vy / ONE) * 0.03);
         view.squashAt = now;
@@ -1138,7 +1151,8 @@ class SlugsScene extends Phaser.Scene {
         view.labelText = text;
         view.label.setText(text);
       }
-      const at = this.toScreen(view.drawX, view.drawY - 13);
+      // The label rests on the head, or on the canopy's top (27 px up) while a parachute is open, not across it.
+      const at = this.toScreen(view.drawX, view.drawY - (slug.mode === 'chute' ? 28 : 13));
       // A slug on screen keeps its whole label on screen and above the team bars, even at the very edge or behind
       // them. One off screen takes its label with it, rather than piling labels up along the border.
       const half = view.label.width / 2;
@@ -1224,13 +1238,17 @@ class SlugsScene extends Phaser.Scene {
 
   // --- What flies ---
 
-  /** Mines and barrels, repainted only when the picture changes: a tripped mine's lamp blinks, nothing else moves. */
+  /**
+   * Mines, barrels and crates, repainted only when the picture changes: a mine's lamp flashes and a crate's
+   * parachute sways, nothing else moves. The picture is 40 px square with the object 28 px down, leaving room above
+   * for a canopy.
+   */
   private drawObjects(now: number) {
     const objs = this.state.objs;
     const res = this.wantedRes();
     while (this.objViews.length < objs.length) {
-      const tex = this.paintable('obj', 20 * res, 20 * res)!;
-      this.objViews.push({ tex, img: this.world(this.add.image(0, 0, tex).setDepth(15)), drawn: '' });
+      const tex = this.paintable('obj', 40 * res, 40 * res)!;
+      this.objViews.push({ tex, img: this.world(this.add.image(0, 0, tex).setDepth(15).setOrigin(0.5, 0.7)), drawn: '' });
     }
     this.objViews.forEach((view, i) => {
       const o = objs[i];
@@ -1238,23 +1256,30 @@ class SlugsScene extends Phaser.Scene {
         view.img.setVisible(false);
         return;
       }
-      const lit = o.kind === 'mine' && o.fuse >= 0 && !o.dud && Math.floor(now / 150) % 2 === 0;
-      const sig = `${o.kind}|${lit}|${res}`;
+      const lit = o.kind === 'mine' && mineLit(o, now);
+      // The sway is drawn in steps; a smooth one would repaint every frame for the few seconds a crate falls.
+      const sway = o.chute ? Math.floor(now / 80) * 80 : 0;
+      const sig = `${o.kind}|${o.gift}|${sway}|${lit}|${res}`;
       if (sig !== view.drawn) {
         view.drawn = sig;
-        if (view.tex.width !== 20 * res) view.tex.setSize(20 * res, 20 * res);
+        // An image keeps the size its texture had when it was made, and places its origin by that size: resized, the
+        // texture would draw an object off its place by the change in resolution, so the image takes the new size too.
+        if (view.tex.width !== 40 * res) view.img.setSizeToFrame(view.tex.setSize(40 * res, 40 * res).get()).updateDisplayOrigin();
         const ctx = view.tex.context;
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, view.tex.width, view.tex.height);
-        ctx.setTransform(res, 0, 0, res, 10 * res, 10 * res);
-        // The art's drum is half the size of the barrel the rules collide with
-        // (12 x 16, centred on o.y); scaled up, its base meets the ground.
-        if (o.kind === 'barrel') ctx.transform(2, 0, 0, 2, 0, 4);
-        // drawObject blinks on its own clock; `lit` has already picked the phase, so it is drawn at a lit moment.
-        drawObject(ctx, o.kind, 0, lit);
+        ctx.setTransform(res, 0, 0, res, 20 * res, 28 * res);
+        if (o.kind === 'crate' && o.gift) drawCrate(ctx, crateKind(o.gift), o.chute, sway);
+        else {
+          // The art's drum is half the size of the barrel the rules collide with
+          // (12 x 16, centred on o.y); scaled up, its base meets the ground.
+          if (o.kind === 'barrel') ctx.transform(2, 0, 0, 2, 0, 4);
+          // drawObject blinks on its own clock; `lit` has already picked the phase, so it is drawn at a lit moment.
+          drawObject(ctx, o.kind, 0, lit);
+        }
         view.tex.refresh();
       }
-      view.img.setVisible(true).setPosition(o.x / ONE, o.y / ONE).setDisplaySize(20, 20);
+      view.img.setVisible(true).setPosition(o.x / ONE, o.y / ONE).setDisplaySize(40, 40);
     });
   }
 
@@ -1331,7 +1356,7 @@ class SlugsScene extends Phaser.Scene {
       const sig = `${p.kind}|${dir}|${beat}|${res}`;
       if (sig !== view.drawn) {
         view.drawn = sig;
-        if (view.tex.width !== 24 * res) view.tex.setSize(24 * res, 24 * res);
+        if (view.tex.width !== 24 * res) view.img.setSizeToFrame(view.tex.setSize(24 * res, 24 * res).get()).updateDisplayOrigin();
         const ctx = view.tex.context;
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.clearRect(0, 0, view.tex.width, view.tex.height);
@@ -1401,6 +1426,17 @@ class SlugsScene extends Phaser.Scene {
         g.fillTriangle(x + dx * 8, y + dy * 8, x + dx * len + nx * (wide + 1), y + dy * len + ny * (wide + 1), x + dx * len - nx * (wide + 1), y + dy * len - ny * (wide + 1));
         g.fillStyle(colour, 1);
         g.fillTriangle(x + dx * 8, y + dy * 8, x + dx * len + nx * wide, y + dy * len + ny * wide, x + dx * len - nx * wide, y + dy * len - ny * wide);
+      }
+      if (s.boost & BOOST.laser && spec.category === 'firearm' && !s.charging) {
+        const end = shotEnd(s, slug, slug.aim, shotRange(s.weapon));
+        g.lineStyle(2, 0x111111, 0.45);
+        g.lineBetween(end.x0, end.y0, end.x1, end.y1);
+        g.lineStyle(1, LASER, 0.9);
+        g.lineBetween(end.x0, end.y0, end.x1, end.y1);
+        if (end.stop === 'hit') {
+          g.fillStyle(LASER, 1);
+          g.fillCircle(end.x1, end.y1, 1.5);
+        }
       }
       this.crosshair(g, x + dx * 34, y + dy * 34, colour);
     }

@@ -254,8 +254,15 @@ describe('explosions', () => {
   });
 
   it('inside the crater the throw still grows with the damage', () => {
-    expect(after(24).moved).toBeGreaterThan(after(38).moved);
-    expect(after(38).moved).toBeGreaterThan(after(47).moved);
+    // The speed it leaves with: where it stops also depends on whether it lands on the crater's rim and slides back in.
+    const thrown = (gap: number) => {
+      const s = lab();
+      stand(s, 1, 1000);
+      explode(s, 996 - gap, FLOOR - 2, 50, 48, 0);
+      return Math.hypot(s.slugs[1].vx, s.slugs[1].vy);
+    };
+    expect(thrown(24)).toBeGreaterThan(thrown(38));
+    expect(thrown(38)).toBeGreaterThan(thrown(47));
   });
 
   it('a blast level with a standing slug, or above it, throws it out of the crater and away, not back into it', () => {
@@ -912,10 +919,10 @@ describe('options', () => {
     expect(hashOf(newGame(3, setups, 2, DEFAULT_OPTIONS))).toBe(hashOf(newGame(3, setups, 2)));
   });
 
-  it('the classic set stocks only the first six weapons', () => {
+  it('the classic set stocks only its six weapons and the two ways of getting about', () => {
     const s = lab();
     const stocked = WEAPONS.filter((w) => s.teams[0].ammo[w] !== 0);
-    expect(stocked).toEqual(['bazooka', 'grenade', 'cluster', 'airstrike', 'dynamite', 'shotgun'].sort((a, b) => WEAPONS.indexOf(a as WeaponId) - WEAPONS.indexOf(b as WeaponId)));
+    expect(stocked).toEqual(['bazooka', 'grenade', 'cluster', 'airstrike', 'dynamite', 'shotgun', 'rope', 'jetpack'].sort((a, b) => WEAPONS.indexOf(a as WeaponId) - WEAPONS.indexOf(b as WeaponId)));
   });
 
   it('the full set stocks every weapon, and an empty weapon cannot be chosen', () => {
@@ -939,7 +946,7 @@ describe('options', () => {
       const spec = WEAPON[w];
       expect(spec.name.length).toBeGreaterThan(2);
       expect(spec.desc.length).toBeGreaterThan(10);
-      expect(['explosive', 'special', 'firearm', 'melee', 'tool']).toContain(spec.category);
+      expect(['explosive', 'special', 'firearm', 'melee', 'tool', 'utility']).toContain(spec.category);
       expect(['charge', 'shot', 'drop', 'target', 'mark']).toContain(spec.use);
     }
     expect(Object.keys(WEAPON).sort()).toEqual([...WEAPONS].sort());
@@ -1055,7 +1062,7 @@ describe('the arsenal', () => {
     const s = lab();
     let duds = 0;
     for (let i = 0; i < 12; i++) {
-      s.objs = [{ id: 900 + i, kind: 'mine', x: 1500 * ONE, y: (FLOOR - 2) * ONE, vx: 0, vy: 0, rest: true, fuse: 1, delay: 1, dud: false, hp: 0, arm: 0 }];
+      s.objs = [{ id: 900 + i, kind: 'mine', x: 1500 * ONE, y: (FLOOR - 2) * ONE, vx: 0, vy: 0, rest: true, fuse: 1, delay: 1, dud: false, hp: 0, arm: 0, gift: null, chute: false, laid: false }];
       s.slugs[1].hp = 100;
       if (run(s, 1).some((e) => e.k === 'dud')) duds++;
       s.terrain.fill(1, FLOOR * W);
@@ -1066,7 +1073,7 @@ describe('the arsenal', () => {
 
   it('a barrel that takes enough damage bursts', () => {
     const s = lab();
-    s.objs = [{ id: 900, kind: 'barrel', x: 800 * ONE, y: (FLOOR - 8) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: 0, dud: false, hp: 40, arm: 0 }];
+    s.objs = [{ id: 900, kind: 'barrel', x: 800 * ONE, y: (FLOOR - 8) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: 0, dud: false, hp: 40, arm: 0, gift: null, chute: false, laid: false }];
     explode(s, 800 - 10, FLOOR - 8, 50, 48, 0);
     expect(s.objs[0].hp).toBeLessThanOrEqual(0);
     const events = run(s, 1);

@@ -1,7 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   BACKJUMP,
+  BOOST,
+  CRATE_HEALTH,
   FLIP,
+  GRAVITY,
   HOP,
   KEY,
   ONE,
@@ -21,12 +24,16 @@ import {
   explode,
   fallDamage,
   fits,
+  gravity,
   newGame,
   px,
+  shotEnd,
+  shotRange,
   type Input,
   type Obj,
   type SlugEvent,
   type SlugsState,
+  type Gift,
   type WeaponId,
 } from '../slugsGameLogic';
 import { MAP_DESIGN_IDS } from '../slugsMaps';
@@ -161,7 +168,8 @@ const SHOTS: Shot[] = [
 ];
 
 describe('every weapon, fired a few ways on flat land', () => {
-  for (const w of WEAPONS) {
+  // Utilities are only found in crates, so a team has none to fire; they are tried under 'utilities' below.
+  for (const w of WEAPONS.filter((w) => WEAPON[w].ammo !== 0)) {
     it(`${w}: the shot ends, the turn passes, nothing is left flying or inside the land`, () => {
       for (const shot of SHOTS) {
         const s = lab();
@@ -197,7 +205,7 @@ function proj(s: SlugsState, kind: 'shell' | 'grenade' | 'jar', x: number, y: nu
 }
 
 function barrel(s: SlugsState, x: number, hp = 40, floor = FLOOR): SlugsState['objs'][number] {
-  const o = { id: s.nextId++, kind: 'barrel' as const, x: x * ONE, y: (floor - 8) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: 0, dud: false, hp, arm: 0 };
+  const o = { id: s.nextId++, kind: 'barrel' as const, x: x * ONE, y: (floor - 8) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: 0, dud: false, hp, arm: 0, gift: null, chute: false, laid: false };
   s.objs.push(o);
   return o;
 }
@@ -533,7 +541,7 @@ describe('what the scene and the panel read', () => {
 
 describe('mines, edges, teleports and the jetpack', () => {
   const mineAt = (s: SlugsState, x: number): Obj => {
-    const o: Obj = { id: 900, kind: 'mine', x: x * ONE, y: (FLOOR - 2) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: RETREAT_TICKS, dud: false, hp: 0, arm: 0 };
+    const o: Obj = { id: 900, kind: 'mine', x: x * ONE, y: (FLOOR - 2) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: RETREAT_TICKS, dud: false, hp: 0, arm: 0, gift: null, chute: false, laid: false };
     s.objs.push(o);
     return o;
   };
@@ -682,7 +690,7 @@ describe('edge cases', () => {
   it('a mine tripped by an enemy goes off (or fizzles) after its fuse, and a blast throws a mine aside', () => {
     const s = lab();
     s.phase = 'settle';
-    const mine = { id: s.nextId++, kind: 'mine' as const, x: 1500 * ONE, y: (FLOOR - 2) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: 150, dud: false, hp: 0, arm: 0 };
+    const mine = { id: s.nextId++, kind: 'mine' as const, x: 1500 * ONE, y: (FLOOR - 2) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: 150, dud: false, hp: 0, arm: 0, gift: null, chute: false, laid: false };
     s.objs.push(mine);
     const events = run(s, 1);
     expect(ofKind(events, 'mine')).toHaveLength(1);
@@ -828,4 +836,336 @@ describe('determinism', () => {
     // The copy is its own board: running it on leaves the original where it was.
     expect(half.tick).toBe(s.tick + 100);
   }, 20_000);
+});
+
+/** A crate lying on the flat lab's floor at `x`. */
+function crate(s: SlugsState, x: number, gift: Gift): Obj {
+  const o: Obj = { id: s.nextId++, kind: 'crate', x: x * ONE, y: (FLOOR - 6) * ONE, vx: 0, vy: 0, rest: true, fuse: -1, delay: 0, dud: false, hp: 1, arm: 0, gift, chute: false, laid: false };
+  s.objs.push(o);
+  return o;
+}
+
+/** Turns that run out on the clock with nothing fired, every tick checked and handed to `each`. */
+function idleTurns(s: SlugsState, turns: number, each: (s: SlugsState) => void = () => {}): SlugEvent[] {
+  const events: SlugEvent[] = [];
+  for (let t = 0; t < turns; t++) {
+    const team = s.activeTeam;
+    for (let i = 0; ; i++) {
+      if (i > 8000) throw new Error(`turn never passed: phase ${s.phase}`);
+      if (s.phase === 'turn') s.timeLeft = Math.min(s.timeLeft, 1);
+      events.push(...run(s, 1));
+      each(s);
+      if (s.phase === 'over') return events;
+      if (s.phase === 'ready' && s.activeTeam !== team) break;
+    }
+  }
+  return events;
+}
+
+/** The gift of each crate as it is dropped, taking every crate away again so the cap never stops the drops. */
+function giftsDropped(s: SlugsState, turns: number): Gift[] {
+  const gifts: Gift[] = [];
+  const water = s.water;
+  idleTurns(s, turns, (s) => {
+    // In sudden death the water would rise each turn and drown the lab before many crates came.
+    s.water = water;
+    if (!s.events.some((e) => e.k === 'crate')) return;
+    for (const o of s.objs) if (o.kind === 'crate' && o.gift) gifts.push(o.gift);
+    s.objs = s.objs.filter((o) => o.kind !== 'crate');
+  });
+  return gifts;
+}
+
+describe('crates', () => {
+  it('lose the parachute to a blast that shoves them, so they fall rather than float on', () => {
+    const s = lab();
+    s.phase = 'settle';
+    const o = crate(s, 1000, 'health');
+    o.y = 200 * ONE;
+    o.rest = false;
+    o.chute = true;
+    explode(s, 1000 - 40, 200, 50, 30, 0);
+    expect(o.vx).toBeGreaterThan(0);
+    expect(o.chute).toBe(false);
+    const far = crate(s, 1600, 'health');
+    far.y = 200 * ONE;
+    far.chute = true;
+    explode(s, 1000, 200, 50, 30, 0);
+    expect(far.chute).toBe(true);
+  });
+
+  it('parachute in between turns, never more than five, apart from everything, and come to rest on the land', () => {
+    const s = lab();
+    let most = 0;
+    let dropped = 0;
+    idleTurns(s, 40, (s) => {
+      const crates = s.objs.filter((o) => o.kind === 'crate');
+      most = Math.max(most, crates.length);
+      if (!s.events.some((e) => e.k === 'crate')) return;
+      dropped++;
+      // The lab is flat, so every crate comes down to the same row.
+      const c = s.objs[s.objs.length - 1];
+      expect(c.kind).toBe('crate');
+      expect(c.chute).toBe(true);
+      expect(s.phase).toBe('ready');
+      for (const o of s.objs) {
+        if (o !== c) expect(Math.abs(px(o.x) - px(c.x)) + Math.abs(px(o.y) - (FLOOR - 6))).toBeGreaterThanOrEqual(64);
+      }
+    });
+    expect(dropped).toBeGreaterThanOrEqual(5);
+    expect(most).toBe(5);
+    run(s, 600);
+    for (const o of s.objs.filter((o) => o.kind === 'crate')) {
+      expect(o.chute).toBe(false);
+      expect(px(o.y)).toBe(FLOOR - 6);
+    }
+  }, 30_000);
+
+  it('never land within 64 px of a barrel, mine or crate', () => {
+    const s = lab();
+    // Barrels 60 px apart along the whole floor leave nowhere far enough from one.
+    for (let x = 10; x < W; x += 60) barrel(s, x);
+    s.objs.forEach((o) => { o.hp = 1000; });
+    expect(ofKind(idleTurns(s, 30), 'crate')).toEqual([]);
+    // With two barrels in three gone, the gaps are 180 px and crates come into them.
+    s.objs = s.objs.filter((_, i) => i % 3 === 0);
+    const gaps = s.objs.map((o) => px(o.x));
+    const drops = ofKind(idleTurns(s, 30), 'crate');
+    expect(drops.length).toBeGreaterThan(0);
+    for (const d of drops) expect(Math.min(...gaps.map((x) => Math.abs(x - d.x)))).toBeGreaterThanOrEqual(62);
+  }, 30_000);
+
+  it('do not come when the match has them off', () => {
+    const s = lab();
+    s.opts = { ...s.opts, crates: false };
+    expect(ofKind(idleTurns(s, 30), 'crate')).toEqual([]);
+  }, 30_000);
+
+  it('hold weapons, health and utilities, and no health once sudden death has begun', () => {
+    const gifts = giftsDropped(lab(), 60);
+    expect(gifts.length).toBeGreaterThan(15);
+    expect(gifts).toContain('health');
+    expect(gifts.some((g) => g !== 'health' && WEAPON[g].category === 'utility')).toBe(true);
+    expect(gifts.some((g) => g !== 'health' && WEAPON[g].category !== 'utility')).toBe(true);
+    // A gift is something a team can be short of: never a weapon every team has without end.
+    expect(gifts.every((g) => g === 'health' || WEAPON[g].ammo >= 0)).toBe(true);
+    const late = lab();
+    late.sudden = true;
+    const lateGifts = giftsDropped(late, 60);
+    expect(lateGifts.length).toBeGreaterThan(15);
+    expect(lateGifts).not.toContain('health');
+  }, 60_000);
+
+  it('give health to the slug that reaches one, and a weapon to its team', () => {
+    const s = lab();
+    const hp = s.slugs[0].hp;
+    crate(s, 330, 'health');
+    const events = run(s, 200, { keys: RIGHT });
+    expect(ofKind(events, 'gift')).toEqual([{ k: 'gift', id: 0, what: 'health', x: 330, y: FLOOR - 6 }]);
+    expect(s.slugs[0].hp).toBe(hp + CRATE_HEALTH);
+    expect(s.objs.some((o) => o.kind === 'crate')).toBe(false);
+
+    const t = lab();
+    const homing = t.teams[0].ammo.homing;
+    const enemy = t.teams[1].ammo.homing;
+    crate(t, px(t.slugs[2].x), 'homing');
+    run(t, 2);
+    expect(t.teams[1].ammo.homing).toBe(enemy + 1);
+    expect(t.teams[0].ammo.homing).toBe(homing);
+  });
+
+  it('a utility found makes one the team can use, where before it had none to pick', () => {
+    const s = lab();
+    advance(s, { keys: 0, act: { t: 'weapon', w: 'laser' } });
+    expect(s.weapon).not.toBe('laser');
+    crate(s, px(s.slugs[0].x), 'laser');
+    run(s, 2);
+    expect(s.teams[0].ammo.laser).toBe(1);
+    choose(s, 'laser');
+  });
+
+  it('a weapon crate that is shot goes off; a health crate is only broken', () => {
+    for (const [gift, booms] of [['bazooka', 2], ['health', 1]] as const) {
+      const s = lab();
+      crate(s, 360, gift);
+      s.slugs[0].facing = 1;
+      s.slugs[0].aim = 0;
+      choose(s, 'shotgun');
+      const events = [...press(s), ...run(s, 5)];
+      expect(ofKind(events, 'boom'), gift).toHaveLength(booms);
+      expect(ofKind(events, 'gift')).toEqual([]);
+      expect(s.objs.some((o) => o.kind === 'crate')).toBe(false);
+    }
+  });
+});
+
+describe('utilities', () => {
+  /** Slug 0's team holding `n` of utility `w`, which it switches on. */
+  function switchOn(s: SlugsState, w: 'lowgrav' | 'fastwalk' | 'laser' | 'double', n = 1): SlugEvent[] {
+    s.teams[0].ammo[w] = n;
+    choose(s, w);
+    return press(s);
+  }
+
+  it('switch on without using up the turn, and put the weapon back in hand', () => {
+    const s = lab();
+    const events = switchOn(s, 'lowgrav', 2);
+    expect(ofKind(events, 'boost')).toEqual([{ k: 'boost', id: 0, w: 'lowgrav' }]);
+    expect(s.boost & BOOST.lowgrav).toBe(BOOST.lowgrav);
+    expect(s.teams[0].ammo.lowgrav).toBe(1);
+    expect(s.phase).toBe('turn');
+    expect(s.weapon).toBe(s.teams[0].weapon);
+    expect(s.teams[0].weapon).not.toBe('lowgrav');
+    // One already on is not spent again.
+    choose(s, 'lowgrav');
+    expect(ofKind(press(s), 'boost')).toEqual([]);
+    expect(s.teams[0].ammo.lowgrav).toBe(1);
+    // The attack is still there to make.
+    choose(s, 'shotgun');
+    expect(ofKind(press(s), 'shot')).toHaveLength(1);
+  });
+
+  it('last until the next turn', () => {
+    const s = lab();
+    switchOn(s, 'double');
+    expect(s.boost).toBe(BOOST.double);
+    untilNextTurn(s);
+    expect(s.boost).toBe(0);
+  }, 20_000);
+
+  it('low gravity halves gravity, so a jump stays up longer', () => {
+    const airTime = (low: boolean) => {
+      const s = lab();
+      if (low) switchOn(s, 'lowgrav');
+      expect(gravity(s)).toBe(low ? GRAVITY >> 1 : GRAVITY);
+      advance(s, { keys: 0, act: { t: 'jump' } });
+      let ticks = 0;
+      while (s.slugs[0].mode !== 'stand' && ticks < 400) {
+        run(s, 1);
+        ticks++;
+      }
+      return ticks;
+    };
+    const normal = airTime(false);
+    expect(normal).toBeGreaterThan(10);
+    expect(airTime(true)).toBeGreaterThan(normal * 1.3);
+  });
+
+  it('fast walk covers twice the ground', () => {
+    const walked = (fast: boolean) => {
+      const s = lab();
+      if (fast) switchOn(s, 'fastwalk');
+      const x = px(s.slugs[0].x);
+      run(s, 90, { keys: RIGHT });
+      return px(s.slugs[0].x) - x;
+    };
+    const normal = walked(false);
+    expect(normal).toBeGreaterThan(10);
+    const fast = walked(true);
+    expect(fast).toBeGreaterThanOrEqual(normal * 1.8);
+    expect(fast).toBeLessThanOrEqual(normal * 2.2);
+  });
+
+  it('double damage doubles the attack, but not a barrel it sets off', () => {
+    const shotgunDamage = (double: boolean) => {
+      const s = lab();
+      stand(s, 2, 380);
+      if (double) switchOn(s, 'double');
+      s.slugs[0].facing = 1;
+      s.slugs[0].aim = 0;
+      choose(s, 'shotgun');
+      return ofKind(press(s), 'hurt').filter((e) => e.id === 2).reduce((n, e) => n + e.dmg, 0);
+    };
+    const normal = shotgunDamage(false);
+    expect(normal).toBeGreaterThan(0);
+    expect(shotgunDamage(true)).toBeGreaterThanOrEqual(2 * normal);
+
+    const barrelDamage = (double: boolean) => {
+      const s = lab();
+      if (double) s.boost = BOOST.double;
+      const before = s.slugs[2].hp;
+      explode(s, px(s.slugs[2].x) + 6, FLOOR - 8, 30, 20, 0, 'barrel');
+      return before - s.slugs[2].hp;
+    };
+    expect(barrelDamage(false)).toBeGreaterThan(0);
+    expect(barrelDamage(true)).toBe(barrelDamage(false));
+  });
+
+  it("the laser sight's line ends where the shot does", () => {
+    const s = lab();
+    stand(s, 2, 380);
+    switchOn(s, 'laser');
+    const slug = s.slugs[0];
+    slug.facing = 1;
+    slug.aim = 0;
+    const sight = shotEnd(s, slug, 0, shotRange('shotgun'));
+    expect(sight.stop).toBe('hit');
+    expect(Math.abs(sight.x1 - 380)).toBeLessThanOrEqual(4);
+    choose(s, 'shotgun');
+    const [shot] = ofKind(press(s), 'shot');
+    expect([shot.x1, shot.y1]).toEqual([sight.x1, sight.y1]);
+    expect(shotEnd(s, slug, 89, shotRange('shotgun')).stop).toBe('away');
+  });
+
+  it('can be switched on in flight, and the jetpack keeps flying', () => {
+    const s = lab();
+    s.teams[0].ammo.lowgrav = 1;
+    choose(s, 'jetpack');
+    press(s);
+    run(s, 20, { keys: UP });
+    expect(s.slugs[0].mode).toBe('jet');
+    choose(s, 'lowgrav');
+    const events = [...run(s, 1, { keys: FIRE | UP }), ...run(s, 1, { keys: UP })];
+    expect(ofKind(events, 'boost')).toHaveLength(1);
+    expect(s.slugs[0].mode).toBe('jet');
+    expect(s.teams[0].ammo.lowgrav).toBe(0);
+  });
+
+  it('switched on while flying the last jetpack, leaves the jetpack in hand, so fire still switches it off', () => {
+    const s = lab();
+    s.teams[0].ammo.jetpack = 1;
+    s.teams[0].ammo.double = 1;
+    choose(s, 'jetpack');
+    press(s);
+    run(s, 20, { keys: UP });
+    expect(s.teams[0].ammo.jetpack).toBe(0);
+    choose(s, 'double');
+    run(s, 1, { keys: FIRE | UP });
+    run(s, 1, { keys: UP });
+    expect(s.weapon).toBe('jetpack');
+    const events = [...run(s, 1, { keys: FIRE }), ...run(s, 5)];
+    expect(s.slugs[0].mode).toBe('air');
+    expect(s.charging).toBe(false);
+    expect(ofKind(events, 'fire')).toEqual([]);
+    expect(s.phase).toBe('turn');
+  });
+
+  it('double damage counts for a mine laid this turn, not one already on the map, and the laying is forgotten next turn', () => {
+    const mineDamage = (laid: boolean, double: boolean) => {
+      const s = lab();
+      if (double) s.boost = BOOST.double;
+      s.dudBag = [0, 0];
+      s.phase = 'settle';
+      const x = px(s.slugs[2].x) + 10;
+      s.objs.push({ id: s.nextId++, kind: 'mine', x: x * ONE, y: (FLOOR - 2) * ONE, vx: 0, vy: 0, rest: true, fuse: 1, delay: 1, dud: false, hp: 0, arm: 0, gift: null, chute: false, laid });
+      const before = s.slugs[2].hp;
+      expect(ofKind(run(s, 3), 'boom')).toHaveLength(1);
+      return before - s.slugs[2].hp;
+    };
+    const normal = mineDamage(true, false);
+    expect(normal).toBeGreaterThan(0);
+    expect(mineDamage(true, true)).toBeGreaterThanOrEqual(2 * normal);
+    expect(mineDamage(false, true)).toBe(mineDamage(false, false));
+
+    const s = lab();
+    choose(s, 'mine');
+    press(s);
+    const laid = s.objs.filter((o) => o.kind === 'mine' && o.laid);
+    expect(laid).toHaveLength(1);
+    // Never armed, so the slug that laid it cannot set it off before the next turn.
+    laid[0].arm = 99999;
+    untilNextTurn(s);
+    expect(s.objs).toContain(laid[0]);
+    expect(laid[0].laid).toBe(false);
+  });
 });
