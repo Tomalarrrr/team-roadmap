@@ -88,9 +88,24 @@ export function seatOf(match: Pick<SlugsMatch, 'players'>, sessionId: string): S
   return SEATS.find((seat) => match.players[seat]?.sessionId === sessionId);
 }
 
+type Presence = Pick<SlugsMatch, 'players' | 'out' | 'gone'>;
+
+/**
+ * Whether the person in `seat` is still taking part. One who left a game partway
+ * keeps the seat until the next game starts (the game still names them), but is
+ * not waited on or made host while gone.
+ */
+const stays = (match: Presence, seat: Seat) => Boolean(match.players[seat]) && match.out?.[seat] === undefined && match.gone !== seat;
+
 /** The person who chooses the settings: the one in the first seat taken, so the role passes on when they leave. */
-export function hostOf(match: Pick<SlugsMatch, 'players'>): Seat | undefined {
-  return SEATS.find((seat) => match.players[seat]);
+export function hostOf(match: Presence): Seat | undefined {
+  return SEATS.find((seat) => stays(match, seat));
+}
+
+/** The people the host waits on before starting: everyone else still taking part who is not ready. */
+export function waitingOn(match: Presence): Seat[] {
+  const host = hostOf(match);
+  return SEATS.filter((seat) => seat !== host && stays(match, seat) && !match.players[seat]!.ready);
 }
 
 /** The seats that play, in team order: each held by a person or the computer. */
@@ -264,7 +279,9 @@ async function inLobby(
       refusal = 'A game is being played.';
       return undefined;
     }
-    const next = change(current, seat);
+    // Acting in the lobby is coming back: someone who rejoined while the game
+    // they left was still on is in the next one.
+    const next = change(withoutOut(current, seat), seat);
     if (typeof next === 'string') {
       refusal = next;
       return undefined;
@@ -336,14 +353,17 @@ export async function startMatch(code: string, sessionId: string, seed: number):
       refusal = 'Only the host starts the game.';
       return undefined;
     }
+    if (waitingOn(current).length > 0) {
+      refusal = 'Waiting for everyone to be ready.';
+      return undefined;
+    }
+    // The one whose leaving ended the last game plays again only once they are back and ready.
     const players: SlugsMatch['players'] = {};
     for (const each of SEATS) {
       const player = current.players[each];
-      if (player && current.out?.[each] === undefined) players[each] = { sessionId: player.sessionId, name: player.name };
-    }
-    if (SEATS.some((each) => each !== seat && players[each] && !current.players[each]!.ready)) {
-      refusal = 'Waiting for everyone to be ready.';
-      return undefined;
+      if (player && (stays(current, each) || (current.out?.[each] === undefined && player.ready))) {
+        players[each] = { sessionId: player.sessionId, name: player.name };
+      }
     }
     if (teamSeats({ players, cpu: current.cpu }).length < 2) {
       refusal = 'A game needs two teams. Add the computer or invite someone.';

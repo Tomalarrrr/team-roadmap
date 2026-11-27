@@ -18,6 +18,7 @@ import {
   startMatch,
   teamSeats,
   vacateSeat,
+  waitingOn as waitingOnIn,
 } from '../../api/slugsApi';
 import type { Seat, SlugsRoom } from '../../api/slugsApi';
 import { TEAM_COLORS } from '../../slugsGameLogic';
@@ -123,7 +124,12 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
   const [me] = useState(who);
   const [name, setName] = useState(me.name);
   const [code, setCode] = useState<string | null>(null);
-  const [joinCode, setJoinCode] = useState(() => inviteCode?.toUpperCase() ?? recallRoom());
+  // The invite counts while the link still carries it. It is taken off once
+  // joined, so a reload, or coming back to the lobby, goes to the room this tab
+  // was last in instead.
+  const [joinCode, setJoinCode] = useState(() =>
+    inviteCode && new URLSearchParams(window.location.search).has('slugs') ? inviteCode.toUpperCase() : recallRoom()
+  );
   const [room, setRoom] = useState<SlugsRoom | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -136,6 +142,11 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
 
   const enter = useCallback((roomCode: string) => {
     rememberRoom(roomCode);
+    const url = new URL(window.location.href);
+    if (url.searchParams.has('slugs')) {
+      url.searchParams.delete('slugs');
+      window.history.replaceState(window.history.state, '', url.toString());
+    }
     setError('');
     setRoom(null);
     setCode(roomCode);
@@ -258,6 +269,14 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
     setSettings(code, me.sessionId, stamped(encodeSettings(decodeSettings(restamp)!))).catch((err: Error) => setError(err.message));
   }, [code, restamp, me.sessionId]);
 
+  // Ready means ready for these rules: once the room's differ from this tab's,
+  // the host must not be able to start with this seat counted in.
+  const staleReady = Boolean(code && match && mySeat && !rulesMatch && match.status !== 'playing' && match.players[mySeat]?.ready);
+  useEffect(() => {
+    if (!code || !staleReady) return;
+    setReady(code, me.sessionId, false).catch((err: Error) => setError(err.message));
+  }, [code, staleReady, me.sessionId]);
+
   const act = (work: Promise<void>) => {
     setError('');
     work.catch((err: Error) => setError(err.message));
@@ -326,7 +345,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: 
 
   const teams = teamSeats(match);
   const isHost = host === mySeat;
-  const waitingOn = SEATS.filter((seat) => seat !== host && match.players[seat] && !match.players[seat]!.ready);
+  const waitingOn = waitingOnIn(match);
   const canStart = isHost && waitingOn.length === 0 && teams.length >= 2 && settings !== null && rulesMatch && match.status !== 'playing';
   const nameOf = (seat: Seat) => match.players[seat]?.name || `Player ${seat.toUpperCase()}`;
 

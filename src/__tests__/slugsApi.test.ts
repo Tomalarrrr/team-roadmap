@@ -29,6 +29,7 @@ import {
   createRoom,
   getChunks,
   getRoom,
+  hostOf,
   joinRoom,
   putChunk,
   putSeat,
@@ -38,6 +39,7 @@ import {
   setSettings,
   startMatch,
   vacateSeat,
+  waitingOn,
 } from '../api/slugsApi';
 import type { SlugsMatch } from '../api/slugsApi';
 
@@ -51,6 +53,14 @@ const matchOf = async (code: string) => (await getRoom(code))!.m;
 async function seated(): Promise<string> {
   const code = await createRoom('s-ann', 'Ann');
   await joinRoom(code, 's-bob', 'Bob');
+  return code;
+}
+
+async function threeTeams(): Promise<string> {
+  const code = await seated();
+  await setComputer(code, 's-ann', 'c', true);
+  await setReady(code, 's-bob', true);
+  await startMatch(code, 's-ann', 1);
   return code;
 }
 
@@ -212,6 +222,46 @@ describe('slugs leaving', () => {
     await recordResult(code, 1, 'a');
     expect(await joinRoom(code, 's-bob', 'Bob')).toBe('b');
     expect((await matchOf(code)).out).toBeUndefined();
+  });
+
+  it('brings back a person who rejoined while the game they left was still on, once they press Ready', async () => {
+    const code = await threeTeams();
+    await vacateSeat(code, 'b', 0);
+    expect(await joinRoom(code, 's-bob', 'Bob')).toBe('b');
+    await recordResult(code, 1, 'a');
+    expect((await matchOf(code)).out).toEqual({ b: 0 });
+    await setReady(code, 's-bob', true);
+    expect((await matchOf(code)).out).toBeUndefined();
+    await startMatch(code, 's-ann', 2);
+    expect((await matchOf(code)).players.b).toEqual({ sessionId: 's-bob', name: 'Bob' });
+  });
+
+  it('passes the host on from one who left a game of three, and leaves them out of the next', async () => {
+    const code = await threeTeams();
+    await vacateSeat(code, 'a', 0);
+    await recordResult(code, 1, 'b');
+    const m = await matchOf(code);
+    expect(hostOf(m)).toBe('b');
+    expect(waitingOn(m)).toEqual([]);
+    await expect(startMatch(code, 's-ann', 2)).rejects.toThrow('Only the host');
+    await startMatch(code, 's-bob', 2);
+    const next = await matchOf(code);
+    expect(next.status).toBe('playing');
+    expect(Object.keys(next.players)).toEqual(['b']);
+  });
+
+  it('does not wait on the one whose leaving ended a game of two, and plays them again once back and ready', async () => {
+    const code = await playing();
+    await vacateSeat(code, 'a', 0);
+    const m = await matchOf(code);
+    expect(m.gone).toBe('a');
+    expect(hostOf(m)).toBe('b');
+    expect(waitingOn(m)).toEqual([]);
+
+    await joinRoom(code, 's-ann', 'Ann');
+    await setReady(code, 's-ann', true);
+    await startMatch(code, 's-bob', 2);
+    expect(Object.keys((await matchOf(code)).players).sort()).toEqual(['a', 'b']);
   });
 
   it('frees a seat between games, and removes the room with its last person', async () => {

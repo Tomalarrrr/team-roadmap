@@ -474,6 +474,12 @@ export interface Lockstep {
   sent: number[];
   /** The last tick this seat promised its inputs complete through. */
   promised: number;
+  /**
+   * Whether the room, as last read, is playing this game. The rules take a sealed
+   * chunk only then: a seal sent after the result is refused, and the seat write
+   * behind it never goes.
+   */
+  live: boolean;
   /** What the room holds for this seat as of `ownSeq`: the chunks sealed, the open part and the last sealed. */
   roomN: number;
   roomIn: string;
@@ -534,6 +540,7 @@ export function newLockstep(match: SlugsMatch, seat: Seat): Lockstep {
     ownSeq: undefined,
     sent: [],
     promised: 0,
+    live: false,
     roomN: 0,
     roomIn: '',
     roomPrev: undefined,
@@ -658,6 +665,7 @@ const PLAYBACK_JUMPS = 8;
  */
 export function takeRoom(ls: Lockstep, room: SlugsRoom): Seat[] {
   const missing: Seat[] = [];
+  ls.live = room.m.status === 'playing' && room.m.game === ls.game;
   if (room.m.game === ls.game && room.m.out) {
     for (const seat of ls.seats) {
       const from = room.m.out[seat];
@@ -764,12 +772,14 @@ function add(ls: Lockstep, entry: Entry): void {
   const log = ownLog(ls);
   const after = log.entries.length ? log.entries[log.entries.length - 1].tick : 0;
   const text = encodeEntry(entry, after);
-  if (log.text.length + text.length - ls.sealedLen - (ls.roomIn.length >= SEAL_AT ? ls.roomIn.length : 0) > IN_MOST) return;
+  if (log.text.length + text.length - ls.sealedLen - (sealDue(ls) ? ls.roomIn.length : 0) > IN_MOST) return;
   log.text += text;
   log.entries.push(entry);
   if (entry.keys !== undefined) ls.keys = entry.keys;
   else ls.lastAct = entry.tick;
 }
+
+const sealDue = (ls: Lockstep) => ls.live && ls.roomIn.length >= SEAL_AT && ls.roomN < CHUNKS_MOST;
 
 /** A chunk to seal before a seat write, at its place among the seat's chunks. */
 export interface Seal {
@@ -791,16 +801,19 @@ export function sending(ls: Lockstep, seq: number): { write: SeatWrite; seal?: S
   let prev = ls.roomPrev;
   let from = ls.sealedLen;
   let seal: Seal | undefined;
-  if (ls.roomIn.length >= SEAL_AT && n < CHUNKS_MOST) {
+  if (sealDue(ls)) {
     seal = { index: n, text: ls.roomIn };
     n += 1;
     prev = ls.roomIn;
     from += ls.roomIn.length;
   }
+  // Once this seat is handed to the computer, the rules refuse a promise past the
+  // tick it was handed over at: a tab that slept through it would be refused for ever.
+  const out = ls.out[ls.seat];
   const write: SeatWrite = {
     seq,
     game: ls.game,
-    k: ls.promised,
+    k: out === undefined ? ls.promised : Math.min(ls.promised, out),
     n,
     in: text.slice(from),
     ...(prev !== undefined && { prev }),

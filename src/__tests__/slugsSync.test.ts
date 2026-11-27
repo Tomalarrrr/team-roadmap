@@ -1046,3 +1046,56 @@ describe('slugs input sizes over a long match', () => {
     expect(total).toBeLessThan(20_000);
   }, 120_000);
 });
+
+describe('slugs writes the rules would refuse', () => {
+  /** A room in game 1 whose seat a holds a full open part, read by a's client. */
+  function fullOpenPart(): { db: Db; ls: Lockstep; open: string } {
+    const db = startedDb(QUICK);
+    const open = '1Ka'.repeat(Math.ceil(SEAL_AT / 3));
+    expect(db.write(roomAt('/s/a'), { seq: 1, at: db.now, game: 1, k: 0, n: 0, in: open })).toBe(true);
+    const ls = newLockstep(db.room().m, 'a');
+    takeRoom(ls, db.room());
+    expect(ls.roomIn).toBe(open);
+    return { db, ls, open };
+  }
+
+  it('seals a full open part while the game is on', () => {
+    const { db, ls, open } = fullOpenPart();
+    const { write, seal } = sending(ls, 2);
+    expect(seal).toEqual({ index: 0, text: open });
+    expect(db.write(roomAt(`/h/g1/a/${chunkKey(0)}`), seal!.text)).toBe(true);
+    expect(db.write(roomAt('/s/a'), { ...write, at: db.now })).toBe(true);
+  });
+
+  it('does not seal once the result is in, so the seat write that follows still lands', () => {
+    const { db, ls, open } = fullOpenPart();
+    expect(db.write(roomAt('/m'), { ...db.room().m, status: 'finished', winner: 'a' })).toBe(true);
+    // What the client sent before: the rules take no chunk now.
+    expect(db.write(roomAt(`/h/g1/a/${chunkKey(0)}`), open)).toBe(false);
+    takeRoom(ls, db.room());
+    const { write, seal } = sending(ls, 2);
+    expect(seal).toBeUndefined();
+    expect(write.n).toBe(0);
+    expect(write.in).toBe(open);
+    expect(db.write(roomAt('/s/a'), { ...write, at: db.now })).toBe(true);
+  });
+
+  it('promises no further than the tick a seat was handed to the computer at', () => {
+    const db = startedDb(QUICK, 12345, 'c');
+    expect(db.write(roomAt('/s/a'), { seq: 1, at: db.now, game: 1, k: 5000, n: 0, in: '' })).toBe(true);
+    expect(db.write(roomAt('/s/b'), { seq: 1, at: db.now, game: 1, k: 10, n: 0, in: '' })).toBe(true);
+    const bob = newLockstep(db.room().m, 'b');
+    takeRoom(bob, db.room());
+    expect(db.write(roomAt('/m'), { ...db.room().m, out: { b: 10 } })).toBe(true);
+    // Bob's tab slept through being handed over and runs on from where it was.
+    takeRoom(bob, db.room());
+    for (let now = 0; now <= 3000; now += FRAME_MS) frame(bob, now, { keys: 0 });
+    expect(bob.state.tick).toBeGreaterThan(10);
+
+    const { write } = sending(bob, 2);
+    expect(write.k).toBe(10);
+    expect(db.write(roomAt('/s/b'), { ...write, at: db.now })).toBe(true);
+    // Positive control: the promise the tab would otherwise send is refused.
+    expect(db.write(roomAt('/s/b'), { ...write, k: bob.state.tick, at: db.now })).toBe(false);
+  });
+});

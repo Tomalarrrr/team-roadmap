@@ -40,8 +40,10 @@ const lobby = (set: string | undefined, ready = false): SlugsRoom => ({
 let box: HTMLDivElement;
 let root: Root;
 
-async function open(as: string, room: SlugsRoom, inviteCode: string | null = 'QX7Z') {
+async function open(as: string, room: SlugsRoom, inviteCode: string | null = 'QX7Z', inLink = inviteCode !== null) {
   sessionStorage.setItem('roadmap-user-id', as);
+  // As SearchFilter does: the invite is read off the link it came in on.
+  window.history.replaceState(null, '', inLink ? `/?slugs=${inviteCode}` : '/');
   vi.mocked(api.getRoom).mockResolvedValue(room);
   box = document.createElement('div');
   document.body.appendChild(box);
@@ -65,6 +67,8 @@ const button = (label: string) => [...box.querySelectorAll('button')].find((b) =
 beforeEach(() => {
   vi.mocked(api.setSettings).mockClear();
   vi.mocked(api.setReady).mockClear();
+  vi.mocked(api.joinRoom).mockClear();
+  sessionStorage.removeItem('slugs-room');
 });
 
 afterEach(() => {
@@ -117,5 +121,32 @@ describe('a room on other rules', () => {
   it('can be readied by a guest on the host’s rules', async () => {
     await open('session-b', lobby(stamped('perTeam=2')));
     expect(button('Ready').disabled).toBe(false);
+  });
+
+  it('takes back a guest’s Ready given before the rules changed', async () => {
+    await open('session-b', lobby(`perTeam=2;rules=${OTHER}`, true));
+    expect(api.setReady).toHaveBeenCalledTimes(1);
+    expect(api.setReady).toHaveBeenCalledWith('QX7Z', 'session-b', false);
+  });
+
+  it('keeps a guest’s Ready on the host’s rules', async () => {
+    await open('session-b', lobby(stamped('perTeam=2'), true));
+    expect(api.setReady).not.toHaveBeenCalled();
+  });
+});
+
+describe('an invite link', () => {
+  it('is joined, then taken off the address so a reload does not join it again', async () => {
+    await open('session-b', lobby(stamped('perTeam=2')));
+    expect(api.joinRoom).toHaveBeenCalledWith('QX7Z', 'session-b', 'Player');
+    expect(window.location.search).toBe('');
+    expect(sessionStorage.getItem('slugs-room')).toBe('QX7Z');
+  });
+
+  it('gives way to the room this tab was last in once it is off the address', async () => {
+    sessionStorage.setItem('slugs-room', 'K2PD');
+    await open('session-b', lobby(stamped('perTeam=2')), 'QX7Z', false);
+    expect(api.joinRoom).toHaveBeenCalledTimes(1);
+    expect(api.joinRoom).toHaveBeenCalledWith('K2PD', 'session-b', 'Player');
   });
 });

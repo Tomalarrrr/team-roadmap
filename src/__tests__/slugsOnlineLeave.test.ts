@@ -83,3 +83,26 @@ describe('leaving an online game of three', () => {
     expect(vi.mocked(api.vacateSeat).mock.calls[0]).toEqual(['QX7Z', 'a', 0]);
   });
 });
+
+describe('a seat write the room refuses', () => {
+  it('is sent again at a slowing pace, not on every frame, and each refusal is logged', async () => {
+    let clock = 1000;
+    const now = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    vi.mocked(api.putSeat).mockClear();
+    const driver = onlineDriver('QX7Z', 'session-a', match);
+    driver.tick(clock, { keys: 0 });
+    await vi.waitFor(() => expect(api.getRoom).toHaveBeenCalled());
+    await Promise.resolve();
+    // Two seconds of frames, each long enough for the last refusal to come back.
+    for (let frame = 0; frame < 125; frame++) {
+      clock += 16;
+      driver.tick(clock, { keys: 0 });
+      for (let settle = 0; settle < 5; settle++) await Promise.resolve();
+    }
+    driver.dispose();
+    now.mockRestore();
+    // Waits of 100, 200, 400 and 800 ms fit in two seconds: five writes, where every frame would be over a hundred.
+    expect(vi.mocked(api.putSeat).mock.calls.length).toBe(5);
+    expect(warn.mock.calls.filter((call: unknown[]) => call[0] === '[Slugs] Report failed:')).toHaveLength(5);
+  });
+});

@@ -30,6 +30,9 @@ const REFOLLOW_MS = 5000;
 const REFOLLOW_MAX_MS = 60_000;
 /** Reads failing in a row before the link is shown as lost. */
 const FAILURES_LOST = 3;
+/** After a refused or failed seat write, the wait before the next, doubling each time it fails again. */
+const RETRY_FIRST_MS = 100;
+const RETRY_MOST_MS = 2000;
 /** A seat that wrote nothing for this long is shown as reconnecting: three of its beats. */
 const QUIET_MS = 3 * BEAT_LIVE_MS;
 
@@ -97,6 +100,8 @@ export function onlineDriver(code: string, sessionId: string, match: SlugsMatch)
   let seq = Math.floor(Math.random() * 1e9);
   let putBusy = false;
   let sentAt = -Infinity;
+  let retryAt = 0;
+  let retryWait = RETRY_FIRST_MS;
   let resultSent = false;
   const ears: Partial<Record<Seat, Ear>> = {};
   const fetching = new Set<Seat>();
@@ -207,7 +212,7 @@ export function onlineDriver(code: string, sessionId: string, match: SlugsMatch)
   };
 
   const report = () => {
-    if (!heard || putBusy || !reportDue(ls, performance.now() - sentAt)) return;
+    if (!heard || putBusy || performance.now() < retryAt || !reportDue(ls, performance.now() - sentAt)) return;
     const { write, seal } = sending(ls, ++seq);
     putBusy = true;
     sentAt = performance.now();
@@ -215,11 +220,17 @@ export function onlineDriver(code: string, sessionId: string, match: SlugsMatch)
     sealFirst
       .then(() => putSeat(code, seat, write))
       .then(
-        () => landed(ls, write),
-        // The next write is due straight away and carries everything this one did.
+        () => {
+          landed(ls, write);
+          retryWait = RETRY_FIRST_MS;
+        },
+        // The next write carries everything this one did. It waits a while first:
+        // a write the rules refuse is refused again, and every frame would send it.
         (err) => {
           console.warn('[Slugs] Report failed:', err);
           sentAt = -Infinity;
+          retryAt = performance.now() + retryWait;
+          retryWait = Math.min(retryWait * 2, RETRY_MOST_MS);
         }
       )
       .finally(() => {
