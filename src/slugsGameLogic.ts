@@ -1824,7 +1824,10 @@ export function stepProj(state: SlugsState, p: Proj, live: boolean): ProjFate {
     const held = !steep || (p.x === x0 && p.y === y0) || (projHitsLand(t, px(p.x) + down, px(p.y)) && projHitsLand(t, px(p.x) + down, px(p.y) + 1));
     // A slug holds it up as land does: a jar lobbed straight up comes down on its thrower's head and
     // sits there, and with no rest its fuse never burns its last tick and the turn never ends.
-    if ((pinned || slow) && held && (target || projHitsLand(t, px(p.x), px(p.y) + 3))) {
+    // Beside a spike it can be held from one side below with nothing straight under it, and go nowhere.
+    const stuck = pinned && p.x === x0 && p.y === y0;
+    const under = projHitsLand(t, px(p.x), px(p.y) + 3) || (stuck && (projHitsLand(t, px(p.x) - 1, px(p.y) + 1) || projHitsLand(t, px(p.x) + 1, px(p.y) + 1)));
+    if ((pinned || slow) && held && (target || under)) {
       p.vx = p.vy = 0;
       p.rest = true;
     }

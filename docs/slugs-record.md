@@ -57,8 +57,15 @@ texture had when it was made and places its origin by it, so a texture repainted
 resolution put the origin a quarter of the way out: a mine sat 15 px right of and 20 px below
 where the rules had it. Each image now takes its texture's new size when it is repainted.
 
-Sent for the next push: a local match stops while the leave question is open (`hold` on the local
+Live by bfed74f: a local match stops while the leave question is open (`hold` on the local
 driver), so deciding costs no turn time. Online it cannot stop, and the clock runs on there.
+
+Live by 1538049, from a play-through of all 28 weapons: the weapon and controls panels are near
+opaque (`--plate-dense`), since at the strips' 72% the land and slug labels showed through the
+weapon names. The panel's description follows whichever moved last: an arrow press drops the
+pointer's hover until the pointer enters another cell, where before a resting pointer pinned the
+text to the cell under it. A slug's name and health sit on the canopy's top while a parachute is
+open, not across it.
 
 ## Architecture
 
@@ -220,6 +227,13 @@ mechanic is worth having it gets an original name and look (seedpod, jar, snail,
 | 2026-11-27 | Mine and object images after a zoom from resolution 2 to 8, in Chrome | Before: image width 80 against a 320 px texture. After: 320 against 320, mines on the ground where the rules put them |
 | 2026-11-27 | All slug test files on the working tree | `Tests 4 failed \| 471 passed (475)`; the four are slugsReplay "no replay of the kind wanted", which fail the same with zip lines switched off |
 | 2026-11-27 | Start to first frame, local match, Chrome on this Mac | Canvas at 241 ms, HUD at 750 ms; the gap is the theme's sky colour, not black, so no loading screen added |
+| 2026-11-27 | Play-through in Chrome, every one of the 28 weapons fired or used at least once | Three findings, all fixed: panel see-through, description stuck to the hovered cell, name across the open canopy. Spud's 15 hp in the parachute turn was a fall before Space opened it |
+| 2026-11-27 | Chute probe: 1,158 parachute drops across every map and several seeds, landing hp read on dry land | 0 lost health; the 215 that lost any were drownings or drift off the map |
+| 2026-11-27 | slugsWeaponPanel (new, jsdom) | `Tests 3 passed (3)` |
+| 2026-11-27 | Mutations on the panel: hover kept on an arrow press; description always the cursor | `expected 'Grenade' to be 'Shotgun'`; two failed, `expected 'Bazooka' to be 'Grenade'`, `expected 'Shotgun' to be 'Mortar'` |
+| 2026-11-27 | Panel, description and canopy label, in Chrome | Checked by eye: panel opaque, Right after hovering Grenade shows Homing missile, label above the canopy and back on the head on landing |
+| 2026-11-27 | 25f65ed with only the panel, CSS and label hunks: tsc -b, vite build, eslint, slop-check, all 13 slug test files one at a time | Each exit 0; slop-check `4 file(s) scanned, clean`; every file `Test Files 1 passed (1)` |
+| 2026-11-27 | Live ce43c43 in a clean worktree: tsc -b, vite build, full vitest | tsc and build exit 0; Vercel both projects "Deployment has completed". `Tests 10 failed \| 3585 passed (3595)`: all Swarm (swarmBuildStarts, swarmBuildings, swarmFloodPowers, swarmPieces), failing the same on 25f65ed, plus two files that need a `.env` the worktree lacks |
 
 ## Next task
 
