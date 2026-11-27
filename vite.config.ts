@@ -1,7 +1,9 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
+import { fileURLToPath } from 'url'
+import { build as esbuild } from 'esbuild'
 
 // Stamp the service worker with a build-time version so old caches are busted on deploy
 function swVersionPlugin() {
@@ -19,6 +21,55 @@ function swVersionPlugin() {
   }
 }
 
+// Slugs imports 'phaser', and the package's only entry is the whole library prebuilt
+// (1.4 MB minified), which cannot be tree-shaken. Its source is CommonJS switched by
+// webpack-style `typeof FLAG` tests, so the parts Slugs uses are bundled from it here
+// with the flags set as Phaser's own build sets them, less sound, which Slugs has none
+// of. Dev and build both get this, so a part missing from phaserParts.js shows up in dev.
+function phaserParts(): Plugin {
+  const entry = fileURLToPath(new URL('src/components/slugs/phaserParts.js', import.meta.url))
+  const flags: Record<string, boolean> = {
+    CANVAS_RENDERER: true,
+    WEBGL_RENDERER: true,
+    WEBGL_DEBUG: false,
+    FEATURE_SOUND: false,
+    PLUGIN_CAMERA3D: false,
+    PLUGIN_FBINSTANT: false,
+  }
+  const tests = new RegExp(`typeof (${Object.keys(flags).join('|')})\\b`, 'g')
+  const id = '\0phaser-parts'
+  return {
+    name: 'phaser-parts',
+    enforce: 'pre',
+    resolveId(source) {
+      return source === 'phaser' ? id : null
+    },
+    async load(loaded) {
+      if (loaded !== id) return null
+      this.addWatchFile(entry)
+      const out = await esbuild({
+        entryPoints: [entry],
+        bundle: true,
+        format: 'esm',
+        // Without its doc comments and indentation the dev module is 5.1 MB, not 15.8; names stay for stack traces.
+        minifyWhitespace: true,
+        minifySyntax: true,
+        write: false,
+        plugins: [{
+          name: 'phaser-flags',
+          setup(build) {
+            build.onLoad({ filter: /[\\/]phaser[\\/]src[\\/].*\.js$/ }, ({ path }) => ({
+              contents: readFileSync(path, 'utf-8').replace(tests, (_, flag: string) => String(flags[flag])),
+              loader: 'js',
+            }))
+          },
+        }],
+      })
+      return out.outputFiles[0].text
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // The /api/db proxy (api/db/[...path].ts) only runs on Vercel, not under the
@@ -28,7 +79,7 @@ export default defineConfig(({ mode }) => {
   const dbUrl = (env.FIREBASE_DATABASE_URL || env.VITE_FIREBASE_DATABASE_URL || '').replace(/\/$/, '')
 
   return {
-  plugins: [react(), swVersionPlugin()],
+  plugins: [phaserParts(), react(), swVersionPlugin()],
   server: {
     // Prevent connection resets during development
     hmr: {

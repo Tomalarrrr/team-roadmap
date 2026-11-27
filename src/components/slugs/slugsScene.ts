@@ -64,9 +64,10 @@ export interface Battlefield {
   destroy(): void;
 }
 
-/** Mean frame time (ms) over SLOW_SPAN (ms) above which the picture drops to its cheaper tier. */
+/** Mean frame time (ms) over SLOW_SPAN (ms) above which a span counts as slow; SLOW_RUNS slow spans in a row drop the picture to its cheaper tier. */
 const SLOW_FRAME_MS = 22;
 const SLOW_SPAN = 2000;
+const SLOW_RUNS = 2;
 /** World px of empty space the camera may show left and right of the map, and of sky above it for high shots. */
 const SIDE = 160;
 const SKY = 520;
@@ -155,7 +156,7 @@ class SlugsScene extends Phaser.Scene {
   private lean = false;
   /** prefers-reduced-motion, read once when the match starts. */
   private reduced = prefersReducedMotion();
-  private pace = { from: -1, frames: 0, after: -1 };
+  private pace = { from: -1, frames: 0, after: -1, slow: 0 };
   private bgCam!: Phaser.Cameras.Scene2D.Camera;
   private worldCam!: Phaser.Cameras.Scene2D.Camera;
   private uiCam!: Phaser.Cameras.Scene2D.Camera;
@@ -296,6 +297,21 @@ class SlugsScene extends Phaser.Scene {
 
   private key(prefix: string) {
     return `${prefix}${this.nextKey++}`;
+  }
+
+  /**
+   * A canvas texture for a picture repainted many times a second. Phaser's createCanvas
+   * asks for willReadFrequently, which keeps the canvas in main memory, and every upload
+   * of one then cost 2 to 6 times a GPU-backed canvas's (measured at 6x CPU throttle: 0.58
+   * against 0.25 ms a slug at 1 texture px per world px, 1.95 against 0.31 at 4). The
+   * context made here first is the one Phaser is handed back; nothing reads these back.
+   */
+  private paintable(prefix: string, width: number, height: number) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext('2d');
+    return this.textures.addCanvas(this.key(prefix), canvas)!;
   }
 
   /**
@@ -761,8 +777,11 @@ class SlugsScene extends Phaser.Scene {
   /**
    * An old laptop that cannot hold the frame rate gets a cheaper picture: one canvas
    * px per CSS px, half the particles, a coarser water line and a still sky. Judged on
-   * the mean frame over two seconds, after the first three (loading is not the pace).
-   * It never steps back up, so the picture does not flip between the two.
+   * the mean frame over two seconds, after the first three (loading is not the pace),
+   * and only when two such spans in a row are slow: a computer's turn can make one span
+   * slow on a machine that holds 60 the rest of the time (measured at 6x CPU throttle:
+   * single spans of 22 to 27 ms between runs of 16.7). It never steps back up, so the
+   * picture does not flip between the two.
    */
   private watchPace(time: number, delta: number) {
     if (this.lean) return;
@@ -771,12 +790,14 @@ class SlugsScene extends Phaser.Scene {
     if (time < this.pace.after || delta > 250 || this.pace.from < 0) {
       this.pace.from = time;
       this.pace.frames = 0;
+      this.pace.slow = 0;
       return;
     }
     this.pace.frames++;
     const span = time - this.pace.from;
     if (span < SLOW_SPAN) return;
-    if (span / this.pace.frames > SLOW_FRAME_MS) {
+    this.pace.slow = span / this.pace.frames > SLOW_FRAME_MS ? this.pace.slow + 1 : 0;
+    if (this.pace.slow >= SLOW_RUNS) {
       this.lean = true;
       this.fx.lean = true;
       this.lowerRes();
@@ -979,7 +1000,7 @@ class SlugsScene extends Phaser.Scene {
   }
 
   private newSlugTexture(res: number) {
-    return this.textures.createCanvas(this.key('slug'), CELL * res, TALL * res)!;
+    return this.paintable('slug', CELL * res, TALL * res)!;
   }
 
   private slugImage(x: number, y: number, tex: Phaser.Textures.CanvasTexture, depth: number) {
@@ -1208,7 +1229,7 @@ class SlugsScene extends Phaser.Scene {
     const objs = this.state.objs;
     const res = this.wantedRes();
     while (this.objViews.length < objs.length) {
-      const tex = this.textures.createCanvas(this.key('obj'), 20 * res, 20 * res)!;
+      const tex = this.paintable('obj', 20 * res, 20 * res)!;
       this.objViews.push({ tex, img: this.world(this.add.image(0, 0, tex).setDepth(15)), drawn: '' });
     }
     this.objViews.forEach((view, i) => {
@@ -1286,7 +1307,7 @@ class SlugsScene extends Phaser.Scene {
     const s = this.state;
     const res = this.wantedRes();
     while (this.projs.length < s.projs.length) {
-      const tex = this.textures.createCanvas(this.key('proj'), 24 * res, 24 * res)!;
+      const tex = this.paintable('proj', 24 * res, 24 * res)!;
       this.projs.push({
         tex,
         drawn: '',
