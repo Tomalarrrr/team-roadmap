@@ -1,0 +1,156 @@
+/* The Swarm lobby's look (SwarmGame.module.css), so the two games' rooms read the same. */
+.lobby {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 24px 20px;
+}
+.title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.note,
+.errorText {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.45;
+}
+.errorText { color: var(--error-red-dark); }
+.joinRow,
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.codeInput {
+  width: 96px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-full);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.codeInput:focus {
+  outline: none;
+  border-color: var(--text-primary);
+}
+.primaryBtn,
+.secondaryBtn {
+  padding: 8px 20px;
+  border-radius: var(--radius-full);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.primaryBtn {
+  border: 1px solid var(--text-primary);
+  background: var(--text-primary);
+  color: var(--bg-secondary);
+}
+.primaryBtn:hover:not(:disabled) { opacity: 0.86; }
+.secondaryBtn {
+  border: 1px solid var(--border-medium);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.secondaryBtn:hover:not(:disabled) { background: var(--bg-tertiary); }
+.primaryBtn:disabled,
+.secondaryBtn:disabled {
+  border-color: var(--border-light);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: default;
+}
+.linkBtn,
+.seatBtn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkBtn:hover,
+.seatBtn:hover { color: var(--text-primary); }
+.codeDisplay {
+  border: none;
+  background: none;
+  padding: 0 0 0 0.35em;
+  font-size: 1.7rem;
+  font-weight: 700;
+  letter-spacing: 0.35em;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.seats {
+  width: 100%;
+  max-width: 320px;
+  border-top: 1px solid var(--border-light);
+}
+.seat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+.seatEmpty { color: var(--text-muted); }
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+.seatName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seatState { color: var(--text-muted); }
+.form {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 12px;
+  width: min(100%, 360px);
+}
+.formWide { grid-column: 1 / -1; }
+.field { display: contents; }
+.fieldName {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  text-align: right;
+}
+.fieldControl {
+  display: flex;
+  min-width: 0;
+}
+.pick {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.85rem;
+}
+.pick:disabled {
+  color: var(--text-secondary);
+  opacity: 1;
+}

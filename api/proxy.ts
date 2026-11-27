@@ -30,7 +30,7 @@ const PATH_REGEX = /^[a-zA-Z0-9_\-/]*$/;
 // behind corporate VPNs that block Firebase's WebSocket. Everything else
 // (presence, connectFour, DB root) still goes via the Firebase SDK and must not
 // be reachable through the proxy.
-const ALLOWED_ROOTS = ['roadmap', 'ludo', 'ludo3', 'ludo4', 'snake', 'swarm'];
+const ALLOWED_ROOTS = ['roadmap', 'ludo', 'ludo3', 'ludo4', 'snake', 'swarm', 'slugs'];
 
 export default async function handler(request: Request): Promise<Response> {
   const databaseUrl =

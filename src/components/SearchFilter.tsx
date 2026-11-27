@@ -10,6 +10,7 @@ const Ludo3Game = lazy(() => import('./ludo3/Ludo3Game').then(m => ({ default: m
 const Ludo4Game = lazy(() => import('./ludo4/Ludo4Game').then(m => ({ default: m.Ludo4Game })));
 const SnakeGame = lazy(() => import('./snake/SnakeGame').then(m => ({ default: m.SnakeGame })));
 const SwarmGame = lazy(() => import('./swarm/SwarmGame').then(m => ({ default: m.SwarmGame })));
+const SlugsGame = lazy(() => import('./slugs/SlugsGame').then(m => ({ default: m.SlugsGame })));
 import { GameErrorBoundary } from './GameErrorBoundary';
 import { CyclesiteEmbed } from './CyclesiteEmbed';
 
@@ -79,6 +80,7 @@ export const SearchFilter = memo(function SearchFilter({
   const [showLudo4, setShowLudo4] = useState(false);
   const [showSnake, setShowSnake] = useState(false);
   const [showSwarm, setShowSwarm] = useState(false);
+  const [showSlugs, setShowSlugs] = useState(false);
   const [showCyclesite, setShowCyclesite] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -125,6 +127,7 @@ export const SearchFilter = memo(function SearchFilter({
     else if (magic === 'ludo4') open = () => setShowLudo4(true);
     else if (magic === 'snake') open = () => setShowSnake(true);
     else if (magic === 'swarm') open = () => setShowSwarm(true);
+    else if (magic === 'slugs') open = () => setShowSlugs(true);
     else if (magic === 'cyclesite') open = () => setShowCyclesite(true);
     if (!open) return;
     const timer = setTimeout(() => {
@@ -196,6 +199,18 @@ export const SearchFilter = memo(function SearchFilter({
   const closeSwarm = useCallback(() => {
     setShowSwarm(false);
     setSwarmInviteDismissed(true);
+  }, []);
+
+  // Slugs invite links: the same contract on ?slugs=CODE, with the code handed to the lobby.
+  const slugsInviteCode = useMemo(() => {
+    const code = new URLSearchParams(window.location.search).get('slugs');
+    return code && /^[a-z0-9]{4}$/i.test(code) ? code : null;
+  }, []);
+  const [slugsInviteDismissed, setSlugsInviteDismissed] = useState(false);
+  const slugsOpen = showSlugs || (!isLocked && slugsInviteCode !== null && !slugsInviteDismissed);
+  const closeSlugs = useCallback(() => {
+    setShowSlugs(false);
+    setSlugsInviteDismissed(true);
   }, []);
 
   // Compute search results as derived state (no effect needed)
@@ -399,6 +414,14 @@ export const SearchFilter = memo(function SearchFilter({
         <GameErrorBoundary gameName="Swarm" onClose={closeSwarm}>
           <Suspense fallback={null}>
             <SwarmGame onClose={closeSwarm} isSearchOpen={isOpen} />
+          </Suspense>
+        </GameErrorBoundary>,
+        document.body
+      )}
+      {slugsOpen && createPortal(
+        <GameErrorBoundary gameName="Slugs" onClose={closeSlugs}>
+          <Suspense fallback={null}>
+            <SlugsGame onClose={closeSlugs} isSearchOpen={isOpen} inviteCode={slugsInviteDismissed ? null : slugsInviteCode} />
           </Suspense>
         </GameErrorBoundary>,
         document.body
