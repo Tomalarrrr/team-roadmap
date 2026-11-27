@@ -10,6 +10,7 @@ import type { SlugsMatch, SlugsRoom } from '../api/slugsApi';
 
 vi.mock('../api/slugsApi', async (actual) => ({
   ...(await actual<typeof import('../api/slugsApi')>()),
+  createRoom: vi.fn(async () => 'QX7Z'),
   joinRoom: vi.fn(async () => {}),
   getRoom: vi.fn(),
   putSeat: vi.fn(async () => {}),
@@ -19,7 +20,7 @@ vi.mock('../api/slugsApi', async (actual) => ({
 
 const api = await import('../api/slugsApi');
 const { SlugsLobby } = await import('../components/slugs/SlugsLobby');
-const { choicesOf, DEFAULT_SETTINGS, RULES, stamped } = await import('../components/slugs/slugsSync');
+const { choicesOf, decodeSettings, DEFAULT_SETTINGS, RULES, sameRules, settingsOf, stamped } = await import('../components/slugs/slugsSync');
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -39,7 +40,7 @@ const lobby = (set: string | undefined, ready = false): SlugsRoom => ({
 let box: HTMLDivElement;
 let root: Root;
 
-async function open(as: string, room: SlugsRoom) {
+async function open(as: string, room: SlugsRoom, inviteCode: string | null = 'QX7Z') {
   sessionStorage.setItem('roadmap-user-id', as);
   vi.mocked(api.getRoom).mockResolvedValue(room);
   box = document.createElement('div');
@@ -49,7 +50,7 @@ async function open(as: string, room: SlugsRoom) {
     root.render(createElement(SlugsLobby, {
       onStart: () => {},
       onBack: () => {},
-      inviteCode: 'QX7Z',
+      inviteCode,
       choices: choicesOf(DEFAULT_SETTINGS),
       onChoices: () => {},
     }));
@@ -69,6 +70,17 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   box.remove();
+});
+
+describe('a new room', () => {
+  it('is set up on this client’s rules', async () => {
+    await open('session-a', lobby(undefined), null);
+    await act(async () => button('Create a room').click());
+    expect(api.setSettings).toHaveBeenCalledTimes(1);
+    const set = vi.mocked(api.setSettings).mock.calls[0][2];
+    expect(sameRules(set)).toBe(true);
+    expect(decodeSettings(set)).toEqual(settingsOf(choicesOf(DEFAULT_SETTINGS)));
+  });
 });
 
 describe('a room on other rules', () => {

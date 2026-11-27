@@ -2144,7 +2144,10 @@ function stepObj(state: SlugsState, o: Obj): boolean {
     // One that went nowhere this tick is wedged whatever the slope says: its speed can settle into a
     // loop that the bounce takes off and gravity puts back, and the turn would wait on it for ever.
     const held = !steep || (o.x === x0 && o.y === y0) || (!free(px(o.x) + down, px(o.y)) && !free(px(o.x) + down, px(o.y) + 1));
-    if ((pinned || slow) && held && !free(px(o.x), px(o.y) + 1)) {
+    // In a V it can be held from one side below with nothing straight under it, and go nowhere.
+    const stuck = pinned && o.x === x0 && o.y === y0;
+    const under = !free(px(o.x), px(o.y) + 1) || (stuck && (!free(px(o.x) - 1, px(o.y) + 1) || !free(px(o.x) + 1, px(o.y) + 1)));
+    if ((pinned || slow) && held && under) {
       o.vx = o.vy = 0;
       o.rest = true;
     }

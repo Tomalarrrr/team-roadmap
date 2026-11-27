@@ -139,6 +139,7 @@ function pickWait(state: SlugsState, mine: boolean): PickWait {
   return can === true ? null : can;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- for the HUD tests; an edit to this file reloads the page in development, as a component-only one would not
 export function hudOf(state: SlugsState, mine: readonly number[]): Hud {
   const team = state.teams[state.activeTeam];
   const slug = state.slugs[state.active];
