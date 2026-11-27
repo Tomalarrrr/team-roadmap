@@ -5,10 +5,12 @@ import { resolve } from 'node:path';
 import { advance, DEFAULT_OPTIONS, KEY, WEAPONS } from '../slugsGameLogic';
 import type { Act, Input, SlugsState } from '../slugsGameLogic';
 import { chunkKey } from '../api/slugsApi';
+import { MAP_DESIGN_IDS, MAP_DESIGNS } from '../slugsMaps';
 import type { Seat, SeatWrite, SlugsMatch, SlugsRoom } from '../api/slugsApi';
 import {
   addChunks,
   canStep,
+  choicesOf,
   DEFAULT_SETTINGS,
   decodeSettings,
   encodeEntry,
@@ -18,21 +20,28 @@ import {
   INPUT_SHAPE,
   KNOBS,
   landed,
+  MAP_GROUND,
+  mapOf,
   myTurn,
   newLockstep,
   normalAct,
+  optionsOf,
   parseInputs,
+  RANDOM_MAP,
   reportDue,
   restingReport,
   resultOf,
   SEAL_AT,
   sealed,
   sending,
+  settingsOf,
   takeRoom,
+  themeOf,
   waitsOn,
   withStored,
 } from '../components/slugs/slugsSync';
-import type { Entry, Lockstep, Settings } from '../components/slugs/slugsSync';
+import type { Entry, Lockstep, MatchChoices, Settings } from '../components/slugs/slugsSync';
+import { THEME_IDS } from '../components/slugs/slugThemes';
 
 // --- The database rules, run against a stand-in for the server's evaluator ---
 //
@@ -437,6 +446,98 @@ describe('slugs settings', () => {
     expect(DEFAULT_SETTINGS.turnSeconds).toBe(DEFAULT_OPTIONS.turnSeconds);
   });
 
+  it('carries the host\'s map into the match, and a room from before the map knob plays the default map', () => {
+    const last = MAP_DESIGN_IDS.length - 1;
+    expect(MAP_DESIGN_IDS[DEFAULT_SETTINGS.map]).toBe(DEFAULT_OPTIONS.map);
+    expect(optionsOf(DEFAULT_SETTINGS, 7).map).toBe(DEFAULT_OPTIONS.map);
+    const chosen: Settings = { ...DEFAULT_SETTINGS, map: last };
+    expect(encodeSettings(chosen)).toBe(`map=${last}`);
+    expect(optionsOf(decodeSettings(`map=${last}`)!, 7).map).toBe(MAP_DESIGN_IDS[last]);
+    expect(optionsOf(decodeSettings('perTeam=2')!, 7).map).toBe(DEFAULT_OPTIONS.map);
+    expect(decodeSettings(`map=${last + 1}`)).toBeNull();
+    expect(allowed(null, roomAt(), { m: lobbyMatch(chosen) }, T0)).toBe(true);
+  });
+
+  const FIRST: MatchChoices = {
+    perTeam: 4,
+    level: 3,
+    map: 'random',
+    ground: 'map',
+    options: {
+      turnSeconds: DEFAULT_OPTIONS.turnSeconds,
+      startHp: DEFAULT_OPTIONS.startHp,
+      windScale: DEFAULT_OPTIONS.windScale,
+      mines: DEFAULT_OPTIONS.mines,
+      barrels: DEFAULT_OPTIONS.barrels,
+      weapons: DEFAULT_OPTIONS.weapons,
+      roundMinutes: DEFAULT_OPTIONS.roundMinutes,
+      placing: DEFAULT_OPTIONS.placing,
+    },
+  };
+
+  it('starts a new room on a random design and its own ground, which every seat works out the same from the seed', () => {
+    const fresh = settingsOf(FIRST);
+    expect(encodeSettings(fresh)).toBe(`ground=${MAP_GROUND};map=${RANDOM_MAP}`);
+    expect(allowed(null, roomAt(), { m: lobbyMatch(fresh) }, T0)).toBe(true);
+    const playing: SlugsMatch = { ...lobbyMatch(fresh), status: 'playing', seed: 0xc0ffee, game: 1 };
+    const ann = newLockstep(playing, 'a');
+    const bob = newLockstep(playing, 'b');
+    expect(bob.options.map).toBe(ann.options.map);
+    expect(Array.from(bob.state.terrain)).toEqual(Array.from(ann.state.terrain));
+    expect(ann.options.map).toBe(mapOf(fresh, 0xc0ffee));
+    expect(themeOf(fresh, 0xc0ffee)).toBe(MAP_DESIGNS[ann.options.map].theme);
+    // A ground picked by hand still wins over the design's own.
+    expect(themeOf({ ...fresh, ground: 2 }, 0xc0ffee)).toBe(THEME_IDS[2]);
+  });
+
+  it('draws every design over a run of games, and a fixed design ignores the seed', () => {
+    const fresh = settingsOf(FIRST);
+    const seen = new Map<string, number>();
+    for (let game = 0; game < 600; game++) {
+      const map = mapOf(fresh, (Math.imul(game + 1, 2654435761) >>> 0));
+      seen.set(map, (seen.get(map) ?? 0) + 1);
+    }
+    expect([...seen.keys()].sort()).toEqual([...MAP_DESIGN_IDS].sort());
+    // 600 games over the designs is 50 each when even; none should be drawn under half or over twice that.
+    for (const count of seen.values()) {
+      expect(count).toBeGreaterThan(600 / MAP_DESIGN_IDS.length / 2);
+      expect(count).toBeLessThan((600 / MAP_DESIGN_IDS.length) * 2);
+    }
+    // Seeds close together, as a counter would give, still land on more than one design.
+    expect(new Set([1, 2, 3, 4].map((seed) => mapOf(fresh, seed))).size).toBeGreaterThan(1);
+    const fixed = { ...fresh, map: MAP_DESIGN_IDS.indexOf('canyon') };
+    expect(new Set([1, 2, 3, 99, 0xffffffff].map((seed) => mapOf(fixed, seed)))).toEqual(new Set(['canyon']));
+  });
+
+  it('keeps Random and the map ground out of the old list places, so a client from before them refuses the room', () => {
+    const oldMapKnob = MAP_DESIGN_IDS.map((_, i) => i);
+    const oldGroundKnob = THEME_IDS.map((_, i) => i);
+    expect(oldMapKnob).not.toContain(RANDOM_MAP);
+    expect(oldGroundKnob).not.toContain(MAP_GROUND);
+    // An empty set is a room from before Random, and still reads as the one fixed design it was.
+    expect(decodeSettings('')).toEqual(DEFAULT_SETTINGS);
+    expect(mapOf(decodeSettings('')!, 1)).toBe(DEFAULT_OPTIONS.map);
+  });
+
+  it('turns the local setup into a room and back without losing a choice', () => {
+    const picked: MatchChoices = {
+      perTeam: 2,
+      level: 5,
+      map: 'canyon',
+      ground: THEME_IDS[1],
+      options: { turnSeconds: 20, startHp: 200, windScale: 0, mines: 12, barrels: 12, weapons: 'all', roundMinutes: 30, placing: 'players' },
+    };
+    for (const choices of [FIRST, picked]) {
+      const settings = settingsOf(choices);
+      expect(choicesOf(settings)).toEqual(choices);
+      expect(choicesOf(decodeSettings(encodeSettings(settings))!)).toEqual(choices);
+    }
+    // A value no knob offers takes the default rather than making a room nobody can read.
+    const odd = settingsOf({ ...picked, options: { ...picked.options, turnSeconds: 33 } });
+    expect(odd.turnSeconds).toBe(DEFAULT_SETTINGS.turnSeconds);
+    expect(decodeSettings(encodeSettings(odd))).toEqual(odd);
+  });
+
   it('refuses a setting or a choice it does not know', () => {
     expect(decodeSettings('gravity=2')).toBeNull();
     expect(decodeSettings('turnSeconds=33')).toBeNull();
@@ -746,6 +847,16 @@ describe('slugs lockstep', () => {
     for (let now = 60_000; now < 70_000; now += 16) frame(ann, now, { keys: 0 });
     expect(ann.state.tick).toBe(stuck);
     expect(canStep(ann)).toBe(false);
+  });
+
+  it('waits on the seat placing a slug, and the placing knob reaches the rules', () => {
+    const set = { ...DEFAULT_SETTINGS, placing: 1 };
+    expect(decodeSettings(encodeSettings(set))).toEqual(set);
+    const playing: SlugsMatch = { ...lobbyMatch(set), status: 'playing', seed: 77, game: 1 };
+    const ann = newLockstep(playing, 'a');
+    expect(ann.state.phase).toBe('place');
+    expect(waitsOn(ann)).toBe('a');
+    expect(newLockstep({ ...lobbyMatch(DEFAULT_SETTINGS), status: 'playing', seed: 77, game: 1 }, 'a').state.phase).toBe('ready');
   });
 
   it('copes with its clock stepping back', () => {

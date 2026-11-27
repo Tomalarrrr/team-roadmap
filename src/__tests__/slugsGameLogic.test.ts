@@ -20,9 +20,11 @@ import {
   cloneState,
   explode,
   fallDamage,
+  FALL_SAFE,
   fits,
   newGame,
   placeSlugs,
+  placeSpot,
   predict,
   px,
   solidAt,
@@ -228,44 +230,74 @@ describe('explosions', () => {
     explode(t, 1000 + 20, FLOOR - 2, 50, 48, 50);
     expect(t.slugs[1].vx).toBeLessThan(0);
   });
+
+  // Where slug 1 (body from 996 to 1004) ends up after a 50 hp / 48 px blast `gap` px to its left at ground level.
+  function after(gap: number) {
+    const s = lab();
+    stand(s, 1, 1000);
+    explode(s, 996 - gap, FLOOR - 2, 50, 48, 0);
+    run(s, 300);
+    return { lost: 100 - s.slugs[1].hp, moved: px(s.slugs[1].x) - 1000 };
+  }
+
+  it('a slug at the rim of a blast is moved as well as hurt', () => {
+    const rim = after(47);
+    expect(rim.lost).toBe(2);
+    expect(rim.moved).toBeGreaterThanOrEqual(10);
+  });
+
+  it('a slug just past the crater is shoved without damage, and one well past it is left alone', () => {
+    const near = after(50);
+    expect(near.lost).toBe(0);
+    expect(near.moved).toBeGreaterThanOrEqual(8);
+    expect(after(72)).toEqual({ lost: 0, moved: 0 });
+  });
+
+  it('inside the crater the throw still grows with the damage', () => {
+    expect(after(24).moved).toBeGreaterThan(after(38).moved);
+    expect(after(38).moved).toBeGreaterThan(after(47).moved);
+  });
 });
 
 describe('falling', () => {
-  it('fall damage is 67 at the 32 px/frame cap and none at or below 8', () => {
-    expect(fallDamage(SPEED_CAP)).toBe(67);
+  it('fall damage is 134 at the 32 px/frame cap, 45 at 16 and none at or below 8', () => {
+    expect(fallDamage(SPEED_CAP)).toBe(134);
+    expect(fallDamage(16 * ONE)).toBe(45);
     expect(fallDamage(8 * ONE)).toBe(0);
     expect(fallDamage(8 * ONE + 1)).toBe(1);
-    expect(fallDamage(9 * ONE)).toBe(3);
-    // The +1 in the formula only shows where (impact - 8 px) * 50 sits just under a multiple of 18 px.
-    expect(fallDamage(8 * ONE + 23592)).toBe(2);
+    expect(fallDamage(9 * ONE)).toBe(6);
+    // The +1 in the formula only shows where (impact - 8 px) * 100 sits just under a multiple of 18 px.
+    expect(fallDamage(8 * ONE + 11796)).toBe(2);
   });
 
-  it('a slug landing at the cap loses 67 hp', () => {
+  it('a slug falling at 16 px/frame lands at 16.24 with a tick of gravity and loses 46 hp', () => {
     const s = lab();
     const slug = s.slugs[1];
     slug.mode = 'air';
-    slug.y = (FLOOR - SLUG_HALF_H - 20) * ONE;
-    slug.vy = SPEED_CAP;
+    slug.y = (FLOOR - SLUG_HALF_H - 10) * ONE;
+    slug.vy = 16 * ONE;
     const events = run(s, 1);
-    expect(events).toContainEqual({ k: 'fall', id: 1, dmg: 67 });
-    expect(slug.hp).toBe(33);
+    expect(events).toContainEqual({ k: 'fall', id: 1, dmg: 46 });
+    expect(slug.hp).toBe(54);
     expect(slug.mode).toBe('stand');
   });
 
-  it('the first landing after a blast does not hurt, the next one does', () => {
+  it('a slug thrown by a blast is hurt landing as well, and no slower landing hurts', () => {
     const s = lab();
     const slug = s.slugs[1];
     slug.mode = 'air';
     slug.blown = true;
-    slug.y = (FLOOR - SLUG_HALF_H - 20) * ONE;
-    slug.vy = SPEED_CAP;
-    run(s, 1);
-    expect(slug.hp).toBe(100);
+    slug.y = (FLOOR - SLUG_HALF_H - 10) * ONE;
+    slug.vy = 16 * ONE;
+    const events = run(s, 1);
+    expect(events).toContainEqual({ k: 'fall', id: 1, dmg: 46 });
+    expect(slug.hp).toBe(54);
     slug.mode = 'air';
-    slug.y = (FLOOR - SLUG_HALF_H - 20) * ONE;
-    slug.vy = SPEED_CAP;
+    slug.blown = true;
+    slug.y = (FLOOR - SLUG_HALF_H - 10) * ONE;
+    slug.vy = FALL_SAFE;
     run(s, 1);
-    expect(slug.hp).toBe(33);
+    expect(slug.hp).toBe(54);
   });
 
   it('a slug whose ground is blown away falls', () => {
@@ -328,6 +360,81 @@ describe('walking', () => {
     expect(px(s.slugs[0].x)).toBe(300);
     run(s, 40, { keys: LEFT });
     expect(px(s.slugs[0].x)).toBeLessThan(290);
+  });
+});
+
+describe('jumping', () => {
+  /** A block `height` px high whose near face is 1 px past slug 0's side, so it stands against it. */
+  function wall(s: SlugsState, height: number, at = 305): void {
+    for (let y = FLOOR - height; y < FLOOR; y++) s.terrain.fill(1, y * W + at, y * W + at + 200);
+  }
+  function leap(s: SlugsState, t: 'jump' | 'hop' | 'flip', keys = 0): void {
+    advance(s, { keys, act: { t } });
+    for (let i = 0; i < 300 && s.slugs[0].mode !== 'stand'; i++) advance(s, { keys });
+  }
+  const onTop = (s: SlugsState, height: number) => px(s.slugs[0].y) === FLOOR - height - SLUG_HALF_H;
+
+  it('leaps 71 px forward on flat ground, and holding forward takes it no further', () => {
+    for (const keys of [0, RIGHT]) {
+      const s = lab();
+      leap(s, 'jump', keys);
+      expect(px(s.slugs[0].x)).toBe(371);
+      expect(px(s.slugs[0].y)).toBe(FLOOR - SLUG_HALF_H);
+    }
+  });
+
+  it('is steered by holding left or right in the air', () => {
+    const back = lab();
+    leap(back, 'jump', LEFT);
+    expect(px(back.slugs[0].x)).toBeLessThan(330);
+    const hop = lab();
+    leap(hop, 'hop', RIGHT);
+    expect(px(hop.slugs[0].x)).toBeGreaterThan(340);
+  });
+
+  it('gets up a wall it stands against when forward is held through the jump', () => {
+    for (const [t, height] of [['jump', 30], ['hop', 40], ['flip', 60]] as const) {
+      const s = lab();
+      wall(s, height);
+      leap(s, t, RIGHT);
+      expect(onTop(s, height)).toBe(true);
+      expect(s.slugs[0].hp).toBe(100);
+    }
+  });
+
+  it('slides up a wall it jumps into and comes down at its foot, not flung back past where it stood', () => {
+    const s = lab();
+    wall(s, 40);
+    leap(s, 'jump');
+    expect(px(s.slugs[0].x)).toBe(300);
+    expect(onTop(s, 0)).toBe(true);
+  });
+
+  it('steps onto a lip it clips coming down, as a walk climbs a step', () => {
+    const s = lab();
+    wall(s, 25, 319);
+    leap(s, 'jump');
+    expect(onTop(s, 25)).toBe(true);
+  });
+
+  it('does not steer or catch walls when thrown by a blast', () => {
+    const s = lab();
+    wall(s, 60, 330);
+    const slug = s.slugs[0];
+    slug.mode = 'air';
+    slug.blown = true;
+    slug.vx = 3 * ONE;
+    slug.vy = -2 * ONE;
+    run(s, 12);
+    expect(slug.vx).toBeLessThan(0);
+    const open = lab();
+    const drifting = open.slugs[0];
+    drifting.y -= 200 * ONE;
+    drifting.mode = 'air';
+    drifting.blown = true;
+    drifting.vx = -ONE;
+    run(open, 10, { keys: RIGHT });
+    expect(drifting.vx).toBe(-ONE);
   });
 });
 
@@ -411,6 +518,26 @@ describe('turns', () => {
     expect(s.activeTeam).toBe(1);
     expect(s.active).toBe(1);
     expect(s.phase).toBe('ready');
+  });
+
+  it('rolls light wind often and strong wind about one turn in ten, both ways', () => {
+    const s = lab();
+    const winds: number[] = [];
+    for (let turn = 0; turn < 1500; turn++) {
+      const team = s.activeTeam;
+      s.roundT = 0;
+      advance(s, { keys: 0, act: { t: 'skip' } });
+      for (let i = 0; i < 2000 && s.activeTeam === team; i++) advance(s, idle);
+      winds.push(s.wind);
+    }
+    const share = (keep: (w: number) => boolean) => winds.filter(keep).length / winds.length;
+    expect(share((w) => Math.abs(w) >= 8)).toBeGreaterThan(0.06);
+    expect(share((w) => Math.abs(w) >= 8)).toBeLessThan(0.15);
+    expect(share((w) => Math.abs(w) <= 3)).toBeGreaterThan(0.45);
+    expect(Math.min(...winds)).toBe(-10);
+    expect(Math.max(...winds)).toBe(10);
+    expect(share((w) => w < 0)).toBeGreaterThan(0.35);
+    expect(share((w) => w > 0)).toBeGreaterThan(0.35);
   });
 
   it('a team with no slug left is out and the other team wins', () => {
@@ -517,6 +644,84 @@ describe('a new landscape', () => {
     const b = newGame(9, [{ name: 'A', control: 1 }, { name: 'B', control: 1 }], 3);
     expect(hashOf(a)).toBe(hashOf(b));
     expect(a.terrain.length).toBe(W * H);
+  });
+});
+
+describe('players placing their slugs', () => {
+  const people = [{ name: 'A', control: 'human' as const }, { name: 'B', control: 'human' as const }];
+  const placed = (s: SlugsState) => s.slugs.filter((g) => !s.placing.includes(g.id));
+  /** True when no two slugs' bodies (8 px wide, 16 tall) overlap. */
+  const apart = (s: SlugsState) =>
+    s.slugs.every((a) => s.slugs.every((b) => a === b || Math.abs(px(a.x) - px(b.x)) >= 12 || Math.abs(px(a.y) - px(b.y)) >= 12));
+  /** Whether a slug at (x, y) stands: room for its body, and rock within a walking step of its feet. */
+  const stands = (s: SlugsState, x: number, y: number) =>
+    fits(s.terrain, x, y) && [-4, -3, -2, -1, 0, 1, 2, 3, 4].some((d) => solidAt(s.terrain, x, y + SLUG_HALF_H + d));
+
+  it('waits for each slug in turn, a slug from each team in turn, before the first turn', () => {
+    const s = newGame(5, people, 2, { placing: 'players' });
+    expect(s.phase).toBe('place');
+    expect(s.placing).toEqual([s.teams[0].slugs[0], s.teams[1].slugs[0], s.teams[0].slugs[1], s.teams[1].slugs[1]]);
+    expect(s.active).toBe(s.placing[0]);
+    expect(s.activeTeam).toBe(0);
+    for (let k = 0; k < 200; k++) advance(s, idle);
+    // Nothing is picked for a person before their clock runs out, and the match clock does not start.
+    expect(s.phase).toBe('place');
+    expect(s.placing).toHaveLength(4);
+    expect(s.roundT).toBe(0);
+  });
+
+  it('puts the slug on the seat nearest the click, then hands the next one to the other team', () => {
+    const s = newGame(5, people, 2, { placing: 'players' });
+    const first = s.active;
+    const at = placeSpot(s, 900, 50)!;
+    expect(stands(s, at.x, at.y)).toBe(true);
+    advance(s, { keys: 0, act: { t: 'target', x: 900, y: 50 } });
+    expect([px(s.slugs[first].x), px(s.slugs[first].y)]).toEqual([at.x, at.y]);
+    expect(s.activeTeam).toBe(1);
+    expect(s.placing).toHaveLength(3);
+    // A click on top of the slug just placed puts the next one beside it, not in it.
+    advance(s, { keys: 0, act: { t: 'target', x: at.x, y: at.y } });
+    expect(apart(s)).toBe(true);
+  });
+
+  it('the clock running out or a skip takes the automatic pick, and the first turn follows the last slug', () => {
+    const s = newGame(6, people, 2, { placing: 'players', turnSeconds: 15 });
+    advance(s, { keys: 0, act: { t: 'skip' } });
+    expect(s.placing).toHaveLength(3);
+    for (let k = 0; k < 15 * 50; k++) advance(s, idle);
+    expect(s.placing).toHaveLength(2);
+    for (let k = 0; k < 2 * 15 * 50 + 1 && s.phase === 'place'; k++) advance(s, idle);
+    expect(s.phase).toBe('ready');
+    expect(s.seats).toEqual([]);
+    expect(placed(s)).toHaveLength(4);
+    expect(apart(s)).toBe(true);
+    for (const g of s.slugs) expect(stands(s, px(g.x), px(g.y))).toBe(true);
+  });
+
+  it('computer teams place their own, the same way every time from the same seed', () => {
+    const cpus = [{ name: 'A', control: 3 as const }, { name: 'B', control: 3 as const }, { name: 'C', control: 3 as const }];
+    const run = () => {
+      const s = newGame(9, cpus, 4, { placing: 'players', mines: 8 });
+      for (let k = 0; k < 2000 && s.phase === 'place'; k++) advance(s, idle);
+      return s;
+    };
+    const a = run();
+    expect(a.phase).toBe('ready');
+    expect(apart(a)).toBe(true);
+    // Off every mine's trigger.
+    for (const g of a.slugs) for (const o of a.objs.filter((m) => m.kind === 'mine')) {
+      expect(Math.abs(px(g.x) - px(o.x)) + Math.abs(px(g.y) - px(o.y))).toBeGreaterThanOrEqual(78);
+    }
+    expect(hashOf(run())).toBe(hashOf(a));
+  });
+
+  it('a copy made while placing runs on by itself', () => {
+    const s = newGame(5, people, 1, { placing: 'players' });
+    const copy = cloneState(s);
+    advance(s, { keys: 0, act: { t: 'skip' } });
+    expect(copy.placing).toHaveLength(2);
+    expect(s.placing).toHaveLength(1);
+    expect(placeSpot(newGame(5, people, 1), 900, 50)).toBeNull();
   });
 });
 

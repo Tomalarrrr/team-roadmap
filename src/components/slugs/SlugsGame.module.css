@@ -8,10 +8,11 @@
   background: rgba(var(--shadow-rgb), 0.18);
 }
 
-/* Two weights in the whole game, 500 and 700, and whole-pixel line heights, so every row lands on the pixel grid. */
+/* Two weights in the whole game, 500 and 700, and whole-pixel line heights, so every row lands on the pixel grid.
+   The width is a whole number too: 94vw put a phone's popup at x 11.7 and blurred every edge in it. */
 .popup {
   position: relative;
-  width: min(94vw, 560px);
+  width: min(calc(100vw - 24px), 560px);
   max-height: calc(100dvh - 16px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -176,7 +177,11 @@
   min-width: 0;
 }
 
-.portrait { flex: none; }
+/* At 24 px the slug's own band is a hairline, so Red and Pink looked alike; the disc behind it carries the team. */
+.portrait {
+  flex: none;
+  border-radius: var(--radius-full);
+}
 
 .input {
   flex: 1;
@@ -260,6 +265,7 @@ select.input {
 .primaryBtn,
 .secondaryBtn {
   height: 32px;
+  white-space: nowrap;
   padding: 0 18px;
   border-radius: var(--radius-full);
   font: inherit;
@@ -610,7 +616,8 @@ button.note:hover { background: var(--plate-hover); }
   color: var(--on-plate-soft);
 }
 
-.panel .textBtn { color: var(--on-plate-soft); }
+/* In a narrow window the key hint wraps first; a button split over two lines reads as two. */
+.panel .textBtn { color: var(--on-plate-soft); white-space: nowrap; }
 .panel .textBtn:hover:not(:disabled) { color: var(--on-plate); }
 .panel .textBtn:disabled { color: rgba(255, 255, 255, 0.4); }
 
@@ -635,6 +642,9 @@ button.note:hover { background: var(--plate-hover); }
   align-items: center;
   gap: 16px;
   padding: 20px 24px;
+  /* Placed at left 50%, a shrink-to-fit box may only use the right half of
+     the field, which on a phone clipped the end card's buttons. */
+  width: max-content;
   max-width: calc(100% - 32px);
   animation: plateIn 120ms ease-out;
 }
@@ -685,12 +695,16 @@ button.note:hover { background: var(--plate-hover); }
   color: var(--on-plate-soft);
 }
 
+/* A flex header cell stops being a table cell, and its rule then no longer meets the next cell's. */
 .summary tbody th {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-weight: 700;
   text-align: left;
+}
+
+.summary .dot {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: 1px;
 }
 
 .summary th:first-child { text-align: left; padding-left: 0; }

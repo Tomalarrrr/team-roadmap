@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { blastRecipe, blastStyle, groundTilt, leanedPicture } from '../components/slugs/slugFx';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { blastRecipe, blastStyle, groundTilt, leanedPicture, paintFxAtlas } from '../components/slugs/slugFx';
 import { H, ONE, W, WEAPON } from '../slugsGameLogic';
 
 describe('blastStyle', () => {
@@ -55,7 +55,7 @@ describe('blastRecipe', () => {
     expect(dynamite.embers).toBeGreaterThan(bazooka.embers);
     expect(dynamite.burnMs).toBeGreaterThan(bazooka.burnMs);
     expect(bazooka).toMatchObject({
-      fire: 9, chunks: 22, smoke: 12, ring: 72, streaks: 12, embers: 7, burnMs: 900, shake: { ms: 196, intensity: 0.0028 },
+      fire: 9, chunks: 22, smoke: 12, ring: 72, streaks: 12, embers: 7, burnMs: 1500, shake: { ms: 196, intensity: 0.0028 },
     });
   });
 
@@ -86,8 +86,8 @@ describe('blastRecipe', () => {
   });
 
   it('a barrel burns longest, a bomblet not at all, and a slug pops in its own colour', () => {
-    expect(blastRecipe('barrel', 40, false).burnMs).toBe(1800);
-    expect(blastRecipe('fire', 40, false).burnMs).toBe(900);
+    expect(blastRecipe('barrel', 40, false).burnMs).toBe(2600);
+    expect(blastRecipe('fire', 40, false).burnMs).toBe(1500);
     expect(blastRecipe('bomblet', 23, false).burnMs).toBe(0);
     expect(blastRecipe('stone', 40, false).burnMs).toBe(0);
     expect(blastRecipe('pop', 20, false).goo).toBe(12);
@@ -172,5 +172,37 @@ describe('leanedPicture', () => {
     const r = (20 * Math.PI) / 180;
     expect(leanedPicture(slug, r).aim).toBe(50);
     expect(leanedPicture({ ...slug, facing: -1 }, r).aim).toBe(10);
+  });
+});
+
+describe('paintFxAtlas', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  /** Paints into a context that records each call, and returns the canvas and the calls in order. */
+  function paint(scale?: number) {
+    const calls: string[] = [];
+    const ctx = new Proxy({}, {
+      get: (_, key: string) => (...args: unknown[]) => {
+        calls.push(`${key}(${args.join(',')})`);
+        return { addColorStop: () => undefined };
+      },
+      set: () => true,
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ctx as never);
+    const canvas = document.createElement('canvas');
+    if (scale === undefined) paintFxAtlas(canvas);
+    else paintFxAtlas(canvas, scale);
+    return { canvas, calls };
+  }
+
+  it('paints the same drawing larger for a closer zoom, scaled before anything is drawn', () => {
+    const sharp = paint(3);
+    expect([sharp.canvas.width, sharp.canvas.height]).toEqual([576, 576]);
+    expect(sharp.calls[0]).toBe('scale(3,3)');
+    const plain = paint();
+    expect([plain.canvas.width, plain.canvas.height]).toEqual([192, 192]);
+    expect(plain.calls[0]).toBe('scale(1,1)');
+    // Only the first call differs: the drawing itself is the same at every scale.
+    expect(sharp.calls.slice(1)).toEqual(plain.calls.slice(1));
   });
 });

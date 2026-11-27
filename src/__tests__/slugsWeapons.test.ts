@@ -10,6 +10,7 @@ import {
   H,
   SLUG_HALF_H,
   SLUG_HALF_W,
+  SPEED_CAP,
   STEEL,
   W,
   WEAPON,
@@ -18,6 +19,7 @@ import {
   canPickWeapon,
   cloneState,
   explode,
+  fallDamage,
   fits,
   newGame,
   px,
@@ -172,8 +174,11 @@ describe('every weapon, fired a few ways on flat land', () => {
         expect(s.remote).toBe(-1);
         if (before > 0) expect(s.teams[0].ammo[w], `${w} ammo`).toBe(before - 1);
         else expect(s.teams[0].ammo[w]).toBe(-1);
-        const hurt = events.filter((e): e is Extract<SlugEvent, { k: 'hurt' }> => e.k === 'hurt');
+        // A fall's damage comes as a 'fall' and then its 'hurt'; those are held to the fall's own cap instead.
+        const hurt = events.filter((e, i): e is Extract<SlugEvent, { k: 'hurt' }> => e.k === 'hurt' && events[i - 1]?.k !== 'fall');
+        const falls = events.filter((e): e is Extract<SlugEvent, { k: 'fall' }> => e.k === 'fall');
         for (const e of hurt) expect(e.dmg).toBeLessThanOrEqual(Math.max(WEAPON[w].damage, 50));
+        for (const e of falls) expect(e.dmg).toBeLessThanOrEqual(fallDamage(SPEED_CAP));
         for (const g of s.slugs) if (g.alive) expect(g.hp).toBeGreaterThan(0);
       }
     }, 20_000);
@@ -595,7 +600,7 @@ describe('mines, edges, teleports and the jetpack', () => {
       press(s);
       run(s, 20);
       const body = w === 'mine' ? s.objs.find((o) => o.kind === 'mine') : s.projs.find((p) => p.kind === 'dynamite');
-      expect(body).toBeDefined();
+      expect(body?.kind).toBe(w);
       const b = body as { x: number; y: number };
       expect(clear(s, px(b.x), px(b.y))).toBe(true);
       expect(px(b.x)).toBeLessThanOrEqual(300 + SLUG_HALF_W);

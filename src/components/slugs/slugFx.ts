@@ -92,7 +92,7 @@ export interface BlastRecipe {
 export function blastRecipe(style: BlastStyle, r: number, reduced: boolean, lean = false): BlastRecipe {
   const base: BlastRecipe = {
     flash: r * 1.3, fire: 5 + r / 12, fireLife: 520, ring: r * 1.5, ringMs: 240, chunks: 6 + r / 3,
-    smoke: 4 + r / 6, smokeLife: 2200, sparks: 4 + r / 8, streaks: 6 + r / 8, embers: 3 + r / 12, dust: 0, goo: 0, burnMs: 900,
+    smoke: 4 + r / 6, smokeLife: 2200, sparks: 4 + r / 8, streaks: 6 + r / 8, embers: 3 + r / 12, dust: 0, goo: 0, burnMs: 1500,
     shake: r >= 25 ? { ms: 100 + r * 2, intensity: (0.0028 * r) / 48 } : null,
   };
   const recipe: BlastRecipe = (() => {
@@ -100,7 +100,7 @@ export function blastRecipe(style: BlastStyle, r: number, reduced: boolean, lean
       case 'big':
         return {
           ...base, flash: r * 1.4, fire: 6 + r / 10, fireLife: 900, ring: r * 1.7, ringMs: 380, chunks: 10 + r / 2.5,
-          smoke: 8 + r / 5, smokeLife: 3800, sparks: 10 + r / 6, streaks: 10 + r / 8, embers: 6 + r / 10, dust: 6, burnMs: 1600,
+          smoke: 8 + r / 5, smokeLife: 3800, sparks: 10 + r / 6, streaks: 10 + r / 8, embers: 6 + r / 10, dust: 6, burnMs: 2400,
           shake: { ms: 260 + r * 2, intensity: (0.0045 * r) / 73 },
         };
       case 'bomblet':
@@ -109,7 +109,7 @@ export function blastRecipe(style: BlastStyle, r: number, reduced: boolean, lean
           sparks: 4, streaks: 5, embers: 2, burnMs: 0, shake: null,
         };
       case 'barrel':
-        return { ...base, fire: 8 + r / 5, fireLife: 700, smoke: 6 + r / 5, smokeLife: 3200, sparks: 8 + r / 5, embers: 8 + r / 8, burnMs: 1800 };
+        return { ...base, fire: 8 + r / 5, fireLife: 700, smoke: 6 + r / 5, smokeLife: 3200, sparks: 8 + r / 5, embers: 8 + r / 8, burnMs: 2600 };
       case 'stone':
         return {
           ...base, flash: 0, fire: 0, ring: r * 1.3, ringMs: 300, chunks: 10 + r / 2.5, smoke: 0, sparks: 0, streaks: 0, embers: 0, dust: 10 + r / 4, burnMs: 0,
@@ -207,7 +207,7 @@ export function paintFxAtlas(canvas: HTMLCanvasElement, scale = 1): void {
     c.fill('nonzero');
   };
   at('blob', cloud([[0, '#fff'], [0.4, '#f4f4f4'], [0.78, '#c8c8c8'], [1, '#a8a8a8']], '#6e6e6e', 2.5));
-  at('puff', cloud([[0, '#fff'], [0.55, '#eeeeee'], [1, '#bdbdbd']], '#9a9a9a', 1.5));
+  at('puff', cloud([[0, '#fff'], [0.55, '#eeeeee'], [1, '#c4c4c4']], '#b4b4b4', 1.5));
   at('ring', (w) => {
     c.strokeStyle = '#fff';
     c.lineWidth = 5;
@@ -477,6 +477,8 @@ export interface FxHost {
   reduced: boolean;
   /** Canvas px per world px the view wants now, so the atlas can be painted that sharp. */
   res(): number;
+  /** Where the projectile with this id is drawn this frame, which trails a tick behind the rules; null if not drawn. */
+  projAt(id: number): { x: number; y: number } | null;
   /** Radians the picture of the slug at this index in state.slugs leans with the ground, turned about its foot. */
   leanOf(slug: number): number;
 }
@@ -743,7 +745,7 @@ export class SlugFx {
       });
     }
     for (let i = 0; i < k.fire; i++) {
-      // The first puff is the ball's heart, sat on the centre; the rest bulge out of it.
+      // The first puff is the ball's heart, sat on the centre and outliving the rest, so it is the last to cool.
       const core = i === 0;
       const a = Math.random() * Math.PI * 2;
       const d = core ? 0 : rand(0.1, 0.35) * r;
@@ -751,7 +753,7 @@ export class SlugFx {
       const size = core ? 0.85 * r : rand(0.45, 0.75) * r;
       this.spawn('fire', {
         frame: 'blob', x: x + Math.cos(a) * d, y: y + Math.sin(a) * d, vx: Math.cos(a) * out, vy: Math.sin(a) * out - r * 0.4,
-        drag: 5, g: -r * 1.2, wind: wind * 2, life: k.fireLife * (core ? 0.8 : rand(0.75, 1.15)), delay: i < 3 ? 0 : rand(0, 60),
+        drag: 5, g: -r * 1.2, wind: wind * 2, life: k.fireLife * (core ? 1.25 : rand(0.75, 1.15)), delay: i < 3 ? 0 : rand(0, 60),
         s0: size * 0.5, s1: size, s2: size * 0.75, grow: 0.3, a0: 1, a1: 0, hold: 0.7, ramp: FIRE, vr: rand(-2, 2),
       });
     }
@@ -1148,8 +1150,9 @@ export class SlugFx {
   private trails(s: SlugsState) {
     const seen = new Map<number, { kind: ProjKind; x: number; y: number; carry: number }>();
     for (const p of s.projs) {
-      const x = p.x / ONE;
-      const y = p.y / ONE;
+      const drawn = this.host.projAt(p.id);
+      const x = drawn ? drawn.x : p.x / ONE;
+      const y = drawn ? drawn.y : p.y / ONE;
       const was = this.lastProjs.get(p.id);
       const now = { kind: p.kind, x, y, carry: was?.carry ?? 0 };
       seen.set(p.id, now);

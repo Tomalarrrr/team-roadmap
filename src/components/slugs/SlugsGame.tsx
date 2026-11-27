@@ -16,6 +16,7 @@ import type { OnlineDriver, OnlineStatus } from './onlineDriver';
 import { THEMES, THEME_IDS } from './slugThemes';
 import type { ThemeId } from './slugThemes';
 import type { LobbyInfo } from './SlugsLobby';
+import type { MatchChoices } from './slugsSync';
 import type { Battlefield } from './slugsScene';
 import styles from './SlugsGame.module.css';
 
@@ -29,8 +30,12 @@ interface Settings {
   names: string[];
   perTeam: number;
   level: 1 | 2 | 3 | 4 | 5;
-  theme: ThemeId;
-  options: SlugsOptions;
+  /** A design, or a different one drawn for each match. */
+  map: MapDesignId | 'random';
+  /** A ground, or the one the match's design was drawn for. */
+  ground: ThemeId | 'map';
+  /** The match options but the map, which `map` chooses. */
+  options: Omit<SlugsOptions, 'map'>;
 }
 
 interface Match {
@@ -108,6 +113,8 @@ interface Hud {
   sudden: boolean;
   over: boolean;
   winner: string | null;
+  /** Slugs are being placed before the first turn. */
+  placing: boolean;
   wait: PickWait;
   /** Stock of the team the weapons panel shows: the playing team when it is this machine's, else this machine's own. */
   stock: number[];
@@ -123,7 +130,7 @@ function hudOf(state: SlugsState, mine: readonly number[]): Hud {
   const team = state.teams[state.activeTeam];
   const slug = state.slugs[state.active];
   const spec = WEAPON[state.weapon];
-  const timed = state.phase === 'ready' || state.phase === 'turn' || state.phase === 'retreat';
+  const timed = state.phase === 'place' || state.phase === 'ready' || state.phase === 'turn' || state.phase === 'retreat';
   const isMine = mine.includes(state.activeTeam);
   const own = isMine ? team : state.teams[mine.find((i) => !state.teams[i].out) ?? state.activeTeam];
   return {
@@ -147,6 +154,7 @@ function hudOf(state: SlugsState, mine: readonly number[]): Hud {
     sudden: state.sudden,
     over: state.phase === 'over',
     winner: state.phase === 'over' && state.winner !== null ? state.teams[state.winner].name : null,
+    placing: state.phase === 'place',
     wait: pickWait(state, isMine),
     stock: WEAPONS.map((w) => own.ammo[w]),
   };
@@ -181,7 +189,8 @@ function tallyEvents(tally: Tally, state: SlugsState) {
   for (const e of state.events) {
     if (e.k === 'turn') tally.playing = state.slugs[e.id].team;
     else if (e.k === 'fire') tally.shots[tally.playing]++;
-    else if ((e.k === 'hurt' || e.k === 'fall') && state.slugs[e.id].team !== tally.playing) tally.dealt[tally.playing] += e.dmg;
+    // A fall's damage arrives as a 'hurt' as well, so only those are counted.
+    else if (e.k === 'hurt' && state.slugs[e.id].team !== tally.playing) tally.dealt[tally.playing] += e.dmg;
   }
 }
 
@@ -440,12 +449,12 @@ function EndCard({
       )}
       {online ? (
         <div className={styles.buttonRow}>
-          <button className={styles.primaryBtn} onClick={onLobby} autoFocus>Back to the room for a rematch</button>
+          <button className={styles.primaryBtn} onClick={onLobby} autoFocus>Back to the room</button>
         </div>
       ) : (
         <div className={styles.buttonRow}>
           <button className={styles.secondaryBtn} onClick={onSetup}>Change the setup</button>
-          <button className={styles.primaryBtn} onClick={onRematch} autoFocus>Rematch on new ground</button>
+          <button className={styles.primaryBtn} onClick={onRematch} autoFocus>Rematch</button>
         </div>
       )}
     </div>
@@ -815,6 +824,14 @@ function Battle({
         {hud && !over && (
           <>
             {flash && <span key={flash.n} className={styles.flash} style={{ animationDuration: `120ms, ${flash.ms}ms` }} role="status">{flash.text}</span>}
+            {hud.placing && (hud.mine ? (
+              <>
+                <span className={styles.note}>Tap or click where {hud.slug} starts</span>
+                <button className={styles.note} onClick={skip} onMouseDown={noMouseFocus}>Place it for me</button>
+              </>
+            ) : (
+              <span className={styles.note}>{hud.team} is placing {hud.slug}</span>
+            ))}
             {hud.mine && hud.marked === false && <span className={styles.note}>Click the map to mark the point</span>}
             {hud.mine && hud.girder !== null && (
               <button className={styles.note} onClick={turnGirder} onMouseDown={noMouseFocus}>
@@ -879,7 +896,7 @@ function Battle({
       {helpOpen && (
         <div className={styles.panel} role="dialog" aria-label="Controls">
           <dl className={styles.keys}>
-            <dt>← →</dt><dd>Crawl, or turn round</dd>
+            <dt>← →</dt><dd>Crawl, or turn round; in a jump, steer, to carry it over or up onto a ledge</dd>
             <dt>↑ ↓</dt><dd>Aim; hold Shift for a degree at a time</dd>
             <dt>Space</dt><dd>Hold to charge, let go to fire</dd>
             <dt>Enter</dt><dd>Jump forward; twice, jump back</dd>
@@ -961,23 +978,28 @@ function Choice<T extends string | number>({
 const LEVELS = [[1, 'Easy'], [2, 'Fair'], [3, 'Good'], [4, 'Hard'], [5, 'Best']] as const;
 const PER_TEAM = [1, 2, 3, 4, 5, 6, 7, 8];
 
-/** What the setup offers for each match option; a saved setup is only trusted where it holds one of these. */
+/**
+ * What the setup offers for each match option; a saved setup is only trusted
+ * where it holds one of these. The lists a room has a knob for are the
+ * knob's (slugsSync KNOBS), so what a host picks there can be kept here.
+ */
 const OFFERED = {
   weapons: ['classic', 'all'],
-  turnSeconds: [15, 30, 45, 60, 90],
-  map: MAP_DESIGN_IDS,
+  turnSeconds: [15, 20, 30, 45, 60, 90],
   startHp: [50, 100, 150, 200],
   windScale: [0, 50, 100, 150],
   mines: [0, 4, 8, 12],
-  barrels: [0, 4, 8],
-  roundMinutes: [5, 10, 15, 20],
+  barrels: [0, 4, 8, 12],
+  roundMinutes: [5, 10, 15, 20, 30],
   waterRise: [10, 20, 40],
-} as const satisfies Record<keyof SlugsOptions, readonly (string | number)[]>;
+  placing: ['auto', 'players'],
+} as const satisfies Record<keyof Settings['options'], readonly (string | number)[]>;
 
 const WIND_NAME: Record<number, string> = { 0: 'None', 50: 'Half', 100: 'Normal', 150: 'Strong' };
 
 /** The ground the next match will be built on, from the same design and seed the match will be given. */
-function MapThumb({ map, seed, theme }: { map: MapDesignId; seed: number; theme: ThemeId }) {
+function MapThumb({ map, seed, ground }: { map: MapDesignId; seed: number; ground: Settings['ground'] }) {
+  const theme = ground === 'map' ? MAP_DESIGNS[map].theme : ground;
   const canvas = useRef<HTMLCanvasElement>(null);
   const mask = useMemo(() => buildMap(map, seed), [map, seed]);
   useEffect(() => {
@@ -993,8 +1015,6 @@ function MapThumb({ map, seed, theme }: { map: MapDesignId; seed: number; theme:
     />
   );
 }
-/** Degrees the computer's best shot is put off by, at each level (the rules' AIM_ERROR). */
-const LEVEL_MISS = ['', 'up to 8°', 'up to 5°', 'up to 3°', 'up to 1°', ''];
 
 function Setup({
   settings, seed, onChange, onStart,
@@ -1027,11 +1047,7 @@ function Setup({
         onPick={(mode) => set({ mode })}
       />
 
-      {online ? (
-        <p className={styles.onlineNote}>
-          Make a room, or join one with its four-letter code. The room’s host sets up the match there.
-        </p>
-      ) : (
+      {!online && (
         <>
           <div className={styles.row}>
             <span className={styles.label}>Teams</span>
@@ -1039,7 +1055,14 @@ function Setup({
               <div className={styles.teamInputs}>
                 {settings.names.map((name, i) => (
                   <div key={i} className={styles.teamInput}>
-                    <img className={styles.portrait} src={portraitOf(TEAM_COLORS[i])} alt="" width={PORTRAIT_PX} height={PORTRAIT_PX} />
+                    <img
+                      className={styles.portrait}
+                      src={portraitOf(TEAM_COLORS[i])}
+                      style={{ background: TEAM_COLORS[i] }}
+                      alt=""
+                      width={PORTRAIT_PX}
+                      height={PORTRAIT_PX}
+                    />
                     <input
                       className={styles.input}
                       value={name}
@@ -1075,71 +1098,70 @@ function Setup({
             </div>
           </div>
 
-          <Choice
-            label="Slugs each"
-            value={settings.perTeam}
-            choices={PER_TEAM.map((n) => [n, String(n)] as const)}
-            onPick={(perTeam) => set({ perTeam })}
-          />
-
           {settings.mode === 'cpu' && (
-            <Choice
-              label="Computer"
-              value={settings.level}
-              choices={LEVELS}
-              onPick={(level) => set({ level })}
-              hint={settings.level === 5 ? 'Takes its best shot every time.' : `Misses its best shot by ${LEVEL_MISS[settings.level]}.`}
-            />
+            <Choice label="Computer" value={settings.level} choices={LEVELS} onPick={(level) => set({ level })} />
           )}
-
-          <Choice
-            label="Weapons"
-            value={o.weapons}
-            choices={OFFERED.weapons.map((w) => [w, w === 'classic' ? `Classic ${CLASSIC_COUNT}` : `All ${WEAPONS.length}`] as const)}
-            onPick={(weapons) => opt({ weapons })}
-          />
-          <Choice
-            label="Turn"
-            value={o.turnSeconds}
-            choices={OFFERED.turnSeconds.map((n) => [n, `${n}s`] as const)}
-            onPick={(turnSeconds) => opt({ turnSeconds })}
-          />
-
-          <div className={styles.row}>
-            <label className={styles.label} htmlFor="slugs-map">Map</label>
-            <div className={styles.mapPick}>
-              <div className={styles.rowControl}>
-                <select
-                  id="slugs-map"
-                  className={styles.input}
-                  value={o.map}
-                  // Each design comes with the ground it was drawn for; Ground under More settings can still change it.
-                  onChange={(e) => {
-                    const map = e.target.value as SlugsOptions['map'];
-                    set({ options: { ...o, map }, theme: MAP_DESIGNS[map].theme });
-                  }}
-                >
-                  {MAP_DESIGN_IDS.map((id) => (
-                    <option key={id} value={id}>{MAP_DESIGNS[id].name}</option>
-                  ))}
-                </select>
-                <span className={styles.hint}>{MAP_DESIGNS[o.map].blurb}</span>
-              </div>
-              <MapThumb map={o.map} seed={seed} theme={settings.theme} />
-            </div>
-          </div>
 
           {advanced && (
             <>
+              <Choice
+                label="Slugs each"
+                value={settings.perTeam}
+                choices={PER_TEAM.map((n) => [n, String(n)] as const)}
+                onPick={(perTeam) => set({ perTeam })}
+              />
+              <Choice
+                label="Placing"
+                value={o.placing}
+                choices={OFFERED.placing.map((p) => [p, p === 'auto' ? 'Automatic' : 'Players'] as const)}
+                onPick={(placing) => opt({ placing })}
+                hint={o.placing === 'players' ? 'Before the first turn, each team clicks where its slugs start, one slug at a time.' : undefined}
+              />
+              <Choice
+                label="Weapons"
+                value={o.weapons}
+                choices={OFFERED.weapons.map((w) => [w, w === 'classic' ? `Classic ${CLASSIC_COUNT}` : `All ${WEAPONS.length}`] as const)}
+                onPick={(weapons) => opt({ weapons })}
+              />
+              <Choice
+                label="Turn"
+                value={o.turnSeconds}
+                choices={OFFERED.turnSeconds.map((n) => [n, `${n}s`] as const)}
+                onPick={(turnSeconds) => opt({ turnSeconds })}
+              />
+              <div className={styles.row}>
+                <label className={styles.label} htmlFor="slugs-map">Map</label>
+                <div className={styles.mapPick}>
+                  <div className={styles.rowControl}>
+                    <select
+                      id="slugs-map"
+                      className={styles.input}
+                      value={settings.map}
+                      onChange={(e) => set({ map: e.target.value as Settings['map'] })}
+                    >
+                      <option value="random">Random</option>
+                      {MAP_DESIGN_IDS.map((id) => (
+                        <option key={id} value={id}>{MAP_DESIGNS[id].name}</option>
+                      ))}
+                    </select>
+                    <span className={styles.hint}>
+                      {settings.map === 'random' ? 'A different map each match.' : MAP_DESIGNS[settings.map].blurb}
+                    </span>
+                  </div>
+                  {/* Random has no ground to show until the match starts and draws one. */}
+                  {settings.map !== 'random' && <MapThumb map={settings.map} seed={seed} ground={settings.ground} />}
+                </div>
+              </div>
               <div className={styles.row}>
                 <label className={styles.label} htmlFor="slugs-theme">Ground</label>
                 <div className={styles.rowControl}>
                   <select
                     id="slugs-theme"
                     className={styles.input}
-                    value={settings.theme}
-                    onChange={(e) => set({ theme: e.target.value as ThemeId })}
+                    value={settings.ground}
+                    onChange={(e) => set({ ground: e.target.value as Settings['ground'] })}
                   >
+                    <option value="map">Map’s own</option>
                     {THEME_IDS.map((id) => (
                       <option key={id} value={id}>{THEMES[id].name}</option>
                     ))}
@@ -1190,7 +1212,7 @@ function Setup({
 
       <div className={styles.setupFoot}>
         <button type="submit" className={styles.primaryBtn}>
-          {online ? 'Go to the online room' : 'Start the match'}
+          {online ? 'Make or join a room' : 'Start the match'}
         </button>
         {!online && (
           <button type="button" className={styles.fold} aria-expanded={advanced} onClick={() => setAdvanced((a) => !a)}>
@@ -1211,13 +1233,29 @@ const FIRST_SETUP: Settings = {
   names: DEFAULT_NAMES.slice(0, 2),
   perTeam: 4,
   level: 3,
-  theme: THEME_IDS[0],
-  options: DEFAULT_OPTIONS,
+  map: 'random',
+  ground: 'map',
+  options: {
+    weapons: DEFAULT_OPTIONS.weapons,
+    turnSeconds: DEFAULT_OPTIONS.turnSeconds,
+    startHp: DEFAULT_OPTIONS.startHp,
+    windScale: DEFAULT_OPTIONS.windScale,
+    mines: DEFAULT_OPTIONS.mines,
+    barrels: DEFAULT_OPTIONS.barrels,
+    roundMinutes: DEFAULT_OPTIONS.roundMinutes,
+    waterRise: DEFAULT_OPTIONS.waterRise,
+    placing: DEFAULT_OPTIONS.placing,
+  },
 };
 
 const isIn = <T,>(list: readonly T[], v: unknown): v is T => list.includes(v as T);
 
-/** The saved setup, each part checked against what the setup offers; a part that fails keeps the first setup's. */
+/**
+ * The saved setup, each part checked against what the setup offers; a part
+ * that fails keeps the first setup's. A setup saved before Random held its map
+ * in `options.map` and its ground in `theme`; those are left behind, since
+ * nearly every one was the old default rather than a choice.
+ */
 function recallSetup(): Settings {
   let raw: string | null;
   try {
@@ -1234,10 +1272,10 @@ function recallSetup(): Settings {
     console.warn('[Slugs] The saved setup is not JSON, so it is ignored:', err);
     return FIRST_SETUP;
   }
-  const { mode, names, perTeam, level, theme } = saved;
-  const options = (saved.options ?? {}) as Partial<Record<keyof SlugsOptions, unknown>>;
-  const kept = { ...DEFAULT_OPTIONS };
-  for (const key of Object.keys(OFFERED) as (keyof SlugsOptions)[]) {
+  const { mode, names, perTeam, level, map, ground } = saved;
+  const options = (saved.options ?? {}) as Partial<Record<keyof Settings['options'], unknown>>;
+  const kept = { ...FIRST_SETUP.options };
+  for (const key of Object.keys(OFFERED) as (keyof Settings['options'])[]) {
     const v = options[key];
     if (isIn<string | number>(OFFERED[key], v)) Object.assign(kept, { [key]: v });
   }
@@ -1248,7 +1286,8 @@ function recallSetup(): Settings {
     names: namesOk ? (names as string[]) : FIRST_SETUP.names,
     perTeam: isIn(PER_TEAM, perTeam) ? perTeam : FIRST_SETUP.perTeam,
     level: isIn(LEVELS.map(([n]) => n), level) ? level : FIRST_SETUP.level,
-    theme: isIn(THEME_IDS, theme) ? theme : FIRST_SETUP.theme,
+    map: map === 'random' || isIn(MAP_DESIGN_IDS, map) ? map : FIRST_SETUP.map,
+    ground: ground === 'map' || isIn(THEME_IDS, ground) ? ground : FIRST_SETUP.ground,
     options: kept,
   };
 }
@@ -1297,20 +1336,29 @@ export function SlugsGame({ onClose, isSearchOpen, inviteCode }: SlugsGameProps)
     void import('./slugsScene');
   }, []);
 
+  // Random never deals the design just played, so a rematch is always somewhere new.
+  const lastMap = useRef<MapDesignId | null>(null);
   const start = useCallback(
     (from: Settings, matchSeed: number) => {
       if (from.mode === 'online') {
         setInLobby(true);
         return;
       }
-      const setups = setupsOf(from);
+      const others = MAP_DESIGN_IDS.filter((id) => id !== lastMap.current);
+      const map = from.map === 'random' ? others[Math.floor(Math.random() * others.length)] : from.map;
+      lastMap.current = map;
       setMatch((m) => ({
         id: (m?.id ?? 0) + 1,
-        driver: localDriver(matchSeed, setups, from.perTeam, from.options),
-        theme: from.theme,
+        driver: localDriver(matchSeed, setupsOf(from), from.perTeam, { ...from.options, map }),
+        theme: from.ground === 'map' ? MAP_DESIGNS[map].theme : from.ground,
         online: null,
       }));
     },
+    []
+  );
+
+  const keepChoices = useCallback(
+    (choices: MatchChoices) => setSettings((s) => ({ ...s, ...choices, options: { ...s.options, ...choices.options } })),
     []
   );
 
@@ -1373,7 +1421,13 @@ export function SlugsGame({ onClose, isSearchOpen, inviteCode }: SlugsGameProps)
           />
         ) : inLobby ? (
           <Suspense fallback={null}>
-            <SlugsLobby onStart={startOnline} onBack={() => setInLobby(false)} inviteCode={inviteCode} />
+            <SlugsLobby
+              onStart={startOnline}
+              onBack={() => setInLobby(false)}
+              inviteCode={inviteCode}
+              choices={settings}
+              onChoices={keepChoices}
+            />
           </Suspense>
         ) : (
           <Setup settings={settings} seed={seed} onChange={setSettings} onStart={() => start(settings, seed)} />

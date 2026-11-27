@@ -26,11 +26,21 @@ import type { Act, Control, Input, SlugEvent, SlugsOptions, SlugsState, TeamSetu
 import { chunkKey, chunksIn, teamSeats } from '../../api/slugsApi';
 import type { Seat, SeatWrite, SlugsMatch, SlugsRoom, SlugsSeatState } from '../../api/slugsApi';
 import { BEAT_LIVE_MS, orderTick } from '../swarm/swarmSync';
-import { MAP_DESIGN_IDS } from '../../slugsMaps';
+import { MAP_DESIGN_IDS, MAP_DESIGNS } from '../../slugsMaps';
+import type { MapDesignId } from '../../slugsMaps';
 import { THEME_IDS } from './slugThemes';
 import type { ThemeId } from './slugThemes';
 
 // --- Settings ---
+
+/**
+ * The map knob's value for a design drawn from the game's seed, and the
+ * ground knob's for the ground that design was drawn for. Both lie outside
+ * the list places, so a client from before them refuses the room (reload)
+ * rather than playing a different map from everyone else.
+ */
+export const RANDOM_MAP = 99;
+export const MAP_GROUND = 99;
 
 /**
  * What the host can choose, each from a short list so the database can hold
@@ -40,7 +50,7 @@ import type { ThemeId } from './slugThemes';
 export const KNOBS = {
   perTeam: [1, 2, 3, 4, 5, 6, 7, 8],
   level: [1, 2, 3, 4, 5],
-  ground: THEME_IDS.map((_, i) => i),
+  ground: [MAP_GROUND, ...THEME_IDS.map((_, i) => i)],
   turnSeconds: [15, 20, 30, 45, 60, 90],
   startHp: [50, 100, 150, 200],
   windScale: [0, 50, 100, 150],
@@ -48,15 +58,21 @@ export const KNOBS = {
   barrels: [0, 4, 8, 12],
   weapons: [0, 1],
   roundMinutes: [5, 10, 15, 20, 30],
-  map: MAP_DESIGN_IDS.map((_, i) => i),
+  placing: [0, 1],
+  map: [RANDOM_MAP, ...MAP_DESIGN_IDS.map((_, i) => i)],
 } as const satisfies Record<string, readonly number[]>;
 
 export type Knob = keyof typeof KNOBS;
 export type Settings = Record<Knob, number>;
 
 const WEAPON_SETS: readonly SlugsOptions['weapons'][] = ['classic', 'all'];
+const PLACINGS: readonly SlugsOptions['placing'][] = ['auto', 'players'];
 
-/** The local setup screen's defaults for the two the rules do not hold, and the rules' own for the rest. */
+/**
+ * What a room's empty `set` stands for. A room made now does not start from
+ * these but from the host's own setup (settingsOf), which is Random by default;
+ * these stay as they were so a room set up before Random reads as it did.
+ */
 export const DEFAULT_SETTINGS: Settings = {
   perTeam: 4,
   level: 3,
@@ -68,6 +84,7 @@ export const DEFAULT_SETTINGS: Settings = {
   barrels: DEFAULT_OPTIONS.barrels,
   weapons: WEAPON_SETS.indexOf(DEFAULT_OPTIONS.weapons),
   roundMinutes: DEFAULT_OPTIONS.roundMinutes,
+  placing: PLACINGS.indexOf(DEFAULT_OPTIONS.placing),
   map: MAP_DESIGN_IDS.indexOf(DEFAULT_OPTIONS.map),
 };
 
@@ -93,7 +110,21 @@ export function decodeSettings(set: string | undefined): Settings | null {
   return settings;
 }
 
-export function optionsOf(settings: Settings): SlugsOptions {
+/**
+ * The design a game is played on. Random takes it from the game's seed, so
+ * every client works out the same one and the host's next game draws again.
+ * The seed is mixed first because the map is also built from it: the design
+ * should not follow from the same bits that shape its ground.
+ */
+export function mapOf(settings: Settings, seed: number): MapDesignId {
+  if (settings.map !== RANDOM_MAP) return MAP_DESIGN_IDS[settings.map];
+  let h = Math.imul(seed ^ (seed >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return MAP_DESIGN_IDS[(h >>> 0) % MAP_DESIGN_IDS.length];
+}
+
+export function optionsOf(settings: Settings, seed: number): SlugsOptions {
   return {
     ...DEFAULT_OPTIONS,
     turnSeconds: settings.turnSeconds,
@@ -103,11 +134,73 @@ export function optionsOf(settings: Settings): SlugsOptions {
     barrels: settings.barrels,
     weapons: WEAPON_SETS[settings.weapons],
     roundMinutes: settings.roundMinutes,
-    map: MAP_DESIGN_IDS[settings.map],
+    placing: PLACINGS[settings.placing],
+    map: mapOf(settings, seed),
   };
 }
 
-export const themeOf = (settings: Settings): ThemeId => THEME_IDS[settings.ground];
+export const themeOf = (settings: Settings, seed: number): ThemeId =>
+  settings.ground === MAP_GROUND ? MAP_DESIGNS[mapOf(settings, seed)].theme : THEME_IDS[settings.ground];
+
+/** The options a room's knobs can carry; the rest are the rules' own online. */
+type KnobOptions = Pick<SlugsOptions, 'turnSeconds' | 'startHp' | 'windScale' | 'mines' | 'barrels' | 'weapons' | 'roundMinutes' | 'placing'>;
+
+/**
+ * A match setup in the local setup screen's terms. A room a person makes
+ * starts from theirs, and what they pick as its host goes back into it.
+ */
+export interface MatchChoices {
+  perTeam: number;
+  level: 1 | 2 | 3 | 4 | 5;
+  map: MapDesignId | 'random';
+  ground: ThemeId | 'map';
+  options: KnobOptions;
+}
+
+/** A room's settings for a setup; a part no knob offers is left at the default. */
+export function settingsOf(choices: MatchChoices): Settings {
+  const o = choices.options;
+  const wanted: Settings = {
+    perTeam: choices.perTeam,
+    level: choices.level,
+    ground: choices.ground === 'map' ? MAP_GROUND : THEME_IDS.indexOf(choices.ground),
+    turnSeconds: o.turnSeconds,
+    startHp: o.startHp,
+    windScale: o.windScale,
+    mines: o.mines,
+    barrels: o.barrels,
+    weapons: WEAPON_SETS.indexOf(o.weapons),
+    roundMinutes: o.roundMinutes,
+    placing: PLACINGS.indexOf(o.placing),
+    map: choices.map === 'random' ? RANDOM_MAP : MAP_DESIGN_IDS.indexOf(choices.map),
+  };
+  const settings = { ...DEFAULT_SETTINGS };
+  for (const knob of Object.keys(KNOBS) as Knob[]) {
+    if ((KNOBS[knob] as readonly number[]).includes(wanted[knob])) settings[knob] = wanted[knob];
+  }
+  return settings;
+}
+
+/** A room's settings in the setup screen's terms, which every knob value has one in. */
+export function choicesOf(settings: Settings): MatchChoices {
+  return {
+    perTeam: settings.perTeam,
+    // decodeSettings and settingsOf only let a value of KNOBS.level through.
+    level: settings.level as MatchChoices['level'],
+    map: settings.map === RANDOM_MAP ? 'random' : MAP_DESIGN_IDS[settings.map],
+    ground: settings.ground === MAP_GROUND ? 'map' : THEME_IDS[settings.ground],
+    options: {
+      turnSeconds: settings.turnSeconds,
+      startHp: settings.startHp,
+      windScale: settings.windScale,
+      mines: settings.mines,
+      barrels: settings.barrels,
+      weapons: WEAPON_SETS[settings.weapons],
+      roundMinutes: settings.roundMinutes,
+      placing: PLACINGS[settings.placing],
+    },
+  };
+}
 
 /** The teams of a match, in seat order, as the rules are given them. */
 export function setupsOf(match: Pick<SlugsMatch, 'players' | 'cpu'>, level: number): TeamSetup[] {
@@ -373,7 +466,7 @@ export function newLockstep(match: SlugsMatch, seat: Seat): Lockstep {
   if (!settings) throw new Error('This room was set up by a newer version of Slugs. Reload the page.');
   const seats = teamSeats(match);
   const setups = setupsOf(match, settings.level);
-  const options = optionsOf(settings);
+  const options = optionsOf(settings, match.seed);
   const state = newGame(match.seed, setups, settings.perTeam, options);
   const logs: Partial<Record<Seat, SeatLog>> = {};
   for (const each of seats) if (match.players[each]) logs[each] = emptyLog();
@@ -416,7 +509,7 @@ const ownLog = (ls: Lockstep) => ls.logs[ls.seat]!;
 /** The seat the next tick waits on: a person playing the active team, or null when the rules read nobody's input. */
 export function waitsOn(ls: Lockstep): Seat | null {
   const { state } = ls;
-  if (state.phase !== 'ready' && state.phase !== 'turn' && state.phase !== 'retreat') return null;
+  if (state.phase !== 'place' && state.phase !== 'ready' && state.phase !== 'turn' && state.phase !== 'retreat') return null;
   const seat = ls.seats[state.activeTeam];
   if (state.teams[state.activeTeam].control !== 'human') return null;
   const out = ls.out[seat];

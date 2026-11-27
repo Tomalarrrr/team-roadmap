@@ -10,7 +10,7 @@
 
 import * as Phaser from 'phaser';
 import {
-  CHARGE_TICKS, GIRDER_HALF, GIRDER_REACH, H, KEY, ONE, SLUG_HALF_H, TEAM_COLORS, TICK_MS, W, WEAPON, cosDeg, px, sinDeg, solidAt,
+  CHARGE_TICKS, GIRDER_HALF, GIRDER_REACH, H, KEY, ONE, SLUG_HALF_H, TEAM_COLORS, TICK_MS, W, WEAPON, cosDeg, placeSpot, px, sinDeg, solidAt,
 } from '../../slugsGameLogic';
 import type { Act, Input, Slug, SlugEvent, SlugsState } from '../../slugsGameLogic';
 import type { GameDriver } from './driver';
@@ -192,12 +192,18 @@ class SlugsScene extends Phaser.Scene {
 
   private slugs: SlugView[] = [];
   private slugRes = 0;
-  /** The rules' tick when the slugs were last drawn, and when (ms) it was first seen: see drawSlugs. */
+  /** The rules' tick when the slugs were last drawn, and the frame (ms) its glide is timed from: see drawSlugs. */
   private seenTick = -1;
   private tickSeenAt = 0;
+  private slugFrameAt = 0;
   /** Whether the slugs' labels are folded to one small line: see drawSlugs. */
   private smallLabels = false;
   private projs: { img: Phaser.GameObjects.Image; tex: Phaser.Textures.CanvasTexture; fuse: Phaser.GameObjects.Text; drawn: string }[] = [];
+  /** Where each projectile is drawn, by id, gliding over a tick the way slugs do (see drawSlugs). */
+  private projGlide = new Map<number, { drawX: number; drawY: number; fromX: number; fromY: number }>();
+  private projTick = -1;
+  private projTickAt = 0;
+  private projFrameAt = 0;
   private objViews: { img: Phaser.GameObjects.Image; tex: Phaser.Textures.CanvasTexture; drawn: string }[] = [];
   private graves: Grave[] = [];
   private sinking: Sinking[] = [];
@@ -252,6 +258,7 @@ class SlugsScene extends Phaser.Scene {
       shake: (ms, intensity) => this.worldCam.shake(ms, intensity, true),
       leanOf: (slug) => this.slugs[slug]?.tilt ?? 0,
       res: () => this.wantedRes(),
+      projAt: (id) => this.projDrawn(id),
     });
 
     this.fitView();
@@ -410,6 +417,8 @@ class SlugsScene extends Phaser.Scene {
    */
   private cameraGoal(now: number): { x: number; y: number; fast: boolean } {
     const s = this.state;
+    // The slug being placed waits hidden at a seat nobody chose, so the camera stays where the player put it.
+    if (s.phase === 'place') return { x: this.cx, y: this.cy, fast: false };
     const follow = (x: number, y: number) => {
       const at = this.activeTarget();
       this.boomAt = { x, y, t: now, sx: at.x, sy: at.y };
@@ -455,7 +464,9 @@ class SlugsScene extends Phaser.Scene {
     // The overview is a glance at the whole battle: the first turn's zoom starts once it has had a second and a half,
     // or as soon as the turn does.
     if (this.playZoom && !this.overviewAt) this.overviewAt = now;
-    if (this.playZoom && (this.state.phase !== 'ready' || now - this.overviewAt > 1500)) {
+    // Placing slugs is done on the overview, so the glance starts when the first turn is made ready.
+    if (this.state.phase === 'place') this.overviewAt = now;
+    if (this.playZoom && (this.state.phase !== 'ready' || now - this.overviewAt > 1500) && this.state.phase !== 'place') {
       this.zoomGoal = this.playZoom;
       this.playZoom = 0;
       this.manual = false;
@@ -564,6 +575,12 @@ class SlugsScene extends Phaser.Scene {
       if (down.size < 2) pinch = 0;
       if (!was || moved || e.type === 'pointercancel') return;
       const s = this.state;
+      if (s.phase === 'place') {
+        if (!this.hooks.driver.mine.includes(s.activeTeam)) return;
+        const w = this.toWorld(was.x, was.y);
+        this.hooks.act({ t: 'target', x: Math.round(w.x), y: Math.round(w.y) });
+        return;
+      }
       const use = WEAPON[s.weapon].use;
       if ((use !== 'target' && use !== 'mark') || !this.hooks.driver.mine.includes(s.activeTeam) || s.phase !== 'turn') return;
       const w = this.toWorld(was.x, was.y);
@@ -636,6 +653,8 @@ class SlugsScene extends Phaser.Scene {
     this.watchPace(time, delta);
     this.moveCamera(time, delta);
     this.land.show(this.zoom);
+    // Before the effects, so trails are laid where the shell is drawn rather than a tick ahead of it.
+    this.glideProjectiles(time);
     this.fx.update(s, time, delta);
     if (!this.lean) this.drawSky(time);
     this.drawWater(time, delta);
@@ -944,8 +963,11 @@ class SlugsScene extends Phaser.Scene {
     const ticked = s.tick !== this.seenTick;
     if (ticked) {
       this.seenTick = s.tick;
-      this.tickSeenAt = now;
+      // Timed from the last frame, where the glide sets off: timed from this one, every frame with a tick in it would
+      // draw the slug standing still.
+      this.tickSeenAt = this.slugFrameAt;
     }
+    this.slugFrameAt = now;
     const glide = Math.min(1, (now - this.tickSeenAt) / TICK_MS);
     s.slugs.forEach((slug, i) => {
       let view = this.slugs[i];
@@ -976,7 +998,7 @@ class SlugsScene extends Phaser.Scene {
         };
         this.slugs[i] = view;
       }
-      if (!slug.alive) {
+      if (!slug.alive || s.placing.includes(slug.id)) {
         view.img.setVisible(false);
         view.label.setVisible(false);
         return;
@@ -1172,6 +1194,47 @@ class SlugsScene extends Phaser.Scene {
   }
 
   /**
+   * Shells drawn where the rules put them would judder against the eased camera, as slugs did; each instead glides
+   * from where it was drawn to where the rules last put it, over one tick. Drawing only: the rules never see it.
+   */
+  private glideProjectiles(now: number) {
+    const s = this.state;
+    const ticked = s.tick !== this.projTick;
+    if (ticked) {
+      this.projTick = s.tick;
+      // The glide sets off from where the last frame drew it, so it is timed from that frame: timed from this one,
+      // every frame with a tick in it would draw the shell standing still.
+      this.projTickAt = this.projFrameAt;
+    }
+    this.projFrameAt = now;
+    const glide = Math.min(1, (now - this.projTickAt) / TICK_MS);
+    const next = new Map<number, { drawX: number; drawY: number; fromX: number; fromY: number }>();
+    for (const p of s.projs) {
+      const x = p.x / ONE;
+      const y = p.y / ONE;
+      const view = this.projGlide.get(p.id) ?? { drawX: x, drawY: y, fromX: x, fromY: y };
+      if (ticked) {
+        // A fast shell covers 15 px a tick, so the slugs' 24 px teleport test is widened by its speed;
+        // further than that (a replay rewinding) it jumps.
+        const reach = (Math.hypot(p.vx, p.vy) / ONE) * 2 + 24;
+        const far = Math.hypot(x - view.drawX, y - view.drawY) > reach;
+        view.fromX = far ? x : view.drawX;
+        view.fromY = far ? y : view.drawY;
+      }
+      view.drawX = view.fromX + (x - view.fromX) * glide;
+      view.drawY = view.fromY + (y - view.fromY) * glide;
+      next.set(p.id, view);
+    }
+    this.projGlide = next;
+  }
+
+  /** Where a projectile is drawn this frame, for the effects to lay its trail from. */
+  projDrawn(id: number): { x: number; y: number } | null {
+    const view = this.projGlide.get(id);
+    return view ? { x: view.drawX, y: view.drawY } : null;
+  }
+
+  /**
    * What flies is painted once, unturned, and turned as an image, so a cluster's
    * dozen bits cost no uploads; only a flame, fuse or drill repaints, at 25 a second.
    */
@@ -1211,8 +1274,9 @@ class SlugsScene extends Phaser.Scene {
         drawProjectileBody(ctx, p.kind, dir, beat * 40);
         view.tex.refresh();
       }
-      const x = p.x / ONE;
-      const y = p.y / ONE;
+      const glided = this.projGlide.get(p.id);
+      const x = glided ? glided.drawX : p.x / ONE;
+      const y = glided ? glided.drawY : p.y / ONE;
       view.img.setVisible(true).setPosition(x, y).setDisplaySize(24, 24).setRotation(projectileSpin(p.kind, angle, now));
       // A fuse is shown in whole seconds, the way it was set.
       if (p.fuse > 0) {
@@ -1230,6 +1294,12 @@ class SlugsScene extends Phaser.Scene {
     const slug = s.slugs[s.active];
     if (!slug || !slug.alive) return;
     const colour = hex(TEAM_COLORS[s.teams[slug.team].color]);
+    if (s.phase === 'place') {
+      const at = this.pointer && this.hooks.driver.mine.includes(s.activeTeam) && this.toWorld(this.pointer.x, this.pointer.y);
+      const spot = at && placeSpot(s, Math.round(at.x), Math.round(at.y));
+      if (spot) this.placeGhost(g, spot.x, spot.y, colour);
+      return;
+    }
     const x = px(slug.x);
     const y = px(slug.y) - 2;
     // Whose turn it is, pointed out while the turn gets ready and until that slug first crawls, aims, turns or picks a weapon.
@@ -1311,6 +1381,18 @@ class SlugsScene extends Phaser.Scene {
     g.lineBetween(cx - ux, cy - uy, cx + ux, cy + uy);
     g.lineStyle(5, 0xc9ccd1, near ? 0.9 : 0.3);
     g.lineBetween(cx - ux, cy - uy, cx + ux, cy + uy);
+  }
+
+  /** Where a click would put the slug being placed: its outline on the ground there, pointed out from above. */
+  private placeGhost(g: Phaser.GameObjects.Graphics, x: number, y: number, colour: number) {
+    for (const [width, c] of [[3, 0x111111], [1.4, colour]] as const) {
+      g.lineStyle(width, c, 1);
+      g.strokeEllipse(x, y, 12, 17);
+    }
+    g.fillStyle(0x111111, 0.9);
+    g.fillTriangle(x - 6, y - 22, x + 6, y - 22, x, y - 13);
+    g.fillStyle(colour, 1);
+    g.fillTriangle(x - 4.5, y - 21, x + 4.5, y - 21, x, y - 14.5);
   }
 
   private crosshair(g: Phaser.GameObjects.Graphics, x: number, y: number, colour: number) {

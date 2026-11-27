@@ -48,10 +48,21 @@ export const BACKJUMP = { vx: -Math.trunc(0.672 * ONE), vy: -Math.trunc(5 * ONE)
 /** Straight up about 39 px, as the source's straight jump: v = sqrt(2 * gravity * 39). */
 export const HOP = { vx: 0, vy: -Math.trunc(4.327 * ONE) };
 const LEAP = { jump: JUMP, flip: FLIP, backjump: BACKJUMP, hop: HOP } as const;
+/**
+ * Holding left or right in the air pushes a slug that jumped or stepped off by this much a tick,
+ * up to a forward jump's own speed. Ours: Worms has no steering in the air, and the table asked
+ * for it so a jump can be carried over or up onto what it would otherwise fall short of.
+ */
+const AIR_PUSH = Math.trunc(0.12 * ONE);
+const AIR_TOP = JUMP.vx;
 
-/** Landing faster than this hurts, by `((v - 8 + 1/65536) * 50 + 18) / 18` hp, and ends the turn. */
+/**
+ * Landing faster than this hurts, by `((v - 8 + 1/65536) * FALL_COEF + 18) / 18` hp, and ends the turn.
+ * The coefficient is the source's fall-damage setting at 2, double its default: at 1 a 300 px drop
+ * cost 12 hp and falls hardly counted.
+ */
 export const FALL_SAFE = 8 * ONE;
-export const FALL_COEF = 50;
+export const FALL_COEF = 100;
 
 export const TURN_TICKS = 45 * 50;
 export const RETREAT_TICKS = 3 * 50;
@@ -80,6 +91,13 @@ const WALL_KEEP = 26214;
  */
 const KNOCK_PER_HP = 9800;
 
+/**
+ * How far past the crater a blast still shoves, as a percent of the crater radius. Ours. Damage
+ * stops at the crater's edge, but a push that fell to nothing there as well left a slug at the rim
+ * hurt but unmoved, and one a pixel outside untouched though the fireball covered it.
+ */
+const SHOVE_PCT = 150;
+
 export interface SlugsOptions {
   turnSeconds: number;
   startHp: number;
@@ -96,6 +114,8 @@ export interface SlugsOptions {
   waterRise: number;
   /** Which map design the land is built from (slugsMaps.ts). */
   map: MapDesignId;
+  /** 'players': before the first turn each team picks where its slugs start, one slug at a time (Worms' manual placement). */
+  placing: 'auto' | 'players';
 }
 
 export const DEFAULT_OPTIONS: SlugsOptions = {
@@ -108,6 +128,7 @@ export const DEFAULT_OPTIONS: SlugsOptions = {
   roundMinutes: ROUND_TICKS / 3000,
   waterRise: WATER_RISE,
   map: 'classic',
+  placing: 'auto',
 };
 
 // --- Fixed-point trig: sin of 0..90 degrees, times ONE. ---
@@ -454,7 +475,7 @@ export interface Slug {
   vy: number;
   /** 'rope' swinging, 'jet' on a jetpack, 'chute' under a parachute. */
   mode: 'stand' | 'air' | 'slide' | 'rope' | 'jet' | 'chute';
-  /** Thrown by a blast or a blow: its next landing does not hurt. */
+  /** Thrown by a blast or a blow: it cannot steer, and skids where it lands. */
   blown: boolean;
   /** Jetpack thrusters burning this tick, as KEY bits (up, left, right); 0 or absent when none. */
   thrust?: number;
@@ -473,7 +494,7 @@ export interface Slug {
 /** What set off a blast: a projectile, a weapon fired straight, a barrel, a mine, or a slug popping. */
 export type BoomSource = ProjKind | WeaponId | ObjKind | 'pop';
 
-export type Phase = 'ready' | 'turn' | 'retreat' | 'settle' | 'tally' | 'deaths' | 'over';
+export type Phase = 'place' | 'ready' | 'turn' | 'retreat' | 'settle' | 'tally' | 'deaths' | 'over';
 
 export type SlugEvent =
   /** `src` is what went off, when the rules know it. */
@@ -592,6 +613,10 @@ export interface SlugsState {
   jetFuel: number;
   /** Mine triggers still to draw before the bag is refilled; 1 is a dud. */
   dudBag: number[];
+  /** Slugs still to be placed by their teams, the one being placed first; it stands hidden at its automatic seat meanwhile. */
+  placing: number[];
+  /** While slugs are placed: every place one may start, in a shuffled order for the automatic pick. Empty after. */
+  seats: Spot[];
   opts: SlugsOptions;
   events: SlugEvent[];
 }
@@ -821,7 +846,7 @@ function unitTo(x0: number, y0: number, x1: number, y1: number): { ux: number; u
 
 // --- Setting up ---
 
-interface Spot {
+export interface Spot {
   x: number;
   y: number;
 }
@@ -965,6 +990,25 @@ function openRoom(t: Uint8Array, water: number): Uint8Array {
   return open;
 }
 
+/** Standing spots in the room that joins the open air. */
+const openSpots = (state: SlugsState) => {
+  const open = openRoom(state.terrain, state.water);
+  return standingSpots(state.terrain, state.water).filter((s) => open[s.y * W + s.x] === 1);
+};
+
+/** Whether a slug at a spot can walk out of it (walkRoom both ways), worked out once a spot, as it is the dear check. */
+function roomTest(state: SlugsState): (s: Spot) => boolean {
+  const roomy = new Map<Spot, boolean>();
+  return (s) => {
+    let ok = roomy.get(s);
+    if (ok === undefined) {
+      ok = walkRoom(state.terrain, s.x, s.y, -1, state.water) + walkRoom(state.terrain, s.x, s.y, 1, state.water) >= SEAT_ESCAPE;
+      roomy.set(s, ok);
+    }
+    return ok;
+  };
+}
+
 /** Slugs closer than this to an enemy at the start, or this to anyone, are moved. Ours. */
 const ENEMY_GAP = 140;
 const FRIEND_GAP = 60;
@@ -978,19 +1022,8 @@ const FRIEND_GAP = 60;
  * False if even that cannot seat them.
  */
 export function placeSlugs(state: SlugsState): boolean {
-  const open = openRoom(state.terrain, state.water);
-  const t = state.terrain;
-  const spots = standingSpots(t, state.water).filter((s) => open[s.y * W + s.x] === 1);
-  // Walking out is the dear check, so it runs only on spots that pass the gaps, once each.
-  const roomy = new Map<Spot, boolean>();
-  const room = (s: Spot) => {
-    let ok = roomy.get(s);
-    if (ok === undefined) {
-      ok = walkRoom(t, s.x, s.y, -1, state.water) + walkRoom(t, s.x, s.y, 1, state.water) >= SEAT_ESCAPE;
-      roomy.set(s, ok);
-    }
-    return ok;
-  };
+  const spots = openSpots(state);
+  const room = roomTest(state);
   if (spots.length === 0) return false;
   // standingSpots runs left to right, so this is the ground in order from a random start.
   const start = randInt(state, spots.length);
@@ -1034,6 +1067,122 @@ export function placeSlugs(state: SlugsState): boolean {
     }
   }
   return false;
+}
+
+/** A slug placed by a player keeps this far from every slug already placed, so two never stand in one another. Ours. */
+const PLACE_APART = 2 * SLUG_HALF_W + 4;
+
+/**
+ * Whether the slug being placed may start at `s`: clear of the slugs already
+ * placed, off any mine's trigger and not inside a barrel, by placeObjects' own
+ * measure of near.
+ */
+function seatFree(state: SlugsState, s: Spot): boolean {
+  const near = (o: Obj) => Math.abs(px(o.x) - s.x) + Math.abs(px(o.y) - s.y);
+  if (state.objs.some((o) => near(o) < (o.kind === 'mine' ? MINE_REACH + 30 : 30))) return false;
+  const placed = state.slugs.filter((g) => !state.placing.includes(g.id));
+  return placed.every((g) => Math.abs(px(g.x) - s.x) >= PLACE_APART || Math.abs(px(g.y) - s.y) >= PLACE_APART);
+}
+
+/**
+ * Where a click at (x, y) puts the slug being placed: the free seat nearest it,
+ * so a click in the sky drops it to the ground below. Null outside placement or
+ * when no seat is free. The scene shows the same answer under the pointer.
+ */
+export function placeSpot(state: SlugsState, x: number, y: number): Spot | null {
+  if (state.phase !== 'place') return null;
+  let best: Spot | null = null;
+  let bestD = Infinity;
+  for (const s of state.seats) {
+    const d = (s.x - x) * (s.x - x) + (s.y - y) * (s.y - y);
+    if (d < bestD && seatFree(state, s)) {
+      best = s;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+/**
+ * The seat picked for a computer team, or for a person who lets the clock run
+ * out: the first free one in the shuffled list that keeps placeSlugs' gaps from
+ * the slugs already placed, halving them up to twice, then any free one. Null
+ * if none is free; the slug then keeps the seat placeSlugs gave it.
+ */
+function autoSeat(state: SlugsState): Spot | null {
+  const slug = state.slugs[state.active];
+  const placed = state.slugs.filter((g) => !state.placing.includes(g.id));
+  for (let relax = 0; relax <= 2; relax++) {
+    const at = state.seats.find(
+      (s) =>
+        seatFree(state, s) &&
+        placed.every((o) => {
+          const gap = (o.team === slug.team ? FRIEND_GAP : ENEMY_GAP) >> relax;
+          return (s.x - px(o.x)) ** 2 + (s.y - px(o.y)) ** 2 >= gap * gap;
+        })
+    );
+    if (at) return at;
+  }
+  return state.seats.find((s) => seatFree(state, s)) ?? null;
+}
+
+/**
+ * Start placement: every seat placeSlugs would trust, shuffled, and the slugs
+ * queued in turn order, a slug from each team in turn as the turns will run.
+ */
+function beginPlacing(state: SlugsState): void {
+  const room = roomTest(state);
+  const seats = openSpots(state).filter(room);
+  for (let i = seats.length - 1; i > 0; i--) {
+    const j = randInt(state, i + 1);
+    [seats[i], seats[j]] = [seats[j], seats[i]];
+  }
+  state.seats = seats;
+  const most = Math.max(...state.teams.map((team) => team.slugs.length));
+  for (let k = 0; k < most; k++) for (const team of state.teams) if (k < team.slugs.length) state.placing.push(team.slugs[k]);
+  nextToPlace(state);
+}
+
+/** Hand the next slug in the queue to its team to place, or, once all are placed, start the first turn. */
+function nextToPlace(state: SlugsState): void {
+  if (state.placing.length === 0) {
+    state.seats = [];
+    beginTurn(state, randInt(state, state.teams.length));
+    return;
+  }
+  state.active = state.placing[0];
+  state.activeTeam = state.slugs[state.active].team;
+  state.phase = 'place';
+  state.phaseT = 0;
+  state.timeLeft = state.opts.turnSeconds * 50;
+}
+
+/**
+ * One tick of placement. A person places with a 'target' act at the point, or
+ * 'skip' to take the automatic pick, which the clock running out also takes; a
+ * computer takes it after the same pause it starts a turn with.
+ */
+function placeTick(state: SlugsState, input: Input): void {
+  const team = state.teams[state.activeTeam];
+  let at: Spot | null | undefined;
+  if (isComputer(team)) {
+    if (state.phaseT >= CPU_READY_TICKS) at = autoSeat(state);
+  } else if (input.act?.t === 'target') {
+    at = placeSpot(state, input.act.x, input.act.y);
+    // Nowhere free to put it: wait for the clock, whose pick keeps the automatic seat.
+    if (!at) return;
+  } else if (input.act?.t === 'skip' || --state.timeLeft <= 0) {
+    at = autoSeat(state);
+  }
+  if (at === undefined) return;
+  const slug = state.slugs[state.active];
+  if (at) {
+    slug.x = at.x * ONE;
+    slug.y = at.y * ONE;
+    slug.facing = at.x < W / 2 ? 1 : -1;
+  }
+  state.placing.shift();
+  nextToPlace(state);
 }
 
 /** Scatter mines and barrels on free standing spots well clear of the slugs and of each other. */
@@ -1104,6 +1253,8 @@ export function newGame(seed: number, setups: TeamSetup[], perTeam: number, opti
     ropeShots: ROPE_SHOTS,
     jetFuel: 0,
     dudBag: [],
+    placing: [],
+    seats: [],
     opts,
     events: [],
   };
@@ -1138,6 +1289,11 @@ export function newGame(seed: number, setups: TeamSetup[], perTeam: number, opti
   // A land too broken to seat everyone is swapped for the next seed's.
   for (let land = 1; !placeSlugs(state); land++) state.terrain = buildMap(opts.map, (seed + land * 7919) >>> 0);
   placeObjects(state, opts.mines, opts.barrels);
+  // Placement still seats everyone first: it proves the land has room, and is where a slug no seat is free for stays.
+  if (opts.placing === 'players') {
+    beginPlacing(state);
+    return state;
+  }
   state.activeTeam = randInt(state, state.teams.length);
   beginTurn(state, state.activeTeam);
   return state;
@@ -1157,6 +1313,9 @@ export function cloneState(s: SlugsState): SlugsState {
     using: s.using && { ...s.using, hit: s.using.hit.slice() },
     rope: s.rope && { ...s.rope, pts: s.rope.pts.map((q) => ({ ...q })) },
     dudBag: s.dudBag.slice(),
+    placing: s.placing.slice(),
+    // Spots are never changed, only the list replaced, so copies share them.
+    seats: s.seats.slice(),
     opts: { ...s.opts },
     events: s.events.slice(),
   };
@@ -1164,12 +1323,19 @@ export function cloneState(s: SlugsState): SlugsState {
 
 // --- Turns ---
 
+/**
+ * A wind step from -WIND_MOST to WIND_MOST, the sum of two rolls so light wind is common and
+ * strong wind rare: 8 or more either way on about 1 turn in 10, where an even roll gave 2 in 7
+ * and left the bazooka a lottery. Ours: the source leaves its distribution unstated.
+ */
+const windRoll = (state: SlugsState) => randInt(state, WIND_MOST + 1) + randInt(state, WIND_MOST + 1) - WIND_MOST;
+
 function rollWind(state: SlugsState): void {
   const slug = state.slugs[state.active];
-  let wind = randInt(state, WIND_MOST * 2 + 1) - WIND_MOST;
+  let wind = windRoll(state);
   // Leans toward the middle of the map from where the slug stands (ours: the source gives the lean, not its size).
   if (randInt(state, 100) < 15) wind += px(slug.x) < W / 2 ? 2 : -2;
-  if (wind === state.wind) wind = randInt(state, WIND_MOST * 2 + 1) - WIND_MOST;
+  if (wind === state.wind) wind = windRoll(state);
   state.wind = Math.max(-WIND_MOST, Math.min(WIND_MOST, wind));
 }
 
@@ -1296,7 +1462,7 @@ export function blastDamage(damage: number, crater: number, dist: number): numbe
   return Math.ceil((damage * (crater - dist)) / crater);
 }
 
-/** Throw a slug off its feet: the speed is added, and its next landing does not hurt if `blown`. */
+/** Throw a slug off its feet: the speed is added, and if `blown` it cannot steer and skids on landing. */
 function knock(slug: Slug, vx: number, vy: number, blown: boolean): void {
   slug.vx += vx;
   slug.vy += vy;
@@ -1310,28 +1476,36 @@ export function explode(state: SlugsState, x: number, y: number, damage: number,
   state.events.push({ k: 'boom', x, y, r: crater, ...(src && { src }) });
   const kx = x;
   const ky = y + Math.trunc((crater * bias) / 100);
+  const reach = Math.trunc((crater * SHOVE_PCT) / 100);
+  // The push the damage gives, but never less than a shove that is an eighth of the full push at the
+  // crater's edge and fades to none at `reach`: for a standard blast that is about 0.9 px/frame at
+  // the rim, which skids a slug some 15 px. Nearer than about 0.8 of the crater the damage's push is larger.
+  const atLeast = (dist: number) => (dist >= reach ? 0 : Math.trunc(((reach - dist) * damage * KNOCK_PER_HP) / (8 * (reach - crater))));
   for (const slug of state.slugs) {
     if (!slug.alive) continue;
-    const dmg = blastDamage(damage, crater, distToSlug(slug, x, y));
-    if (dmg <= 0) continue;
-    const push = Math.min(SPEED_CAP, dmg * KNOCK_PER_HP);
+    const dist = distToSlug(slug, x, y);
+    const dmg = blastDamage(damage, crater, dist);
+    const push = Math.min(SPEED_CAP, Math.max(dmg * KNOCK_PER_HP, atLeast(dist)));
+    if (push <= 0) continue;
     const u = unitTo(kx, ky, px(slug.x), px(slug.y));
     knock(slug, Math.trunc((u.ux * push) / ONE), Math.trunc((u.uy * push) / ONE), true);
     hurt(state, slug, dmg);
   }
   const pushBody = (b: { x: number; y: number; vx: number; vy: number; rest: boolean }) => {
     const u = unitTo(kx, ky, px(b.x), px(b.y));
-    if (u.d >= crater) return false;
-    const push = Math.trunc(((crater - u.d) * damage * KNOCK_PER_HP) / crater);
+    const inner = u.d >= crater ? 0 : Math.trunc(((crater - u.d) * damage * KNOCK_PER_HP) / crater);
+    const push = Math.max(inner, atLeast(u.d));
+    if (push <= 0) return u.d;
     b.vx += Math.trunc((u.ux * push) / ONE);
     b.vy += Math.trunc((u.uy * push) / ONE);
     b.rest = false;
-    return true;
+    return u.d;
   };
   for (const p of state.projs) if (p.fuse >= 0) pushBody(p);
   for (const o of state.objs) {
+    // Shoved out to `reach`, but only the crater itself hurts a barrel or trips a mine.
     // A barrel is hurt as a slug is, by the blast's distance to its body, so a shot that hits it does full damage.
-    if (!pushBody(o)) continue;
+    if (pushBody(o) >= crater) continue;
     if (o.kind === 'barrel') o.hp -= blastDamage(damage, crater, distToBox(px(o.x), px(o.y), BARREL_HALF.w, BARREL_HALF.h, x, y));
     else if (!o.dud && o.fuse < 0) {
       // A blast trips a mine whether or not it has armed, and it goes off as a slug would set it off.
@@ -1738,9 +1912,21 @@ function moveSlug(state: SlugsState, slug: Slug): number {
     }
     const upright = fits(t, px(slug.x), px(ny));
     const level = fits(t, px(nx), px(slug.y));
+    // A slug that jumped or stepped off is not thrown: it climbs onto a lip it clips, as a walk
+    // climbs a step, and meeting a wall it slides up it rather than being flung back off it.
+    const leapt = slug.mode === 'air' && !slug.blown;
+    if (leapt && nx !== slug.x && (upright || !level)) {
+      let lip = 1;
+      while (lip <= STEP_PX && !fits(t, px(nx), px(ny) - lip)) lip++;
+      if (lip <= STEP_PX) {
+        slug.x = nx;
+        slug.y = ny - lip * ONE;
+        continue;
+      }
+    }
     if (upright) {
       slug.y = ny;
-      slug.vx = -Math.trunc((slug.vx * WALL_KEEP) / ONE);
+      slug.vx = leapt ? 0 : -Math.trunc((slug.vx * WALL_KEEP) / ONE);
       continue;
     }
     if (slug.vy > 0) {
@@ -1768,7 +1954,9 @@ export function fallDamage(impact: number): number {
 }
 
 function land(state: SlugsState, slug: Slug, impact: number): void {
-  if (!slug.blown && impact > FALL_SAFE) {
+  // A thrown slug's landing hurts too, as with the source's v3.8 option: without it a blast that
+  // flings a slug across the map costs no more than one that nudges it.
+  if (impact > FALL_SAFE) {
     const dmg = fallDamage(impact);
     state.events.push({ k: 'fall', id: slug.id, dmg });
     hurt(state, slug, dmg);
@@ -1776,7 +1964,8 @@ function land(state: SlugsState, slug: Slug, impact: number): void {
   // Only a slug thrown by a blast or a blow skids on landing; a jump or a drop stops where it lands.
   const thrown = slug.blown;
   slug.blown = false;
-  if (thrown && Math.abs(slug.vx) > ONE) {
+  // The slide's own stopping speed, so a slow throw skids a few px rather than stopping dead.
+  if (thrown && Math.abs(slug.vx) >= ONE / 2) {
     slug.mode = 'slide';
   } else {
     slug.vx = 0;
@@ -1871,6 +2060,13 @@ function stepSlug(state: SlugsState, slug: Slug): void {
       stepRope(state, slug);
       return;
   }
+}
+
+/** Push a slug in the air towards `dir`, never past AIR_TOP, and never slowing one already going faster that way. */
+function steer(slug: Slug, dir: 1 | -1): void {
+  slug.facing = dir;
+  if (dir * slug.vx >= AIR_TOP) return;
+  slug.vx = dir * Math.min(AIR_TOP, dir * slug.vx + AIR_PUSH);
 }
 
 /** Snap a landed slug down onto the ground under it. */
@@ -2535,6 +2731,7 @@ function control(state: SlugsState, input: Input): void {
 
   // Walk. Turning round takes a tick; between the shotgun's shots the slug may turn but not walk.
   const dir = keys & KEY.left ? -1 : keys & KEY.right ? 1 : 0;
+  if (dir !== 0 && slug.mode === 'air' && !slug.blown && !state.charging) steer(slug, dir);
   if (dir === 0 || slug.mode !== 'stand' || state.charging) {
     slug.walk = 0;
     return;
@@ -3186,6 +3383,11 @@ export function advance(state: SlugsState, input: Input): void {
   state.events = [];
   state.tick++;
   state.phaseT++;
+  // Nothing moves while slugs are placed, and the round clock has not started.
+  if (state.phase === 'place') {
+    placeTick(state, input);
+    return;
+  }
   // The round runs on the match clock, retreats and settling included, as the classic game's does.
   if (state.phase !== 'over') state.roundT++;
   const team = state.teams[state.activeTeam];

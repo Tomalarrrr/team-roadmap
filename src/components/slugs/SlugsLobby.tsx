@@ -9,7 +9,6 @@ import {
   getRoom,
   hostOf,
   joinRoom,
-  MOST_PEOPLE,
   putSeat,
   SEATS,
   seatOf,
@@ -30,8 +29,10 @@ import { onlineDriver, recallRoom, rememberRoom } from './onlineDriver';
 import type { OnlineDriver } from './onlineDriver';
 import { THEME_IDS, THEMES } from './slugThemes';
 import type { ThemeId } from './slugThemes';
-import { decodeSettings, encodeSettings, KNOBS, optionsOf, restingReport, setupsOf, themeOf } from './slugsSync';
-import type { Knob, Settings } from './slugsSync';
+import {
+  choicesOf, decodeSettings, encodeSettings, KNOBS, MAP_GROUND, optionsOf, RANDOM_MAP, restingReport, settingsOf, setupsOf, themeOf,
+} from './slugsSync';
+import type { Knob, MatchChoices, Settings } from './slugsSync';
 import styles from './SlugsLobby.module.css';
 
 export interface LobbyInfo {
@@ -46,6 +47,10 @@ interface LobbyProps {
   onStart: (driver: OnlineDriver, info: LobbyInfo) => void;
   onBack: () => void;
   inviteCode?: string | null;
+  /** This person's last setup: a room they make starts from it. */
+  choices: MatchChoices;
+  /** What they pick as a host, to keep for their next setup. */
+  onChoices: (choices: MatchChoices) => void;
 }
 
 function who(): { sessionId: string; name: string } {
@@ -71,11 +76,11 @@ const KNOB_NAME: Record<Knob, string> = {
   barrels: 'Barrels',
   weapons: 'Weapons',
   roundMinutes: 'Sudden death',
+  placing: 'Placing',
   map: 'Map',
 };
 
-const SHORT: Knob[] = ['perTeam', 'level', 'map', 'ground', 'turnSeconds'];
-const ADVANCED: Knob[] = ['startHp', 'windScale', 'mines', 'barrels', 'weapons', 'roundMinutes'];
+const ADVANCED: Knob[] = ['perTeam', 'map', 'ground', 'turnSeconds', 'weapons', 'startHp', 'windScale', 'mines', 'barrels', 'roundMinutes', 'placing'];
 
 const LEVEL_NAME = ['', 'Easy', 'Fair', 'Good', 'Hard', 'Best'];
 
@@ -84,9 +89,9 @@ function choiceName(knob: Knob, value: number): string {
     case 'level':
       return LEVEL_NAME[value];
     case 'ground':
-      return THEMES[THEME_IDS[value]].name;
+      return value === MAP_GROUND ? 'Map’s own' : THEMES[THEME_IDS[value]].name;
     case 'map':
-      return MAP_DESIGNS[MAP_DESIGN_IDS[value]].name;
+      return value === RANDOM_MAP ? 'Random' : MAP_DESIGNS[MAP_DESIGN_IDS[value]].name;
     case 'turnSeconds':
       return `${value}s`;
     case 'roundMinutes':
@@ -95,6 +100,8 @@ function choiceName(knob: Knob, value: number): string {
       return value === 0 ? 'None' : `${value}%`;
     case 'weapons':
       return value === 0 ? 'Classic' : 'All';
+    case 'placing':
+      return value === 0 ? 'Automatic' : 'Players';
     default:
       return String(value);
   }
@@ -109,7 +116,7 @@ function Field({ name, children }: { name: string; children: React.ReactNode }) 
   );
 }
 
-export function SlugsLobby({ onStart, onBack, inviteCode }: LobbyProps) {
+export function SlugsLobby({ onStart, onBack, inviteCode, choices, onChoices }: LobbyProps) {
   const [me] = useState(who);
   const [name, setName] = useState(me.name);
   const [code, setCode] = useState<string | null>(null);
@@ -153,7 +160,11 @@ export function SlugsLobby({ onStart, onBack, inviteCode }: LobbyProps) {
   const handleCreate = () => {
     setBusy(true);
     createRoom(me.sessionId, name.trim() || 'Player')
-      .then(enter, (err: Error) => setError(err.message))
+      .then((roomCode) => {
+        enter(roomCode);
+        return setSettings(roomCode, me.sessionId, encodeSettings(settingsOf(choices)));
+      })
+      .catch((err: Error) => setError(err.message))
       .finally(() => setBusy(false));
   };
 
@@ -231,7 +242,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode }: LobbyProps) {
       return;
     }
     const s = decodeSettings(match.set)!;
-    onStart(driver, { setups: setupsOf(match, s.level), perTeam: s.perTeam, theme: themeOf(s), seed: match.seed, options: optionsOf(s) });
+    onStart(driver, { setups: setupsOf(match, s.level), perTeam: s.perTeam, theme: themeOf(s, match.seed), seed: match.seed, options: optionsOf(s, match.seed) });
   }, [code, match, mySeat, me.sessionId, onStart]);
 
   const act = (work: Promise<void>) => {
@@ -301,7 +312,6 @@ export function SlugsLobby({ onStart, onBack, inviteCode }: LobbyProps) {
   }
 
   const teams = teamSeats(match);
-  const people = SEATS.filter((seat) => match.players[seat]).length;
   const isHost = host === mySeat;
   const waitingOn = SEATS.filter((seat) => seat !== host && match.players[seat] && !match.players[seat]!.ready);
   const canStart = isHost && waitingOn.length === 0 && teams.length >= 2 && settings !== null && match.status !== 'playing';
@@ -310,8 +320,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode }: LobbyProps) {
   const pick = (knob: Knob, value: number) => {
     if (!code || !settings) return;
     const next = { ...settings, [knob]: value } as Settings;
-    // As on the local setup, a design brings the ground it was drawn for; Ground can still change it after.
-    if (knob === 'map') next.ground = THEME_IDS.indexOf(MAP_DESIGNS[MAP_DESIGN_IDS[value]].theme);
+    onChoices(choicesOf(next));
     act(setSettings(code, me.sessionId, encodeSettings(next)));
   };
 
@@ -338,7 +347,7 @@ export function SlugsLobby({ onStart, onBack, inviteCode }: LobbyProps) {
 
   let idle = '';
   if (settings === null) idle = 'This room was set up by a newer version of Slugs. Reload the page.';
-  else if (teams.length < 2) idle = isHost ? 'Wait for a friend to join with the code, or add the computer.' : 'Waiting for the host to add a team.';
+  else if (teams.length < 2) idle = isHost ? 'Share the code with one friend, or add the computer.' : 'Waiting for the host to add a team.';
   else if (mySeat && waitingOn.includes(mySeat)) idle = 'Press Ready when the settings suit you.';
   else if (waitingOn.length) idle = `Waiting for ${waitingOn.map(nameOf).join(' and ')} to be ready.`;
   else if (!isHost && host) idle = `Waiting for ${nameOf(host)} to start.`;
@@ -373,10 +382,9 @@ export function SlugsLobby({ onStart, onBack, inviteCode }: LobbyProps) {
           );
         })}
       </div>
-      {people < MOST_PEOPLE && <span className={styles.note}>Rooms take {MOST_PEOPLE} people. The computer plays the other teams.</span>}
       {settings && (
         <div className={styles.form}>
-          {SHORT.map(knobField)}
+          {match.cpu && knobField('level')}
           <button type="button" className={`${styles.formWide} ${styles.linkBtn}`} onClick={() => setAdvanced(!advanced)} aria-expanded={advanced}>
             {advanced ? 'Fewer settings' : 'More settings'}
           </button>

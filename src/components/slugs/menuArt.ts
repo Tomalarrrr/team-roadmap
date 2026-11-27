@@ -5,12 +5,9 @@
 
 import { H, W, WATER_START } from '../../slugsGameLogic';
 import type { WeaponId } from '../../slugsGameLogic';
-import { drawSlug, drawWeaponIcon } from './slugArt';
+import { STEEL_BODY, drawSlug, drawWeaponIcon } from './slugArt';
 import { THEMES } from './slugThemes';
 import type { ThemeId } from './slugThemes';
-
-/** The steel slugArt paints girders with (its STEEL.body), so a wreck's hull reads as metal here too. */
-const STEEL = '#7f878e';
 
 /** The thumbnail's size in CSS px: the battlefield's own proportions, 1920 by 696, at a twelfth. */
 export const THUMB_W = 160;
@@ -69,7 +66,7 @@ export function paintMapThumb(canvas: HTMLCanvasElement, mask: Uint8Array, theme
   const img = lctx.createImageData(tw, th);
   const soil = hex(t.soil[1]);
   const crust = hex(t.crust);
-  const metal = hex(STEEL);
+  const metal = hex(STEEL_BODY);
   // The crust is as deep as the battlefield's, scaled with the rest, and at least a pixel so it shows.
   const crustRows = Math.max(1, Math.round(t.crustDepth / step));
   for (let tx = 0; tx < tw; tx++) {
@@ -123,10 +120,13 @@ export const iconOf = (w: WeaponId): string => picture(`weapon ${w}`, ICON_PX, (
 /** CSS px of a team's slug portrait. */
 export const PORTRAIT_PX = 24;
 
-/** A slug standing, facing right, wearing the team's band. */
+/** A slug standing, facing right, wearing the team's band, sized to sit inside a round disc. */
 export const portraitOf = (band: string): string =>
   picture(`slug ${band}`, PORTRAIT_PX, (ctx) => {
-    // Idle, the drawing spans x -10 to 6 and y -13 to 8 (measured from its pixels), so this centres it.
-    ctx.translate(PORTRAIT_PX / 2 + 2, PORTRAIT_PX / 2 + 2.5);
+    // Idle, the drawing spans x -10 to 6.25 and y -13 to 8.25 (measured from its pixels): a box whose
+    // diagonal is 26.8, so at 0.84 its corners clear the disc's 24 px and the eyes are not clipped.
+    ctx.translate(PORTRAIT_PX / 2, PORTRAIT_PX / 2);
+    ctx.scale(0.84, 0.84);
+    ctx.translate(1.875, 2.375);
     drawSlug(ctx, { facing: 1, aim: 0, t: 0, anim: 'idle', crawl: 0, band });
   });
