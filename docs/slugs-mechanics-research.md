@@ -276,7 +276,7 @@ Worms 2 default turn and round times: **[UNVERIFIED]**.
 Sources: https://worms2d.info/Intrinsic_schemes, https://worms2d.info/Deathmatch, https://worms2d.info/Training_Disciplines_(Worms_Armageddon), https://worms2d.info/Rope_Race, https://worms2d.info/Shopper, https://worms2d.info/Bungee_Race, https://worms2d.info/Forts, https://worms2d.info/Wormpot, https://worms2d.info/Team17_(scheme)
 
 - Built-in schemes (WA): Beginner, Intermediate (default), Pro, Tournament, Classic, Retro, Artillery, Sudden Sinking, Strategic, The Darkside, Armageddon, Blast Zone, The Full Wormage.
-- Single player: Quick Match (4 v 4 against a CPU level 5 team); Deathmatch (21 ranks; CPU teams get more worms and higher skill as rank rises); Missions; Training (Basic Training, Super Sheep Racing, Rifle Range, Crazy Crates and others, which unlock cheats).
+- Single player: Quick Match (4 v 4 against a CPU level 5 team); Deathmatch (21 ranks; CPU teams get more worms and higher skill as rank rises); Missions; Training (Basic Training, Super Sheep Racing, Rifle Range, Crazy Crates and others, whose medals earn cheats).
 - Multiplayer: hot-seat on one machine, LAN, online. W2 supports up to 6 computers online (Wikipedia).
 - Community schemes:
   - Elite: competitive standard.
