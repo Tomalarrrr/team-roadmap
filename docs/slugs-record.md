@@ -101,6 +101,7 @@ open, not across it.
 | 2026-11-27 | Zip lines strung by the rules from terrain and seed, no new act or saved field | Every client finds the same lines from the seed, so online rooms and the database rules need nothing new |
 | 2026-11-27 | A cut cable's fall is drawn, not ruled: a 6 px link chain stepped at the rules' gravity, 40 constraint passes | At 10 passes a 280 px cable stretched 6% as it hung, visibly too long; 40 keeps it within 2% |
 | 2026-11-27 | Armed mines flash a red lamp, not only tripped ones | TPS: "mines need red flashing lights so i can see them" |
+| 2026-11-27 | A room carries the rules it is played by (`rules=N` in `m/set`), and a client plays only a room carrying its own | Room 8WBG split: a tab open since before the 13:56 deploy ended game 1 at tick 25078 with b the winner, while the other tab, on the new rules, began a's turn with a's team alive. N is a hash of the minified online driver and all it imports (vite.config.ts `slugsRules`), so a comment leaves it alone and any rule change moves it. The host's lobby moves a room onto its own number; a guest on another number cannot be ready. Clients from before the gate refuse stamped rooms as a newer version |
 
 Fall damage by drop, before and after: 150 px 2 to 3, 200 px 5 to 10, 300 px 12 to 23,
 400 px 17 to 33, 600 px 25 to 50, at the speed cap 67 to 134.
@@ -234,6 +235,11 @@ mechanic is worth having it gets an original name and look (seedpod, jar, snail,
 | 2026-11-27 | Panel, description and canopy label, in Chrome | Checked by eye: panel opaque, Right after hovering Grenade shows Homing missile, label above the canopy and back on the head on landing |
 | 2026-11-27 | 25f65ed with only the panel, CSS and label hunks: tsc -b, vite build, eslint, slop-check, all 13 slug test files one at a time | Each exit 0; slop-check `4 file(s) scanned, clean`; every file `Test Files 1 passed (1)` |
 | 2026-11-27 | Live ce43c43 in a clean worktree: tsc -b, vite build, full vitest | tsc and build exit 0; Vercel both projects "Deployment has completed". `Tests 10 failed \| 3585 passed (3595)`: all Swarm (swarmBuildStarts, swarmBuildings, swarmFloodPowers, swarmPieces), failing the same on 25f65ed, plus two files that need a `.env` the worktree lacks |
+| 2026-11-27 | Replays of 8WBG's inputs on the rules before and after 13:56, and two clients at uneven pace on the live rules | Old rules: over at tick 25078, a wiped out, b at 48/72/17/89/100 hp. Live rules: tick 25078 is a's turn, a at 100/32/100; both paced clients matched the reference on every tick checked, so the rules themselves agree |
+| 2026-11-27 | Rules gate: `describe('slugs rules version')` in slugsSync, slugsLobbyRules (jsdom), on 7b9b597 | tsc -b exit 0; all slug test files `Tests 489 passed (489)` |
+| 2026-11-27 | Mutations on the gate: sameRules always true, by substring, no lockstep check, decode refuses `rules`, stamp dropped, Ready and Start ungated, restamp of a room being made, guest restamps, no restamp, room created unstamped | Each failed at least one test |
+| 2026-11-27 | Rules hash: twice, from another path, with a comment added, with one `Math.floor` made `Math.ceil` | 2154, 2154, 2154, 8968. Live bundle of 7b9b597 carries 8970, the same as a local build of 7b9b597 |
+| 2026-11-27 | Live room XX3Q, made on 7b9b597 | `set` ends `rules=8970`; both seats' promises went 37.7k to 38.7k ticks in 20 s, within 50 of each other |
 
 ## Next task
 
