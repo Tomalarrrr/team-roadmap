@@ -106,7 +106,7 @@ open, not across it.
 Fall damage by drop, before and after: 150 px 2 to 3, 200 px 5 to 10, 300 px 12 to 23,
 400 px 17 to 33, 600 px 25 to 50, at the speed cap 67 to 134.
 
-## Physics rules (2026-11-27, for TPS to check before they ship)
+## Physics rules (2026-11-27, live since 1538049 at TPS's call, still for TPS to check)
 
 TPS asked for the physics to feel like Worms Armageddon. A bench of scripted scenes on the rules
 as they stood found these gaps:
@@ -169,6 +169,21 @@ test gives 20° always holds and 30° never does.
 A mine or grenade on steep ground that is creeping into the land at under 1 px a frame is lifted
 1 px off it rather than stopped. Without that, a mine's box caught on every pixel step of a 30°
 slope and stalled half way down, and a jar could wedge on a 45° face.
+
+Coming to rest. Each rule below was added for a case that held a turn open for ever, found by the
+sweeps and the red team listed under Tests performed:
+
+- A mine or shot that went nowhere in a tick is held, whatever the slope says. Its speed can settle
+  into a loop that the bounce takes off and gravity puts back each tick (a mine on a steep face of
+  the forts map; a grenade wedged on the wreck map).
+- A shot rolls on only if the land faces the way the heights fall. On the flat lip of a cliff the
+  heights alone call it steep, and a grenade bounced straight up there for ever (canyon map).
+- A mine or shot that is wedged (its next step is blocked and it went nowhere) counts land
+  diagonally below it as ground. In a V, or beside a 1 px spike, it is held from one side with
+  nothing straight under it. Only when wedged: letting any slow mine or shot rest on a corner it
+  passes stops it short of where it slid before.
+- Mines and barrels are set down at the start only on ground that holds. Before, in 247 of 360
+  idle matches something slid before anyone had moved, and in 42 of them a slug was hurt.
 
 Research notes (`docs/slugs-mechanics-research.md`):
 
@@ -240,6 +255,10 @@ mechanic is worth having it gets an original name and look (seedpod, jar, snail,
 | 2026-11-27 | Mutations on the gate: sameRules always true, by substring, no lockstep check, decode refuses `rules`, stamp dropped, Ready and Start ungated, restamp of a room being made, guest restamps, no restamp, room created unstamped | Each failed at least one test |
 | 2026-11-27 | Rules hash: twice, from another path, with a comment added, with one `Math.floor` made `Math.ceil` | 2154, 2154, 2154, 8968. Live bundle of 7b9b597 carries 8970, the same as a local build of 7b9b597 |
 | 2026-11-27 | Live room XX3Q, made on 7b9b597 | `set` ends `rules=8970`; both seats' promises went 37.7k to 38.7k ticks in 20 s, within 50 of each other |
+| 2026-11-27 | Physics bench and slugsPhysics (new): slides, bounces, rolling, rope, coming to rest | `Tests 21 passed (21)`; with slugsJarRest, slugsWeapons, slugsGameLogic, slugsReplay on 9abf174 `Tests 221 passed (221)`; all slug files on the working tree `Tests 493 passed (493)`; tsc and vite build exit 0 |
+| 2026-11-27 | Sweeps on the live rules: 360 idle matches (12 maps × 30 seeds, mines 12, barrels 4); 36 matches CPU 3 against 5 with every weapon; 900 grenades dropped on every map | Settle stuck 0, objects moved before turn 1 ends 0, slug hurt 0 (before placement on held ground: 247 and 42); 36 of 36 over, longest settle 531 ticks; 0 of 900 never rested |
+| 2026-11-27 | Red team by experiment: 1,592 shaped scenes (wall corners, shafts, V notches, jar and mine) and 2,700 random drops over 9 seeds, low gravity in 3 of 10 | 0 stuck. Before the wedged-corner rule: a mine in a 10°/70° V, 1 of 196; a jar beside a 1 px spike in low gravity, 4 of 300 on seed 9 |
+| 2026-11-27 | Mutations on the rest rules: placement anywhere; no went-nowhere rest for mines, for shots; heights alone decide steep for shots; no corner for wedged mines, for wedged shots; corner without being wedged for mines, for shots | Each failed its test. Mine rollsOn was tried and dropped, as no scene needed it |
 
 ## Next task
 

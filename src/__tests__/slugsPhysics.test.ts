@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { H, KEY, ONE, W, advance, cloneState, explode, fits, newGame, px, type Input, type SlugEvent, type SlugsState } from '../slugsGameLogic';
+import { BOOST, H, KEY, ONE, W, advance, cloneState, explode, fits, newGame, px, type Input, type SlugEvent, type SlugsState } from '../slugsGameLogic';
 
 const idle: Input = { keys: 0 };
 const WATER_LINE = 626;
@@ -284,5 +284,62 @@ describe('coming to rest on a real map', () => {
       expect(s.phase).toBe('settle');
       expect(where()).toEqual(placed);
     }
+  });
+
+  // The V and the spike were found by the red team's shape sweep and fuzz; each held its turn open for ever before the fix.
+  it('a mine dropped into a V, held from one side below with nothing straight under it, rests', () => {
+    const left = Math.tan((10 * Math.PI) / 180), right = Math.tan((70 * Math.PI) / 180);
+    const s = world((x) => Math.max(100, 450 - Math.trunc((x < 1000 ? 1000 - x : x - 1000) * (x < 1000 ? left : right))));
+    let y = 100;
+    while (!s.terrain[(y + 6) * W + 1030]) y++;
+    mine(s, 1030, y - 10);
+    run(s, 600);
+    expect(s.objs).toHaveLength(1);
+    expect(s.objs[0].rest).toBe(true);
+  });
+
+  /** Rough ground falling away to the right of x 600, from a fixed seed: a step of up to 3 px either way each column, and 1 down every `fall`. */
+  const rough = (seed: number, fall: number) => {
+    let r = seed;
+    let y = 300;
+    const tops: number[] = [];
+    for (let x = 0; x < W; x++) {
+      r = (r * 1103515245 + 12345) & 0x7fffffff;
+      if (x >= 600) y = Math.min(H - 1, y + (r % 7) - 3 + (x % fall === 0 ? 1 : 0));
+      tops.push(y);
+    }
+    return tops;
+  };
+
+  it('a mine sliding over rough ground is not stopped by a corner it only passes', () => {
+    const tops = rough(7, 1);
+    const s = world((x) => tops[x]);
+    mine(s, 640, tops[640] - 20);
+    run(s, 1500);
+    // It ends at 667 on these rules and on the rules before a wedged mine could rest on a corner; letting
+    // any slow mine rest on one stops it at 641, short of where it slid before.
+    expect(s.objs[0].rest).toBe(true);
+    expect(px(s.objs[0].x)).toBe(667);
+  });
+
+  it('a grenade rolling over rough ground is not stopped by a corner it only passes', () => {
+    const tops = rough(4, 2);
+    const s = world((x) => tops[x]);
+    grenade(s, 640, tops[640] - 20);
+    Object.assign(s.projs[0], { vx: ONE, bounce: 19661, fuse: 99999 });
+    run(s, 1500);
+    // 648 on these rules and on those before; resting on any corner while slow stops it at 646.
+    expect(s.projs[0].rest).toBe(true);
+    expect(px(s.projs[0].x)).toBe(648);
+  });
+
+  it('a jar wedged beside a 1-pixel spike in low gravity rests, so its fuse burns out', () => {
+    const s = world((x) => (x === 886 ? 506 : 516));
+    s.boost |= BOOST.lowgrav;
+    grenade(s, 0, 0);
+    Object.assign(s.projs[0], { kind: 'jar', x: 58009621, y: 33230916, vx: -95267, vy: 93453, bounce: 19661, fuse: 150 });
+    const events = run(s, 400);
+    expect(s.projs).toEqual([]);
+    expect(events.some((e) => e.k === 'boom')).toBe(true);
   });
 });
