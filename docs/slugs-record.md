@@ -16,15 +16,13 @@ characters, art, names and signature weapons are our own.
 | Tests: 10 files under `src/__tests__/slug*` | Run on every change; outputs below |
 | Sound | None, by decision |
 
-Not yet live, in the working tree on branch `slugs` (2026-11-27 afternoon):
+Live on main by 7a2ed25 (2026-11-27 afternoon): the slug body redraw (2b6eb89); doubled fall
+damage, with a slug thrown by a blast hurt on landing too; wind and air steering; players placing
+their own slugs; easier menus with a random map by default. The rules changes split any match in
+progress at the time until every player refreshed.
 
-- Fall damage doubled (`FALL_COEF` 50 to 100), and a slug thrown by a blast is hurt on landing too.
-  This changes the rules: when it deploys, a match in progress splits until every player refreshes.
-- Air steering and wind work (session d5) in the same rules file.
-- Easier menus with a random map by default (menus agent).
-
-The slug body redraw (S-curve outline, mantle saddle, wet highlight, lower feelers pointing down)
-went live at 2b6eb89.
+Sent for the next push: blasts throw a standing slug out of its crater rather than back into it (a
+rules change, so it splits running matches the same way), and the sky's hairline fix below.
 
 ## Architecture
 
@@ -72,6 +70,9 @@ mechanic is worth having it gets an original name and look (seedpod, jar, snail,
 | 2026-11-27 | Mutation: dropping the blown-slug landing damage | Blast-landing test failed, as it should |
 | 2026-11-27 | Mutation: chamfer diagonal cost 4 to 5 | "charges 4 for a diagonal step to air" failed, as it should |
 | 2026-11-27 | Slug body at 16×, every pose both facings, hats, held weapons; then a live match | Checked by eye in Chrome |
+| 2026-11-27 | All 11 slug test files, one at a time, on live commit 7a2ed25 in a clean worktree | Each `Test Files 1 passed (1)`; slugsMaps alone takes 181 s |
+| 2026-11-27 | Sky hairline: a pixel detector on the game canvas, frames sampled every 0.3 s from match start | Before rounding the layer offsets, 35 of 43 frames had the line; after, 0 of 100 |
+| 2026-11-27 | tsc and all slug test files on the working tree with the knockback and sky changes | tsc clean; `Test Files 11 passed (11)` |
 
 ## Next task
 

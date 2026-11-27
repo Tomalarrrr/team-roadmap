@@ -915,7 +915,10 @@ class SlugsScene extends Phaser.Scene {
       // Sideways the layer wraps. Up and down it only ever sits lower than its
       // place, so its see-through top shows and its bottom never lifts off the screen's.
       layer.tilePositionX = along * this.scale.width * 0.12 * depth + (i === 0 ? this.cloudShift : 0);
-      layer.y = Math.max(0, (0.5 - up) * this.scale.height * 0.1 * depth);
+      // On a whole pixel: an edge across a pixel row leaves that row part-covered, the antialiased canvas shades it
+      // from just above the sprite, and the tile wrap reads that as the texture's opaque bottom row, a pale line
+      // across the sky.
+      layer.y = Math.max(0, Math.round((0.5 - up) * this.scale.height * 0.1 * depth));
     });
   }
 

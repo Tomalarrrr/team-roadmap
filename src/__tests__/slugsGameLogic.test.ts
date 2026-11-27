@@ -257,6 +257,20 @@ describe('explosions', () => {
     expect(after(24).moved).toBeGreaterThan(after(38).moved);
     expect(after(38).moved).toBeGreaterThan(after(47).moved);
   });
+
+  it('a blast level with a standing slug, or above it, throws it out of the crater and away, not back into it', () => {
+    for (const dy of [0, -20]) {
+      for (const gap of [0, 10, 30]) {
+        const s = lab();
+        stand(s, 1, 1000);
+        explode(s, 996 - gap, FLOOR - SLUG_HALF_H + dy, 50, 48, 0);
+        expect(s.slugs[1].vy).toBeLessThan(0);
+        run(s, 300);
+        expect(px(s.slugs[1].x) - 1000).toBeGreaterThan(48);
+        expect(px(s.slugs[1].y)).toBe(FLOOR - SLUG_HALF_H);
+      }
+    }
+  });
 });
 
 describe('falling', () => {

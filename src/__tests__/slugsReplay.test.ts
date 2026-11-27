@@ -138,10 +138,13 @@ describe('the replay', { timeout: 30_000 }, () => {
       expect(r.state.phase).toBe('tally');
       expect(r.state.slugs.map((s) => [s.hp, s.alive])).toEqual(live.slugs.map((s) => [s.hp, s.alive]));
       expect(r.state.terrain.every((v, i) => v === live.terrain[i])).toBe(true);
-      const lost = pin.slugs.reduce((n, s, i) => n + s.hp - live.slugs[i].hp, 0);
-      const shown = events.reduce((n, e) => n + (e.k === 'hurt' ? e.dmg : 0), 0);
-      expect(lost).toBeGreaterThan(0);
-      expect(shown).toBeGreaterThanOrEqual(lost);
+      const lost = pin.slugs.map((s, i) => s.hp - live.slugs[i].hp);
+      expect(lost.some((n) => n > 0)).toBe(true);
+      // A drowning takes a slug's hp without a 'hurt', so for a slug that drowned the splash is what shows it.
+      lost.forEach((n, id) => {
+        if (n <= 0 || events.some((e) => e.k === 'drown' && e.id === id)) return;
+        expect(events.reduce((sum, e) => sum + (e.k === 'hurt' && e.id === id ? e.dmg : 0), 0)).toBeGreaterThanOrEqual(n);
+      });
     }
   });
 

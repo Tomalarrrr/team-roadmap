@@ -1487,7 +1487,11 @@ export function explode(state: SlugsState, x: number, y: number, damage: number,
     const dmg = blastDamage(damage, crater, dist);
     const push = Math.min(SPEED_CAP, Math.max(dmg * KNOCK_PER_HP, atLeast(dist)));
     if (push <= 0) continue;
-    const u = unitTo(kx, ky, px(slug.x), px(slug.y));
+    // A blast throws a slug standing on land off it, never into it: for that slug the push is
+    // measured from no higher than its feet, so a shot level with its body still lifts it out of
+    // the crater rather than skimming it into the far wall and back towards the shooter.
+    const footed = slug.mode === 'stand' || slug.mode === 'slide';
+    const u = unitTo(kx, footed ? Math.max(ky, px(slug.y) + SLUG_HALF_H) : ky, px(slug.x), px(slug.y));
     knock(slug, Math.trunc((u.ux * push) / ONE), Math.trunc((u.uy * push) / ONE), true);
     hurt(state, slug, dmg);
   }
