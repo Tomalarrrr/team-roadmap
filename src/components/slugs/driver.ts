@@ -18,5 +18,11 @@ export interface GameDriver {
    * this machine has one: online, the others' clocks would run on regardless.
    */
   hold?(on: boolean): void;
+  /**
+   * The screen went a while without calling tick (an instant replay): start the
+   * clock again from the next call, so the gap is not caught up at once. Apart
+   * from `hold`, which the leave question owns. Only a match on this machine.
+   */
+  restartClock?(): void;
   dispose(): void;
 }

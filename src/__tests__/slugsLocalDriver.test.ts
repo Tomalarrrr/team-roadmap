@@ -27,6 +27,22 @@ describe('the local driver', () => {
     expect(run(driver, 6000, 7000).at(-1)!.tick).toBe(ran + 1000 / TICK_MS - 1);
   });
 
+  it('starts its clock afresh after a gap in calls, so the gap is not run at once', () => {
+    const fresh = () => {
+      const driver = localDriver(7, [{ name: 'A', control: 'human' }, { name: 'B', control: 3 }], 2, {});
+      driver.tick(0, { keys: 0 });
+      return { driver, at: run(driver, 0, 1000).at(-1)!.tick };
+    };
+    // Control: five silent seconds come back as CATCH_UP_MOST ticks in one call.
+    const plain = fresh();
+    expect(plain.driver.tick(6000, { keys: 0 }).tick).toBe(plain.at + 10);
+
+    const restarted = fresh();
+    restarted.driver.restartClock!();
+    expect(restarted.driver.tick(6000, { keys: 0 }).tick).toBe(restarted.at);
+    expect(restarted.driver.tick(6000 + 3 * TICK_MS, { keys: 0 }).tick).toBe(restarted.at + 3);
+  });
+
   it('hands the events of the last tick over once, not again on every held frame', () => {
     const driver = localDriver(7, [{ name: 'A', control: 'human' }, { name: 'B', control: 3 }], 2, {});
     expect(driver.tick(0, { keys: 0 }).events.length).toBeGreaterThan(0);

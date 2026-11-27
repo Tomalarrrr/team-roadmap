@@ -57,6 +57,9 @@ export function localDriver(seed: number, setups: TeamSetup[], perTeam: number, 
       // Picked up from the next call's time, so the held seconds are not caught up afterwards.
       if (!on) clock = null;
     },
+    restartClock() {
+      clock = null;
+    },
     // Nothing outside this closure to let go of: no timers, no connection.
     dispose() {},
   };

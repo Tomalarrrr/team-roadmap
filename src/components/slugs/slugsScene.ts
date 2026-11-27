@@ -203,7 +203,6 @@ class SlugsScene extends Phaser.Scene {
   private ropeSegs: Phaser.GameObjects.TileSprite[] = [];
 
   private slugs: SlugView[] = [];
-  private slugRes = 0;
   /** The rules' tick when the slugs were last drawn, and the frame (ms) its glide is timed from: see drawSlugs. */
   private seenTick = -1;
   private tickSeenAt = 0;
@@ -226,6 +225,8 @@ class SlugsScene extends Phaser.Scene {
   private state!: SlugsState;
   private pointer: { x: number; y: number } | null = null;
   private unlisten: (() => void)[] = [];
+  /** Shut down by the screen. Phaser runs create() only once its own textures have loaded, which can be after that. */
+  private shut = false;
   /** This turn so far, kept while replays are on, and whether its tally has been looked at. */
   private log: TurnLog | null = null;
   private planned = false;
@@ -472,6 +473,12 @@ class SlugsScene extends Phaser.Scene {
     if (flying) return follow(px(flying.x), px(flying.y));
     const held = { x: this.boomAt.x, y: this.boomAt.y, fast: false };
     if (now - this.boomAt.t < 1200) return held;
+    if (s.phase === 'over') {
+      // The last shooter may have drowned or be on the losing side: the end looks at the winners, or stays put on a draw.
+      const active = s.slugs[s.active];
+      const won = active?.alive && active.team === s.winner ? active : s.slugs.find((slug) => slug.alive && slug.team === s.winner);
+      return won ? { x: px(won.x), y: px(won.y), fast: false } : held;
+    }
     // Once the shot is spent nobody steers until the next turn, so the camera stays on the blast and makes one move,
     // to the next slug, instead of a trip back to the shooter first. In the retreat it goes back only to a shooter
     // who is actually running.
@@ -507,6 +514,8 @@ class SlugsScene extends Phaser.Scene {
       this.manual = false;
     }
     if (this.zoomGoal) {
+      // A goal setZoom would clamp could never be reached, and would hold the zoom at the clamp every frame.
+      this.zoomGoal = Math.max(this.minZoom(), Math.min(4 * this.dpr, this.zoomGoal));
       // Zoomed about the middle of the screen while the follow below brings the slug into view.
       const z = this.zoom + (this.zoomGoal - this.zoom) * (1 - Math.exp(-dt / 250));
       this.setZoom(Math.abs(this.zoomGoal - z) < 0.002 ? this.zoomGoal : z);
@@ -557,6 +566,7 @@ class SlugsScene extends Phaser.Scene {
   // --- Pointer: drag to pan, wheel or pinch to zoom, click to target, right-click for weapons ---
 
   private listen() {
+    if (this.shut) return;
     const canvas = this.game.canvas;
     const down = new Map<number, { x: number; y: number }>();
     let moved = false;
@@ -658,6 +668,7 @@ class SlugsScene extends Phaser.Scene {
   }
 
   shutdownListeners() {
+    this.shut = true;
     this.unlisten.forEach((off) => off());
     this.unlisten = [];
   }
@@ -784,6 +795,7 @@ class SlugsScene extends Phaser.Scene {
     this.land = play.liveLand;
     this.terrainRef = play.live.terrain;
     this.state = play.live;
+    this.hooks.driver.restartClock?.();
   }
 
   /**
@@ -820,6 +832,9 @@ class SlugsScene extends Phaser.Scene {
 
   /** Called when the canvas is redrawn at a new number of canvas px per CSS px: text is sized in canvas px. */
   setDpr(dpr: number) {
+    // The first turn's zoom, still to come or easing in, was worked out in canvas px at the old density.
+    this.playZoom *= dpr / this.dpr;
+    this.zoomGoal *= dpr / this.dpr;
     this.dpr = dpr;
     const size = (t: Phaser.GameObjects.Text, font: number, stroke: number) => t.setFontSize(Math.round(font * dpr)).setStroke('#111', Math.round(stroke * dpr));
     for (const view of this.slugs) this.sizeLabel(view.label);
@@ -961,7 +976,8 @@ class SlugsScene extends Phaser.Scene {
     this.waterShown += (this.state.water - this.waterShown) * (1 - Math.exp(-dt / 300));
     const half = this.scale.width / this.zoom / 2;
     drawWaterInto(this.waterBack, this.waterFront, this.look, {
-      level: this.waterShown, x0: this.cx - half - 20, x1: this.cx + half + 20, now, lean: this.lean,
+      // Waves and drifting patches are motion nobody asked for: with reduced motion the surface is a still picture.
+      level: this.waterShown, x0: this.cx - half - 20, x1: this.cx + half + 20, now: this.reduced ? 0 : now, lean: this.lean,
       // A tall narrow screen zoomed out to the whole map sees further down than the sky allowance.
       bottom: Math.max(H + SKY, this.cy + this.scale.height / this.zoom / 2 + 20),
     });
@@ -1023,8 +1039,6 @@ class SlugsScene extends Phaser.Scene {
   private drawSlugs(now: number, dt: number) {
     const s = this.state;
     const res = this.wantedRes();
-    const resChanged = res !== this.slugRes;
-    this.slugRes = res;
     // Zoomed out past a world px a CSS px, slugs shrink to a dozen px; a full two-line label would bury them, so it
     // folds to one smaller line, kept as tall as the slug.
     const small = this.zoom < this.dpr;
@@ -1081,7 +1095,9 @@ class SlugsScene extends Phaser.Scene {
         view.label.setVisible(false);
         return;
       }
-      if (resChanged) {
+      // Judged per slug, not on the frame the resolution changed: a slug hidden then (placing, or dead until a replay
+      // brings it back) would keep the old canvas and be painted into it at the new scale.
+      if (view.tex.width !== CELL * res) {
         const old = view.tex;
         view.tex = this.newSlugTexture(res);
         view.img.setTexture(view.tex.key);
